@@ -96,7 +96,7 @@ export class CaptureCollector {
       // For nested functions, recursively collect their captures too
       // Even though they have their own scope for parameters, they still
       // close over variables from outer scopes, and we need to know about
-      // all such captures for the derive/handler transformation
+      // all such captures for the lift-applied/handler transformation
       if (node !== func && this.isFunctionLikeDeclaration(node)) {
         const nestedCaptures = this.collectCaptures(node);
         // Filter out captures that are parameters of the current function

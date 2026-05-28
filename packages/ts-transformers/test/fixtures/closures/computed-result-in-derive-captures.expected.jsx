@@ -30,7 +30,13 @@ interface State {
 //   transform rewrites them to stats.key("count") and stats.key("total") in
 //   the captures object because stats is an OpaqueRef.
 export default pattern((state) => {
-    const stats = __cfHelpers.derive({
+    const stats = __cfHelpers.lift<{
+        state: {
+            items: {
+                done: boolean;
+            }[];
+        };
+    }, { count: number; total: number; }>({
         type: "object",
         properties: {
             state: {
@@ -64,15 +70,20 @@ export default pattern((state) => {
             }
         },
         required: ["count", "total"]
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
-            items: state.key("items")
-        } }, ({ state }) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => ({
         count: state.items.filter((i) => i.done).length,
         total: state.items.length,
-    })).for("stats", true);
+    }))({ state: {
+            items: state.key("items")
+        } }).for("stats", true);
     return {
         [UI]: (<div>
-        {__cfHelpers.derive({
+        {__cfHelpers.lift<{
+            stats: {
+                count: number;
+                total: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 stats: {
@@ -91,10 +102,10 @@ export default pattern((state) => {
             required: ["stats"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { stats: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ stats }) => `${stats.count} of ${stats.total} done`)({ stats: {
                 count: stats.key("count"),
                 total: stats.key("total")
-            } }, ({ stats }) => `${stats.count} of ${stats.total} done`)}
+            } })}
       </div>),
     };
 }, {

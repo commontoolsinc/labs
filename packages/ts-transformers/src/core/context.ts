@@ -13,9 +13,12 @@ import {
 import { getRelevantDataFlows } from "../ast/normalize.ts";
 import {
   DiagnosticInput,
+  type FunctionCapabilitySummary,
+  type SchemaHint,
   TransformationDiagnostic,
   TransformationOptions,
 } from "./transformers.ts";
+import { CrossStageState } from "./cross-stage-state.ts";
 import { CFHelpers } from "./cf-helpers.ts";
 
 const DEFAULT_OPTIONS: TransformationOptions = {
@@ -60,6 +63,7 @@ export class TransformationContext {
     this.options = {
       ...DEFAULT_OPTIONS,
       ...config.options,
+      state: config.options?.state ?? new CrossStageState(),
     };
   }
 
@@ -131,9 +135,7 @@ export class TransformationContext {
    * array method callback scopes.
    */
   markAsArrayMethodCallback(node: ts.Node): void {
-    if (this.options.mapCallbackRegistry) {
-      this.options.mapCallbackRegistry.add(node);
-    }
+    this.options.state?.markArrayMethodCallback(node);
     this.invalidateReactiveAnalysisCaches();
   }
 
@@ -141,15 +143,7 @@ export class TransformationContext {
    * Check if a node is an array method callback created by ClosureTransformer.
    */
   isArrayMethodCallback(node: ts.Node): boolean {
-    if (this.options.mapCallbackRegistry?.has(node)) {
-      return true;
-    }
-    const original = ts.getOriginalNode(node);
-    return !!(
-      original &&
-      original !== node &&
-      this.options.mapCallbackRegistry?.has(original)
-    );
+    return this.options.state?.isArrayMethodCallback(node) ?? false;
   }
 
   /**
@@ -158,9 +152,7 @@ export class TransformationContext {
    * authored nodes with original parent chains in pattern context.
    */
   markAsSyntheticComputeCallback(node: ts.Node): void {
-    if (this.options.syntheticComputeCallbackRegistry) {
-      this.options.syntheticComputeCallbackRegistry.add(node);
-    }
+    this.options.state?.markSyntheticComputeCallback(node);
     this.invalidateReactiveAnalysisCaches();
   }
 
@@ -168,40 +160,101 @@ export class TransformationContext {
    * Check if a node is a synthetic compute wrapper callback.
    */
   isSyntheticComputeCallback(node: ts.Node): boolean {
-    if (this.options.syntheticComputeCallbackRegistry?.has(node)) {
-      return true;
-    }
-    const original = ts.getOriginalNode(node);
-    return !!(
-      original &&
-      original !== node &&
-      this.options.syntheticComputeCallbackRegistry?.has(original)
-    );
+    return this.options.state?.isSyntheticComputeCallback(node) ?? false;
   }
 
   markSyntheticComputeOwnedSubtree(node: ts.Node): void {
-    const registry = this.options.syntheticComputeOwnedNodeRegistry;
-    if (!registry) return;
-
-    const visit = (current: ts.Node): void => {
-      registry.add(current);
-      ts.forEachChild(current, visit);
-    };
-
-    visit(node);
+    this.options.state?.markSyntheticComputeOwnedSubtree(node);
     this.invalidateReactiveAnalysisCaches();
   }
 
   isSyntheticComputeOwnedNode(node: ts.Node): boolean {
-    if (this.options.syntheticComputeOwnedNodeRegistry?.has(node)) {
-      return true;
-    }
-    const original = ts.getOriginalNode(node);
-    return !!(
-      original &&
-      original !== node &&
-      this.options.syntheticComputeOwnedNodeRegistry?.has(original)
-    );
+    return this.options.state?.isSyntheticComputeOwnedNode(node) ?? false;
+  }
+
+  /**
+   * Record the pre-shrink semantic type that drove a wrapper narrowing.
+   * `applyShrinkAndWrap` (in type-shrinking.ts) calls this on every wrapper
+   * TypeNode it produces so the SchemaInjection inner-lift revisit path can
+   * re-narrow from the original baseType instead of `any` (the checker
+   * widens synthetic wrappers). See `narrowedWrapperTypeRegistry` docs in
+   * core/mod.ts and the underlying smell tracked as CT-1621.
+   *
+   * Promoted from direct `.set` to a method so the registry's contract is
+   * documented and enforced in one place (Berni's review §3.4).
+   */
+  markNarrowedWrapper(wrapperNode: ts.TypeNode, preShrinkType: ts.Type): void {
+    this.options.state?.markNarrowedWrapper(wrapperNode, preShrinkType);
+  }
+
+  /**
+   * Look up the pre-shrink semantic type for a wrapper TypeNode previously
+   * recorded by `markNarrowedWrapper`. Returns undefined when not present;
+   * callers should fall through to their existing recovery path.
+   */
+  lookupNarrowedWrapper(wrapperNode: ts.TypeNode): ts.Type | undefined {
+    return this.options.state?.lookupNarrowedWrapper(wrapperNode);
+  }
+
+  /**
+   * Mark a builder call/new node that SchemaInjection has finalized, so a
+   * later re-traversal of the transformer's own output skips re-injection.
+   * Replaces the arg-count idempotency guards in schema-injection.ts. See
+   * `schemaInjectedRegistry` docs in core/mod.ts (CT-1621).
+   */
+  markSchemaInjected(node: ts.Node): void {
+    this.options.state?.markSchemaInjected(node);
+  }
+
+  /**
+   * Whether SchemaInjection has already finalized this node. Returns false
+   * when no state is present (so a missing registry never suppresses a real
+   * first-pass injection).
+   */
+  isSchemaInjected(node: ts.Node): boolean {
+    return this.options.state?.isSchemaInjected(node) ?? false;
+  }
+
+  /**
+   * Record a schema-generation hint for a node (and its original node, so the
+   * hint survives visitor node-replacement). Overwrites any existing hint for
+   * the node, matching the prior direct-`.set` behavior. See `SchemaHints`
+   * docs in core/mod.ts: producers are schema-injection + jsx-site-router,
+   * consumers are schema-injection + the schema generator.
+   */
+  recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
+    this.options.state?.recordSchemaHint(node, hint);
+  }
+
+  /**
+   * Look up a schema-generation hint for a node, falling back to its original
+   * node (handles visitor-replaced nodes). Returns undefined when absent.
+   */
+  lookupSchemaHint(node: ts.Node): SchemaHint | undefined {
+    return this.options.state?.lookupSchemaHint(node);
+  }
+
+  /**
+   * Record a per-function capability summary computed by
+   * PatternCallbackLoweringTransformer (expensive interprocedural analysis;
+   * cached here for SchemaInjection to reuse). See `CapabilitySummaryRegistry`
+   * docs in core/mod.ts.
+   */
+  recordCapabilitySummary(
+    fn: ts.Node,
+    summary: FunctionCapabilitySummary,
+  ): void {
+    this.options.state?.recordCapabilitySummary(fn, summary);
+  }
+
+  /**
+   * Look up a previously-recorded capability summary. Returns undefined when
+   * absent; callers fall through to computing the summary on demand.
+   */
+  lookupCapabilitySummary(
+    fn: ts.Node,
+  ): FunctionCapabilitySummary | undefined {
+    return this.options.state?.lookupCapabilitySummary(fn);
   }
 
   markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
@@ -215,7 +268,7 @@ export class TransformationContext {
     if (!symbol) {
       return;
     }
-    this.options.syntheticReactiveCollectionRegistry?.add(symbol);
+    this.options.state?.markSyntheticReactiveCollection(symbol);
     this.invalidateReactiveAnalysisCaches();
   }
 

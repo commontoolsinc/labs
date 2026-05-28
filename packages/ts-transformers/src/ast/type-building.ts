@@ -13,12 +13,298 @@ import {
 } from "./utils.ts";
 
 /**
+ * Rewrite commonfabric type references in a TypeNode tree to the canonical
+ * `__cfHelpers.X` qualified form, so synthesized annotations are always
+ * resolvable regardless of which symbols the user has imported.
+ *
+ * Detection is semantic, not name-based: each TypeReferenceNode is matched
+ * against its corresponding `ts.Type` (walked in lockstep with the TypeNode
+ * tree, starting from the root `rootType`). When the Type's symbol or
+ * aliasSymbol has a parent that is the `"commonfabric"` module symbol, the
+ * node is rewritten — the symbol's `name` becomes the leaf of the new
+ * qualified name. The runner exposes `__cfHelpers` as a self-reference to
+ * the commonfabric namespace (see runner/src/builder/factory.ts:228), so
+ * every commonfabric export is reachable as `__cfHelpers.X`.
+ *
+ * Lockstep walking is necessary because synthetic TypeNodes have no source
+ * position and `checker.getSymbolAtLocation` returns nothing for them;
+ * `getTypeFromTypeNodeWithFallback` also widens nested synthetic refs to
+ * `any` because the inner identifiers have no scope to resolve against.
+ * The root Type passed in carries full symbol info; walking the Type tree
+ * and TypeNode tree in parallel propagates that info to every nested ref.
+ *
+ * Also handles the `import("commonfabric").X<...>` `ImportTypeNode` form
+ * (TS emits this when no in-scope alias exists). This case is syntactically
+ * unambiguous and is rewritten without needing the paired Type.
+ *
+ * The original TypeNode is preserved when no rewrite is needed; only
+ * subtrees that change are rebuilt via `factory.create*`.
+ */
+export function qualifyCommonFabricTypeRefs(
+  typeNode: ts.TypeNode,
+  rootType: ts.Type | undefined,
+  context: {
+    readonly checker: ts.TypeChecker;
+    readonly factory: ts.NodeFactory;
+    readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
+    readonly tsContext?: ts.TransformationContext;
+  },
+): ts.TypeNode {
+  const { factory } = context;
+
+  // Module symbol names are stored with surrounding double quotes for
+  // external modules (e.g. `"commonfabric"`). Match either form.
+  const isCommonFabricModuleName = (name: string | undefined): boolean =>
+    name === "commonfabric" || name === '"commonfabric"';
+
+  const buildHelperQualifiedName = (leafName: string): ts.QualifiedName =>
+    factory.createQualifiedName(
+      factory.createIdentifier("__cfHelpers"),
+      factory.createIdentifier(leafName),
+    );
+
+  // From a Type, find the export name in commonfabric (if any).
+  //
+  // Prefer `aliasSymbol` over `symbol`: when the user writes `Writable<X>`
+  // and `Writable` is an alias for `Cell`, the Type's `symbol` may be the
+  // underlying `Cell` constructor while `aliasSymbol` correctly points at
+  // `Writable`. Preserving the user's chosen name keeps the emitted
+  // annotation closer to authored intent.
+  const commonFabricExportName = (
+    type: ts.Type | undefined,
+  ): string | undefined => {
+    if (!type) return undefined;
+    const candidates: (ts.Symbol | undefined)[] = [
+      type.aliasSymbol,
+      type.symbol,
+    ];
+    for (const sym of candidates) {
+      if (!sym) continue;
+      const parent = (sym as unknown as { parent?: ts.Symbol }).parent;
+      if (isCommonFabricModuleName(parent?.name) && sym.name) {
+        return sym.name;
+      }
+    }
+    return undefined;
+  };
+
+  // For a TypeReference Type, get its Nth type argument. Different
+  // TypeScript versions expose this via slightly different shapes; try the
+  // public ones first.
+  const getTypeArgumentAt = (
+    type: ts.Type | undefined,
+    index: number,
+  ): ts.Type | undefined => {
+    if (!type) return undefined;
+    const asReference = type as ts.TypeReference;
+    if (asReference.typeArguments) {
+      return asReference.typeArguments[index];
+    }
+    // Alias-resolved generics expose aliasTypeArguments.
+    const aliased = (type as unknown as {
+      aliasTypeArguments?: readonly ts.Type[];
+    }).aliasTypeArguments;
+    if (aliased) {
+      return aliased[index];
+    }
+    return undefined;
+  };
+
+  // For a TypeLiteral / Object Type, get the Type of a named property.
+  const getPropertyType = (
+    type: ts.Type | undefined,
+    propertyName: string,
+  ): ts.Type | undefined => {
+    if (!type) return undefined;
+    const property = type.getProperty(propertyName);
+    if (!property) return undefined;
+    const decl = property.valueDeclaration ?? property.declarations?.[0];
+    if (!decl) {
+      // Property has no declaration we can locate (anonymous object). Use the
+      // generic getTypeOfSymbol via a SourceFile fallback if available.
+      const ofSym = (context.checker as unknown as {
+        getTypeOfSymbol?: (sym: ts.Symbol) => ts.Type;
+      }).getTypeOfSymbol;
+      return ofSym ? ofSym.call(context.checker, property) : undefined;
+    }
+    return context.checker.getTypeOfSymbolAtLocation(property, decl);
+  };
+
+  // For an array Type (T[] or Array<T>), get its element Type.
+  const getArrayElementType = (
+    type: ts.Type | undefined,
+  ): ts.Type | undefined => {
+    if (!type) return undefined;
+    return context.checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  };
+
+  // The walker takes a TypeNode and the Type it represents, and returns a
+  // (possibly-rewritten) TypeNode. The Type may be undefined when the
+  // paired info isn't available — in that case nested ImportType
+  // recognition still works (it's purely syntactic), but bare-identifier
+  // commonfabric-ref detection is skipped (no false-positive risk).
+  const walk = (
+    node: ts.TypeNode,
+    pairedType: ts.Type | undefined,
+  ): ts.TypeNode => {
+    // `import("commonfabric").X<...>` → `__cfHelpers.X<...>` (syntactic).
+    if (ts.isImportTypeNode(node) && !node.isTypeOf) {
+      const arg = node.argument;
+      if (
+        ts.isLiteralTypeNode(arg) &&
+        ts.isStringLiteral(arg.literal) &&
+        arg.literal.text === "commonfabric" &&
+        node.qualifier
+      ) {
+        const leafName = ts.isIdentifier(node.qualifier)
+          ? node.qualifier.text
+          : node.qualifier.right.text;
+        const visitedTypeArgs = node.typeArguments
+          ? factory.createNodeArray(
+            node.typeArguments.map((arg, i) =>
+              walk(arg, getTypeArgumentAt(pairedType, i))
+            ),
+          )
+          : undefined;
+        return factory.createTypeReferenceNode(
+          buildHelperQualifiedName(leafName),
+          visitedTypeArgs,
+        );
+      }
+    }
+
+    // `X<...>` where X resolves to a commonfabric export → `__cfHelpers.X<...>`.
+    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+      if (node.typeName.text !== "__cfHelpers") {
+        const exportName = commonFabricExportName(pairedType);
+        if (exportName) {
+          const visitedTypeArgs = node.typeArguments
+            ? factory.createNodeArray(
+              node.typeArguments.map((arg, i) =>
+                walk(arg, getTypeArgumentAt(pairedType, i))
+              ),
+            )
+            : undefined;
+          return factory.createTypeReferenceNode(
+            buildHelperQualifiedName(exportName),
+            visitedTypeArgs,
+          );
+        }
+        // Not a commonfabric ref — recurse into type args with their
+        // corresponding paired sub-types.
+        if (node.typeArguments) {
+          const rewritten = node.typeArguments.map((arg, i) =>
+            walk(arg, getTypeArgumentAt(pairedType, i))
+          );
+          const changed = rewritten.some((arg, i) =>
+            arg !== node.typeArguments![i]
+          );
+          if (changed) {
+            return factory.updateTypeReferenceNode(
+              node,
+              node.typeName,
+              factory.createNodeArray(rewritten),
+            );
+          }
+        }
+        return node;
+      }
+    }
+
+    // TypeLiteral: walk each member, pairing with the Type's property type.
+    if (ts.isTypeLiteralNode(node)) {
+      const rewrittenMembers = node.members.map((member) => {
+        if (
+          ts.isPropertySignature(member) && member.name && member.type &&
+          (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name))
+        ) {
+          const propertyName = member.name.text;
+          const propertyType = getPropertyType(pairedType, propertyName);
+          const rewrittenType = walk(member.type, propertyType);
+          if (rewrittenType === member.type) return member;
+          return factory.updatePropertySignature(
+            member,
+            member.modifiers,
+            member.name,
+            member.questionToken,
+            rewrittenType,
+          );
+        }
+        return member;
+      });
+      const changed = rewrittenMembers.some((m, i) => m !== node.members[i]);
+      return changed
+        ? factory.updateTypeLiteralNode(
+          node,
+          factory.createNodeArray(rewrittenMembers),
+        )
+        : node;
+    }
+
+    // ArrayTypeNode: element Type paired with the array's numeric-index Type.
+    if (ts.isArrayTypeNode(node)) {
+      const elementType = getArrayElementType(pairedType);
+      const rewritten = walk(node.elementType, elementType);
+      return rewritten === node.elementType
+        ? node
+        : factory.updateArrayTypeNode(node, rewritten);
+    }
+
+    // Union / Intersection: walk each member without paired Type info (the
+    // paired Type IS the union/intersection, but mapping individual members
+    // to constituent Types is brittle; recurse and rely on Import-form
+    // detection for nested refs).
+    if (ts.isUnionTypeNode(node)) {
+      const rewritten = node.types.map((t) => walk(t, undefined));
+      const changed = rewritten.some((t, i) => t !== node.types[i]);
+      return changed
+        ? factory.updateUnionTypeNode(node, factory.createNodeArray(rewritten))
+        : node;
+    }
+    if (ts.isIntersectionTypeNode(node)) {
+      const rewritten = node.types.map((t) => walk(t, undefined));
+      const changed = rewritten.some((t, i) => t !== node.types[i]);
+      return changed
+        ? factory.updateIntersectionTypeNode(
+          node,
+          factory.createNodeArray(rewritten),
+        )
+        : node;
+    }
+
+    // ParenthesizedType, TypeOperator: unwrap and walk inner.
+    if (ts.isParenthesizedTypeNode(node)) {
+      const rewritten = walk(node.type, pairedType);
+      return rewritten === node.type
+        ? node
+        : factory.updateParenthesizedType(node, rewritten);
+    }
+    if (ts.isTypeOperatorNode(node)) {
+      const rewritten = walk(node.type, pairedType);
+      return rewritten === node.type
+        ? node
+        : factory.updateTypeOperatorNode(node, rewritten);
+    }
+
+    return node;
+  };
+
+  return walk(typeNode, rootType);
+}
+
+/**
  * Common flags for type-to-typenode conversion.
  * NoTruncation: Prevents type strings from being truncated
  * UseStructuralFallback: Falls back to structural types when nominal types aren't available
+ * UseAliasDefinedOutsideCurrentScope: Prefer existing aliases (e.g. `Cell<T>`
+ *   imported at module scope) over their canonical qualified forms (e.g.
+ *   `import("commonfabric").Cell<T>`). Without this flag, type-arg
+ *   annotations on synthesized helper calls print the import-qualified form
+ *   even when an alias is in scope (CT-1615 Berni review on PR #3676).
  */
 export const DEFAULT_TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
-  ts.NodeBuilderFlags.UseStructuralFallback;
+  ts.NodeBuilderFlags.UseStructuralFallback |
+  ts.NodeBuilderFlags.UseAliasDefinedOutsideCurrentScope;
 
 export interface TypeLiteralRegistrationContext {
   readonly factory: ts.NodeFactory;
@@ -40,9 +326,29 @@ export function typeToTypeNodeWithRegistry(
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   flags = DEFAULT_TYPE_NODE_FLAGS,
 ): ts.TypeNode {
-  const node =
+  const rawNode =
     context.checker.typeToTypeNode(type, context.sourceFile, flags) ??
       context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+  // Rewrite commonfabric type references to the always-resolvable
+  // `__cfHelpers.X` qualified form. The printer's natural output references
+  // commonfabric symbols that may not be imported in the user's source
+  // (especially when `UseAliasDefinedOutsideCurrentScope` is on), so the
+  // emitted annotation wouldn't typecheck. `__cfHelpers` is always injected
+  // by the transformer and re-exports the entire commonfabric namespace
+  // (see runner/src/builder/factory.ts:228), so the qualified form is
+  // unconditionally valid.
+  //
+  // We pass the root `type` in so the rewriter can walk Type and TypeNode
+  // trees in lockstep — synthetic inner TypeNodes carry no source position
+  // and their symbols can't be recovered via `getSymbolAtLocation`, so
+  // pairing each ref with its corresponding Type from the input is the
+  // only reliable way to detect nested commonfabric refs.
+  const node = qualifyCommonFabricTypeRefs(rawNode, type, {
+    checker: context.checker,
+    factory: context.factory,
+    typeRegistry,
+  });
 
   if (typeRegistry) {
     typeRegistry.set(node, type);
@@ -80,7 +386,7 @@ export function expressionToTypeNode(
   if (declaredTypeNode) {
     const type = context.checker.getTypeFromTypeNode(declaredTypeNode);
     const clonedTypeNode = cloneTypeNode(declaredTypeNode);
-    context.options.typeRegistry?.set(clonedTypeNode, type);
+    context.options.state?.typeRegistry?.set(clonedTypeNode, type);
     return clonedTypeNode;
   }
 
@@ -89,12 +395,12 @@ export function expressionToTypeNode(
   const type = inferWidenedTypeFromExpression(
     expr,
     context.checker,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
   return typeToTypeNodeWithRegistry(
     type,
     context,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
 }
 
@@ -330,7 +636,7 @@ export function buildTypeElementsFromCaptureTree(
         {
           factory,
           checker,
-          typeRegistry: context.options.typeRegistry,
+          typeRegistry: context.options.state?.typeRegistry,
         },
       );
     } else {
@@ -392,7 +698,7 @@ export function createCaptureTypeLiteral(
     {
       factory: context.factory,
       checker: context.checker,
-      typeRegistry: context.options.typeRegistry,
+      typeRegistry: context.options.state?.typeRegistry,
     },
   );
 }
@@ -435,7 +741,7 @@ export function mergeCaptureTypesIntoTypeLiteral(
     {
       factory: context.factory,
       checker: context.checker,
-      typeRegistry: context.options.typeRegistry,
+      typeRegistry: context.options.state?.typeRegistry,
     },
   );
 }

@@ -35,7 +35,9 @@ export default pattern((__cf_pattern_input) => {
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
                 const info = [file.key("type"), file.key("name")] as const;
-                const isFolder = __cfHelpers.derive({
+                const isFolder = __cfHelpers.lift<{
+                    info: readonly ["file" | "folder", string];
+                }, boolean>({
                     type: "object",
                     properties: {
                         info: {
@@ -48,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
                     required: ["info"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { info: info }, ({ info }) => info[0] === "folder").for("isFolder", true);
+                } as const satisfies __cfHelpers.JSONSchema, ({ info }) => info[0] === "folder")({ info: info }).for("isFolder", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {

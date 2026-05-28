@@ -20,7 +20,7 @@ Deno.test("parseShard rejects invalid shard notation", () => {
   }
 });
 
-Deno.test("selectRunnerTestFiles balances by file size", () => {
+Deno.test("selectRunnerTestFiles balances by estimated file weight", () => {
   const files = [
     { name: "large.test.ts", size: 100 },
     { name: "medium.test.ts", size: 60 },
@@ -35,5 +35,23 @@ Deno.test("selectRunnerTestFiles balances by file size", () => {
     "medium.test.ts",
     "small-a.test.ts",
     "small-b.test.ts",
+  ]);
+});
+
+Deno.test("selectRunnerTestFiles honors explicit weights for slow small files", () => {
+  const files = [
+    { name: "large.test.ts", size: 100 },
+    { name: "slow-small.test.ts", size: 10, weight: 90 },
+    { name: "medium.test.ts", size: 50 },
+    { name: "small.test.ts", size: 40 },
+  ];
+
+  assertEquals(selectRunnerTestFiles(files, { index: 1, total: 2 }), [
+    "large.test.ts",
+    "small.test.ts",
+  ]);
+  assertEquals(selectRunnerTestFiles(files, { index: 2, total: 2 }), [
+    "medium.test.ts",
+    "slow-small.test.ts",
   ]);
 });

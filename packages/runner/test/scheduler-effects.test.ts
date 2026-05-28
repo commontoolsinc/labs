@@ -605,6 +605,101 @@ describe("effect/computation tracking", () => {
     expect(target.get()).toEqual({ value: 2, stable: 0 });
   });
 
+  it("should schedule normal output readers when a materializer input dirties", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "materializer-normal-output-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "materializer-normal-output-target",
+      undefined,
+      tx,
+    );
+    const sideTarget = runtime.getCell<{ value: number }>(
+      space,
+      "materializer-normal-output-side-target",
+      undefined,
+      tx,
+    );
+    const unrelated = runtime.getCell<number>(
+      space,
+      "materializer-normal-output-unrelated",
+      undefined,
+      tx,
+    );
+    source.set(0);
+    output.set(0);
+    sideTarget.set({ value: 0 });
+    unrelated.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const observedOutput: number[] = [];
+    const runOrder: string[] = [];
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        runOrder.push("materializer");
+        const value = source.withTx(actionTx).get();
+        output.withTx(actionTx).set(value);
+        sideTarget.withTx(actionTx).set({ value });
+      },
+      {
+        materializerWriteEnvelopes: [sideTarget.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof sideTarget.getAsNormalizedFullLink
+      >[];
+    };
+    const outputEffect: Action = (actionTx) => {
+      runOrder.push("output-effect");
+      observedOutput.push(output.withTx(actionTx).get());
+    };
+    const unrelatedEffect: Action = (actionTx) => {
+      runOrder.push("unrelated-effect");
+      unrelated.withTx(actionTx).get();
+    };
+
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+    });
+    runtime.scheduler.subscribe(outputEffect, outputEffect, {
+      isEffect: true,
+    });
+    runtime.scheduler.subscribe(unrelatedEffect, unrelatedEffect, {
+      isEffect: true,
+    });
+    await runtime.idle();
+
+    runtime.scheduler.enableSettleStats();
+    runOrder.length = 0;
+    observedOutput.length = 0;
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).set(1);
+    unrelated.withTx(updateTx).set(1);
+    await updateTx.commit();
+    await runtime.idle();
+
+    expect(observedOutput).toEqual([1]);
+    const nonEmptyIterations = runtime.scheduler.getSettleStatsHistory()
+      .flatMap((entry) =>
+        entry.stats.iterations.filter((iteration) => iteration.actionsRun > 0)
+      );
+    expect(nonEmptyIterations.length).toBe(1);
+    expect(nonEmptyIterations[0]?.actionsRun).toBe(3);
+    expect(runOrder.indexOf("materializer")).toBeLessThan(
+      runOrder.indexOf("output-effect"),
+    );
+  });
+
   it("should not make broad attempted writes into materializer dependents", async () => {
     runtime.scheduler.enablePullMode();
 

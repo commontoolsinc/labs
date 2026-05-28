@@ -42,7 +42,9 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            recentEvents: TagEvent[];
+        }, boolean>({
             type: "object",
             properties: {
                 recentEvents: {
@@ -55,7 +57,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["recentEvents"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { recentEvents: recentEvents }, ({ recentEvents }) => recentEvents.length === 0), <span>No events yet</span>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, ({ recentEvents }) => recentEvents.length === 0)({ recentEvents: recentEvents }), <span>No events yet</span>, <div>
             {recentEvents.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const event = __cf_pattern_input.key("element");
                 const idx = __cf_pattern_input.key("index");

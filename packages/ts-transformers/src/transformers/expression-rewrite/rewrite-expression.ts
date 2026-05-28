@@ -135,7 +135,7 @@ function rewriteChildExpressions(
   reactiveContextKind: RewriteParams["reactiveContextKind"],
   containerKind: RewriteParams["containerKind"],
   inSafeContext?: boolean,
-  preferDeriveWrappers?: boolean,
+  preferInputBoundWrappers?: boolean,
 ): ts.Expression {
   const visitor = (child: ts.Node): ts.Node => {
     if (ts.isExpression(child)) {
@@ -157,7 +157,7 @@ function rewriteChildExpressions(
               reactiveContextKind,
               containerKind,
               inSafeContext,
-              preferDeriveWrappers,
+              preferInputBoundWrappers,
             )
           );
 
@@ -194,7 +194,7 @@ function rewriteChildExpressions(
           reactiveContextKind,
           containerKind,
           inSafeContext,
-          preferDeriveWrappers,
+          preferInputBoundWrappers,
         });
         if (result) {
           return result;
@@ -216,7 +216,7 @@ export function rewriteExpression(
 ): ts.Expression | undefined {
   const inSafeContext = params.inSafeContext ?? false;
   const reactiveContextKind = params.reactiveContextKind ?? "neutral";
-  const preferDeriveWrappers = params.preferDeriveWrappers ?? false;
+  const preferInputBoundWrappers = params.preferInputBoundWrappers ?? false;
   const emitterContext: EmitterContext = {
     rewriteChildren(node: ts.Expression): ts.Expression {
       return rewriteChildExpressions(
@@ -226,7 +226,7 @@ export function rewriteExpression(
         reactiveContextKind,
         params.containerKind,
         inSafeContext,
-        preferDeriveWrappers,
+        preferInputBoundWrappers,
       );
     },
     rewriteSubexpression(node: ts.Expression): ts.Expression {
@@ -244,7 +244,7 @@ export function rewriteExpression(
           reactiveContextKind,
           params.containerKind,
           inSafeContext,
-          preferDeriveWrappers,
+          preferInputBoundWrappers,
         );
       }
 
@@ -258,7 +258,7 @@ export function rewriteExpression(
           reactiveContextKind,
           containerKind: params.containerKind,
           inSafeContext,
-          preferDeriveWrappers,
+          preferInputBoundWrappers,
         }) ?? rewriteChildExpressions(
           node,
           params.context,
@@ -266,7 +266,7 @@ export function rewriteExpression(
           reactiveContextKind,
           params.containerKind,
           inSafeContext,
-          preferDeriveWrappers,
+          preferInputBoundWrappers,
         );
       }
 
@@ -277,12 +277,12 @@ export function rewriteExpression(
         reactiveContextKind,
         params.containerKind,
         inSafeContext,
-        preferDeriveWrappers,
+        preferInputBoundWrappers,
       );
     },
     ...params,
     inSafeContext,
-    preferDeriveWrappers,
+    preferInputBoundWrappers,
     reactiveContextKind,
     containerKind: params.containerKind,
     dataFlows: params.context.getRelevantDataFlowsFromAnalysis(params.analysis),

@@ -3,7 +3,7 @@ import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { setParentPointers, visitEachChildWithJsx } from "../ast/mod.ts";
 import { ActionStrategy } from "./strategies/action-strategy.ts";
 import { ArrayMethodStrategy } from "./strategies/array-method-strategy.ts";
-import { DeriveStrategy } from "./strategies/derive-strategy.ts";
+import { LiftAppliedStrategy } from "./strategies/lift-applied-strategy.ts";
 import { HandlerStrategy } from "./strategies/handler-strategy.ts";
 import { PatternToolStrategy } from "./strategies/patternTool-strategy.ts";
 import type { ClosureTransformationStrategy } from "./strategies/strategy.ts";
@@ -22,7 +22,7 @@ function createClosureTransformVisitor(
     new ActionStrategy(),
     new ArrayMethodStrategy(),
     new PatternToolStrategy(),
-    new DeriveStrategy(),
+    new LiftAppliedStrategy(),
   ];
 
   const visit: ts.Visitor = (node: ts.Node) => {

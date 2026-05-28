@@ -19,7 +19,11 @@ const identity = __cfHardenFn(<T,>(value: T) => value);
 //   const label = identity(state.done ? "Done" : "Pending")
 //   → const label = derive(..., ({ state }) => identity(state.done ? "Done" : "Pending"))
 export default pattern((state) => {
-    const label = __cfHelpers.derive({
+    const label = __cfHelpers.lift<{
+        state: {
+            done: boolean;
+        };
+    }, "Done" | "Pending">({
         type: "object",
         properties: {
             state: {
@@ -35,9 +39,9 @@ export default pattern((state) => {
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["Done", "Pending"]
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ state: {
             done: state.key("done")
-        } }, __cfModuleCallback_1).for("label", true);
+        } }).for("label", true);
     return { label };
 }, {
     type: "object",

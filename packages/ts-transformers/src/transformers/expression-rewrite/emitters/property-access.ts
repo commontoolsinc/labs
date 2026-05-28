@@ -12,11 +12,11 @@ export function emitPropertyAccess(
     dataFlows,
     context,
     inSafeContext,
-    preferDeriveWrappers,
+    preferInputBoundWrappers,
   } = params;
   if (!ts.isPropertyAccessExpression(expression)) return undefined;
 
-  // Skip derive wrapping in safe contexts - they don't need it
+  // Skip lift-applied wrapping in safe contexts - they don't need it
   if (inSafeContext) return undefined;
 
   if (dataFlows.length === 0) return undefined;
@@ -33,7 +33,7 @@ export function emitPropertyAccess(
     dataFlows,
     context,
     {
-      preferDeriveWrapper: preferDeriveWrappers,
+      preferInputBoundWrapper: preferInputBoundWrappers,
     },
   );
 }

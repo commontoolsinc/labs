@@ -25,13 +25,10 @@ export interface WritePropagationState {
   readonly queueExecution: () => void;
 }
 
-export function recordChangedComputationWrites(
-  state: WritePropagationState,
-  action: Action,
+export function collectChangedWritesForTransaction(
   tx: IExtendedStorageTransaction,
-  log: ReactivityLog,
+  log: Pick<ReactivityLog, "writes">,
 ): IMemorySpaceAddress[] {
-  if (!state.computations.has(action)) return [];
   if (log.writes.length === 0) return [];
 
   const spaces = new Set(log.writes.map((write) => write.space));
@@ -45,9 +42,27 @@ export function recordChangedComputationWrites(
     }
   }
 
+  return sortAndCompactPaths(changedWrites);
+}
+
+export function recordChangedWritesHistory(
+  state: Pick<WritePropagationState, "changedWritesHistory">,
+  changedWrites: readonly IMemorySpaceAddress[],
+): void {
   if (changedWrites.length > 0) {
-    state.changedWritesHistory.push(...sortAndCompactPaths(changedWrites));
+    state.changedWritesHistory.push(...sortAndCompactPaths([...changedWrites]));
   }
+}
+
+export function recordChangedComputationWrites(
+  state: WritePropagationState,
+  action: Action,
+  tx: IExtendedStorageTransaction,
+  log: ReactivityLog,
+): IMemorySpaceAddress[] {
+  if (!state.computations.has(action)) return [];
+  const changedWrites = collectChangedWritesForTransaction(tx, log);
+  recordChangedWritesHistory(state, changedWrites);
   return changedWrites;
 }
 
@@ -73,6 +88,9 @@ export function markReadersDirtyForChangedWrites(
       state.scheduleWithDebounce(reader);
     } else if (state.computations.has(reader)) {
       state.markDirty(reader);
+      if (state.materializerIndex.isMaterializer(reader)) {
+        state.queueExecution();
+      }
       if (isAncestorAction(state.actionParent, sourceAction, reader)) {
         // Continuations are only for actions in the scheduler parent chain.
         // Dependency edges already schedule ordinary downstream readers; this
@@ -82,9 +100,7 @@ export function markReadersDirtyForChangedWrites(
         state.pending.add(reader);
         state.queueExecution();
       }
-      if (!state.materializerIndex.isMaterializer(reader)) {
-        state.scheduleAffectedEffects(reader);
-      }
+      state.scheduleAffectedEffects(reader);
     }
   }
 }

@@ -691,9 +691,15 @@ export class RuntimeProcessor {
         scope: redirect.scope ?? "space",
       });
       await target.sync();
-      if (!target.getSourceCell()) {
+      const targetLink = target.getAsNormalizedFullLink();
+      const sourceCell = target.getSourceCell();
+      if (!sourceCell || targetLink.path.length > 0) {
+        const pageCell = sourceCell && targetLink.path.length > 0
+          ? target.asSchemaFromLinks()
+          : target;
+        await pageCell.pull();
         return {
-          page: createPageRef(target),
+          page: createPageRef(pageCell),
         };
       }
 

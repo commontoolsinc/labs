@@ -38,13 +38,15 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            items: __cfHelpers.Cell<string[]>;
+        }, number>({
             type: "object",
             properties: {
                 items: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: ["readonly"]
                 }
@@ -52,7 +54,7 @@ export default pattern((_state) => {
             required: ["items"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length), <span>List is empty</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length)({ items: items }), <span>List is empty</span>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

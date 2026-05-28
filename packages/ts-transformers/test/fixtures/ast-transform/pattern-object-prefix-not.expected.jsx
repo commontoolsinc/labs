@@ -17,7 +17,11 @@ const __cfAmdHooks = undefined;
 //   return { hidden: !state.done }
 //   → return { hidden: derive(!state.done) }
 export default pattern((state) => ({
-    hidden: __cfHelpers.derive({
+    hidden: __cfHelpers.lift<{
+        state: {
+            done: boolean;
+        };
+    }, boolean>({
         type: "object",
         properties: {
             state: {
@@ -33,9 +37,9 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.done)({ state: {
             done: state.key("done")
-        } }, ({ state }) => !state.done).for(["__patternResult", "hidden"], true)
+        } }).for(["__patternResult", "hidden"], true)
 }), {
     type: "object",
     properties: {

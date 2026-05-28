@@ -41,7 +41,17 @@ export default pattern((state) => {
                 const state = __cf_pattern_input.key("params", "state");
                 const multiplier = __cf_pattern_input.params.multiplier;
                 return (<span>
-            Total: {__cfHelpers.derive({
+            Total: {__cfHelpers.lift<{
+                    item: {
+                        price: number;
+                        quantity: number;
+                    };
+                    state: {
+                        discount: number;
+                        taxRate: number;
+                    };
+                    multiplier: number;
+                }, number>({
                     type: "object",
                     properties: {
                         item: {
@@ -75,7 +85,7 @@ export default pattern((state) => {
                     required: ["item", "state", "multiplier"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
                     item: {
                         price: item.key("price"),
                         quantity: item.key("quantity")
@@ -85,7 +95,7 @@ export default pattern((state) => {
                         taxRate: state.key("taxRate")
                     },
                     multiplier: multiplier
-                }, __cfModuleCallback_1)}
+                })}
           </span>);
             }, {
                 type: "object",

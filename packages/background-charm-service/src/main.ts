@@ -33,6 +33,7 @@ const runtime = new Runtime({
   }),
   experimental: {
     modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
+    persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
   },
 });
 const service = new BackgroundCharmService({

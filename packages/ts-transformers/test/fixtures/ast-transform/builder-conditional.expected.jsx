@@ -41,7 +41,11 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -57,9 +61,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count > 0), <p>Positive</p>, <p>Non-positive</p>)}
+            } }), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),
     };
 }, {

@@ -20,7 +20,11 @@ const double = __cfHardenFn((x: number) => x * 2);
 //   double(state.count + 1)   -> derive(..., ({ state }) => double(state.count + 1))
 export default pattern((state) => ({
     staticDoubled: double(2),
-    doubled: __cfHelpers.derive({
+    doubled: __cfHelpers.lift<{
+        state: {
+            count: number;
+        };
+    }, number>({
         type: "object",
         properties: {
             state: {
@@ -36,9 +40,9 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ state: {
             count: state.key("count")
-        } }, __cfModuleCallback_1).for(["__patternResult", "doubled"], true)
+        } }).for(["__patternResult", "doubled"], true)
 }), {
     type: "object",
     properties: {

@@ -86,7 +86,12 @@ export default pattern((state) => {
     } as const satisfies __cfHelpers.JSONSchema).for("selectedCommentId", true);
     const laneLabels = passthroughLabels(["lane", "detail", "summary"]).for("laneLabels", true);
     // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
-    const visibleThreads = __cfHelpers.derive({
+    const visibleThreads = __cfHelpers.lift<{
+        state: {
+            threads: Thread[];
+            showFlagged: boolean;
+        };
+    }, { thread: Thread; outerIndex: number; visibleComments: Comment[]; }[]>({
         type: "object",
         properties: {
             state: {
@@ -214,10 +219,7 @@ export default pattern((state) => {
                 required: ["id", "title", "muted", "comments"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
-            threads: state.key("threads"),
-            showFlagged: state.key("showFlagged")
-        } }, ({ state }) => 
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => 
     // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this derive
     state.threads.map((thread, outerIndex) => ({
         thread,
@@ -225,9 +227,31 @@ export default pattern((state) => {
         visibleComments: state.showFlagged
             ? thread.comments.filter((comment) => comment.flagged)
             : thread.comments,
-    }))).for("visibleThreads", true);
+    })))({ state: {
+            threads: state.key("threads"),
+            showFlagged: state.key("showFlagged")
+        } }).for("visibleThreads", true);
     // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
-    const threadRows = __cfHelpers.derive({
+    const threadRows = __cfHelpers.lift<{
+        visibleThreads: {
+            thread: {
+                title: string;
+                id: string;
+                muted: boolean;
+            };
+            visibleComments: {
+                id: string;
+                flagged: boolean;
+                text: string;
+                reactions: string[];
+            }[];
+            outerIndex: number;
+        }[];
+        selectedCommentId: __cfHelpers.ReadonlyCell<string | undefined>;
+        state: {
+            lane: string;
+        };
+    }, import("commonfabric").JSXElement[]>({
         type: "object",
         properties: {
             visibleThreads: {
@@ -326,20 +350,16 @@ export default pattern((state) => {
                 required: ["$UI"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        visibleThreads: visibleThreads,
-        selectedCommentId: selectedCommentId,
-        state: {
-            lane: state.key("lane")
-        }
-    }, ({ visibleThreads, selectedCommentId, state }) => 
+    } as const satisfies __cfHelpers.JSONSchema, ({ visibleThreads, selectedCommentId, state }) => 
     // [TRANSFORM] .map() stays plain: visibleThreads is a captured derive input, plain inside this derive
     visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
         // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
         const plainSeparators = ["top", "bottom"].map((edge) => `${thread.title}-${edge}`);
         const liftedSeparators = passthroughLabels(plainSeparators).for("liftedSeparators", true);
         // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
-        const reboundComments = __cfHelpers.derive({
+        const reboundComments = __cfHelpers.lift<{
+            visibleComments: Comment[];
+        }, Comment[]>({
             type: "object",
             properties: {
                 visibleComments: {
@@ -401,7 +421,7 @@ export default pattern((state) => {
                     required: ["id", "text", "flagged", "reactions"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, { visibleComments: visibleComments }, ({ visibleComments }) => visibleComments).for("reboundComments", true);
+        } as const satisfies __cfHelpers.JSONSchema, ({ visibleComments }) => visibleComments)({ visibleComments: visibleComments }).for("reboundComments", true);
         return (<article>
           <h2>{thread.title}</h2>
           {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured derive input */}
@@ -453,7 +473,10 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    reboundIndex: number;
+                    outerIndex: number;
+                }, boolean>({
                     type: "object",
                     properties: {
                         reboundIndex: {
@@ -466,10 +489,17 @@ export default pattern((state) => {
                     required: ["reboundIndex", "outerIndex"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex)({
                     reboundIndex: reboundIndex,
                     outerIndex: outerIndex
-                }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __cfHelpers.derive({
+                }), __cfHelpers.lift<{
+                    state: {
+                        lane: string;
+                    };
+                    comment: {
+                        id: string;
+                    };
+                }, string>({
                     type: "object",
                     properties: {
                         state: {
@@ -494,14 +524,14 @@ export default pattern((state) => {
                     required: ["state", "comment"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ state, comment }) => `${state.lane}:${comment.id}`)({
                     state: {
                         lane: state.key("lane")
                     },
                     comment: {
                         id: comment.key("id")
                     }
-                }, ({ state, comment }) => `${state.lane}:${comment.id}`), comment.key("text"))}
+                }), comment.key("text"))}
             </aside>);
             }, {
                 type: "object",
@@ -583,7 +613,10 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    edgeIndex: number;
+                    outerIndex: number;
+                }, boolean>({
                     type: "object",
                     properties: {
                         edgeIndex: {
@@ -596,10 +629,15 @@ export default pattern((state) => {
                     required: ["edgeIndex", "outerIndex"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex)({
                     edgeIndex: edgeIndex,
                     outerIndex: outerIndex
-                }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __cfHelpers.derive({
+                }), __cfHelpers.lift<{
+                    state: {
+                        lane: string;
+                    };
+                    edge: string;
+                }, string>({
                     type: "object",
                     properties: {
                         state: {
@@ -618,12 +656,12 @@ export default pattern((state) => {
                     required: ["state", "edge"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ state, edge }) => `${state.lane}:${edge}`)({
                     state: {
                         lane: state.key("lane")
                     },
                     edge: edge
-                }, ({ state, edge }) => `${state.lane}:${edge}`), edge)}
+                }), edge)}
             </small>);
             }, {
                 type: "object",
@@ -683,7 +721,13 @@ export default pattern((state) => {
           {/* [TRANSFORM] .map() stays plain: plainSeparators is a local literal array */}
           {plainSeparators.map((edge) => <small>{edge}</small>)}
         </article>);
-    })).for("threadRows", true);
+    }))({
+        visibleThreads: visibleThreads,
+        selectedCommentId: selectedCommentId,
+        state: {
+            lane: state.key("lane")
+        }
+    }).for("threadRows", true);
     return {
         [UI]: (<div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
@@ -701,7 +745,9 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    labelIndex: number;
+                }, boolean>({
                     type: "object",
                     properties: {
                         labelIndex: {
@@ -711,7 +757,12 @@ export default pattern((state) => {
                     required: ["labelIndex"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { labelIndex: labelIndex }, ({ labelIndex }) => labelIndex === 0), __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, ({ labelIndex }) => labelIndex === 0)({ labelIndex: labelIndex }), __cfHelpers.lift<{
+                    state: {
+                        lane: string;
+                    };
+                    label: string;
+                }, string>({
                     type: "object",
                     properties: {
                         state: {
@@ -730,12 +781,12 @@ export default pattern((state) => {
                     required: ["state", "label"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ state, label }) => `${state.lane}:${label}`)({
                     state: {
                         lane: state.key("lane")
                     },
                     label: label
-                }, ({ state, label }) => `${state.lane}:${label}`), label)}
+                }), label)}
           </header>);
             }, {
                 type: "object",

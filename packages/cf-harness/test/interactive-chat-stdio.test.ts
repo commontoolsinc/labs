@@ -122,6 +122,55 @@ Deno.test("interactive NDJSON transport returns structured parse errors", async 
   );
 });
 
+Deno.test("interactive NDJSON transport accepts list_events requests", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-1",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+        },
+      }),
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-2",
+        method: "list_events",
+        params: {
+          sessionId: "session-1",
+          afterSequence: 0,
+          limit: 10,
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output).find((envelope) =>
+    "ok" in envelope && envelope.requestId === "req-2"
+  );
+  assertEquals(
+    response !== undefined && "ok" in response ? response.ok : false,
+    true,
+  );
+  assertEquals(
+    response !== undefined && "ok" in response && response.ok
+      ? response.result
+      : undefined,
+    {
+      events: [decodeLines(output)[0]],
+      latestSequence: 1,
+    },
+  );
+});
+
 Deno.test("interactive NDJSON transport rejects unsupported methods", async () => {
   const output: string[] = [];
   await runHarnessInteractiveChatNdjsonTransport({

@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
+import { CrossStageState } from "./cross-stage-state.ts";
 
 export type TransformMode = "transform" | "error";
 
@@ -73,14 +74,12 @@ export interface TransformationOptions {
   readonly mode?: TransformMode;
   readonly debug?: boolean;
   readonly logger?: (message: string) => void;
-  readonly typeRegistry?: TypeRegistry;
-  readonly mapCallbackRegistry?: WeakSet<ts.Node>;
-  readonly syntheticComputeCallbackRegistry?: WeakSet<ts.Node>;
-  readonly syntheticComputeOwnedNodeRegistry?: WeakSet<ts.Node>;
-  readonly syntheticReactiveCollectionRegistry?:
-    SyntheticReactiveCollectionRegistry;
-  readonly schemaHints?: SchemaHints;
-  readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
+  /**
+   * Single owner of the pipeline's cross-transformer communication registries
+   * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly
+   * separate registry fields. See `CrossStageState`.
+   */
+  readonly state?: CrossStageState;
   /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
@@ -114,7 +113,7 @@ export interface DiagnosticInput {
  * The registry carries three related kinds of synthetic typing:
  * - replacement expression nodes that should keep the original authored type
  * - synthetic TypeNodes that later schema/codegen phases must resolve faithfully
- * - synthetic call expressions (`derive`, `computed`, `ifElse`, etc.) whose
+ * - synthetic call expressions (`lift-applied`, `ifElse`, etc.) whose
  *   result types would otherwise be lost after rewriting
  *
  * Most TypeNodes are registered directly at creation time. For composite

@@ -1,61 +1,42 @@
-import type { ImmutableJSONValue } from "commonfabric";
+import { CFC_CONCEPT_KIND, type CfcAtom, cfcAtom } from "../api-cfc.ts";
 
 export const DEFAULT_PROMPT_INJECTION_RISK_KIND =
-  "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened";
-export const DEFAULT_PROMPT_INFLUENCE_KIND =
-  "https://commonfabric.org/cfc/concepts/prompt-influence";
+  CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened;
+export const DEFAULT_PROMPT_INFLUENCE_KIND = CFC_CONCEPT_KIND.PromptInfluence;
 
-export const INJECTION_SAFE_ATOM = {
-  type: "https://commonfabric.org/cfc/atom/InjectionSafe",
-} as const;
+export const INJECTION_SAFE_ATOM = cfcAtom.injectionSafe();
 
 export const promptInjectionRiskAtom = (
-  source: ImmutableJSONValue,
+  source: CfcAtom,
   kind: string = DEFAULT_PROMPT_INJECTION_RISK_KIND,
-) => ({
-  type: "https://commonfabric.org/cfc/atom/Caveat",
-  kind,
-  source,
-});
+) => cfcAtom.caveat(kind, source);
 
 export const promptInfluenceAtom = (
-  source: ImmutableJSONValue,
+  source: CfcAtom,
   kind: string = DEFAULT_PROMPT_INFLUENCE_KIND,
-) => ({
-  type: "https://commonfabric.org/cfc/atom/Caveat",
-  kind,
-  source,
-});
+) => cfcAtom.caveat(kind, source);
 
-export const trustedAgentKernelAtom = (name: string) => ({
-  type: "https://commonfabric.org/cfc/atom/Builtin",
-  name,
-});
+export const trustedAgentKernelAtom = (name: string) => cfcAtom.builtin(name);
 
 export const userSurfaceInputAtom = (
   user: string,
   surface: string,
   valueDigest: string,
-) => ({
-  type: "https://commonfabric.org/cfc/atom/UserSurfaceInput",
-  user,
-  surface,
-  valueDigest,
-});
+) => cfcAtom.userSurfaceInput(user, surface, valueDigest);
 
 export const promptSlotBoundAtom = (
-  source: ImmutableJSONValue,
+  source: CfcAtom,
   role: string,
   kernelName: string,
   subject: string,
   surface: string,
   valueDigest: string,
-) => ({
-  type: "https://commonfabric.org/cfc/atom/PromptSlotBound",
-  source,
-  role,
-  kernelName,
-  subject,
-  surface,
-  valueDigest,
-});
+) =>
+  cfcAtom.promptSlotBound(
+    source,
+    role,
+    kernelName,
+    subject,
+    surface,
+    valueDigest,
+  );

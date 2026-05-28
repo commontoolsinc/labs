@@ -1,6 +1,11 @@
 import type { Immutable } from "@commonfabric/utils/types";
 import type { CellScope, ImmutableJSONValue } from "@commonfabric/api";
-import type { EntityDocument, PatchOp } from "@commonfabric/memory/v2";
+import type {
+  EntityDocument,
+  PatchOp,
+  SchedulerActionSnapshotQuery,
+  SchedulerSnapshotListResult,
+} from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
   type Assertion,
@@ -219,6 +224,14 @@ export interface IStorageProvider {
 
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
+
+  /**
+   * Internal scheduler persistence query. Memory v2 providers implement this
+   * so the runner can rebuild scheduler indexes from persisted observations.
+   */
+  listSchedulerActionSnapshots?(
+    query?: SchedulerActionSnapshotQuery,
+  ): Promise<SchedulerSnapshotListResult>;
 }
 
 /**
@@ -481,6 +494,14 @@ export interface IStorageTransaction {
    * reconstruct it from journal activity.
    */
   getReactivityLog?(): TransactionReactivityLog;
+
+  /**
+   * Optional scheduler observation payload to persist alongside the native
+   * memory transaction. When there are no semantic writes, storage backends may
+   * still commit this metadata as an internal no-op observation.
+   */
+  setSchedulerObservation?(observation: unknown): void;
+  getSchedulerObservation?(): unknown;
 
   /**
    * Optional raw read observations recorded by this transaction.
@@ -1108,6 +1129,7 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
+  schedulerObservation?: unknown;
 }
 
 export interface ITransaction {

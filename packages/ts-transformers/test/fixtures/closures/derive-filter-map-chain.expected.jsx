@@ -23,7 +23,7 @@ interface Preference {
 export default pattern((state) => {
     // Using object input form for derive - exactly like the issue describes
     // This matches: derive({ foodDescription, preferences }, ({ foodDescription: food, preferences: prefs }) => ...)
-    const wishQuery = derive({
+    const wishQuery = __cfHelpers.lift({
         type: "object",
         properties: {
             prefs: {
@@ -53,7 +53,7 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { food: state.key("foodDescription"), prefs: state.key("preferences") }, ({ food, prefs }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ food, prefs }) => {
         // Filter-map chain inside derive callback
         // The .map() should NOT be transformed to .mapWithPattern() because:
         // - Inside derive, `prefs` is unwrapped to a plain array
@@ -64,7 +64,7 @@ export default pattern((state) => {
             .map((p) => p.ingredient)
             .join(", ");
         return `Pattern for ${food} with: ${liked}`;
-    }).for("wishQuery", true);
+    })({ food: state.key("foodDescription"), prefs: state.key("preferences") }).for("wishQuery", true);
     return { wishQuery };
 }, {
     type: "object",

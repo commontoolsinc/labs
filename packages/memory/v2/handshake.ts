@@ -1,9 +1,9 @@
 import {
+  compatibleMemoryProtocolFlags,
   getMemoryProtocolFlags,
   type HelloMessage,
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
-  sameMemoryProtocolFlags,
   type ServerMessage,
   wireMemoryProtocolFlags,
 } from "../v2.ts";
@@ -33,7 +33,8 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
   }
   const parsed = parseMemoryProtocolFlags(message.flags);
   if (
-    parsed === null || !sameMemoryProtocolFlags(parsed.flags, expectedFlags)
+    parsed === null ||
+    !compatibleMemoryProtocolFlags(parsed.flags, expectedFlags)
   ) {
     return {
       type: "response",

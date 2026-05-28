@@ -21,7 +21,11 @@ interface MyInput {
 // Context: Identical structure to pattern-with-name-and-type; confirms consistent behavior
 export default pattern((input: MyInput) => {
     return {
-        result: __cfHelpers.derive({
+        result: __cfHelpers.lift<{
+            input: {
+                value: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 input: {
@@ -37,9 +41,9 @@ export default pattern((input: MyInput) => {
             required: ["input"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { input: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.value * 2)({ input: {
                 value: input.key("value")
-            } }, ({ input }) => input.value * 2).for(["__patternResult", "result"], true)
+            } }).for(["__patternResult", "result"], true)
     };
 }, {
     type: "object",

@@ -29,7 +29,7 @@ describe("UnknownValue", () => {
 
   describe("instance members", () => {
     describe("[DECONSTRUCT]", () => {
-      it("returns the type-tagged state", () => {
+      it("returns the type-tagged `state`", () => {
         const us = new UnknownValue("Test@1", "state");
         expect(us[DECONSTRUCT]()).toEqual({
           type: "Test@1",

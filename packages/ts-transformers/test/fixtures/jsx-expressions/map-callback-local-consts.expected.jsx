@@ -35,7 +35,11 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
-                const isFolder = __cfHelpers.derive({
+                const isFolder = __cfHelpers.lift<{
+                    file: {
+                        type: string;
+                    };
+                }, boolean>({
                     type: "object",
                     properties: {
                         file: {
@@ -51,16 +55,20 @@ export default pattern((__cf_pattern_input) => {
                     required: ["file"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { file: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.type === "folder")({ file: {
                         type: file.key("type")
-                    } }, ({ file }) => file.type === "folder").for("isFolder", true);
+                    } }).for("isFolder", true);
                 const isOpenable = __cfHelpers.unless({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfHelpers.lift<{
+                    file: {
+                        contentType: string;
+                    };
+                }, boolean>({
                     type: "object",
                     properties: {
                         file: {
@@ -76,9 +84,9 @@ export default pattern((__cf_pattern_input) => {
                     required: ["file"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { file: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.contentType !== "binary")({ file: {
                         contentType: file.key("contentType")
-                    } }, ({ file }) => file.contentType !== "binary").for(["isOpenable", 4], true)).for("isOpenable", true);
+                    } }).for(["isOpenable", 4], true)).for("isOpenable", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {

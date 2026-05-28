@@ -11,6 +11,7 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ msg }) => (msg.reactions ?? []) as Reaction[]);
 interface Reaction {
     emoji: string;
 }
@@ -32,7 +33,11 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {messages.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const msg = __cf_pattern_input.key("element");
-                const messageReactions = __cfHelpers.derive({
+                const messageReactions = __cfHelpers.lift<{
+                    msg: {
+                        reactions?: Reaction[] | undefined;
+                    };
+                }, Reaction[]>({
                     type: "object",
                     properties: {
                         msg: {
@@ -75,9 +80,9 @@ export default pattern((__cf_pattern_input) => {
                             required: ["emoji"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { msg: {
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ msg: {
                         reactions: msg.key("reactions")
-                    } }, ({ msg }) => (msg.reactions ?? []) as Reaction[]).for("messageReactions", true);
+                    } }).for("messageReactions", true);
                 return (<div>
               {messageReactions.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                         const reaction = __cf_pattern_input.key("element");

@@ -102,7 +102,7 @@ export function isStructuralReactiveFactoryExpression(
       if (callKind) {
         switch (callKind.kind) {
           case "builder":
-          case "derive":
+          case "lift-applied":
           case "cell-factory":
           case "cell-for":
           case "wish":

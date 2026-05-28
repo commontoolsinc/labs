@@ -27,7 +27,11 @@ interface State {
 //   When the second computed() accesses summary.length, the capture is rewritten
 //   to summary.key("length") because summary is an OpaqueRef, not a plain value.
 export default pattern((state) => {
-    const summary = __cfHelpers.derive({
+    const summary = __cfHelpers.lift<{
+        state: {
+            items: string[];
+        };
+    }, string>({
         type: "object",
         properties: {
             state: {
@@ -46,12 +50,16 @@ export default pattern((state) => {
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.join(", "))({ state: {
             items: state.key("items")
-        } }, ({ state }) => state.items.join(", ")).for("summary", true);
+        } }).for("summary", true);
     return {
         summary,
-        charCount: __cfHelpers.derive({
+        charCount: __cfHelpers.lift<{
+            summary: {
+                length: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 summary: {
@@ -67,9 +75,9 @@ export default pattern((state) => {
             required: ["summary"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { summary: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length)({ summary: {
                 length: summary.key("length")
-            } }, ({ summary }) => summary.length).for(["__patternResult", "charCount"], true)
+            } }).for(["__patternResult", "charCount"], true)
     };
 }, {
     type: "object",

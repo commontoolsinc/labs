@@ -22,13 +22,13 @@ import {
   createRegisteredTypeLiteral,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
-import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 
 /**
  * Replace OpaqueRef expressions with parameter identifiers in the callback body.
  * Also registers the new identifiers with their UNWRAPPED types in the typeRegistry,
- * so that type-based checks inside the derive callback see the correct types.
+ * so that type-based checks inside the lift-applied callback see the correct types.
  */
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
@@ -44,7 +44,7 @@ function replaceOpaqueRefsWithParams(
         const newIdentifier = factory.createIdentifier(paramName);
 
         // Register the new identifier with its UNWRAPPED type.
-        // The ref has type OpaqueRef<T>, but inside the derive callback
+        // The ref has type OpaqueRef<T>, but inside the lift-applied callback
         // the parameter has type T (unwrapped).
         if (checker && typeRegistry) {
           const refType = checker.getTypeAtLocation(ref);
@@ -70,14 +70,14 @@ interface FallbackEntry {
   readonly propertyName: string;
 }
 
-export interface DeriveCallOptions {
+export interface LiftAppliedCallOptions {
   readonly factory: ts.NodeFactory;
   readonly tsContext: ts.TransformationContext;
   readonly cfHelpers: CFHelpers;
   readonly context: TransformationContext;
 }
 
-function planDeriveEntries(
+function planLiftAppliedInputEntries(
   refs: readonly ts.Expression[],
 ): {
   readonly captureTree: ReturnType<typeof groupCapturesByRoot>;
@@ -154,7 +154,7 @@ function createParameterForPlan(
   return createParameterFromBindings(bindings, factory);
 }
 
-function createDeriveArgs(
+function createLiftAppliedInputArgs(
   factory: ts.NodeFactory,
   captureTree: ReturnType<typeof groupCapturesByRoot>,
   fallbackEntries: readonly FallbackEntry[],
@@ -183,17 +183,18 @@ function createDeriveArgs(
   ];
 }
 
-export function createDeriveCall(
+export function createLiftAppliedCall(
   expression: ts.Expression,
   refs: readonly ts.Expression[],
-  options: DeriveCallOptions,
+  options: LiftAppliedCallOptions,
 ): ts.Expression | undefined {
   if (refs.length === 0) return undefined;
 
   const { factory, tsContext, cfHelpers, context } = options;
-  const { captureTree, fallbackEntries, refToParamName } = planDeriveEntries(
-    refs,
-  );
+  const { captureTree, fallbackEntries, refToParamName } =
+    planLiftAppliedInputEntries(
+      refs,
+    );
   if (captureTree.size === 0 && fallbackEntries.length === 0) {
     return undefined;
   }
@@ -213,7 +214,7 @@ export function createDeriveCall(
     factory,
     tsContext,
     context.checker,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
 
   const arrowFunction = factory.createArrowFunction(
@@ -226,10 +227,22 @@ export function createDeriveCall(
   );
   context.markAsSyntheticComputeCallback?.(arrowFunction);
 
-  const deriveArgs = [
-    ...createDeriveArgs(factory, captureTree, fallbackEntries),
-    arrowFunction,
-  ];
+  // Split into the lift-applied shape:
+  //   __cfHelpers.lift<inputTypeNode, resultTypeNode>(callback)(inputObject)
+  //
+  // The input object is the outer applied call's single argument; the
+  // callback (and type arguments, since lift<In, Out> is the generic) live
+  // on the inner lift call. This matches the canonical post-Phase-1 shape
+  // produced by LiftLoweringTransformer (see src/lift/transformer.ts) for
+  // user-authored derive(...) calls.
+  const [inputObject] = createLiftAppliedInputArgs(
+    factory,
+    captureTree,
+    fallbackEntries,
+  );
+  if (!inputObject) {
+    return undefined;
+  }
 
   // Build input type node that preserves Cell<T> types
   const inputTypeNode = buildInputTypeNode(
@@ -241,31 +254,39 @@ export function createDeriveCall(
   // Build result type node from expression type
   const resultTypeNode = buildResultTypeNode(expression, context);
 
-  // Create derive call with type arguments for SchemaInjectionTransformer
-  const deriveCall = cfHelpers.createHelperCall(
-    "derive",
+  // Inner lift call: __cfHelpers.lift<inputTypeNode, resultTypeNode>(callback)
+  const innerLiftCall = cfHelpers.createHelperCall(
+    "lift",
     expression,
     [inputTypeNode, resultTypeNode],
-    deriveArgs,
+    [arrowFunction],
   );
 
-  // Register the type of the derive call expression itself in the typeRegistry
-  // so that type inference works correctly for synthetic nodes
-  if (context.options.typeRegistry && context.checker) {
-    registerDeriveCallType(
-      deriveCall,
+  // Outer applied call: (inputObject)
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [inputObject],
+  );
+
+  // Register the type of the call expression itself in the typeRegistry
+  // so that type inference works correctly for synthetic nodes. The
+  // result type is the value the callback returns.
+  if (context.options.state?.typeRegistry && context.checker) {
+    registerLiftAppliedCallType(
+      liftAppliedCall,
       resultTypeNode,
       undefined, // resultType not available in this code path
       context.checker,
-      context.options.typeRegistry,
+      context.options.state?.typeRegistry,
     );
   }
 
   // Maintain parent chains and compute-wrapper ownership for later passes that
-  // revisit synthetic derive callbacks after post-closure lowering.
-  setParentPointers(deriveCall, expression.parent);
+  // revisit synthetic lift-applied callbacks after post-closure lowering.
+  setParentPointers(liftAppliedCall, expression.parent);
 
-  return deriveCall;
+  return liftAppliedCall;
 }
 
 function buildInputTypeNode(
@@ -301,7 +322,7 @@ function buildInputTypeNode(
     {
       factory,
       checker: context.checker,
-      typeRegistry: context.options.typeRegistry,
+      typeRegistry: context.options.state?.typeRegistry,
     },
   );
 }
@@ -318,7 +339,7 @@ function buildResultTypeNode(
   const resultType = getTypeAtLocationWithFallback(
     expression,
     checker,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
 
   // If we couldn't get a type, fallback to unknown
@@ -336,8 +357,8 @@ function buildResultTypeNode(
 
   if (resultTypeNode) {
     // Register the type in typeRegistry for SchemaGeneratorTransformer
-    if (context.options.typeRegistry) {
-      context.options.typeRegistry.set(resultTypeNode, resultType);
+    if (context.options.state?.typeRegistry) {
+      context.options.state?.typeRegistry.set(resultTypeNode, resultType);
     }
     return resultTypeNode;
   }

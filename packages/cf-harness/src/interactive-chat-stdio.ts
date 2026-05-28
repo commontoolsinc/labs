@@ -47,6 +47,7 @@ const SUPPORTED_REQUEST_METHODS = new Set<HarnessChatRequestMethod>([
   "cancel_turn",
   "close_session",
   "status",
+  "list_events",
 ]);
 const SUPPORTED_POLICY_TOOL_MODES = new Set(["workspace-write", "read-only"]);
 const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>([
@@ -77,6 +78,20 @@ const hasOptionalString = (
   value: Record<string, unknown>,
   key: string,
 ): boolean => value[key] === undefined || typeof value[key] === "string";
+
+const hasOptionalNonNegativeInteger = (
+  value: Record<string, unknown>,
+  key: string,
+): boolean =>
+  value[key] === undefined ||
+  (Number.isInteger(value[key]) && Number(value[key]) >= 0);
+
+const hasOptionalPositiveInteger = (
+  value: Record<string, unknown>,
+  key: string,
+): boolean =>
+  value[key] === undefined ||
+  (Number.isInteger(value[key]) && Number(value[key]) > 0);
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
@@ -169,6 +184,10 @@ const isValidRequestParams = (
         hasOptionalString(params, "reason");
     case "status":
       return hasOptionalString(params, "sessionId");
+    case "list_events":
+      return hasOptionalString(params, "sessionId") &&
+        hasOptionalNonNegativeInteger(params, "afterSequence") &&
+        hasOptionalPositiveInteger(params, "limit");
   }
 };
 

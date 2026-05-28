@@ -87,7 +87,7 @@ function getMarkedSyntheticCallbackContext(
           callParent.arguments.includes(current)
         ) {
           const callKind = detectCallKind(callParent, checker);
-          if (callKind?.kind === "derive") {
+          if (callKind?.kind === "lift-applied") {
             return { kind: "compute", owner: "derive", inJsxExpression };
           }
           if (callKind?.kind === "builder") {

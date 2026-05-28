@@ -33,7 +33,7 @@ export default pattern((state) => {
     // The callback becomes synthetic during transformation, which previously
     // caused type inference to fail, resulting in a 'true' schema instead of
     // the correct union type schema.
-    const latestMessage = derive({
+    const latestMessage = __cfHelpers.lift({
         type: "array",
         items: {
             $ref: "#/$defs/Message"
@@ -80,7 +80,7 @@ export default pattern((state) => {
             }, {
                 type: "null"
             }]
-    } as const satisfies __cfHelpers.JSONSchema, state.key("messages"), (messages) => {
+    } as const satisfies __cfHelpers.JSONSchema, (messages) => {
         if (!messages || messages.length === 0)
             return null;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -98,7 +98,7 @@ export default pattern((state) => {
             }
         }
         return null;
-    }).for("latestMessage", true);
+    })(state.key("messages")).for("latestMessage", true);
     return {
         [UI]: (<div>
         <div>Latest: {latestMessage}</div>

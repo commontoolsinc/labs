@@ -16,7 +16,9 @@ const __cfAmdHooks = undefined;
 //   const { result } = generateObject(...) uses the synthesized __cf_destructure_* binding consistently
 export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");
-    const preview = __cfHelpers.derive({
+    const preview = __cfHelpers.lift<{
+        messages: string[];
+    }, string>({
         type: "object",
         properties: {
             messages: {
@@ -29,7 +31,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["messages"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { messages: messages }, ({ messages }) => messages[0] ?? "").for("preview", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ messages }) => messages[0] ?? "")({ messages: messages }).for("preview", true);
     const __cf_destructure_1 = generateObject({
         prompt: preview,
         schema: {
@@ -40,13 +42,15 @@ export default pattern((__cf_pattern_input) => {
             required: ["title"],
         },
     }), result = __cf_destructure_1.key("result").for("result", true);
-    return <div>{__cfHelpers.derive({
+    return <div>{__cfHelpers.lift<{
+        result: any;
+    }, any>({
         type: "object",
         properties: {
             result: true
         },
         required: ["result"]
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => result?.title ?? "Untitled")}</div>;
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ result }) => result?.title ?? "Untitled")({ result: result })}</div>;
 }, {
     type: "object",
     properties: {

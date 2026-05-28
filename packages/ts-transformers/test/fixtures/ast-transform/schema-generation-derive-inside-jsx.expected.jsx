@@ -17,11 +17,11 @@ declare const value: number;
 //   derive(value, (v) => v * 2) → derive(inputSchema, outputSchema, value, fn)
 // Context: derive() appears as a JSX child expression, not a standalone statement
 export const result = (<div>
-    {derive({
+    {__cfHelpers.lift({
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, value, (v) => v * 2)}
+} as const satisfies __cfHelpers.JSONSchema, (v) => v * 2)(value)}
   </div>);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

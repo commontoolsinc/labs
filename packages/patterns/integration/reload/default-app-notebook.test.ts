@@ -1,0 +1,482 @@
+import { env, Page, waitFor } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { describe, it } from "@std/testing/bdd";
+import { Identity } from "@commonfabric/identity";
+import { assert, assertEquals } from "@std/assert";
+import {
+  collectSchedulerLoadSummary,
+  waitForRuntimeIdle,
+  waitForRuntimeSynced,
+} from "../cfc-browser-helpers.ts";
+
+const { FRONTEND_URL } = env;
+const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 130;
+const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 80;
+const NOTEBOOK_RELOAD_TIMEOUT_MS = 180_000;
+
+const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
+  const raw = Deno.env.get("CF_EXPECT_PERSISTENT_SCHEDULER_STATE");
+  return raw === "1" || raw === "true" || raw === "yes";
+})();
+
+describe("default-app notebook reload integration test", () => {
+  const shell = new ShellIntegration();
+  shell.bindLifecycle();
+
+  it("reloads every rapidly created notebook note in a separate shard", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const notebookSpaceName = globalThis.crypto.randomUUID();
+    const page = shell.page();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: notebookSpaceName },
+      identity,
+    });
+
+    await waitFor(async () => {
+      return await setSchedulerPullMode(page, true);
+    });
+    await waitFor(async () => !!(await clickButtonWithText(page, "Notes")));
+    await waitFor(async () =>
+      !!(await clickButtonWithText(page, "New Notebook"))
+    );
+    await waitFor(async () => {
+      const state = await collectNotebookRenderState(page);
+      return state.isNotebook;
+    });
+
+    await waitFor(async () => !!(await clickButtonWithTitle(page, "New Note")));
+    await waitFor(async () =>
+      !!(await findButtonWithText(page, "Create Another"))
+    );
+    await waitFor(async () => await resetEventInvocationTrace(page));
+
+    const noteCreates = 7;
+    for (let i = 0; i < noteCreates - 1; i++) {
+      assert(
+        await clickButtonWithText(page, "Create Another"),
+        `Expected Create Another click ${i + 1} to succeed`,
+      );
+    }
+    assert(
+      await clickButtonWithExactText(page, "Create"),
+      "Expected final Create click to succeed",
+    );
+
+    await waitFor(async () => {
+      await waitForRuntimeIdle(page);
+      const state = await collectNotebookSourceState(page);
+      return state.argumentNotesLength === noteCreates &&
+        state.noteCount === noteCreates &&
+        state.showNewNotePrompt === false &&
+        state.usedCreateAnotherNote === false;
+    }, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+
+    await waitForRuntimeSynced(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+
+    const startedAt = performance.now();
+    await page.reload({ waitUntil: "load" });
+    await page.applyConsoleFormatter();
+    await shell.login(identity);
+
+    await waitFor(async () => {
+      const state = await collectNotebookRenderState(page);
+      return state.isNotebook &&
+        state.noteCount === noteCreates &&
+        state.renderedNoteChips === noteCreates;
+    }, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForRuntimeIdle(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+
+    const reloadRenderState = await collectNotebookRenderState(page);
+    assertEquals(reloadRenderState.noteCount, noteCreates);
+    assertEquals(reloadRenderState.renderedNoteChips, noteCreates);
+
+    const schedulerSummary = await collectSchedulerLoadSummary(page);
+    assert(
+      schedulerSummary,
+      "Expected notebook reload to expose scheduler load summary",
+    );
+    const reloadSummary = {
+      reloadToRenderedMs: Number((performance.now() - startedAt).toFixed(3)),
+      ...schedulerSummary,
+    };
+    console.log(
+      "Notebook reload scheduler summary:",
+      JSON.stringify(reloadSummary, null, 2),
+    );
+
+    if (!EXPECT_PERSISTENT_SCHEDULER_STATE) return;
+
+    assert(
+      schedulerSummary.graph.actionRuns <=
+        NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,
+      `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${schedulerSummary.graph.actionRuns}`,
+    );
+    assert(
+      schedulerSummary.graph.computationRunsFromStats <=
+        NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT,
+      `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${schedulerSummary.graph.computationRunsFromStats}`,
+    );
+  });
+});
+
+async function setSchedulerPullMode(
+  page: Page,
+  pullMode: boolean,
+): Promise<boolean> {
+  return await page.evaluate<Promise<boolean>, [boolean]>(
+    async (pullMode) => {
+      const rt = globalThis.commonfabric?.rt;
+      if (!rt?.setPullMode || !rt?.idle) return false;
+      await rt.setPullMode(pullMode);
+      await rt.idle();
+      return true;
+    },
+    { args: [pullMode] },
+  );
+}
+
+async function resetEventInvocationTrace(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: {
+        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
+        on?: (event: string, handler: (marker: unknown) => void) => void;
+        off?: (event: string, handler: (marker: unknown) => void) => void;
+        idle?: () => Promise<void>;
+      };
+      __eventInvocationTrace?: unknown[];
+      __eventInvocationTraceHandler?: (marker: unknown) => void;
+    } | undefined;
+    const rt = api?.rt;
+    if (!api || !rt?.setTelemetryEnabled || !rt.on || !rt.off) return false;
+
+    if (api.__eventInvocationTraceHandler) {
+      rt.off("telemetry", api.__eventInvocationTraceHandler);
+    }
+
+    api.__eventInvocationTrace = [];
+    api.__eventInvocationTraceHandler = (marker: unknown) => {
+      const type = marker && typeof marker === "object"
+        ? (marker as { type?: unknown }).type
+        : undefined;
+      if (
+        type === "scheduler.invocation" ||
+        type === "scheduler.event.commit" ||
+        type === "scheduler.event.preflight"
+      ) {
+        api.__eventInvocationTrace?.push(marker);
+      }
+    };
+    rt.on("telemetry", api.__eventInvocationTraceHandler);
+    await rt.setTelemetryEnabled(true);
+    await rt.idle?.();
+    return true;
+  });
+}
+
+async function collectNotebookSourceState(page: Page): Promise<{
+  notebookEntityId?: string;
+  argumentNotesLength?: number;
+  noteCount?: number;
+  showNewNotePrompt?: boolean;
+  usedCreateAnotherNote?: boolean;
+}> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: { idle?: () => Promise<void> };
+      readCell?: (options: {
+        id: string;
+        path?: string[];
+      }) => Promise<unknown>;
+      __eventInvocationTrace?: unknown[];
+    } | undefined;
+    await api?.rt?.idle?.();
+
+    const markers = (api?.__eventInvocationTrace ?? []) as Array<{
+      type?: string;
+      handlerId?: string;
+      handlerInfo?: { moduleName?: string };
+      writes?: string[];
+    }>;
+    const notebookCommits = markers.filter((marker) =>
+      marker.type === "scheduler.event.commit" &&
+      (
+        marker.handlerId?.includes("/api/patterns/notes/notebook.tsx") ||
+        marker.handlerInfo?.moduleName?.includes("notebook")
+      )
+    );
+    const notebookNotesWrite = notebookCommits.at(-1)?.writes?.find((write) =>
+      write.includes("/value/argument/notes")
+    );
+    const notebookEntityId = notebookNotesWrite?.match(
+      /\/(of:[^/]+)\/value\/argument\/notes/,
+    )?.[1];
+    if (!notebookEntityId || !api?.readCell) {
+      return { notebookEntityId };
+    }
+
+    let notebookArgument: unknown;
+    let notebookInternal: unknown;
+    const originalLog = console.log;
+    try {
+      console.log = () => {};
+      notebookArgument = await api.readCell({
+        id: notebookEntityId,
+        path: ["argument"],
+      });
+      notebookInternal = await api.readCell({
+        id: notebookEntityId,
+        path: ["internal"],
+      });
+    } finally {
+      console.log = originalLog;
+    }
+
+    return {
+      notebookEntityId,
+      argumentNotesLength: Array.isArray(
+          (notebookArgument as { notes?: unknown[] } | undefined)?.notes,
+        )
+        ? (notebookArgument as { notes: unknown[] }).notes.length
+        : undefined,
+      noteCount:
+        typeof (notebookInternal as { noteCount?: unknown } | undefined)
+            ?.noteCount === "number"
+          ? (notebookInternal as { noteCount: number }).noteCount
+          : undefined,
+      showNewNotePrompt:
+        typeof (notebookInternal as { showNewNotePrompt?: unknown } | undefined)
+            ?.showNewNotePrompt === "boolean"
+          ? (notebookInternal as { showNewNotePrompt: boolean })
+            .showNewNotePrompt
+          : undefined,
+      usedCreateAnotherNote: typeof (
+          notebookInternal as { usedCreateAnotherNote?: unknown } | undefined
+        )?.usedCreateAnotherNote === "boolean"
+        ? (notebookInternal as { usedCreateAnotherNote: boolean })
+          .usedCreateAnotherNote
+        : undefined,
+    };
+  });
+}
+
+async function clickButtonWithText(
+  page: Page,
+  searchText: string,
+): Promise<boolean> {
+  const button = await findButtonWithText(page, searchText);
+  if (!button) return false;
+  try {
+    await button.click();
+    return true;
+  } catch (_) {
+    return await page.evaluate((searchText: string) => {
+      for (const el of document.querySelectorAll("cf-button, button, a")) {
+        if (el.textContent?.trim().includes(searchText)) {
+          (el as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    }, { args: [searchText] });
+  }
+}
+
+async function findButtonWithText(
+  page: Page,
+  searchText: string,
+): Promise<any | null> {
+  try {
+    const buttons = await page.$$("cf-button, button, a", {
+      strategy: "pierce",
+    });
+    for (const button of buttons) {
+      const text = await button.innerText();
+      if (text?.trim().includes(searchText)) return button;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function clickButtonWithExactText(
+  page: Page,
+  searchText: string,
+): Promise<boolean> {
+  try {
+    const buttons = await page.$$("cf-button, button, a", {
+      strategy: "pierce",
+    });
+    for (const button of buttons) {
+      const text = await button.innerText();
+      if (text?.trim() === searchText) {
+        try {
+          await button.click();
+          return true;
+        } catch (_) {
+          return await page.evaluate((searchText: string) => {
+            for (
+              const el of document.querySelectorAll(
+                "cf-button, button, a",
+              )
+            ) {
+              if (el.textContent?.trim() === searchText) {
+                (el as HTMLElement).click();
+                return true;
+              }
+            }
+            return false;
+          }, { args: [searchText] });
+        }
+      }
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function clickButtonWithTitle(
+  page: Page,
+  title: string,
+): Promise<boolean> {
+  try {
+    const buttons = await page.$$("cf-button, button", {
+      strategy: "pierce",
+    });
+    for (const button of buttons) {
+      const actualTitle = await button.getAttribute("title");
+      if (actualTitle === title) {
+        try {
+          await button.click();
+          return true;
+        } catch (_) {
+          return await page.evaluate((title: string) => {
+            const el = document.querySelector(
+              `cf-button[title="${title}"], button[title="${title}"]`,
+            );
+            if (!el) return false;
+            (el as HTMLElement).click();
+            return true;
+          }, { args: [title] });
+        }
+      }
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function collectNotebookRenderState(page: Page): Promise<{
+  isNotebook: boolean;
+  noteCount: number;
+  notesLength: number;
+  mentionableLength: number;
+  showNewNotePrompt?: boolean;
+  usedCreateAnotherNote?: boolean;
+  storedUiNoteChips: number;
+  storedUiNoteLabels: string[];
+  renderedNoteChips: number;
+  renderedNoteLabels: string[];
+}> {
+  return await page.evaluate(async () => {
+    const commonfabric = globalThis.commonfabric as any;
+    const appState = globalThis.app?.serialize?.();
+    const view = appState?.view;
+    const pieceId = view && typeof view === "object" && "pieceId" in view &&
+        typeof view.pieceId === "string"
+      ? view.pieceId
+      : undefined;
+    let current: any;
+    if (pieceId) {
+      const originalLog = console.log;
+      try {
+        console.log = () => {};
+        current = await commonfabric?.readCell?.({ id: pieceId });
+      } finally {
+        console.log = originalLog;
+      }
+    }
+    const notes = Array.isArray(current?.notes) ? current.notes : [];
+    const mentionable = Array.isArray(current?.mentionable)
+      ? current.mentionable
+      : [];
+    const collectStoredNoteLabels = (value: unknown) => {
+      const labels: string[] = [];
+      const seen = new WeakSet<object>();
+
+      function visit(currentValue: unknown): void {
+        if (currentValue === null || currentValue === undefined) return;
+        if (typeof currentValue !== "object") return;
+        if (seen.has(currentValue)) return;
+        seen.add(currentValue);
+
+        const record = currentValue as Record<string, unknown>;
+        const label = typeof record.label === "string"
+          ? record.label
+          : typeof (record.props as { label?: unknown } | undefined)?.label ===
+              "string"
+          ? (record.props as { label: string }).label
+          : undefined;
+        if (label?.trim().startsWith("📝 New Note")) {
+          labels.push(label.trim());
+        }
+
+        if (Array.isArray(currentValue)) {
+          for (const item of currentValue) visit(item);
+          return;
+        }
+        for (const item of Object.values(record)) visit(item);
+      }
+
+      visit(value);
+      return labels;
+    };
+    const collectRenderedNoteLabels = (root: Document | ShadowRoot) => {
+      const labels: string[] = [];
+
+      function collect(currentRoot: Document | ShadowRoot): void {
+        for (const el of currentRoot.querySelectorAll("*")) {
+          if (el.localName === "cf-chip") {
+            const label = ((el as any).label ?? el.getAttribute("label") ?? "")
+              .trim();
+            if (label.startsWith("📝 New Note")) {
+              labels.push(label);
+            }
+          }
+          if ((el as HTMLElement).shadowRoot) {
+            collect((el as HTMLElement).shadowRoot!);
+          }
+        }
+      }
+
+      collect(root);
+      return labels;
+    };
+    const noteLabels = collectRenderedNoteLabels(document);
+    const storedUiNoteLabels = collectStoredNoteLabels(current?.["$UI"]);
+
+    return {
+      isNotebook: current?.isNotebook === true,
+      noteCount: typeof current?.noteCount === "number"
+        ? current.noteCount
+        : -1,
+      notesLength: notes.length,
+      mentionableLength: mentionable.length,
+      showNewNotePrompt: typeof current?.showNewNotePrompt === "boolean"
+        ? current.showNewNotePrompt
+        : undefined,
+      usedCreateAnotherNote: typeof current?.usedCreateAnotherNote === "boolean"
+        ? current.usedCreateAnotherNote
+        : undefined,
+      storedUiNoteChips: storedUiNoteLabels.length,
+      storedUiNoteLabels,
+      renderedNoteChips: noteLabels.length,
+      renderedNoteLabels: noteLabels,
+    };
+  });
+}

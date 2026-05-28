@@ -2,6 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import ts from "typescript";
 import {
   CommonFabricTransformerPipeline,
+  CrossStageState,
   transformCfDirective,
 } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
@@ -133,10 +134,9 @@ Deno.test(
     `;
 
     const { program, sourceFile } = createProgram(source);
-    const schemaHints = new WeakMap<ts.Node, { cfcUiContract?: unknown }>();
-    const pipeline = new CommonFabricTransformerPipeline({
-      schemaHints: schemaHints as WeakMap<ts.Node, never>,
-    });
+    const state = new CrossStageState();
+    const schemaHints = state.schemaHints;
+    const pipeline = new CommonFabricTransformerPipeline({ state });
 
     const result = ts.transform(sourceFile, pipeline.toFactories(program));
     const transformedFile = result.transformed[0];

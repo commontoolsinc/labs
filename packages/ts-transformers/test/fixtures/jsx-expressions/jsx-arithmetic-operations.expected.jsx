@@ -26,7 +26,11 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Basic Arithmetic</h3>
-        <p>Count + 1: {__cfHelpers.derive({
+        <p>Count + 1: {__cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -42,10 +46,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count + 1)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count + 1)}</p>
-        <p>Count - 1: {__cfHelpers.derive({
+            } })}</p>
+        <p>Count - 1: {__cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -61,10 +69,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count - 1)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count - 1)}</p>
-        <p>Count * 2: {__cfHelpers.derive({
+            } })}</p>
+        <p>Count * 2: {__cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -80,10 +92,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count * 2)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count * 2)}</p>
-        <p>Price / 2: {__cfHelpers.derive({
+            } })}</p>
+        <p>Price / 2: {__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -99,10 +115,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price / 2)({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price / 2)}</p>
-        <p>Count % 3: {__cfHelpers.derive({
+            } })}</p>
+        <p>Count % 3: {__cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -118,12 +138,17 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count % 3)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count % 3)}</p>
+            } })}</p>
 
         <h3>Complex Expressions</h3>
-        <p>Discounted Price: {__cfHelpers.derive({
+        <p>Discounted Price: {__cfHelpers.lift<{
+            state: {
+                price: number;
+                discount: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -142,11 +167,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price - (state.price * state.discount))({ state: {
                 price: state.key("price"),
                 discount: state.key("discount")
-            } }, ({ state }) => state.price - (state.price * state.discount))}</p>
-        <p>Total: {__cfHelpers.derive({
+            } })}</p>
+        <p>Total: {__cfHelpers.lift<{
+            state: {
+                price: number;
+                quantity: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -165,11 +195,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price * state.quantity)({ state: {
                 price: state.key("price"),
                 quantity: state.key("quantity")
-            } }, ({ state }) => state.price * state.quantity)}</p>
-        <p>With Tax (8%): {__cfHelpers.derive({
+            } })}</p>
+        <p>With Tax (8%): {__cfHelpers.lift<{
+            state: {
+                price: number;
+                quantity: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -188,12 +223,19 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.price * state.quantity) * 1.08)({ state: {
                 price: state.key("price"),
                 quantity: state.key("quantity")
-            } }, ({ state }) => (state.price * state.quantity) * 1.08)}</p>
+            } })}</p>
         <p>
-          Complex: {__cfHelpers.derive({
+          Complex: {__cfHelpers.lift<{
+            state: {
+                count: number;
+                quantity: number;
+                price: number;
+                discount: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -218,17 +260,21 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.count + state.quantity) * state.price -
+            (state.price * state.discount))({ state: {
                 count: state.key("count"),
                 quantity: state.key("quantity"),
                 price: state.key("price"),
                 discount: state.key("discount")
-            } }, ({ state }) => (state.count + state.quantity) * state.price -
-            (state.price * state.discount))}
+            } })}
         </p>
 
         <h3>Multiple Same Ref</h3>
-        <p>Count³: {__cfHelpers.derive({
+        <p>Count³: {__cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -244,10 +290,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count * state.count * state.count)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count * state.count * state.count)}</p>
-        <p>Price Range: ${__cfHelpers.derive({
+            } })}</p>
+        <p>Price Range: ${__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -263,9 +313,13 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price - 10)({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price - 10)} - ${__cfHelpers.derive({
+            } })} - ${__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -281,9 +335,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price + 10)({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price + 10)}</p>
+            } })}</p>
       </div>),
     };
 }, {

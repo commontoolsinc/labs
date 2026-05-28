@@ -759,7 +759,7 @@ function buildShrunkTypeNodeFromType(
   }
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
-  // breaks runtime schema matching for downstream derives/lifts.
+  // breaks runtime schema matching for downstream lift-applied calls.
   // However, when only array-intrinsic properties like `length` are accessed
   // (no item-level access), shrink the item type to `unknown` to avoid
   // fetching full item schemas unnecessarily.
@@ -1728,7 +1728,7 @@ export function validateShrinkCoverage(
         shrunk,
         checker,
         context.sourceFile,
-        context.options.typeRegistry,
+        context.options.state?.typeRegistry,
       ) ?? ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
       validateShrinkCoverage(
@@ -1757,13 +1757,13 @@ export function validateShrinkCoverage(
         baseTypeNode,
         checker,
         context.sourceFile,
-        context.options.typeRegistry,
+        context.options.state?.typeRegistry,
       ) ?? ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
       const shrunkElementNode = getArrayElementTypeNode(
         shrunk,
         checker,
         context.sourceFile,
-        context.options.typeRegistry,
+        context.options.state?.typeRegistry,
       );
 
       validateShrinkCoverage(
@@ -3023,7 +3023,7 @@ export function applyShrinkAndWrap(
         factory,
         checker,
         baseType,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
       )
       : applyCapabilityDefaultsToTypeNode(
         baseTypeNode,
@@ -3061,7 +3061,7 @@ export function applyShrinkAndWrap(
       factory,
       checker,
       baseType,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     )
     : identityPaths.length > 0
     ? applyIdentityOnlyPathsToTypeNode(
@@ -3072,7 +3072,7 @@ export function applyShrinkAndWrap(
       factory,
       checker,
       baseType,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     )
     : baseTypeNode;
   let shrunk: ts.TypeNode | undefined;
@@ -3102,7 +3102,7 @@ export function applyShrinkAndWrap(
         checker,
         sourceFile,
         factory,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
         fullShapePaths,
       );
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
@@ -3110,7 +3110,7 @@ export function applyShrinkAndWrap(
         retainedPaths,
         factory,
         checker,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
         fullShapePaths,
       );
       shrunk = choosePreferredShrinkCandidate(
@@ -3131,7 +3131,7 @@ export function applyShrinkAndWrap(
         retainedPaths,
         factory,
         checker,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
         fullShapePaths,
       );
       const typeDriven = baseType && identityPaths.length === 0
@@ -3141,7 +3141,7 @@ export function applyShrinkAndWrap(
           checker,
           sourceFile,
           factory,
-          context?.options.typeRegistry,
+          context?.options.state?.typeRegistry,
           fullShapePaths,
         )
         : undefined;
@@ -3168,7 +3168,7 @@ export function applyShrinkAndWrap(
       factory,
       checker,
       baseType,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     );
     shrunk = next;
   }
@@ -3201,16 +3201,47 @@ export function applyShrinkAndWrap(
     factory,
     checker,
     sourceFile,
-    context?.options.typeRegistry,
+    context?.options.state?.typeRegistry,
   );
 
   if (!shouldWrap) {
     return next;
   }
-  return wrapTypeNodeWithCapabilityOrStream(
+  const wrapped = wrapTypeNodeWithCapabilityOrStream(
     next,
     wrapCapability,
     factory,
     preserveStreamWrapper,
   );
+  // Register the produced wrapper TypeNode against the pre-shrink semantic
+  // baseType in `narrowedWrapperTypeRegistry`. This is consumed by
+  // SchemaInjection (see schema-injection.ts at the `kind === "builder" &&
+  // builderName === "lift"` branch with `isToSchemaCall(firstArgument)`): when
+  // a synthetic wrapper TypeNode reaches that branch, the checker resolves it
+  // to `any`, so capability narrowing needs the original baseType fed back —
+  // without it the inner `type:` is lost and only the `asCell` wrapper
+  // survives.
+  //
+  // CT-1621: the redundant SELF-RE-ENTRY consumer (re-narrowing our own
+  // already-injected output on `ts.visitEachChild`) was eliminated — the
+  // schemaInjectedRegistry marker now makes that re-entry skip re-processing.
+  // The remaining live consumer is the FIRST-pass recovery for `derive`'s
+  // value-as-input lowering (the only shape that puts a runtime value through
+  // the shrink → synthetic wrapper); `computed` and user `lift` don't produce
+  // it. So this write — and the whole registry — is derive-bound and should be
+  // removed when `derive` is deprecated. See narrowedWrapperTypeRegistry's
+  // entry in core/mod.ts for the full invariant.
+  //
+  // We deliberately do NOT write to the main `typeRegistry` here. The schema
+  // generator's wrapper-recovery path (`formatWrapperTypeFromNode`) reads from
+  // `typeRegistry` to recover inner properties — if the pre-shrink type lived
+  // there, the generator would un-shrink the carefully-narrowed inner
+  // schemas (e.g., turn an equals-only-shrunk `Comparable<unknown>` back into
+  // `Comparable<number>`). The two consumers have opposite needs for the
+  // same wrapper node; keeping them in separate registries is the cleanest
+  // way to satisfy both.
+  if (baseType && !isAnyOrUnknownType(baseType) && context) {
+    context.markNarrowedWrapper(wrapped, baseType);
+  }
+  return wrapped;
 }

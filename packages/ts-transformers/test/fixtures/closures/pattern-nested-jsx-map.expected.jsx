@@ -45,7 +45,9 @@ interface PatternInput {
 //   both the outer and inner levels.
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    const hasItems = __cfHelpers.derive({
+    const hasItems = __cfHelpers.lift<{
+        items: __cfHelpers.ReadonlyCell<unknown[]>;
+    }, boolean>({
         type: "object",
         properties: {
             items: {
@@ -59,7 +61,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["items"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0).for("hasItems", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0)({ items: items }).for("hasItems", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({
@@ -98,7 +100,12 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["", "* "]
-                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                        i: number;
+                        item: {
+                            selectedIndex: number;
+                        };
+                    }, boolean>({
                         type: "object",
                         properties: {
                             i: {
@@ -117,12 +124,12 @@ export default pattern((__cf_pattern_input) => {
                         required: ["i", "item"]
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, ({ i, item }) => i === item.selectedIndex)({
                         i: i,
                         item: {
                             selectedIndex: item.key("selectedIndex")
                         }
-                    }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
+                    }), "* ", "")}
                     {tag.key("name")}
                   </li>);
                 }, {

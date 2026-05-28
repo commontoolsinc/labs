@@ -44,7 +44,12 @@ export default pattern((__cf_pattern_input) => {
                 const entry = __cf_pattern_input.key("element");
                 const prefix = __cf_pattern_input.key("params", "prefix");
                 // Parenthesized: (entry).name
-                const a = __cfHelpers.derive({
+                const a = __cfHelpers.lift<{
+                    entry: {
+                        name: string;
+                    };
+                    prefix: string;
+                }, boolean>({
                     type: "object",
                     properties: {
                         entry: {
@@ -63,14 +68,19 @@ export default pattern((__cf_pattern_input) => {
                     required: ["entry", "prefix"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => (entry).name === prefix)({
                     entry: {
                         name: entry.key("name")
                     },
                     prefix: prefix
-                }, ({ entry, prefix }) => (entry).name === prefix).for("a", true);
+                }).for("a", true);
                 // Non-null asserted: entry!.name
-                const b = __cfHelpers.derive({
+                const b = __cfHelpers.lift<{
+                    entry: {
+                        name: string;
+                    };
+                    prefix: string;
+                }, boolean>({
                     type: "object",
                     properties: {
                         entry: {
@@ -89,14 +99,19 @@ export default pattern((__cf_pattern_input) => {
                     required: ["entry", "prefix"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => entry!.name === prefix)({
                     entry: {
                         name: entry.key("name")
                     },
                     prefix: prefix
-                }, ({ entry, prefix }) => entry!.name === prefix).for("b", true);
+                }).for("b", true);
                 // 'as' asserted: (entry as Entry).name
-                const c = __cfHelpers.derive({
+                const c = __cfHelpers.lift<{
+                    entry: {
+                        name: string;
+                    };
+                    prefix: string;
+                }, boolean>({
                     type: "object",
                     properties: {
                         entry: {
@@ -115,12 +130,12 @@ export default pattern((__cf_pattern_input) => {
                     required: ["entry", "prefix"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
                     entry: {
                         name: entry.key("name")
                     },
                     prefix: prefix
-                }, __cfModuleCallback_1).for("c", true);
+                }).for("c", true);
                 return (<span data-a={a} data-b={b} data-c={c}>{entry.key("name")}</span>);
             }, {
                 type: "object",

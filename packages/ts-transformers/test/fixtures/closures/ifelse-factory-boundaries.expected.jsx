@@ -145,7 +145,11 @@ export default pattern((__cf_pattern_input) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    msg: {
+                        type: string;
+                    };
+                }, boolean>({
                     type: "object",
                     properties: {
                         msg: {
@@ -161,9 +165,9 @@ export default pattern((__cf_pattern_input) => {
                     required: ["msg"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { msg: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ msg }) => msg.type === "system")({ msg: {
                         type: msg.key("type")
-                    } }, ({ msg }) => msg.type === "system"), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
+                    } }), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
                 open
               </button>).for("__patternResult", true);
             }, {

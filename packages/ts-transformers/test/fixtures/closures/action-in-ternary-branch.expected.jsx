@@ -50,7 +50,11 @@ export default pattern((__cf_pattern_input) => {
     })({
         isEditing: isEditing
     }).for({ stream: "startEditing" }, true);
-    const hasDescription = __cfHelpers.derive({
+    const hasDescription = __cfHelpers.lift<{
+        card: {
+            description: string;
+        };
+    }, boolean | "">({
         type: "object",
         properties: {
             card: {
@@ -66,12 +70,12 @@ export default pattern((__cf_pattern_input) => {
         required: ["card"]
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": [false, true, ""]
-    } as const satisfies __cfHelpers.JSONSchema, { card: {
-            description: card.key("description")
-        } }, ({ card }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ card }) => {
         const desc = card.description;
         return desc && desc.length > 0;
-    }).for("hasDescription", true);
+    })({ card: {
+            description: card.key("description")
+        } }).for("hasDescription", true);
     return {
         [UI]: (<cf-card>
         {__cfHelpers.ifElse({

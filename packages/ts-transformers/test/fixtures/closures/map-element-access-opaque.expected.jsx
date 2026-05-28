@@ -27,7 +27,12 @@ export default pattern((state) => {
                 const tag = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<span>
-            {tag}: {__cfHelpers.derive({
+            {tag}: {__cfHelpers.lift<{
+                    state: {
+                        tagCounts: Record<string, number>;
+                    };
+                    tag: string;
+                }, number | undefined>({
                     type: "object",
                     properties: {
                         state: {
@@ -50,12 +55,12 @@ export default pattern((state) => {
                     required: ["state", "tag"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: ["number", "undefined"]
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ state, tag }) => state.tagCounts[tag])({
                     state: {
                         tagCounts: state.key("tagCounts")
                     },
                     tag: tag
-                }, ({ state, tag }) => state.tagCounts[tag])}
+                })}
           </span>);
             }, {
                 type: "object",

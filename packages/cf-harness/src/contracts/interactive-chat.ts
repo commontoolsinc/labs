@@ -27,7 +27,8 @@ export type HarnessChatRequestMethod =
   | "start_turn"
   | "cancel_turn"
   | "close_session"
-  | "status";
+  | "status"
+  | "list_events";
 
 export type HarnessChatSessionLifecycle =
   | "idle"
@@ -197,12 +198,19 @@ export interface HarnessChatStatusParams {
   sessionId?: string;
 }
 
+export interface HarnessChatListEventsParams {
+  sessionId?: string;
+  afterSequence?: number;
+  limit?: number;
+}
+
 export type HarnessChatRequestParamsByMethod = {
   start_session: HarnessChatStartSessionParams;
   start_turn: HarnessChatStartTurnParams;
   cancel_turn: HarnessChatCancelTurnParams;
   close_session: HarnessChatCloseSessionParams;
   status: HarnessChatStatusParams;
+  list_events: HarnessChatListEventsParams;
 };
 
 export type HarnessChatRequestEnvelope<
@@ -404,6 +412,11 @@ export interface HarnessChatEventEnvelope<
   sequence: number;
   emittedAt: string;
   event: Event;
+}
+
+export interface HarnessChatListEventsResult {
+  events: readonly HarnessChatEventEnvelope[];
+  latestSequence: number;
 }
 
 export interface CreateHarnessChatSessionStatusOptions {

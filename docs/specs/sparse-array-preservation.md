@@ -70,8 +70,9 @@ indices. This makes sparse-safety structural: you can't forget to check `i in
 arr` because there's no check to write. Use this for copies, transforms, and any
 iteration where you only care about present elements.
 
-For a plain copy, `attestation.ts` has a `sparseArrayCopy` helper that uses
-this pattern.
+For a plain copy, `cloneIfNecessary({ frozen: false, deep: false })`
+preserves sparseness internally -- see "v2-transaction write path" below
+for the production usage shape.
 
 ### `for` + `i in arr` (when you need to detect absences)
 
@@ -115,13 +116,35 @@ uses `for` + `i in` because it needs early return.  `fabricFromNativeValueLegacy
 `toDeepFabricValueInternal` both use `forEach` to preserve holes during
 conversion.
 
-### Attestation (`packages/runner/src/storage/transaction/attestation.ts`)
+### v2-transaction write path (`packages/runner/src/storage/v2-transaction.ts`)
 
-The `setAtPath` function does copy-on-write: when it needs to modify an element
-in an array, it copies the array first. The `sparseArrayCopy` helper (which uses
-`forEach`) is used at all three copy sites (extension, element set, nested
-modification). The `delete` operation at `setAtPath` creates true holes via
-`delete newArray[index]`.
+The hot write path (since PR #3704) goes through `applyMutablePathWrite`,
+which calls `cloneForMutation` (in `value-clone.ts`) to shallow-thaw the
+spine and then mutates the leaf parent in place. `cloneForMutation`'s
+shallow-thaw step uses `cloneIfNecessary({ frozen: false, deep: false })`
+on each spine container, which for arrays preserves sparseness: it
+pre-allocates `new Array(arr.length)` and copies elements via `i in arr`,
+so holes survive.
+
+The leaf write itself is one of:
+
+- `parent[slot] = value` for array indices -- the rest of the array
+  (including holes elsewhere) is untouched, so sparseness is preserved.
+- `delete parent[slot]` for array index deletes -- creates a true hole
+  (`i in arr` returns `false` afterwards).
+- `parent.length = effective` for `.length` writes (see
+  `applyArrayLengthWrite`) -- JS `length=` truncates the tail, leaving
+  holes within the new bound intact.
+
+### Chronicle (`packages/runner/src/storage/transaction/chronicle.ts`)
+
+The working-copy management used by Chronicle (commit-time conflict
+detection) routes its writes through the same
+`applyMutablePathWrite()` helper as the v2-transaction hot write path
+(see above), via a thin `applyWriteToAttestation()` wrapper that maps
+between Chronicle's `IAttestation`-shaped inputs and
+`applyMutablePathWrite`'s `FabricValue`-rooted form. Sparse-array
+handling is therefore identical between the two layers.
 
 ### Cell write path (`packages/runner/src/cell.ts`)
 
@@ -202,8 +225,9 @@ reactive pipeline:
    directive `// deno-lint-ignore no-sparse-arrays`) and verify holes survive
    with `i in result`.
 
-If you're writing a plain array copy, use or follow `sparseArrayCopy` from
-`attestation.ts`.
+If you're writing a plain array copy, `cloneIfNecessary` with
+`{ frozen: false, deep: false }` preserves sparseness internally and is
+the preferred entry point in runner code.
 
 ## How we ensure this stays correct
 
@@ -211,8 +235,10 @@ Test coverage verifies sparse preservation at each layer:
 
 - **`packages/data-model/test/fabric-value.test.ts`** — `isFabricValue` accepts
   sparse arrays; `fabricFromNativeValue` and `toDeepFabricValue` preserve holes.
-- **`packages/runner/test/attestation.test.ts`** — `setAtPath` preserves holes
-  through array copies (extension, element set, nested modification).
+- **`packages/runner/test/cell-core.test.ts`** — sparse-array writes through
+  the full Cell write path (which lands in `applyMutablePathWrite`) preserve
+  holes; the helper's `cloneForMutation` + leaf-mutation steps round-trip
+  sparseness.
 - **`packages/runner/test/cell.test.ts`** — Writing a sparse array to a cell and
   reading it back preserves holes; `push` onto a sparse array preserves existing
   holes.
