@@ -588,6 +588,9 @@ export const prepareTrustedAdminToggle = (
     !equals(role.subject, targetProfile)
   );
   if (withoutParticipant.length !== adminRoles.length) {
+    if (withoutParticipant.length === 0) {
+      return null;
+    }
     return {
       admins: withoutParticipant,
       everyoneIsAdmin: false,

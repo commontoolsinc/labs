@@ -54,12 +54,15 @@ export const adminRegistryEveryoneIsAdmin = <Role>(
     get(): AdminRegistryValue<Role> | undefined;
   },
 ): boolean => {
+  const stored = registry.get() as AdminRegistryStoredValue<Role> | undefined;
+  if (stored?.everyoneIsAdmin === false) {
+    return false;
+  }
   const roles = adminRegistryEntries<Role>(registry);
   if (roles.length === 0) {
     return true;
   }
-  return (registry.get() as AdminRegistryStoredValue<Role> | undefined)
-    ?.everyoneIsAdmin === true;
+  return stored?.everyoneIsAdmin === true;
 };
 
 export const activeAdminRoleForSubject = <

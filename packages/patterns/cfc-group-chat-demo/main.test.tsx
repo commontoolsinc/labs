@@ -103,6 +103,9 @@ export default pattern(() => {
   const action_toggle_bob_admin = action(() => {
     chat.toggleParticipantAdmin.send({ name: "Bob" });
   });
+  const action_try_remove_last_admin = action(() => {
+    chat.toggleCurrentUserAdmin.send({});
+  });
   const action_bob_add_room = action(() => {
     bobChat.addTrustedRoom.send();
   });
@@ -223,6 +226,13 @@ export default pattern(() => {
         "Admin",
       );
   });
+  const assert_last_admin_removal_blocked = computed(() =>
+    chat.currentUserIsAdmin === true &&
+    bobChat.currentUserIsAdmin !== true &&
+    chatAdminRolesValue(adminRegistry).length === 1 &&
+    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+      false
+  );
   const assert_bob_cannot_add_room_after_lockdown = computed(() =>
     roomsValue(rooms).length === 1
   );
@@ -319,6 +329,8 @@ export default pattern(() => {
       { action: action_disable_everyone_admin },
       { assertion: assert_everyone_disabled_seeds_alice },
       { assertion: assert_admin_view_explicit_alice },
+      { action: action_try_remove_last_admin },
+      { assertion: assert_last_admin_removal_blocked },
       { action: action_set_room_bob },
       { action: action_bob_try_add_room },
       { assertion: assert_bob_cannot_add_room_after_lockdown },

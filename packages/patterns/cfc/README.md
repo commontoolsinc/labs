@@ -89,7 +89,8 @@ const canEditAdmins = adminManagerCredentialIsActive(managerCredential.get());
 Keep subject lookup and local role toggling in the pattern when the domain model
 is local, such as people, profiles, rooms, or projects.
 `adminRegistryEveryoneIsAdmin` treats an empty admin list as bootstrap mode:
-everyone is an admin until the pattern writes at least one explicit admin role.
+everyone is an admin until the pattern writes at least one explicit admin role
+or explicitly stores `everyoneIsAdmin: false`.
 
 ## Use Prompt-Injection Helpers
 
