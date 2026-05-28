@@ -10,7 +10,7 @@
  *   - explainTriggerTrace(options?)
  */
 
-import { CellHandle } from "@commonfabric/runtime-client";
+import { $conn, CellHandle, RequestType } from "@commonfabric/runtime-client";
 import type {
   CellRef,
   RuntimeClient,
@@ -20,6 +20,7 @@ import type {
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
+import type { MetaField } from "@commonfabric/api";
 
 interface DebugCellOptions {
   /** Space DID — defaults to current shell space */
@@ -30,6 +31,8 @@ interface DebugCellOptions {
   id?: string;
   /** Path into cell — defaults to [] */
   path?: string[];
+  /** Metadata link to follow before reading the cell */
+  meta?: MetaField;
 }
 
 interface ExplainTriggerTraceOptions {
@@ -370,10 +373,24 @@ export function createDebugUtils(
     const path = options?.path ?? [];
     const ref = buildCellRef(space, id, path);
 
-    if (log) console.log("[debug] readCell ref:", ref);
-    const cell = new CellHandle(rt, ref);
-    const value = await cell.sync();
-    if (log) console.log("[debug] readCell value:", value);
+    const label = options?.meta ? `read ${options.meta} cell` : "readCell";
+    if (log) console.log(`[debug] ${label} ref:`, ref);
+    let value: unknown;
+    if (options?.meta !== undefined) {
+      const response = await rt[$conn]().request<RequestType.CellGet>({
+        type: RequestType.CellGet,
+        cell: ref,
+        meta: options.meta,
+      });
+      value = CellHandle.deserialize(
+        new CellHandle(rt, ref),
+        response.value,
+      );
+    } else {
+      const cell = new CellHandle(rt, ref);
+      value = await cell.sync();
+    }
+    if (log) console.log(`[debug] ${label} value:`, value);
     return value;
   }
 
@@ -384,8 +401,7 @@ export function createDebugUtils(
   function readArgumentCell(
     options?: DebugCellOptions,
   ): Promise<unknown> {
-    const path = ["argument", ...(options?.path ?? [])];
-    return readCell({ ...options, path });
+    return readCellValue({ ...options, meta: "argument" });
   }
 
   function subscribeToCell(

@@ -5,11 +5,13 @@ import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   CompoundCycleTracker,
+  createTraversalContext,
   ManagedStorageTransaction,
   MapSet,
   MapSetStringToPathSelectors,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type {
   MIME,
@@ -135,8 +137,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
@@ -149,10 +155,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}/application/json`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/space/of:${entityId2["/"]}/application/json`,
+      `did:null:null/space/of:${entityId2["/"]}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
@@ -227,8 +233,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
@@ -241,10 +251,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}/application/json`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/space/of:${entityId2["/"]}/application/json`,
+      `did:null:null/space/of:${entityId2["/"]}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
@@ -317,8 +327,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
@@ -331,7 +345,7 @@ describe("Query", () => {
       value: assert1.is.value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}/application/json`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     expect(selectorSet1?.size).toBe(2);
     expect(selectorSet1).toContainEqual({ path: ["value"], schema });
@@ -438,8 +452,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
 
     const result = traverser.traverse({
@@ -457,14 +475,14 @@ describe("Query", () => {
     // Our matching selectors for both entries should each have one entry for
     // the top level schema, and one entry for the schema at `self`.
     const selectors1 = schemaTracker.get(
-      `did:null:null/space/${testCell1.sourceURI}/application/json`,
+      `did:null:null/space/${testCell1.sourceURI}`,
     );
     expect(selectors1).not.toBeUndefined();
     expect(selectors1?.size).toBe(2);
     expect(selectors1).toContainEqual({ path: ["value"], schema });
 
     const selectors2 = schemaTracker.get(
-      `did:null:null/space/${testCell2.sourceURI}/application/json`,
+      `did:null:null/space/${testCell2.sourceURI}`,
     );
     expect(selectors2).not.toBeUndefined();
     expect(selectors2?.size).toBe(2);
@@ -539,8 +557,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       selector,
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
@@ -553,10 +575,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/space/of:${entityId1["/"]}/application/json`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/space/of:${entityId2["/"]}/application/json`,
+      `did:null:null/space/of:${entityId2["/"]}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);

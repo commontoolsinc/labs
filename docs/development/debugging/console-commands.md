@@ -537,7 +537,7 @@ Each recorded entry includes:
 
 Interpret repeated root writes in this order:
 
-- `setup:setSourceCell`: initial result-cell to process-cell linkage
+- `setup:setMetaRaw`: initial result metadata linkage
 - `setup:setRawUntyped`: initial process-cell or result-cell materialization
 - `raw:setRawUntyped`: raw builtin/helper rewriting a result cell directly
 

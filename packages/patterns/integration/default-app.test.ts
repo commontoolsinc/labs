@@ -1318,8 +1318,11 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
 
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
-      if (stack.includes("_CellImpl.setSourceCell")) {
-        return "setup:setSourceCell";
+      if (
+        stack.includes("_CellImpl.setMetaRaw") &&
+        stack.includes("Runner.setupInternal")
+      ) {
+        return "setup:setMetaRaw";
       }
       if (
         stack.includes("_CellImpl.setRawUntyped") &&
@@ -1373,7 +1376,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         line.includes("applyChangeSet") ||
         line.includes("_CellImpl.push") ||
         line.includes("_CellImpl.send") ||
-        line.includes("_CellImpl.setSourceCell") ||
+        line.includes("_CellImpl.setMetaRaw") ||
         line.includes("_CellImpl.setRawUntyped") ||
         line.includes("_CellImpl.set")
       );
@@ -1523,42 +1526,37 @@ async function collectNotebookSourceState(page: Page): Promise<{
       readCell?: (options: {
         id: string;
         path?: string[];
+        meta?: "argument" | "internal";
       }) => Promise<unknown>;
-      __eventInvocationTrace?: unknown[];
     } | undefined;
     await api?.rt?.idle?.();
 
-    const markers = (api?.__eventInvocationTrace ?? []) as Array<{
-      type?: string;
-      handlerId?: string;
-      handlerInfo?: { moduleName?: string };
-      writes?: string[];
-    }>;
-    const notebookCommits = markers.filter((marker) =>
-      marker.type === "scheduler.event.commit" &&
-      (
-        marker.handlerId?.includes("/api/patterns/notes/notebook.tsx") ||
-        marker.handlerInfo?.moduleName?.includes("notebook")
-      )
-    );
-    const notebookNotesWrite = notebookCommits.at(-1)?.writes?.find((write) =>
-      write.includes("/value/argument/notes")
-    );
-    const notebookEntityId = notebookNotesWrite?.match(
-      /\/(of:[^/]+)\/value\/argument\/notes/,
-    )?.[1];
+    const appState = globalThis.app?.serialize?.();
+    const view = appState?.view;
+    const notebookEntityId = view && typeof view === "object" &&
+        "pieceId" in view && typeof view.pieceId === "string"
+      ? view.pieceId
+      : undefined;
     if (!notebookEntityId || !api?.readCell) {
       return { notebookEntityId };
     }
 
-    const notebookArgument = await api.readCell({
-      id: notebookEntityId,
-      path: ["argument"],
-    });
-    const notebookInternal = await api.readCell({
-      id: notebookEntityId,
-      path: ["internal"],
-    });
+    let notebookArgument: unknown;
+    let notebookInternal: unknown;
+    const originalLog = console.log;
+    try {
+      console.log = () => {};
+      notebookArgument = await api.readCell({
+        id: notebookEntityId,
+        meta: "argument",
+      });
+      notebookInternal = await api.readCell({
+        id: notebookEntityId,
+        meta: "internal",
+      });
+    } finally {
+      console.log = originalLog;
+    }
 
     return {
       notebookEntityId,

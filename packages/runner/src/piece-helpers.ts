@@ -1,11 +1,9 @@
 import { type Cell, isCell } from "./cell.ts";
 import type { MemorySpace } from "./storage/interface.ts";
-import type { Pattern } from "./builder/types.ts";
+import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import type { PatternMeta } from "./pattern-manager.ts";
-import { TYPE } from "./shared.ts";
-import { processSchema } from "./schemas.ts";
 import type { Mutable } from "@commonfabric/utils/types";
 
 export type CellPath = (string | number)[];
@@ -73,20 +71,15 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
   return typeof idValue === "string" ? idValue : undefined;
 }
 
-export function getPatternIdFromResultCell(
-  cell: Cell<unknown>,
-): string | undefined {
-  return cell.getSourceCell(processSchema)?.get()?.[TYPE];
-}
-
 export function getResultCellWithSourceSchema<T = unknown>(
   cell: Cell<T>,
 ): Cell<T> {
-  const processCell = cell.getSourceCell();
-  if (processCell) {
-    const resultRefCell = processCell.key("resultRef").resolveAsCell();
-    if (resultRefCell?.schema) {
-      return cell.asSchema<T>(resultRefCell.schema);
+  const link = cell.getAsNormalizedFullLink();
+  if (link.schema === undefined) {
+    const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
+    if (resultSchema !== undefined) {
+      const schema = cell.runtime.cfc.schemaAtPath(resultSchema, link.path);
+      return cell.asSchema<T>(schema);
     }
   }
   return cell;
@@ -101,6 +94,12 @@ export async function compileAndSavePattern(
     parents?: string[];
   },
 ): Promise<Pattern> {
+  if (typeof patternSrc === "string") {
+    patternSrc = {
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: patternSrc }],
+    };
+  }
   const pattern = await runtime.patternManager.compilePattern(patternSrc);
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");

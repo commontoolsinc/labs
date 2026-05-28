@@ -2472,11 +2472,7 @@ export class CellBridge {
         (typeof candidate === "object" && candidate !== null &&
           callableValues.has(candidate)) ||
         isVNode(candidate),
-      classifyEntry: (key: string, candidate: unknown) =>
-        typeof candidate === "object" && candidate !== null &&
-          callableValues.has(candidate)
-          ? callableKinds.get(key) ?? null
-          : null,
+      classifyEntry: (key: string) => callableKinds.get(key) ?? null,
     };
   }
 
@@ -2687,6 +2683,8 @@ export class CellBridge {
     annotator?: CfcProjectionAnnotator,
   ): (parentIno: bigint, name: string, value: unknown) => void {
     return (parentIno, name, value) => {
+      const classifyFsEntry = (key: string, candidate: unknown) =>
+        skipEntry(candidate) ? classifyEntry(key, candidate) : null;
       buildJsonTree(
         this.tree,
         parentIno,
@@ -2696,7 +2694,7 @@ export class CellBridge {
         resolveLink,
         0,
         skipEntry,
-        classifyEntry,
+        classifyFsEntry,
         annotator?.jsonContext([name]),
       );
     };
@@ -3183,8 +3181,6 @@ export class CellBridge {
     let files: { name: string; contents: string }[];
     if (meta?.program?.files?.length) {
       files = meta.program.files;
-    } else if (meta?.src) {
-      files = [{ name: "main.tsx", contents: meta.src }];
     } else {
       // System piece or no source — skip .src/
       return;

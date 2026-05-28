@@ -95,10 +95,9 @@ Control plane metadata for piece execution:
 
 ```
 {
-  $TYPE: string,        // pattern ID
   resultRef: SigilLink, // link to result cell
   argument?: any,       // input data
-  spell?: SigilLink,    // link to spell
+  pattern?: SigilLink,  // link to pattern
   internal?: any        // working state
 }
 ```
