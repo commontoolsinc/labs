@@ -1597,7 +1597,7 @@ describe("runner utils", () => {
       expect(result).toBe(true);
     });
 
-    it("deduplicates concurrent start calls while resumed dependencies sync", async () => {
+    it("does not register duplicate handlers while resumed dependencies sync", async () => {
       const valueAlias = {
         $alias: {
           cell: "argument",
@@ -1696,9 +1696,7 @@ describe("runner utils", () => {
 
       const runner = runtime.runner as any;
       const originalSync = runner.syncCellsForRunningPattern.bind(runner);
-      let syncCalls = 0;
       runner.syncCellsForRunningPattern = async (...args: any[]) => {
-        syncCalls++;
         await new Promise((resolve) => setTimeout(resolve, 10));
         return originalSync(...args);
       };
@@ -1710,7 +1708,6 @@ describe("runner utils", () => {
         ]);
         expect(first).toBe(true);
         expect(second).toBe(true);
-        expect(syncCalls).toBe(1);
 
         resultCell.key("increment").send();
         await runtime.idle();

@@ -1191,6 +1191,11 @@ export class Runner {
     // observe the last persisted result but miss subsequent input updates.
     return this.syncCellsForRunningPattern(rootCell, resolvedPattern)
       .then(() => {
+        // we may already be in the midst of starting this, so don't start again
+        if (this.cancels.has(this.getDocKey(rootCell))) {
+          return true;
+        }
+
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
