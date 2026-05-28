@@ -295,7 +295,8 @@ const personIsParkingAdmin = (
 const currentActorName = (
   selectedPersonName: Writable<string>,
   people: PeopleCell,
-): string => selectedPersonName.get() || people.get()[0]?.name || "";
+): string =>
+  selectedPersonName.get() || (people.get() ?? [])[0]?.name || "";
 
 const currentParkingAdminRole = (
   registry: ParkingAdminRegistryCell,
@@ -1088,7 +1089,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       ({ spotNumber, date }) => {
         gridOverrideSpot.set(spotNumber);
         gridOverrideDate.set(date);
-        overridePersonName.set(people.get()[0]?.name ?? "");
+        overridePersonName.set((people.get() ?? [])[0]?.name ?? "");
       },
     );
 
