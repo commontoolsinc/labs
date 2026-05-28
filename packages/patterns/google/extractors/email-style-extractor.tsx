@@ -18,10 +18,8 @@
  */
 import {
   computed,
-  derive,
   generateObject,
   handler,
-  ifElse,
   JSONSchema,
   NAME,
   pattern,
@@ -257,20 +255,15 @@ Extract the writing style patterns from these emails.`;
       return null;
     });
 
-    const isAnalyzing = computed(() => !!styleResult.pending);
+    const isAnalyzing = !!styleResult.pending;
 
-    // Unwrap Writables once so derive calls in the UI get plain values.
-    // The explicit param type is needed because derive infers Cell<T> for Writable<T>.
-    const style = derive(
-      savedStyle,
-      (s: EmailStyle | null) => s,
-    );
-    const hasStyle = derive(style, (s) => !!s);
-    const analyzedCount = derive(emailsAnalyzedCount, (c: number) => c);
-    const analyzedAt = derive(lastAnalyzedAt, (ts: string) => ts);
+    // Whether a style has been extracted yet
+    const hasStyle = !!savedStyle.get();
 
-    // Pre-built prompt string any consumer can drop into an LLM call
-    const stylePrompt = derive(style, (s) => {
+    // Pre-built prompt string any consumer can drop into an LLM call.
+    // Statement body (intermediate locals + early return) stays a computed.
+    const stylePrompt = computed(() => {
+      const s = savedStyle.get();
       if (!s?.summary) return "";
       const greetings = (s.greetingPatterns || []).join(", ");
       const closings = (s.closingPatterns || []).join(", ");
@@ -293,7 +286,7 @@ Write as if the user wrote it themselves, matching their natural voice.`;
 
     return {
       [NAME]: "Email Style Extractor",
-      style,
+      style: savedStyle,
       stylePrompt,
       emailsAnalyzed: emailsAnalyzedCount,
       lastAnalyzedAt,
@@ -307,115 +300,122 @@ Write as if the user wrote it themselves, matching their natural voice.`;
           <cf-vscroll flex showScrollbar>
             <cf-vstack padding="6" gap="4">
               {authUI}
-              {ifElse(
-                isReady,
-                <div
-                  style={{
-                    padding: "8px",
-                    backgroundColor: "#d1fae5",
-                    borderRadius: "6px",
-                  }}
-                >
-                  Auth ready. Emails: {derive(extractor.emailCount, (c) =>
-                    c > 0 ? `${c} fetched` : "Fetching...")}
-                </div>,
-                <div
-                  style={{
-                    padding: "8px",
-                    backgroundColor: "#fecaca",
-                    borderRadius: "6px",
-                  }}
-                >
-                  Waiting for Google auth...
-                </div>,
-              )}
-              {ifElse(
-                isAnalyzing,
-                <div
-                  style={{
-                    padding: "8px",
-                    backgroundColor: "#e0e7ff",
-                    borderRadius: "6px",
-                  }}
-                >
-                  Analyzing style...
-                </div>,
-                <div />,
-              )}
-              {ifElse(
-                hasStyle,
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#fff",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: "8px",
-                  }}
-                >
-                  <div style={{ fontWeight: "600", marginBottom: "8px" }}>
-                    Your Writing Style
-                  </div>
-                  <div style={{ marginBottom: "6px" }}>
-                    {derive(style, (s) =>
-                      s?.summary || "")}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Tone: {derive(style, (s) =>
-                      s?.overallTone || "")} | Formality: {derive(style, (s) =>
-                        s?.formalityLevel || "")}
-                  </div>
+              {isReady
+                ? (
                   <div
                     style={{
-                      fontSize: "11px",
-                      color: "#9ca3af",
-                      marginTop: "8px",
+                      padding: "8px",
+                      backgroundColor: "#d1fae5",
+                      borderRadius: "6px",
                     }}
                   >
-                    {derive(analyzedCount, (c) => `${c} emails analyzed`)}{" "}
-                    {derive(analyzedAt, (ts) =>
-                      ts ? `| Last: ${new Date(ts).toLocaleString()}` : "")}
+                    Auth ready. Emails: {extractor.emailCount > 0
+                      ? `${extractor.emailCount} fetched`
+                      : "Fetching..."}
                   </div>
-                </div>,
-                <div style={{ padding: "8px", color: "#6b7280" }}>
-                  No style extracted yet
-                </div>,
-              )}
-              {ifElse(
-                isReady,
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    type="button"
-                    onClick={extractor.refresh}
+                )
+                : (
+                  <div
                     style={{
-                      padding: "6px 12px",
-                      backgroundColor: "#10b981",
-                      color: "white",
-                      border: "none",
+                      padding: "8px",
+                      backgroundColor: "#fecaca",
                       borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
                     }}
                   >
-                    Refresh Emails
-                  </button>
-                  <button
-                    type="button"
-                    onClick={triggerReanalyze({ reanalyzeFlag })}
+                    Waiting for Google auth...
+                  </div>
+                )}
+              {isAnalyzing
+                ? (
+                  <div
                     style={{
-                      padding: "6px 12px",
-                      backgroundColor: "#6366f1",
-                      color: "white",
-                      border: "none",
+                      padding: "8px",
+                      backgroundColor: "#e0e7ff",
                       borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
                     }}
                   >
-                    Re-analyze
-                  </button>
-                </div>,
-                <div />,
-              )}
+                    Analyzing style...
+                  </div>
+                )
+                : <div />}
+              {hasStyle
+                ? (
+                  <div
+                    style={{
+                      padding: "12px",
+                      backgroundColor: "#fff",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    <div style={{ fontWeight: "600", marginBottom: "8px" }}>
+                      Your Writing Style
+                    </div>
+                    <div style={{ marginBottom: "6px" }}>
+                      {savedStyle.get()?.summary || ""}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Tone: {savedStyle.get()?.overallTone || ""} | Formality:
+                      {" "}
+                      {savedStyle.get()?.formalityLevel || ""}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "#9ca3af",
+                        marginTop: "8px",
+                      }}
+                    >
+                      {`${emailsAnalyzedCount.get()} emails analyzed`}{" "}
+                      {lastAnalyzedAt.get()
+                        ? `| Last: ${
+                          new Date(lastAnalyzedAt.get()).toLocaleString()
+                        }`
+                        : ""}
+                    </div>
+                  </div>
+                )
+                : (
+                  <div style={{ padding: "8px", color: "#6b7280" }}>
+                    No style extracted yet
+                  </div>
+                )}
+              {isReady
+                ? (
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={extractor.refresh}
+                      style={{
+                        padding: "6px 12px",
+                        backgroundColor: "#10b981",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      Refresh Emails
+                    </button>
+                    <button
+                      type="button"
+                      onClick={triggerReanalyze({ reanalyzeFlag })}
+                      style={{
+                        padding: "6px 12px",
+                        backgroundColor: "#6366f1",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                      }}
+                    >
+                      Re-analyze
+                    </button>
+                  </div>
+                )
+                : <div />}
             </cf-vstack>
           </cf-vscroll>
         </cf-screen>

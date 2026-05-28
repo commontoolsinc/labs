@@ -1,6 +1,17 @@
 /**
  * CT-1597 Reduction Log
  *
+ * MIGRATION NOTE (derive removal): the authored `derive()` calls below were
+ * later replaced with plain reactive expressions (bare projections / ternaries),
+ * which auto-wrap to the same lowered reactive computations. The repro is
+ * preserved: the nullable reactive value (`string | null` / `OptionTally | null`)
+ * captured by the JSX `computed()` block still emits the identical
+ * `{ "anyOf": [..., { "type": "null" }] }` input schema (verified via
+ * --show-transformed — same null-branch schema count as the original `derive()`
+ * form). The STEP log below records the original bisection, which was performed
+ * with `derive()`; the diagnosis (a null-typed reactive value captured by a
+ * computed() generating a null-branch schema) is unchanged by the migration.
+ *
  * STEP 0 - BASELINE: WIP from 93d545ad6 — BLANK (confirmed in browser)
  *
  * STEP 1: Replace <cf-screen> + slot="header" + <cf-vscroll> with plain <div>
@@ -70,7 +81,6 @@
 import {
   computed,
   Default,
-  derive,
   handler,
   NAME,
   nonPrivateRandom,
@@ -410,32 +420,18 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const boundClearMyVote = clearMyVote({ votes, myName });
     const boundResetVotes = resetVotes({ votes, myName, adminName });
 
-    const userCount = derive(users, (u) => u.length);
-    const optionCount = derive(options, (o) => o.length);
-    const voteCount = derive(votes, (v) => v.length);
-    const isJoined = derive(myName, (n) => trimmedName(n) !== "");
-    const isAdmin = derive(
-      { myName, adminName },
-      ({ myName, adminName }) =>
-        trimmedName(myName) !== "" &&
-        trimmedName(myName) === trimmedName(adminName),
-    );
-    const ranked = derive(
-      { options, votes, users },
-      ({ options, votes, users }) => tallyOptions(options, votes, users),
-    );
+    const userCount = users.length;
+    const optionCount = options.length;
+    const voteCount = votes.length;
+    const isJoined = trimmedName(myName) !== "";
+    const isAdmin = trimmedName(myName) !== "" &&
+      trimmedName(myName) === trimmedName(adminName);
+    const ranked = tallyOptions(options, votes, users);
 
-    const _topChoice = derive(
-      { ranked, voteCount },
-      ({ ranked, voteCount }) =>
-        voteCount > 0 && ranked.length > 0 ? ranked[0] : null,
-    );
+    const _topChoice = voteCount > 0 && ranked.length > 0 ? ranked[0] : null;
 
-    // STEP 8: minimal nullable derive — simple string|null from options
-    const minimalNullable = derive(
-      options,
-      (o) => o.length > 0 ? o[0].title : null,
-    );
+    // STEP 8: minimal nullable reactive value — simple string|null from options
+    const minimalNullable = options.length > 0 ? options[0].title : null;
 
     return {
       [NAME]: "Cozy lunch poll",
@@ -530,7 +526,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 </div>
 
                 {/* Top choice — only when there are votes */}
-                {/* STEP 8: does reading a simple string|null derive inside computed() blank? */}
+                {/* STEP 8: does reading a simple string|null reactive value inside computed() blank? */}
                 {computed(() => {
                   const v = minimalNullable;
                   return <div>minimal nullable: {v ?? "null"}</div>;
@@ -596,20 +592,13 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 {options.map((option) => {
                   const oid = option.id;
                   const optionTitle = option.title;
-                  const myVote = derive(
-                    { votes, myName, optionId: oid },
-                    ({ votes, myName, optionId }) =>
-                      myVoteFor(votes, trimmedName(myName), optionId),
-                  );
-                  const rank = derive(
-                    { ranked, optionId: oid },
-                    ({ ranked, optionId }) => {
-                      const idx = ranked.findIndex(
-                        (t) => t.option.id === optionId,
-                      );
-                      return idx >= 0 ? idx + 1 : 0;
-                    },
-                  );
+                  const myVote = myVoteFor(votes, trimmedName(myName), oid);
+                  const rank = computed(() => {
+                    const idx = ranked.findIndex(
+                      (t) => t.option.id === oid,
+                    );
+                    return idx >= 0 ? idx + 1 : 0;
+                  });
                   return (
                     <div
                       style={{
@@ -747,12 +736,12 @@ export default pattern<CozyPollInput, CozyPollOutput>(
           </div>
         </cf-theme>
       ),
-      question: derive(question, (q) => q),
-      options: derive(options, (o) => o),
-      votes: derive(votes, (v) => v),
-      users: derive(users, (u) => u),
-      adminName: derive(adminName, (a) => a),
-      myName: derive(myName, (n) => n),
+      question,
+      options,
+      votes,
+      users,
+      adminName,
+      myName,
       userCount,
       optionCount,
       voteCount,

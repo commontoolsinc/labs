@@ -20,7 +20,6 @@
 import {
   computed,
   Default,
-  derive,
   generateObject,
   handler,
   NAME,

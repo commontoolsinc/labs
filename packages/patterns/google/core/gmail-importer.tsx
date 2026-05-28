@@ -1,9 +1,7 @@
 import {
   computed,
   Default,
-  derive,
   handler,
-  ifElse,
   NAME,
   pattern,
   patternTool,
@@ -36,11 +34,12 @@ type SyncableWritable<T> = Writable<T> & {
 /**
  * Auth data structure for Google OAuth tokens.
  *
- * ⚠️ CRITICAL: When consuming this auth, DO NOT use derive()!
- * derive() creates read-only projections - token refresh will silently fail.
- * Use property access (piece.auth) or ifElse() instead.
- *
- * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
+ * ⚠️ CRITICAL: When consuming this auth, keep it a live, writable cell
+ * reference - do NOT copy it into a read-only projection. Token refresh
+ * mutates the auth cell in place, so any consumer that reads a detached
+ * snapshot will see refresh silently fail.
+ * Use direct property access (piece.auth) or select it with a ternary
+ * (which lowers to ifElse and preserves the underlying cell reference).
  */
 export type Auth = {
   token: Secret<string> | Default<"">;
@@ -1040,7 +1039,7 @@ const EmailCard = pattern<
   { email: Email },
   { [NAME]: string; summary: string; [UI]: VNode }
 >(({ email }) => ({
-  [NAME]: computed(() => email.subject),
+  [NAME]: email.subject,
   summary: str`${email.subject} from ${email.from}: ${email.snippet}`,
   [UI]: (
     <div
@@ -1115,20 +1114,15 @@ export default pattern<
   });
 
   // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
-  const hasOverrideAuth = computed(() => !!overrideAuth?.token);
-  const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
+  const hasOverrideAuth = !!overrideAuth?.token;
+  const overrideAuthEmail = overrideAuth?.user?.email || "";
 
-  const auth = ifElse(
-    hasOverrideAuth,
-    overrideAuth,
-    wishedAuth,
-  );
-  const isReady = ifElse(hasOverrideAuth, hasOverrideAuth, wishedIsReady);
-  const currentEmail = ifElse(
-    hasOverrideAuth,
-    overrideAuthEmail,
-    wishedCurrentEmail,
-  );
+  // IMPORTANT: select auth via a bare ternary (lowers to ifElse), NOT a plain
+  // projection that would copy the value. This keeps `auth` a live, writable
+  // cell reference so cross-piece token refresh can mutate it in place.
+  const auth = hasOverrideAuth ? overrideAuth : wishedAuth;
+  const isReady = hasOverrideAuth ? hasOverrideAuth : wishedIsReady;
+  const currentEmail = hasOverrideAuth ? overrideAuthEmail : wishedCurrentEmail;
 
   const summary = computed(() => {
     const emailList = emails.get();
@@ -1202,7 +1196,7 @@ export default pattern<
             {authUI}
 
             <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-              Imported email count: {computed(() => emails.get().length)}
+              Imported email count: {emails.get().length}
             </h3>
 
             <div style={{ fontSize: "14px", color: "#666" }}>
@@ -1297,30 +1291,30 @@ export default pattern<
                   Debug Mode (verbose console logging)
                 </label>
               </div>
-              {ifElse(
-                isReady,
-                <cf-button
-                  type="button"
-                  onClick={googleUpdaterStream}
-                  disabled={fetching}
-                >
-                  {ifElse(
-                    fetching,
-                    <span
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <cf-loader size="sm" show-elapsed></cf-loader>
-                      Fetching...
-                    </span>,
-                    "Fetch Emails",
-                  )}
-                </cf-button>,
-                null,
-              )}
+              {isReady
+                ? (
+                  <cf-button
+                    type="button"
+                    onClick={googleUpdaterStream}
+                    disabled={fetching}
+                  >
+                    {fetching.get()
+                      ? (
+                        <span
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <cf-loader size="sm" show-elapsed></cf-loader>
+                          Fetching...
+                        </span>
+                      )
+                      : "Fetch Emails"}
+                  </cf-button>
+                )
+                : null}
             </cf-vstack>
 
             <div>
@@ -1350,7 +1344,7 @@ export default pattern<
                         style={{ border: "1px solid black", padding: "10px" }}
                       >
                         &nbsp;
-                        {derive(email, (email) => email?.labelIds?.join(", "))}
+                        {email?.labelIds?.join(", ")}
                         &nbsp;
                       </td>
                       <td
@@ -1381,14 +1375,14 @@ export default pattern<
     authUI,
     emails,
     mentionable: emails.map((e) => <EmailCard email={e} />),
-    emailCount: derive(emails, (list: Email[]) => list?.length || 0),
+    emailCount: emails.get()?.length || 0,
     summary,
     bgUpdater: googleUpdaterStream,
     isReady,
     // Pattern tools for omnibot
     searchEmails: patternTool(
       ({ query, emails }: { query: string; emails: Email[] }) => {
-        return derive({ query, emails }, ({ query, emails }) => {
+        return computed(() => {
           if (!query || !emails) return [];
           const lowerQuery = query.toLowerCase();
           return emails.filter(
@@ -1403,13 +1397,13 @@ export default pattern<
     ),
     getEmailCount: patternTool(
       ({ emails }: { emails: Email[] }) => {
-        return derive(emails, (list: Email[]) => list?.length || 0);
+        return emails?.length || 0;
       },
       { emails },
     ),
     getRecentEmails: patternTool(
       ({ count, emails }: { count: number; emails: Email[] }) => {
-        return derive({ count, emails }, ({ count, emails }) => {
+        return computed(() => {
           if (!emails || emails.length === 0) return "No emails";
           const recent = emails.slice(0, count || 5);
           return recent
