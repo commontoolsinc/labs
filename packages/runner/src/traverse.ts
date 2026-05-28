@@ -3214,7 +3214,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   }
 
   /**
-   * Check whether the schema specifies asCell or asStream
+   * Check whether the schema specifies asCell
    *
    * This handling gets a little blurry with anyOf or oneOf schemas, and
    * in those cases, we base the value on whether every option has the flag.
@@ -3224,7 +3224,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    *
    * We do not resolve references in the anyOf or oneOf options, which means
    * we don't need to worry about cycles, but it also means we may miss some
-   * references that should be asCell or asStream.
+   * references that should be asCell.
    *
    * @param schema
    * @returns
