@@ -275,6 +275,11 @@ function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
   return getSpaceCellForDID(ctx.runtime, space, ctx.tx);
 }
 
+function isProfilePersonaTarget(parsed: ParsedWishTarget): boolean {
+  return (parsed.key === "#profile" || parsed.key === "#profileDefault") &&
+    parsed.path.length === 0;
+}
+
 function formatTarget(parsed: ParsedWishTarget): string {
   return parsed.key +
     (parsed.path.length > 0 ? "/" + parsed.path.join("/") : "");
@@ -989,6 +994,29 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("cf-cell-link", { $cell: cell });
 }
 
+function profileCreateUI(ctx: WishContext): VNode {
+  const createProfile = getHomeSpaceCell(ctx)
+    .key("defaultPattern")
+    .key("createProfile")
+    .resolveAsCell();
+  return h("cf-message-input", {
+    id: "wish-profile-name-input",
+    placeholder: "Your name...",
+    appearance: "rounded",
+    "oncf-send": createProfile,
+  });
+}
+
+function wishResultUI(
+  parsed: ParsedWishTarget,
+  resultCell: Cell<unknown>,
+): VNode | undefined {
+  if (isProfilePersonaTarget(parsed)) {
+    return cellLinkUI(resultCell);
+  }
+  return resultCell.key(UI).get() as VNode | undefined;
+}
+
 function projectWishCellValue(
   cell: Cell<unknown>,
   schema: unknown,
@@ -1313,19 +1341,20 @@ export function wish(
             scope,
             nowCell,
           };
+          let parsed: ParsedWishTarget | undefined;
           try {
             const resolveStartedAt = performance.now();
-            const parsed = measureWishPhase(
+            const activeParsed = parsed = measureWishPhase(
               "parse-target",
               queryKey,
               () => {
-                const parsed = parseWishTarget(query);
-                parsed.path = [...parsed.path, ...(path ?? [])];
-                return parsed;
+                const nextParsed = parseWishTarget(query);
+                nextParsed.path = [...nextParsed.path, ...(path ?? [])];
+                return nextParsed;
               },
             );
-            if (canUseSharedHashtagResult(parsed, { headless })) {
-              const shared = getCurrentSharedHashtagResolver(ctx, parsed);
+            if (canUseSharedHashtagResult(activeParsed, { headless })) {
+              const shared = getCurrentSharedHashtagResolver(ctx, activeParsed);
               usedSharedHashtagResolver = true;
               measureWishPhase(
                 "send-shared-hashtag",
@@ -1342,7 +1371,7 @@ export function wish(
             const baseResolutions = measureWishPhase(
               "resolve-base",
               queryKey,
-              () => resolveBase(parsed, ctx),
+              () => resolveBase(activeParsed, ctx),
             );
             const outputScope = wishOutputScope(
               schema,
@@ -1381,8 +1410,8 @@ export function wish(
               () =>
                 baseResolutions.map((baseResolution) => {
                   const combinedPath = baseResolution.pathPrefix
-                    ? [...baseResolution.pathPrefix, ...parsed.path]
-                    : parsed.path;
+                    ? [...baseResolution.pathPrefix, ...activeParsed.path]
+                    : activeParsed.path;
                   const resolvedCell = resolvePath(
                     baseResolution.cell,
                     combinedPath,
@@ -1430,7 +1459,7 @@ export function wish(
               const resultUI = measureWishPhase(
                 "result-ui-get",
                 queryKey,
-                () => uniqueResultCells[0].key(UI).get(),
+                () => wishResultUI(activeParsed, uniqueResultCells[0]),
               );
               measureWishPhase(
                 "send-fast",
@@ -1477,7 +1506,7 @@ export function wish(
                 const resultUI = measureWishPhase(
                   "result-ui-get",
                   queryKey,
-                  () => uniqueResultCells[0].key(UI).get(),
+                  () => wishResultUI(activeParsed, uniqueResultCells[0]),
                 );
                 measureWishPhase(
                   "send-fast-before-suggestion",
@@ -1514,6 +1543,9 @@ export function wish(
             }
           } catch (e) {
             const errorMsg = e instanceof WishError ? e.message : String(e);
+            const ui = parsed && isProfilePersonaTarget(parsed)
+              ? profileCreateUI(ctx)
+              : errorUI(errorMsg);
             measureWishPhase(
               "send-error",
               queryKey,
@@ -1524,7 +1556,7 @@ export function wish(
                     result: undefined,
                     candidates: [],
                     error: errorMsg,
-                    [UI]: errorUI(errorMsg),
+                    [UI]: ui,
                   } satisfies WishState<any>,
                   wishOutputScope(
                     schema,
