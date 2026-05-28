@@ -62,7 +62,7 @@ These issues compile without errors but fail at runtime.
 - [Persisting Images in Cells](gotchas/persisting-images-in-cells.md) - Store the blob `url`, not the inline `data`
 - [perSession Read in a Mapped computed()](gotchas/persession-read-in-mapped-computed.md) - Per-row inline forms that never open; hoist the session read out of the nested `computed()`
 - [Scoped Cell Pitfalls](gotchas/scoped-cell-pitfalls.md) - `PerSpace`/`PerUser`/`PerSession` gotchas, incl. guarding render-path `.get().map()` against undefined-before-sync
-- [Closure Capture in Nested map()](gotchas/closure-capture-in-nested-map.md) - `(cellCall() ?? []).map(...)` nested in an outer `.map(...)` aborts pattern construction; the `?? []` recipe is unsafe nested. Three recipes (map cell directly; pre-bake top-level computed; per-row `derive`).
+- [Closure Capture in Nested map()](gotchas/closure-capture-in-nested-map.md) - `(cellCall() ?? []).map(...)` nested in an outer `.map(...)` used to abort pattern construction; fixed in CT-1626 / PR #3726. The shape is still a code smell — three recipes (map cell directly; pre-bake top-level computed; per-row `derive`).
 
 ### Error Categories
 
