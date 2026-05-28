@@ -1,13 +1,14 @@
 /**
  * Cross-transformer communication registries.
  *
- * The pipeline creates eight shared registries in CommonFabricTransformerPipeline
+ * The pipeline creates nine shared registries in CommonFabricTransformerPipeline
  * (cf-pipeline.ts). Each is keyed by AST node or symbol identity, which is
  * preserved when transformers are applied in sequence via ts.transform().
  *
- * (A ninth, syntheticLiftAppliedCallRegistry, was removed in the
+ * (A former member, syntheticLiftAppliedCallRegistry, was removed in the
  * registry-unification effort — it was verified functionally inert. See
- * docs/scratch/12-registry-unification-design.md.)
+ * docs/scratch/12-registry-unification-design.md. The current ninth member is
+ * schemaInjectedRegistry, added in CT-1621 — see its entry below.)
  *
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
  *   Preserves and recovers synthetic typing across the pipeline. Serves three
@@ -86,7 +87,49 @@
  *   Writers: context.markNarrowedWrapper() (called by
  *            transformers/type-shrinking.ts applyShrinkAndWrap)
  *   Readers: context.lookupNarrowedWrapper() (called by
- *            transformers/schema-injection.ts inner-lift revisit path)
+ *            transformers/schema-injection.ts lift `isToSchemaCall` branch)
+ *
+ *   CT-1621 INVARIANT (why this still exists, precisely):
+ *   The reader's load-bearing use is the FIRST-pass recovery of the pre-shrink
+ *   type for a synthetic wrapper whose lift input is a runtime VALUE that was
+ *   capability-shrunk (the checker resolves such a synthetic wrapper TypeNode
+ *   to `any`, so without this the inner `type:` is lost and only the `asCell`
+ *   capability wrapper survives). That value-as-input shape is produced ONLY by
+ *   the `derive`/`computed`→lift-applied lowering's value-input path — and in
+ *   practice ONLY by `derive`: `computed(fn)` lowers to the no-input
+ *   `lift(false, fn)()` form (no input wrapper at all), and a `computed`
+ *   capturing cells reifies those captures into an input OBJECT whose member
+ *   nodes carry checker-resolvable types via `typeRegistry` (verified: a
+ *   capturing-computed golden made with this registry matches with it neutered).
+ *   User-authored `lift` cannot express value-as-input (LiftFunction's leading
+ *   args are JSONSchema/fn, never a value), and the user `lift(toSchema<T>(),…)`
+ *   form has a real source TypeNode the checker resolves — so neither needs this.
+ *   The redundant SELF-RE-ENTRY consumer that CT-1621 originally targeted was
+ *   removed (schemaInjectedRegistry now skips re-processing our own output).
+ *   What remains is derive-bound. REMOVE THIS REGISTRY when `derive` is
+ *   deprecated/removed: drop the writer (applyShrinkAndWrap markNarrowedWrapper),
+ *   the reader (schema-injection isToSchemaCall lookup), this map + its methods,
+ *   the context shims, and this entry. Until then it is a principled,
+ *   single-purpose channel, not an ad-hoc workaround.
+ *
+ * schemaInjectedRegistry (WeakSet<ts.Node>)
+ *   Marks builder call/new nodes that SchemaInjection has already finalized.
+ *   The single top-of-visit guard in SchemaInjectionTransformer skips
+ *   re-processing a marked node (descending only into its children to reach
+ *   callback bodies). Replaces the scattered per-builder arg-count idempotency
+ *   guards (`args.length >= 5`, the implicit "drop the type args so
+ *   re-detection fails" trick, etc.) with one explicit signal, and plugs the
+ *   lift `isToSchemaCall` branch's missing idempotency guard — eliminating the
+ *   redundant self-re-entry re-narrowing that CT-1621 targeted. NOTE: this
+ *   marks SYNTHETIC nodes we produce; unlike the other marker sets it uses a
+ *   plain `.has` (no getOriginalNode fallback) because a marked node's original
+ *   is the *pre-injection* user call, which must NOT read as injected.
+ *   Some arg-count guards remain DELIBERATELY: the cell-factory/wish `>= 2`
+ *   checks also protect USER-supplied schemas (which this marker can't cover),
+ *   and the `!== 2`/`!== 3` checks are dispatch (input-shape) guards, not
+ *   idempotency.
+ *   Writers: context.markSchemaInjected() (SchemaInjection producer sites)
+ *   Readers: context.isSchemaInjected() (SchemaInjection top-of-visit guard)
  *
  * --- Cache invalidation contract ---
  *

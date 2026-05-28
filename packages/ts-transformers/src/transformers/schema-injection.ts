@@ -1368,8 +1368,13 @@ function visitInjectedDualSchemaBuilderCall(
     checker,
     typeRegistry,
   );
-  // Visit children to catch any pattern calls created by ClosureTransformer
-  // inside builder callbacks (e.g., from map transformations)
+  // Mark BEFORE re-descending: the re-descent below re-enters `updated` to
+  // reach the callback body (catching pattern calls ClosureTransformer
+  // created inside builder callbacks, e.g. from map transformations). Marking
+  // first means that re-entry self-skips the builder/schema logic — including
+  // the re-narrowing of the synthetic schema arg that previously required
+  // narrowedWrapperTypeRegistry (CT-1621) — and only the callback is visited.
+  context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
 }
 
@@ -1420,6 +1425,7 @@ function visitPrependedWidenedSchemaCall(
     [...schemas, ...args],
   );
 
+  context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
 }
 
@@ -2874,6 +2880,21 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
     const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
+      // Single idempotency guard: if SchemaInjection already finalized this
+      // builder call/new node, do NOT re-process it — only descend into its
+      // children (to reach callback bodies). This replaces the per-builder
+      // arg-count guards (`args.length >= 5`, etc.) and the implicit
+      // "drop the type args so re-detection fails" tricks, and it plugs the
+      // gap in the lift `isToSchemaCall` branch whose re-narrowing of the
+      // synthetic schema arg was the sole reason narrowedWrapperTypeRegistry
+      // existed (CT-1621). Producers call `context.markSchemaInjected(...)`.
+      if (
+        (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
+        context.isSchemaInjected(node)
+      ) {
+        return ts.visitEachChild(node, visit, transformation);
+      }
+
       if (ts.isNewExpression(node)) {
         const callKind = detectNewExpressionKind(node, checker);
         if (callKind?.kind === "cell-factory") {
@@ -2882,7 +2903,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const args = node.arguments ?? [];
           const scope = cellConstructorCallScope(node, checker);
 
-          // If already has 2 arguments, assume schema is already present.
+          // If already has 2 arguments, the schema slot is filled — either we
+          // injected it (idempotency) or the user supplied one. Either way,
+          // leave it. (NOT replaced by the schema-injected marker: the marker
+          // only covers our own output; a user-supplied 2-arg cell must also
+          // be left alone, so this stays an argument-count check.)
           if (args.length >= 2) {
             return ts.visitEachChild(node, visit, transformation);
           }
@@ -2942,6 +2967,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               node.typeArguments,
               newArgs,
             );
+            context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
         }
@@ -3059,6 +3085,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             [toSchemaEvent, toSchemaState, ...node.arguments],
           );
 
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
 
@@ -3160,6 +3187,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               [toSchemaEvent, toSchemaState, handlerCandidate],
             );
 
+            context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
         }
@@ -3326,11 +3354,15 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
           if (argumentType && liftCallback) {
             // Prefer the pre-shrink type from `narrowedWrapperTypeRegistry`
-            // when available — for our own injected lift-applied output, the
-            // outer call's first toSchema argument is a synthetic wrapper
-            // TypeNode that `checker.getTypeFromTypeNode` resolves to `any`.
-            // See type-shrinking.ts `applyShrinkAndWrap` for where this is
-            // populated and the rationale for the separate registry channel.
+            // when available — when the first toSchema argument is a synthetic
+            // wrapper TypeNode, `checker.getTypeFromTypeNode` resolves it to
+            // `any`, dropping the inner `type:`. The registry recovers the
+            // pre-shrink type. CT-1621: the only live consumer is `derive`'s
+            // value-as-input lowering (first pass); the redundant self-re-entry
+            // consumer was removed via the schemaInjectedRegistry marker, and
+            // `computed`/user-`lift` never produce this shape. Registry is
+            // derive-bound — see core/mod.ts and type-shrinking.ts
+            // `applyShrinkAndWrap`.
             const argumentTypeValue =
               context.lookupNarrowedWrapper(argumentType) ??
                 getTypeFromTypeNodeWithFallback(
@@ -3366,6 +3398,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               node.typeArguments,
               [inputSchema, ...node.arguments.slice(1)],
             );
+            // Mark so the re-descent below does NOT re-enter this branch and
+            // re-narrow the synthetic `inputSchema` wrapper against `any`.
+            // That re-narrowing was the sole consumer of
+            // narrowedWrapperTypeRegistry (CT-1621).
+            context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
         }
@@ -3576,6 +3613,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.typeArguments,
             newArgs,
           );
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
       }
@@ -3664,6 +3702,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.typeArguments,
             [...args, schemaCall],
           );
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
       }
@@ -3740,6 +3779,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.typeArguments,
             [newOptions, ...args.slice(1)],
           );
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
       }
@@ -3748,12 +3788,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "when") {
         const args = node.arguments;
 
-        // Skip if already has schemas (5+ args means schemas present)
-        if (args.length >= 5) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        // Must have exactly 2 arguments: condition, value
+        // Idempotency is owned by the top-of-visit schema-injected marker; no
+        // arg-count "already has schemas" guard needed. (The public
+        // WhenFunction type is exactly 2-arity, so the 5-arg withSchemas form
+        // can ONLY be our own injected output — never user source.)
+        // This stays a DISPATCH guard: only the 2-arg form is the injectable shape.
         if (args.length !== 2) {
           return ts.visitEachChild(node, visit, transformation);
         }
@@ -3795,12 +3834,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "unless") {
         const args = node.arguments;
 
-        // Skip if already has schemas (5+ args means schemas present)
-        if (args.length >= 5) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        // Must have exactly 2 arguments: condition, fallback
+        // Idempotency owned by the schema-injected marker (see `when` above).
+        // UnlessFunction is exactly 2-arity, so the 5-arg form is only ever
+        // our injected output. DISPATCH guard: only the 2-arg form is injectable.
         if (args.length !== 2) {
           return ts.visitEachChild(node, visit, transformation);
         }
@@ -3842,12 +3878,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "ifElse") {
         const args = node.arguments;
 
-        // Skip if already has schemas (7+ args means schemas present)
-        if (args.length >= 7) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        // Must have exactly 3 arguments: condition, ifTrue, ifFalse
+        // Idempotency owned by the schema-injected marker (see `when` above).
+        // IfElseFunction is exactly 3-arity, so the 7-arg form is only ever
+        // our injected output. DISPATCH guard: only the 3-arg form is injectable.
         if (args.length !== 3) {
           return ts.visitEachChild(node, visit, transformation);
         }
