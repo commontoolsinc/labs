@@ -119,6 +119,17 @@ describe("value-clone", () => {
       expect(cloneWithoutValueAtPath(root, ["items", "5"])).toBe(root);
     });
 
+    it("treats non-canonical array-index names as absent (no shift)", () => {
+      const root = deepFreeze({ items: [10, 20, 30] });
+
+      // `00`/`01` coerce to in-range numbers but are not canonical index
+      // names; `length` is an own array property but not an element. None
+      // address an array element, so removal is a no-op (no splice/shift).
+      expect(cloneWithoutValueAtPath(root, ["items", "00"])).toBe(root);
+      expect(cloneWithoutValueAtPath(root, ["items", "01"])).toBe(root);
+      expect(cloneWithoutValueAtPath(root, ["items", "length"])).toBe(root);
+    });
+
     it("is a no-op (returns the deep-frozen root) when the path is absent", () => {
       const root = deepFreeze({ value: { left: { stable: true } } });
 

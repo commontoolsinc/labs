@@ -552,48 +552,48 @@ function isMutableHandle(value: unknown): boolean {
 
 /**
  * Helper for the path-edit functions, which reads the child of `container` at
- * `key` (array index or object key).
+ * `key`. A `key` that isn't a canonical array index never addresses an array
+ * element (so e.g. `length` or a non-canonical `08` reads as absent).
  */
 const readChildAt = (
   container: Record<string, unknown> | unknown[],
   key: string,
-): FabricValue =>
-  (Array.isArray(container)
-    ? container[Number(key)]
-    : container[key]) as FabricValue;
+): FabricValue => {
+  if (Array.isArray(container) && !isArrayIndexPropertyName(key)) {
+    return undefined;
+  }
+  return (container as Record<string, unknown>)[key] as FabricValue;
+};
 
 /**
  * Helper for the path-edit functions, which indicates whether `container` has
- * an own child at `key`. For arrays this tests `Object.hasOwn` (not just
- * `index < length`), so a sparse hole counts as absent -- removing a hole is
- * then a no-op rather than a shift-inducing splice.
+ * an own child at `key`. A `key` that isn't a canonical array index is never
+ * an array element (excludes `length` and number-looking-but-non-canonical
+ * names like `08`); `Object.hasOwn` then also treats sparse holes and
+ * out-of-range indices as absent, so removing one is a no-op rather than a
+ * shift-inducing splice.
  */
 const hasChildAt = (
   container: Record<string, unknown> | unknown[],
   key: string,
 ): boolean => {
-  if (Array.isArray(container)) {
-    const index = Number(key);
-    return Number.isInteger(index) && index >= 0 &&
-      Object.hasOwn(container, index);
+  if (Array.isArray(container) && !isArrayIndexPropertyName(key)) {
+    return false;
   }
   return Object.hasOwn(container, key);
 };
 
 /**
  * Helper for the path-edit functions, which writes `value` into `container` at
- * `key` (array index or object key).
+ * `key`. A canonical array-index string addresses (and extends) the array
+ * element directly -- no numeric coercion needed.
  */
 const writeChildAt = (
   container: FabricValue,
   key: string,
   value: FabricValue,
 ): void => {
-  if (Array.isArray(container)) {
-    (container as FabricValue[])[Number(key)] = value;
-  } else {
-    (container as Record<string, FabricValue>)[key] = value;
-  }
+  (container as Record<string, FabricValue>)[key] = value;
 };
 
 /**
