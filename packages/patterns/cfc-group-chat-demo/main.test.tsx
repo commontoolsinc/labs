@@ -98,7 +98,10 @@ export default pattern(() => {
     bobChat.addTrustedRoom.send();
   });
   const action_disable_everyone_admin = action(() => {
-    chat.toggleEveryoneAdmin.send({ everyoneIsAdmin: false });
+    chat.toggleEveryoneAdmin.send({
+      type: "click",
+      target: { name: "", value: "on" },
+    });
   });
   const action_toggle_bob_admin = action(() => {
     chat.toggleParticipantAdmin.send({ name: "Bob" });
@@ -226,6 +229,11 @@ export default pattern(() => {
         "Admin",
       );
   });
+  const assert_admin_view_lists_bob_after_lockdown = computed(() => {
+    const userList = findNodeById(chat[UI], "trusted-admin-user-list");
+    return nodeIncludesText(userList, "Bob") &&
+      nodeIncludesText(userList, "Make admin");
+  });
   const assert_last_admin_removal_blocked = computed(() =>
     chat.currentUserIsAdmin === true &&
     bobChat.currentUserIsAdmin !== true &&
@@ -239,7 +247,9 @@ export default pattern(() => {
   const assert_bob_admin_enabled = computed(() =>
     bobChat.currentUserIsAdmin === true &&
     bobChat.currentUserCanManageAdmins === true &&
-    chatAdminRolesValue(adminRegistry).length === 2
+    chatAdminRolesValue(adminRegistry).length === 2 &&
+    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+      false
   );
   const assert_bob_can_add_room = computed(() => {
     const roomList = roomsValue(rooms);
@@ -329,6 +339,7 @@ export default pattern(() => {
       { action: action_disable_everyone_admin },
       { assertion: assert_everyone_disabled_seeds_alice },
       { assertion: assert_admin_view_explicit_alice },
+      { assertion: assert_admin_view_lists_bob_after_lockdown },
       { action: action_try_remove_last_admin },
       { assertion: assert_last_admin_removal_blocked },
       { action: action_set_room_bob },

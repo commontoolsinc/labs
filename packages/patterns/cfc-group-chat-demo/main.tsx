@@ -38,6 +38,7 @@ import {
   type SharedRoomsCell,
   type SharedRoomsValue,
   TrustedAdminPanel,
+  type TrustedAdminPolicyEvent,
   TrustedChatSendSurface,
   TrustedProfileSaveSurface,
   TrustedRoomAddSurface,
@@ -236,9 +237,9 @@ export interface GroupChatDemoOutput {
   currentUserIsAdmin: boolean;
   currentUserCanManageAdmins: boolean;
   saveProfile: Stream<void>;
-  toggleCurrentUserAdmin: Stream<{ name?: string; everyoneIsAdmin?: boolean }>;
-  toggleParticipantAdmin: Stream<{ name?: string; everyoneIsAdmin?: boolean }>;
-  toggleEveryoneAdmin: Stream<{ name?: string; everyoneIsAdmin?: boolean }>;
+  toggleCurrentUserAdmin: Stream<TrustedAdminPolicyEvent>;
+  toggleParticipantAdmin: Stream<TrustedAdminPolicyEvent>;
+  toggleEveryoneAdmin: Stream<TrustedAdminPolicyEvent>;
   sendTrustedMessage: Stream<void>;
   addTrustedRoom: Stream<void>;
   hostLookalikeSend: Stream<void>;

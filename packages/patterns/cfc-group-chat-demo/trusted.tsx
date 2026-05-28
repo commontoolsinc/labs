@@ -119,21 +119,34 @@ export type ChatAdminList = RequiresIntegrity<
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
 
-export type ChatEveryoneAdminFlag = RequiresIntegrity<
-  AddIntegrity<
-    TrustedActionWrite<
-      boolean,
-      typeof commitTrustedAdminToggle,
-      typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
-      typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
-    >,
-    readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
-  >,
+export type ChatAdminBootstrapRole = AddIntegrity<
+  ChatAdminRoleAssignment,
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
 
+export type ChatEveryoneAdminFlag =
+  | RequiresIntegrity<
+    AddIntegrity<
+      TrustedActionWrite<
+        true,
+        typeof commitTrustedAdminToggle,
+        typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+        typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+      >,
+      readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+    >,
+    readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+  >
+  | TrustedActionWrite<
+    false,
+    typeof commitTrustedAdminToggle,
+    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+  >;
+
 export interface ChatAdminRegistryStoredValue {
   readonly admins?: ChatAdminList;
+  readonly bootstrapAdmin?: ChatAdminBootstrapRole;
   readonly everyoneIsAdmin?: ChatEveryoneAdminFlag;
 }
 
@@ -165,6 +178,11 @@ export type RoomDraftCell = Writable<string | Default<"">>;
 
 const draftText = (draft: Writable<string | Default<"">>): string =>
   (draft.get() as string | undefined) ?? "";
+
+const nonEmptyEventName = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+};
 
 export const messagesValue = (
   messages: SharedMessagesCell,
@@ -206,7 +224,23 @@ export const currentProfileSnapshot = (
 
 export const chatAdminRolesValue = (
   adminRegistry: ChatAdminRegistryCell,
-): ChatAdminRole[] => adminRegistryEntries<ChatAdminRole>(adminRegistry);
+): ChatAdminRole[] => {
+  const explicitAdmins = adminRegistryEntries<ChatAdminRole>(adminRegistry);
+  if (explicitAdmins.length > 0) {
+    return explicitAdmins;
+  }
+  const bootstrapAdmin = (
+    adminRegistry.get() as ChatAdminRegistryStoredValue | undefined
+  )?.bootstrapAdmin;
+  if (bootstrapAdmin === undefined) {
+    return [];
+  }
+  return [{
+    ...bootstrapAdmin,
+    subject: adminRegistry.key("bootstrapAdmin").key("subject")
+      .resolveAsCell() as ProfileCell,
+  } as ChatAdminRole];
+};
 
 export const chatAdminEveryoneIsAdmin = (
   adminRegistry: ChatAdminRegistryCell,
@@ -513,7 +547,15 @@ export const commitTrustedMessageSend = handler<
 type TrustedMessageSendInput = Parameters<typeof commitTrustedMessageSend>[0];
 
 export interface TrustedAdminPolicyEvent {
+  readonly type?: string;
   readonly name?: string;
+  readonly target?: {
+    readonly name?: string;
+    readonly value?: string;
+    readonly dataset?: {
+      readonly adminName?: string;
+    };
+  };
   readonly everyoneIsAdmin?: boolean;
   readonly detail?: {
     readonly checked?: boolean;
@@ -521,7 +563,8 @@ export interface TrustedAdminPolicyEvent {
 }
 
 interface TrustedAdminPolicyChange {
-  readonly admins: ChatAdminRole[];
+  readonly admins?: ChatAdminRole[];
+  readonly bootstrapAdmin?: ChatAdminRole;
   readonly everyoneIsAdmin?: boolean;
 }
 
@@ -540,7 +583,6 @@ export const prepareTrustedAdminToggle = (
   if (nextEveryoneIsAdmin !== undefined) {
     if (nextEveryoneIsAdmin) {
       return {
-        admins: adminRoles,
         everyoneIsAdmin: true,
       };
     }
@@ -551,18 +593,20 @@ export const prepareTrustedAdminToggle = (
     const currentName = myProfile === undefined
       ? undefined
       : currentProfileSnapshot(myProfile)?.name;
-    const seededAdmins =
+    const bootstrapAdmin =
       adminRoles.length === 0 && currentProfile !== undefined &&
         currentName
-        ? [
-          {
-            subject: currentProfile,
-            displayName: currentName,
-          } as ChatAdminRole,
-        ]
-        : adminRoles;
-    return seededAdmins.length === 0 ? null : {
-      admins: seededAdmins,
+        ? {
+          subject: currentProfile,
+          displayName: currentName,
+        } as ChatAdminRole
+        : undefined;
+    if (adminRoles.length === 0 && bootstrapAdmin === undefined) {
+      return null;
+    }
+    return {
+      ...(adminRoles.length > 0 ? { admins: adminRoles } : {}),
+      ...(bootstrapAdmin !== undefined ? { bootstrapAdmin } : {}),
       everyoneIsAdmin: false,
     };
   }
@@ -593,7 +637,6 @@ export const prepareTrustedAdminToggle = (
     }
     return {
       admins: withoutParticipant,
-      everyoneIsAdmin: false,
     };
   }
 
@@ -605,7 +648,6 @@ export const prepareTrustedAdminToggle = (
         displayName: targetName,
       } as ChatAdminRole,
     ],
-    everyoneIsAdmin: false,
   };
 };
 
@@ -622,16 +664,24 @@ export const commitTrustedAdminToggle = handler<
   event,
   { profiles, myProfile, messages, adminRegistry, participant },
 ) => {
-  const eventParticipant = event?.name === undefined
+  const eventName = nonEmptyEventName(event?.name) ??
+    nonEmptyEventName(event?.target?.dataset?.adminName) ??
+    nonEmptyEventName(event?.target?.name);
+  const eventParticipant = eventName === undefined
     ? undefined
     : adminParticipantRowsValue(
       profiles,
       myProfile,
       messages,
       adminRegistry,
-    ).find((row) => row.name === event.name);
+    ).find((row) => row.name === eventName);
   const nextEveryoneIsAdmin = event?.everyoneIsAdmin ??
-    event?.detail?.checked;
+    event?.detail?.checked ??
+    (participant === undefined &&
+        eventName === undefined &&
+        (event as { type?: string } | undefined)?.type === "click"
+      ? !chatAdminEveryoneIsAdmin(adminRegistry)
+      : undefined);
   const nextPolicy = prepareTrustedAdminToggle(
     currentUserAdminRole(myProfile, adminRegistry),
     adminRegistry,
@@ -643,14 +693,43 @@ export const commitTrustedAdminToggle = handler<
     return;
   }
 
-  adminRegistry.set({
-    admins: nextPolicy.admins as ChatAdminList,
-    ...(nextPolicy.everyoneIsAdmin !== undefined
-      ? {
-        everyoneIsAdmin: nextPolicy.everyoneIsAdmin as ChatEveryoneAdminFlag,
-      }
-      : {}),
-  });
+  if (
+    nextPolicy.bootstrapAdmin !== undefined ||
+    nextPolicy.everyoneIsAdmin !== undefined
+  ) {
+    const currentRegistry = adminRegistry.get() as
+      | ChatAdminRegistryStoredValue
+      | undefined;
+    adminRegistry.set({
+      ...(currentRegistry?.admins !== undefined
+        ? { admins: currentRegistry.admins }
+        : {}),
+      ...(currentRegistry?.bootstrapAdmin !== undefined
+        ? { bootstrapAdmin: currentRegistry.bootstrapAdmin }
+        : {}),
+      ...(currentRegistry?.everyoneIsAdmin !== undefined
+        ? { everyoneIsAdmin: currentRegistry.everyoneIsAdmin }
+        : {}),
+      ...(nextPolicy.admins !== undefined
+        ? { admins: nextPolicy.admins as ChatAdminList }
+        : {}),
+      ...(nextPolicy.bootstrapAdmin !== undefined
+        ? {
+          bootstrapAdmin: nextPolicy.bootstrapAdmin as ChatAdminBootstrapRole,
+        }
+        : {}),
+      ...(nextPolicy.everyoneIsAdmin !== undefined
+        ? {
+          everyoneIsAdmin: nextPolicy.everyoneIsAdmin as ChatEveryoneAdminFlag,
+        }
+        : {}),
+    });
+    return;
+  }
+
+  if (nextPolicy.admins !== undefined) {
+    adminRegistry.key("admins").set(nextPolicy.admins as ChatAdminList);
+  }
 });
 type TrustedAdminToggleInput = Parameters<typeof commitTrustedAdminToggle>[0];
 
@@ -805,14 +884,6 @@ export const TrustedAdminPanel = pattern<
     adminRegistry,
   }: TrustedAdminPanelInput,
 ): TrustedAdminPanelOutput => {
-  const adminRows = computed(() =>
-    adminParticipantRowsValue(
-      profiles,
-      myProfile,
-      messages,
-      adminRegistry,
-    )
-  );
   const toggleAdminPolicy = commitTrustedAdminToggle({
     profiles,
     myProfile,
@@ -860,20 +931,38 @@ export const TrustedAdminPanel = pattern<
             disabled={computed(() =>
               !currentUserCanManageAdmins(myProfile, adminRegistry)
             )}
-            oncf-change={toggleAdminPolicy}
+            onClick={toggleAdminPolicy}
           >
             Everyone is admin
           </cf-checkbox>
 
           <cf-vstack id="trusted-admin-user-list" gap="2">
-            {adminRows.map((participant) => {
-              const toggleAdmin = commitTrustedAdminToggle({
-                profiles,
-                myProfile,
-                messages,
-                adminRegistry,
-                participant,
-              } as TrustedAdminToggleInput);
+            {profiles.map((entry) => {
+              const profile = entry.profile;
+              const name = computed(() =>
+                profile.get()?.name ?? "Unnamed user"
+              );
+              const accentColor = computed(() =>
+                profile.get()?.accentColor ?? "#64748b"
+              );
+              const everyoneForProfile = computed(() =>
+                chatAdminEveryoneIsAdmin(adminRegistry)
+              );
+              const isAdmin = computed(() =>
+                everyoneForProfile ||
+                subjectHasAdminRole(chatAdminRolesValue(adminRegistry), profile)
+              );
+              const canManageAdmins = computed(() =>
+                currentUserCanManageAdmins(myProfile, adminRegistry)
+              );
+              const participant = {
+                name,
+                accentColor,
+                profile,
+                isAdmin,
+                everyoneIsAdmin: everyoneForProfile,
+                canManageAdmins,
+              } as AdminParticipantRow;
               const toggleDisabled = computed(() =>
                 !participant.canManageAdmins || participant.everyoneIsAdmin
               );
@@ -914,9 +1003,10 @@ export const TrustedAdminPanel = pattern<
                   <cf-button
                     data-ui-control="admin-user-toggle"
                     data-ui-action={TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION}
+                    data-admin-name={participant.name}
                     size="sm"
                     disabled={toggleDisabled}
-                    onClick={toggleAdmin}
+                    onClick={toggleAdminPolicy}
                   >
                     {toggleLabel}
                   </cf-button>
