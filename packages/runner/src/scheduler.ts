@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { SchedulerActionSnapshotQuery } from "@commonfabric/memory/v2";
 import type { Cancel } from "./cancel.ts";
 import { ConsoleEvent } from "./harness/console.ts";
 import type {
@@ -14,6 +15,7 @@ import type {
   IMemorySpaceAddress,
   IStorageSubscription,
   IStorageTransaction,
+  MemorySpace,
   StorageNotification,
 } from "./storage/interface.ts";
 import {
@@ -77,6 +79,8 @@ import {
   type InFlightSourceState,
   runSchedulerAction,
   type SchedulerActionRunState,
+  schedulerImplementationFingerprint,
+  schedulerRuntimeFingerprint,
 } from "./scheduler/action-run.ts";
 import {
   buildPullInitialSeeds,
@@ -93,6 +97,11 @@ import {
 } from "./scheduler/execution.ts";
 import { runPullSchedulerSettleLoop } from "./scheduler/pull-execution.ts";
 import { runPushSchedulerSettleLoop } from "./scheduler/push-execution.ts";
+import {
+  isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
+  type SchedulerActionObservation,
+} from "./scheduler/persistent-observation.ts";
 import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
   conditionalEffectHasChangedInputs as conditionalEffectHasChangedInputsState,
@@ -149,6 +158,7 @@ import {
 import {
   markReadersDirtyForChangedWrites,
   recordChangedComputationWrites,
+  recordChangedWritesHistory,
   type WritePropagationState,
 } from "./scheduler/write-propagation.ts";
 import {
@@ -189,6 +199,7 @@ import type {
   PopulateDependenciesEntry,
   QueuedEvent,
   ReactivityLog,
+  SchedulerObservationIdentity,
   SettleStats,
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,
@@ -203,10 +214,17 @@ const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
+const DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS = 10_000;
 
 type PendingDependencyCollectionState =
   SchedulerSubscribeActionState["pendingDependencyCollectionState"];
 type FilterStatsState = { filtered: number; executed: number };
+type SchedulerStorageRehydrationOptions =
+  & SchedulerObservationIdentity
+  & {
+    space: MemorySpace;
+    timeoutMs?: number;
+  };
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -389,6 +407,7 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
+  private initialRehydrationTokens = new WeakMap<Action, symbol>();
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
@@ -493,23 +512,39 @@ export class Scheduler {
       noDebounce?: boolean;
       throttle?: number;
       changeGroup?: ChangeGroup;
+      rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
     } = {},
   ): Cancel {
+    const { rehydrateFromStorage } = options;
+    if (rehydrateFromStorage) {
+      this.setActionObservationIdentity(action, rehydrateFromStorage);
+    }
+    const subscribeOptions = {
+      isEffect: options.isEffect,
+      debounce: options.debounce,
+      noDebounce: options.noDebounce,
+      throttle: options.throttle,
+      changeGroup: options.changeGroup,
+      deferInitialExecution: rehydrateFromStorage !== undefined,
+    };
     this.updateMaterializerRegistration(action);
-    if (this.pullMode) {
-      return subscribePullSchedulerAction(
+    const cancel = this.pullMode
+      ? subscribePullSchedulerAction(
         this.subscribeActionState,
         action,
         populateDependencies,
-        options,
+        subscribeOptions,
+      )
+      : subscribePushSchedulerAction(
+        this.subscribeActionState,
+        action,
+        populateDependencies,
+        subscribeOptions,
       );
+    if (rehydrateFromStorage) {
+      this.queueInitialActionRehydration(action, rehydrateFromStorage);
     }
-    return subscribePushSchedulerAction(
-      this.subscribeActionState,
-      action,
-      populateDependencies,
-      options,
-    );
+    return cancel;
   }
 
   /**
@@ -549,6 +584,256 @@ export class Scheduler {
       log,
       options,
     );
+  }
+
+  rehydrateActionFromObservation(
+    action: Action,
+    snapshot: PersistedSchedulerObservationSnapshot,
+  ): boolean {
+    const actionId = this.getActionId(action);
+    const { observation } = snapshot;
+    if (observation.actionId !== actionId) {
+      return false;
+    }
+
+    this.resubscribe(action, {
+      reads: observation.reads,
+      shallowReads: observation.shallowReads,
+      writes: observation.currentKnownWrites,
+    }, {
+      isEffect: observation.actionKind === "effect",
+    });
+    if (observation.materializerWriteEnvelopes.length > 0) {
+      this.materializers.registerAddresses(
+        action,
+        observation.materializerWriteEnvelopes,
+      );
+    }
+
+    const { actionOptions } = observation;
+    if (actionOptions?.debounceMs !== undefined) {
+      this.delays.setDebounce(action, actionOptions.debounceMs);
+    }
+    if (actionOptions?.noDebounce !== undefined) {
+      this.delays.setNoDebounce(action, actionOptions.noDebounce);
+    }
+    if (actionOptions?.throttleMs !== undefined) {
+      this.delays.setThrottle(action, actionOptions.throttleMs);
+    }
+
+    if (
+      observation.status === "failed" ||
+      snapshot.directDirtySeq !== undefined ||
+      snapshot.staleSeq !== undefined ||
+      snapshot.unknownReason !== undefined
+    ) {
+      this.staleness.markDirectDirty(action);
+      this.pending.add(action);
+      this.queueExecution();
+      return true;
+    }
+
+    clearSchedulerDirectDirty(this.dirtySchedulingState, action);
+    this.staleness.forceClearStale(action);
+    this.pending.delete(action);
+    this.pendingDependencyCollection.delete(action);
+    this.scheduledFirstTime.delete(action);
+    return true;
+  }
+
+  async rehydrateActionFromStorage(
+    action: Action,
+    space: MemorySpace,
+    query: Omit<SchedulerActionSnapshotQuery, "actionId"> = {},
+    options: {
+      shouldApply?: () => boolean;
+    } = {},
+  ): Promise<boolean> {
+    const provider = this.runtime.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots;
+    if (!listSnapshots) {
+      return false;
+    }
+
+    const result = await listSnapshots.call(provider, {
+      ...query,
+      ownerSpace: query.ownerSpace ?? space,
+      actionId: this.getActionId(action),
+    });
+    const snapshot = result.snapshots[0];
+    if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
+      return false;
+    }
+    if (!this.observationMatchesCurrentAction(action, snapshot.observation)) {
+      return false;
+    }
+    if (options.shouldApply && !options.shouldApply()) {
+      return false;
+    }
+
+    return this.rehydrateActionFromObservation(action, {
+      observation: snapshot.observation,
+      ...(snapshot.directDirtySeq !== undefined
+        ? { directDirtySeq: snapshot.directDirtySeq }
+        : {}),
+      ...(snapshot.staleSeq !== undefined
+        ? { staleSeq: snapshot.staleSeq }
+        : {}),
+      ...(snapshot.unknownReason !== undefined
+        ? { unknownReason: snapshot.unknownReason }
+        : {}),
+    });
+  }
+
+  private observationMatchesCurrentAction(
+    action: Action,
+    observation: SchedulerActionObservation,
+  ): boolean {
+    const actionId = this.getActionId(action);
+    if (observation.actionId !== actionId) {
+      return false;
+    }
+
+    const telemetry = getSchedulerActionTelemetryInfo(action);
+    return observation.implementationFingerprint ===
+        schedulerImplementationFingerprint(action, actionId, telemetry) &&
+      observation.runtimeFingerprint ===
+        schedulerRuntimeFingerprint(this.pullMode ? "pull" : "push");
+  }
+
+  private setActionObservationIdentity(
+    action: Action,
+    identity: SchedulerObservationIdentity & { space?: MemorySpace },
+  ): void {
+    (action as Partial<TelemetryAnnotations>).schedulerObservationIdentity = {
+      ownerSpace: identity.ownerSpace ?? identity.space,
+      pieceId: identity.pieceId,
+      ...(identity.branch !== undefined ? { branch: identity.branch } : {}),
+      ...(identity.processGeneration !== undefined
+        ? { processGeneration: identity.processGeneration }
+        : {}),
+    };
+  }
+
+  private queueInitialActionRehydration(
+    action: Action,
+    options: SchedulerStorageRehydrationOptions,
+  ): void {
+    const token = Symbol("scheduler-initial-rehydration");
+    this.initialRehydrationTokens.set(action, token);
+    const task = (async () => {
+      const rehydrated = await this.runInitialActionRehydrationWithTimeout(
+        action,
+        options,
+        token,
+      );
+      if (rehydrated === "timeout") {
+        if (this.canApplyInitialActionRehydration(action, token)) {
+          logger.warn("scheduler-rehydrate", () => [
+            "Timed out rehydrating scheduler action; falling back to initial run",
+            this.getActionId(action),
+            options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+          ]);
+          this.initialRehydrationTokens.delete(action);
+          this.scheduleInitialActionRun(action);
+        }
+        return;
+      }
+      if (!this.canApplyInitialActionRehydration(action, token)) {
+        return;
+      }
+      if (!rehydrated) {
+        this.scheduleInitialActionRun(action);
+      }
+    })().catch((error) => {
+      logger.warn("scheduler-rehydrate", () => [
+        "Failed to rehydrate scheduler action; falling back to initial run",
+        this.getActionId(action),
+        error,
+      ]);
+      if (!this.canApplyInitialActionRehydration(action, token)) {
+        return;
+      }
+      this.scheduleInitialActionRun(action);
+    });
+
+    this.backgroundTasks.add(task);
+    task.finally(() => {
+      this.backgroundTasks.delete(task);
+      if (this.initialRehydrationTokens.get(action) === token) {
+        this.initialRehydrationTokens.delete(action);
+      }
+    });
+  }
+
+  private async runInitialActionRehydrationWithTimeout(
+    action: Action,
+    options: SchedulerStorageRehydrationOptions,
+    token: symbol,
+  ): Promise<boolean | "timeout"> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMs = Math.max(
+      0,
+      options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+    );
+    const timeout = new Promise<"timeout">((resolve) => {
+      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        this.rehydrateActionFromStorage(
+          action,
+          options.space,
+          {
+            ...(options.branch !== undefined ? { branch: options.branch } : {}),
+            ownerSpace: options.ownerSpace ?? options.space,
+            pieceId: options.pieceId,
+            ...(options.processGeneration !== undefined
+              ? { processGeneration: options.processGeneration }
+              : {}),
+          },
+          {
+            shouldApply: () =>
+              this.canApplyInitialActionRehydration(action, token),
+          },
+        ),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  private canApplyInitialActionRehydration(
+    action: Action,
+    token: symbol,
+  ): boolean {
+    return this.initialRehydrationTokens.get(action) === token &&
+      (this.effects.has(action) || this.computations.has(action)) &&
+      !this.pending.has(action) &&
+      !this.staleness.dirty.has(action);
+  }
+
+  private scheduleInitialActionRun(action: Action): void {
+    if (!this.effects.has(action) && !this.computations.has(action)) {
+      return;
+    }
+
+    this.pendingDependencyCollection.add(action);
+    this.staleness.markDirectDirty(action);
+    this.pending.add(action);
+    this.scheduledFirstTime.add(action);
+
+    if (
+      !this.isEffectAction.get(action) &&
+      this.writeIndex.getSchedulingWrites(action)?.length
+    ) {
+      this.scheduleAffectedEffects(action);
+    }
+
+    this.queueExecution();
   }
 
   unsubscribe(
@@ -1038,6 +1323,7 @@ export class Scheduler {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
     }
+    this.triggerIndex.clear();
     cancelEventQueueWakeState(this.eventQueueWakeState);
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
@@ -1906,6 +2192,15 @@ export class Scheduler {
           this.dirtyDependencyCollectionState,
           trace,
         ),
+      onEventCommitWrites: (sourceAction, writes) => {
+        if (!this.pullMode) return;
+        recordChangedWritesHistory(this.writePropagationState, writes);
+        markReadersDirtyForChangedWrites(
+          this.writePropagationState,
+          sourceAction,
+          writes,
+        );
+      },
     };
   }
 
@@ -1948,8 +2243,20 @@ export class Scheduler {
         getSchedulerActionTelemetryInfo(target),
       getSchedulingWrites: (target) =>
         this.writeIndex.getSchedulingWrites(target),
+      getCurrentKnownSchedulingWrites: (target) =>
+        this.writeIndex.currentKnownWrites.get(target),
+      getHistoricalMightWrite: (target) =>
+        this.writeIndex.historicalMightWrite.get(target),
+      getMaterializerWriteEnvelopes: (target) =>
+        this.materializers.getMaterializerWriteEnvelopes(target),
+      getDebounce: (target) => this.delays.getDebounce(target),
+      getNoDebounce: (target) => this.delays.getNoDebounce(target),
+      getThrottle: (target) => this.delays.getThrottle(target),
       maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
-      markActionHasRun: (target) => this.delays.markActionHasRun(target),
+      markActionHasRun: (target) => {
+        this.delays.markActionHasRun(target);
+        this.initialRehydrationTokens.delete(target);
+      },
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markDirectDirty: (target) => this.staleness.markDirectDirty(target),

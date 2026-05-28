@@ -19,6 +19,8 @@ import {
   type EntityDocument,
   getMemoryProtocolFlags,
   type PatchOp,
+  resetPersistentSchedulerStateConfig,
+  setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
 import type {
@@ -444,6 +446,7 @@ const createHarness = () => {
           }
           | { op: "delete"; id: URI; type: MIME }
         >;
+        schedulerObservation?: unknown;
       },
       source?: unknown,
     ): Promise<
@@ -533,6 +536,121 @@ const sourceFromReads = (
     },
   };
 };
+
+const schedulerObservationFor = (actionId: string) => ({
+  version: 1,
+  branch: "",
+  pieceId: "of:test-piece",
+  processGeneration: 1,
+  actionId,
+  actionKind: "computation",
+  implementationFingerprint: "impl:test",
+  runtimeFingerprint: "runtime:test",
+  observedAtSeq: 0,
+  transactionKind: "action-run",
+  reads: [],
+  shallowReads: [],
+  actualChangedWrites: [],
+  currentKnownWrites: [],
+  declaredWrites: [],
+  materializerWriteEnvelopes: [],
+  status: "success",
+});
+
+Deno.test("memory v2 ignores no-op scheduler observations when persistent scheduler state is off", async () => {
+  resetPersistentSchedulerStateConfig();
+  const harness = createHarness();
+  try {
+    const result = await harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:off"),
+    });
+
+    assertEquals(result, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs, []);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 batches adjacent no-op scheduler observations", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    assertEquals(firstResult, { ok: {} });
+    assertEquals(secondResult, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs.length, 1);
+
+    const applied = [...harness.model.applied.values()][0];
+    assertEquals(applied.commit.operations, []);
+    assertEquals(
+      applied.commit.schedulerObservationBatch?.map((entry) =>
+        (entry.schedulerObservation as { actionId: string }).actionId
+      ),
+      ["action:first", "action:second"],
+    );
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+
+    const [observationResult, writeResult] = await Promise.all([
+      observation,
+      write,
+    ]);
+    assertEquals(observationResult, { ok: {} });
+    assertEquals(writeResult, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs.length, 2);
+
+    const applied = [...harness.model.applied.values()].sort((a, b) =>
+      a.applied.seq - b.applied.seq
+    );
+    assertEquals(applied[0].commit.operations, []);
+    assertEquals(
+      applied[0].commit.schedulerObservationBatch?.map((entry) =>
+        (entry.schedulerObservation as { actionId: string }).actionId
+      ),
+      ["action:first"],
+    );
+    assertEquals(
+      applied[1].commit.operations.map((operation) => operation.op),
+      [
+        "set",
+      ],
+    );
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
 
 const visibleValue = (provider: TestProvider, id: URI) => {
   const value = provider.get(id)?.value;

@@ -8,6 +8,13 @@ type Shard = {
 type RunnerTestFile = {
   name: string;
   size: number;
+  weight?: number;
+};
+
+const RUNNER_TEST_WEIGHT_OVERRIDES: Record<string, number> = {
+  // This file is much slower than its byte size suggests because it compiles
+  // and evaluates many SES modules. Keep it as a heavy shard anchor.
+  "engine.test.ts": 700_000,
 };
 
 export function parseShard(raw: string): Shard {
@@ -30,23 +37,28 @@ export function selectRunnerTestFiles(
   shard: Shard,
 ): string[] {
   const buckets = Array.from({ length: shard.total }, () => ({
-    size: 0,
+    weight: 0,
     names: [] as string[],
   }));
 
   for (
     const file of [...files].sort((a, b) =>
-      b.size - a.size || a.name.localeCompare(b.name)
+      runnerTestWeight(b) - runnerTestWeight(a) ||
+      a.name.localeCompare(b.name)
     )
   ) {
     const bucket = buckets.reduce((smallest, candidate) =>
-      candidate.size < smallest.size ? candidate : smallest
+      candidate.weight < smallest.weight ? candidate : smallest
     );
-    bucket.size += file.size;
+    bucket.weight += runnerTestWeight(file);
     bucket.names.push(file.name);
   }
 
   return buckets[shard.index - 1].names.sort();
+}
+
+function runnerTestWeight(file: RunnerTestFile): number {
+  return file.weight ?? RUNNER_TEST_WEIGHT_OVERRIDES[file.name] ?? file.size;
 }
 
 async function listRunnerTests(): Promise<RunnerTestFile[]> {

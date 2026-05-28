@@ -28,6 +28,7 @@
 experiments on both servers:
 ```bash
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
+EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
 EXPERIMENTAL_EXAMPLE_EXPERIMENT=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
