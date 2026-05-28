@@ -615,6 +615,58 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       adminMode.set(!adminMode.get());
     });
 
+    // One-shot curator promotion — the lot demo has no separate "admin
+    // manager" persona, so the full CFC ceremony (enable manager → toggle
+    // role → flip view) collapses to a single button. Sets the credential,
+    // promotes the current `reporterName` to lot-watch admin (if not
+    // already), and turns admin view on. `personIsLotWatchAdmin` then
+    // gates curation actions exactly as before — only the UX collapses,
+    // not the underlying integrity model.
+    const becomeCurator = action(() => {
+      const name = (reporterName.get() || "").trim();
+      if (!name) return; // need a reporter identity to bind the role to
+      adminManagerCredential.set({
+        canManageAdmins: true,
+      } as LotWatchAdminManagerCredential);
+      // Toggle the role only if not already an admin (so an already-admin
+      // user clicking "Become curator" doesn't accidentally step down).
+      if (!personIsLotWatchAdmin(adminRegistry, name)) {
+        const nextAdmins = prepareLotWatchAdminToggle(
+          adminManagerCredential.get(),
+          adminRegistry,
+          name,
+        );
+        if (nextAdmins !== null) {
+          adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
+        }
+      }
+      adminMode.set(true);
+    });
+
+    // Symmetric one-click step-down: drop view + drop the role for the
+    // current reporter, so "Become curator" is again a single click later.
+    const stepDownCurator = action(() => {
+      adminMode.set(false);
+      const name = (reporterName.get() || "").trim();
+      if (!name) return;
+      if (personIsLotWatchAdmin(adminRegistry, name)) {
+        const nextAdmins = prepareLotWatchAdminToggle(
+          adminManagerCredential.get(),
+          adminRegistry,
+          name,
+        );
+        if (nextAdmins !== null) {
+          adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
+        }
+      }
+    });
+
+    // Quick-pick: set the assignPersonName cell to a known name. Used by
+    // the chips in the "It's a known person's car" picker.
+    const setAssignPersonName = action<{ name: string }>(({ name }) => {
+      assignPersonName.set(name);
+    });
+
     // Spot selection — cell mutations must go through an action(), not a bare
     // `.set()` in an inline onClick. Also auto-prefills the editable fields
     // from the LLM extraction (if it has resolved) so the user lands on
@@ -804,23 +856,40 @@ export default pattern<LotWatchInput, LotWatchOutput>(
         model: "",
       };
 
-      // Update the people list: find the named person, dedupe by plateId|state,
-      // append if not already present.
+      // Update the people list. Two paths:
+      //   (a) Named person exists → append the vehicle to their list (dedupe by
+      //       plateId|state).
+      //   (b) Name doesn't match anyone → CREATE a new person with this
+      //       vehicle. This is the "oh, actually that's Gideon's car" path:
+      //       the lot operator types a name that isn't in parking-coordinator
+      //       yet, and we add Gideon + the plate in one shot instead of
+      //       silently dropping the write.
       const currentPeople = people.get() ?? [];
-      const updatedPeople = currentPeople.map((p) => {
-        if (p.name !== personName) return p;
-        const existing = p.vehicles ?? [];
-        // Dedupe: skip if this plate is already registered for this person.
-        for (const v of existing) {
-          if (
-            normalizePlateId(v.plateId) === normPlate &&
-            v.plateState.toUpperCase().trim() === normState
-          ) {
-            return p; // already there
+      const trimmedName = personName.trim();
+      const matchIdx = currentPeople.findIndex((p) =>
+        p.name.trim().toLowerCase() === trimmedName.toLowerCase()
+      );
+      let updatedPeople: PersonWithVehicles[];
+      if (matchIdx >= 0) {
+        updatedPeople = currentPeople.map((p, i) => {
+          if (i !== matchIdx) return p;
+          const existing = p.vehicles ?? [];
+          for (const v of existing) {
+            if (
+              normalizePlateId(v.plateId) === normPlate &&
+              v.plateState.toUpperCase().trim() === normState
+            ) {
+              return p; // already there
+            }
           }
-        }
-        return { ...p, vehicles: [...existing, newVehicle] };
-      });
+          return { ...p, vehicles: [...existing, newVehicle] };
+        });
+      } else {
+        updatedPeople = [
+          ...currentPeople,
+          { name: trimmedName, vehicles: [newVehicle] },
+        ];
+      }
       people.set(updatedPeople);
       assignTarget.set(null);
     });
@@ -1366,6 +1435,19 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       (people.get() ?? []).map((p) => ({ label: p.name, value: p.name }))
     );
     const hasPeople = computed(() => (people.get() ?? []).length > 0);
+    // Top-level computed for the assign picker's quick-pick chips. Reading
+    // `people` via closure inside the per-row map below trips the
+    // lift-closure pitfall ("Reactive reference from outer scope cannot be
+    // accessed via closure"); pre-bake the name list here so the row UI just
+    // maps a plain array of strings.
+    const peopleNames = computed(() =>
+      (people.get() ?? []).map((p) => p.name).filter((n) =>
+        (n ?? "").trim() !== ""
+      )
+    );
+    // Disable "Become curator" until a reporter identity exists; the admin
+    // role keys on `reporterName`.
+    const noReporterName = computed(() => !(reporterName.get() ?? "").trim());
 
     // ---- UI ----
 
@@ -1381,14 +1463,31 @@ export default pattern<LotWatchInput, LotWatchOutput>(
             <cf-hstack justify="between" align="center">
               <cf-heading level={4}>Lot Watch</cf-heading>
               <cf-hstack gap="1" align="center">
-                <cf-button
-                  variant={adminModeEnabled ? "primary" : "secondary"}
-                  size="sm"
-                  disabled={!currentPersonIsAdmin}
-                  onClick={() => toggleAdminMode.send()}
-                >
-                  {adminModeEnabled ? "Admin: ON" : "Admin: OFF"}
-                </cf-button>
+                {
+                  /* One-click curator toggle — collapses the parking-coordinator
+                    CFC ceremony (enable manager → toggle role → flip view) into
+                    a single button per `becomeCurator` / `stepDownCurator`. */
+                }
+                {adminModeEnabled
+                  ? (
+                    <cf-button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => stepDownCurator.send()}
+                    >
+                      🔒 Step down
+                    </cf-button>
+                  )
+                  : (
+                    <cf-button
+                      variant="secondary"
+                      size="sm"
+                      disabled={noReporterName}
+                      onClick={() => becomeCurator.send()}
+                    >
+                      🔓 Curator mode
+                    </cf-button>
+                  )}
               </cf-hstack>
             </cf-hstack>
             <cf-hstack gap="2">
@@ -1982,51 +2081,65 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                       <cf-card style="border-left: 3px solid #6366f1; padding: 0.5rem;">
                                         <cf-vstack gap="2">
                                           <span style="font-size: 0.75rem; font-weight: 600;">
-                                            👤 Assign to person
+                                            👤 Whose car is this?
                                           </span>
+                                          <cf-input
+                                            $value={assignPersonName}
+                                            placeholder="e.g. Mary, or a new name like Gideon"
+                                            style="width: 100%;"
+                                          />
+                                          {
+                                            /* Quick-pick chips for existing
+                                              people. A new name typed into the
+                                              input also works — assignToPerson
+                                              creates the person in the shared
+                                              parking-coordinator `people` cell
+                                              if no name matches. */
+                                          }
                                           {hasPeople
                                             ? (
-                                              <cf-vstack gap="1">
-                                                <cf-select
-                                                  $value={assignPersonName}
-                                                  items={peopleSelectItems}
-                                                />
-                                                <cf-hstack gap="1">
-                                                  <cf-button
-                                                    variant="primary"
-                                                    size="sm"
-                                                    onClick={() =>
-                                                      assignToPerson.send()}
-                                                  >
-                                                    Add to their vehicles
-                                                  </cf-button>
+                                              <cf-hstack gap="1" wrap>
+                                                {/* Map the pre-baked
+                                                    top-level `peopleNames`
+                                                    computed instead of
+                                                    `people.get().map(...)` to
+                                                    avoid the "reactive
+                                                    reference from outer scope
+                                                    cannot be accessed via
+                                                    closure" error. */}
+                                                {peopleNames.map((name) => (
                                                   <cf-button
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() =>
-                                                      cancelAssign.send()}
+                                                      setAssignPersonName.send(
+                                                        { name },
+                                                      )}
                                                   >
-                                                    Cancel
+                                                    {name}
                                                   </cf-button>
-                                                </cf-hstack>
-                                              </cf-vstack>
-                                            )
-                                            : (
-                                              <cf-hstack gap="1" align="center">
-                                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
-                                                  Add people in Parking
-                                                  Coordinator first.
-                                                </span>
-                                                <cf-button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  onClick={() =>
-                                                    cancelAssign.send()}
-                                                >
-                                                  Cancel
-                                                </cf-button>
+                                                ))}
                                               </cf-hstack>
-                                            )}
+                                            )
+                                            : null}
+                                          <cf-hstack gap="1">
+                                            <cf-button
+                                              variant="primary"
+                                              size="sm"
+                                              onClick={() =>
+                                                assignToPerson.send()}
+                                            >
+                                              Add to their vehicles
+                                            </cf-button>
+                                            <cf-button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() =>
+                                                cancelAssign.send()}
+                                            >
+                                              Cancel
+                                            </cf-button>
+                                          </cf-hstack>
                                         </cf-vstack>
                                       </cf-card>
                                     )
@@ -2344,160 +2457,17 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                 )
                 : null}
 
-              {/* ====== ADMIN BOOTSTRAP: always visible to allow enabling manager ====== */}
-              {computed(() =>
-                  !currentUserCanManageLotWatchAdmins(adminManagerCredential) &&
-                  !personIsLotWatchAdmin(
-                    adminRegistry,
-                    reporterName.get() || "",
-                  )
-                )
-                ? (
-                  <cf-card style="border: 1px dashed #6366f1;">
-                    <cf-hstack justify="between" align="center" wrap gap="2">
-                      <cf-vstack gap="0">
-                        <span style="font-size: 0.875rem; font-weight: 600;">
-                          🔐 Admin Access
-                        </span>
-                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
-                          Enable manager demo to assign lot-watch admins.
-                        </span>
-                      </cf-vstack>
-                      <cf-button
-                        size="sm"
-                        onClick={() => enableAdminManager.send()}
-                      >
-                        Enable manager demo
-                      </cf-button>
-                    </cf-hstack>
-                  </cf-card>
-                )
-                : null}
-
-              {/* ====== ADMIN SECTION (shown when adminModeEnabled OR manager can bootstrap) ====== */}
-              {computed(() =>
-                  (adminMode.get() &&
-                    personIsLotWatchAdmin(
-                      adminRegistry,
-                      reporterName.get() || "",
-                    )) ||
-                  currentUserCanManageLotWatchAdmins(adminManagerCredential)
-                )
-                ? (
-                  <cf-card style="border: 2px solid #6366f1; margin-top: 0.5rem;">
-                    <cf-vstack gap="3">
-                      <cf-heading level={6}>🔐 Admin Panel</cf-heading>
-
-                      {/* Admin Access */}
-                      <cf-card>
-                        <cf-vstack gap="2">
-                          <cf-hstack
-                            justify="between"
-                            align="center"
-                            wrap
-                            gap="2"
-                          >
-                            <cf-vstack gap="1">
-                              <cf-heading level={6}>Admin Access</cf-heading>
-                              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
-                                Enable manager demo to assign/remove lot-watch
-                                admins.
-                              </span>
-                            </cf-vstack>
-                            <cf-chip
-                              label={currentUserCanManageAdmins
-                                ? "Can manage admins"
-                                : "Cannot manage admins"}
-                            />
-                            <cf-button
-                              size="sm"
-                              disabled={currentUserCanManageAdmins}
-                              onClick={() => enableAdminManager.send()}
-                            >
-                              Enable manager demo
-                            </cf-button>
-                          </cf-hstack>
-
-                          {computed(() => (people.get() ?? []).length === 0)
-                            ? (
-                              <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
-                                No people in shared people cell. Type your name
-                                in "Who's reporting?" to add yourself as admin.
-                              </span>
-                            )
-                            : null}
-
-                          {
-                            /* Reporter-name based admin toggle — uses baked computed to avoid
-                              computed-in-computed JSX with onClick (causes "handler used as lift" error) */
-                          }
-                          {[reporterAdminInfo].filter(Boolean).map((info) => {
-                            const rName = info!.name;
-                            const rIsAdmin = info!.isAdmin;
-                            return (
-                              <cf-hstack
-                                justify="between"
-                                align="center"
-                                gap="2"
-                                wrap
-                                style="padding: 0.5rem 0.75rem; border: 1px solid #a5b4fc; border-radius: 0.75rem; background: #eef2ff;"
-                              >
-                                <cf-hstack gap="2" align="center">
-                                  <span style="font-weight: 600;">{rName}</span>
-                                  <cf-chip
-                                    label={rIsAdmin ? "Admin" : "Member"}
-                                    variant={rIsAdmin ? "accent" : "default"}
-                                  />
-                                </cf-hstack>
-                                <cf-button
-                                  size="sm"
-                                  onClick={() =>
-                                    togglePersonAdmin.send({ name: rName })}
-                                >
-                                  {rIsAdmin ? "Remove admin" : "Make admin"}
-                                </cf-button>
-                              </cf-hstack>
-                            );
-                          })}
-
-                          {adminAccessRows.map((row) => {
-                            const rowName = row.name;
-                            const rowIsAdmin = row.isAdmin;
-                            const rowCanManage = row.canManageAdmins;
-                            return (
-                              <cf-hstack
-                                justify="between"
-                                align="center"
-                                gap="2"
-                                wrap
-                                style="padding: 0.5rem 0.75rem; border: 1px solid var(--cf-color-gray-200); border-radius: 0.75rem;"
-                              >
-                                <cf-hstack gap="2" align="center">
-                                  <span style="font-weight: 600;">
-                                    {rowName}
-                                  </span>
-                                  <cf-chip
-                                    label={rowIsAdmin ? "Admin" : "Member"}
-                                    variant={rowIsAdmin ? "accent" : "default"}
-                                  />
-                                </cf-hstack>
-                                <cf-button
-                                  size="sm"
-                                  disabled={!rowCanManage}
-                                  onClick={() =>
-                                    togglePersonAdmin.send({ name: rowName })}
-                                >
-                                  {rowIsAdmin ? "Remove admin" : "Make admin"}
-                                </cf-button>
-                              </cf-hstack>
-                            );
-                          })}
-                        </cf-vstack>
-                      </cf-card>
-                    </cf-vstack>
-                  </cf-card>
-                )
-                : null}
+              {
+                /* The full multi-admin management UI (per-person Make admin /
+                  Remove admin rows) was removed in favor of the single-click
+                  `🔓 Curator mode` toggle in the header — the lot demo has no
+                  separate "admin manager" persona to model. The CFC
+                  integrity-branded gating + the underlying Streams
+                  (`enableAdminManager`, `togglePersonAdmin`, `toggleAdminMode`)
+                  are unchanged; only the UX collapsed. Re-add an expandable
+                  multi-admin panel here if a real production deployment needs
+                  separate admin assignment. */
+              }
             </cf-vstack>
           </cf-vscroll>
         </cf-screen>
