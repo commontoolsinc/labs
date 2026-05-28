@@ -1,10 +1,10 @@
 import { Immutable, isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
-  cloneIfNecessary,
   type FabricObject,
   type FabricValue,
   isArrayIndexPropertyName,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
@@ -439,13 +439,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         }
         // When modernDataModel is ON, stored objects are deep-frozen by
         // fabricFromNativeValueModern(). Shallow-clone before mutation to avoid
-        // TypeError on frozen objects. force defaults to true (always clone)
-        // because the value may be the transaction's working copy, which
-        // must not be mutated in place.
-        valueObj = cloneIfNecessary(currentValue as FabricValue, {
-          deep: false,
-          frozen: false,
-        }) as FabricObject;
+        // TypeError on frozen objects. `shallowMutableClone` always copies,
+        // because the value may be the transaction's working copy, which must
+        // not be mutated in place.
+        valueObj = shallowMutableClone(
+          currentValue as FabricValue,
+        ) as FabricObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {

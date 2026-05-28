@@ -483,52 +483,6 @@ class Novelty {
     return this.select(address)?.get(address.path);
   }
 
-  /**
-   * Claims a new write invariant, merging it with existing parent invariants
-   * when possible instead of keeping both parent and child separately.
-   */
-  claim(
-    invariant: IAttestation,
-  ): Result<
-    IAttestation,
-    IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
-  > {
-    const candidates = this.edit(invariant.address);
-
-    for (const candidate of candidates) {
-      // If the candidate is a parent of the new invariant, merge the new invariant
-      // into the existing parent invariant.
-      if (Address.includes(candidate.address, invariant.address)) {
-        const { error, ok: merged } = applyWriteToAttestation(
-          candidate,
-          invariant.address,
-          invariant.value,
-        );
-
-        if (error) {
-          return { error };
-        } else {
-          candidates.put(merged);
-          return { ok: merged };
-        }
-      }
-    }
-
-    // If we did not find any parents we may have some children
-    // that will be replaced by this invariant
-    // Since we are altering the collection, we iterate over a copy.
-    for (const candidate of [...candidates]) {
-      if (Address.includes(invariant.address, candidate.address)) {
-        candidates.delete(candidate);
-      }
-    }
-
-    // Store this invariant
-    candidates.put(invariant);
-
-    return { ok: invariant };
-  }
-
   [Symbol.iterator]() {
     return this.#model.values();
   }
@@ -644,33 +598,6 @@ class Changes {
       this.#pathAttestations.set(pathKey, { address, value });
     }
     return result;
-  }
-
-  /** Legacy put() for compatibility - applies write to working copy */
-  put(invariant: IAttestation) {
-    if (!this.#workingCopy) {
-      // First write initializes the working copy
-      this.#workingCopy = invariant;
-    } else {
-      // Apply write to working copy
-      const result = applyWriteToAttestation(
-        this.#workingCopy,
-        invariant.address,
-        invariant.value,
-      );
-      if (result.ok) {
-        this.#workingCopy = result.ok;
-      }
-    }
-    // Store individual path attestation for novelty() iterator
-    const pathKey = JSON.stringify(invariant.address.path);
-    this.#pathAttestations.set(pathKey, invariant);
-  }
-
-  /** Legacy delete() - removes from path attestations */
-  delete(invariant: IAttestation) {
-    const pathKey = JSON.stringify(invariant.address.path);
-    this.#pathAttestations.delete(pathKey);
   }
 
   /**
