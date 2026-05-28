@@ -1888,12 +1888,12 @@ describe("JsonEncodingContext", () => {
       expect(decoded.error).toBeInstanceOf(FabricError);
     });
 
-    it("`.lenient` defaults to false", () => {
+    it("`.lenient` defaults to `false`", () => {
       const ctx = new JsonEncodingContext();
       expect(ctx.lenient).toBe(false);
     });
 
-    it("`.lenient` can be set to true", () => {
+    it("`.lenient` can be set to `true`", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
       expect(ctx.lenient).toBe(true);
     });
