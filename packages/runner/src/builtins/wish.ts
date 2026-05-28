@@ -263,16 +263,20 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
   return ctx.runtime.getHomeSpaceCell(ctx.tx);
 }
 
+function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
+  const profileField = getHomeSpaceCell(ctx).key("defaultPattern").key(
+    "profile",
+  );
+  if (profileField.getRaw() === undefined) {
+    throw new WishError("homeSpaceCell.defaultPattern.profile is not set");
+  }
+  return profileField.resolveAsCell();
+}
+
 function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
-  const profileSpaceField = getHomeSpaceCell(ctx).key("profileSpace");
-  if (profileSpaceField.getRaw() === undefined) {
-    throw new WishError("homeSpaceCell.profileSpace is not set");
-  }
-  const profileSpace = profileSpaceField.get();
-  if (!profileSpace) {
-    throw new WishError("homeSpaceCell.profileSpace is not set");
-  }
-  return (profileSpace as Cell<unknown>).resolveAsCell();
+  const profileDefaultCell = getProfileDefaultCell(ctx);
+  const { space } = profileDefaultCell.getAsNormalizedFullLink();
+  return getSpaceCellForDID(ctx.runtime, space, ctx.tx);
 }
 
 function formatTarget(parsed: ParsedWishTarget): string {
@@ -445,8 +449,7 @@ function searchProfileForHashtag(
     "profile-elements-cell",
     queryKey,
     () =>
-      getProfileSpaceCell(ctx)
-        .key("defaultPattern")
+      getProfileDefaultCell(ctx)
         .key("elements")
         .asSchema(profileElementListSchema),
   );
@@ -651,22 +654,22 @@ function resolveHomeSpaceTarget(
         throw new WishError("User identity DID not available for #profile");
       }
       return [{
-        cell: getProfileSpaceCell(ctx),
-        pathPrefix: ["defaultPattern"],
+        cell: getProfileDefaultCell(ctx),
+        pathPrefix: [],
       }];
     }
 
     case "#profileName": {
       return [{
-        cell: getProfileSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "name"],
+        cell: getProfileDefaultCell(ctx),
+        pathPrefix: ["name"],
       }];
     }
 
     case "#profileAvatar": {
       return [{
-        cell: getProfileSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "avatar"],
+        cell: getProfileDefaultCell(ctx),
+        pathPrefix: ["avatar"],
       }];
     }
 
