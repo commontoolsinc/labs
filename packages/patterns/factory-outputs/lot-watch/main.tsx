@@ -378,8 +378,7 @@ const lotWatchAdminSubject = (personName: string): LotWatchAdminSubject => ({
 
 const lotWatchAdminRolesValue = (
   registry: LotWatchAdminRegistryCell,
-): LotWatchAdminRole[] =>
-  adminRegistryEntries<LotWatchAdminRole>(registry);
+): LotWatchAdminRole[] => adminRegistryEntries<LotWatchAdminRole>(registry);
 
 const personIsLotWatchAdmin = (
   registry: LotWatchAdminRegistryCell,
@@ -461,7 +460,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       Writable.perSpace.of<PersonWithVehicles[]>([]);
 
     // DESIGN §6: admin registry + manager credential (mirror coordinator)
-    const defaultAdminRegistry = new Writable.perSpace<LotWatchAdminRegistryValue>(
+    const defaultAdminRegistry = new Writable.perSpace<
+      LotWatchAdminRegistryValue
+    >(
       {} as LotWatchAdminRegistryValue,
     );
     const adminRegistry =
@@ -1073,7 +1074,8 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
     );
     const adminModeEnabled = computed(() =>
-      adminMode.get() && personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
+      adminMode.get() &&
+      personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
     );
     const currentUserCanManageAdmins = computed(() =>
       currentUserCanManageLotWatchAdmins(adminManagerCredential)
@@ -1084,7 +1086,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // (may be empty standalone). We read canManageAdmins here (top-level) and
     // bake it per row so no perSession read leaks into a nested computed.
     const adminAccessRows = computed(() => {
-      const canManage = currentUserCanManageLotWatchAdmins(adminManagerCredential);
+      const canManage = currentUserCanManageLotWatchAdmins(
+        adminManagerCredential,
+      );
       return (people.get() ?? []).map((p) => ({
         name: p.name,
         isAdmin: personIsLotWatchAdmin(adminRegistry, p.name),
@@ -1096,7 +1100,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // Avoids the "handler used as lift" error from onClick inside computed() JSX.
     const reporterAdminInfo = computed(() => {
       const name = reporterName.get() ?? "";
-      const canManage = currentUserCanManageLotWatchAdmins(adminManagerCredential);
+      const canManage = currentUserCanManageLotWatchAdmins(
+        adminManagerCredential,
+      );
       if (!name.trim() || !canManage) return null;
       return {
         name,
@@ -1204,7 +1210,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
             clsColor: classificationColor(cls),
             clsBg: classificationBg(cls),
             plateDisplay: s.plateNumber
-              ? `${s.plateNumber}${s.plateState ? " (" + s.plateState + ")" : ""}`
+              ? `${s.plateNumber}${
+                s.plateState ? " (" + s.plateState + ")" : ""
+              }`
               : "",
             description: s.description,
           };
@@ -1228,7 +1236,12 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       for (const s of all) {
         if (filterSpot && s.spotNumber !== filterSpot) continue;
         if (filterCls) {
-          const cls = classifyPlate(s.plateNumber, s.plateState, ourVehicles, knownList);
+          const cls = classifyPlate(
+            s.plateNumber,
+            s.plateState,
+            ourVehicles,
+            knownList,
+          );
           if (cls !== filterCls) continue;
         }
         return false; // found at least one match
@@ -1419,7 +1432,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             const spotNum = spot.spotNumber;
                             return (
                               <cf-button
-                                variant={spot.selected ? "primary" : "secondary"}
+                                variant={spot.selected
+                                  ? "primary"
+                                  : "secondary"}
                                 onClick={() =>
                                   setDraftSpot.send({ spot: spotNum })}
                               >
@@ -1969,15 +1984,22 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                     </cf-card>
 
                     {/* Repeat-offender leaderboard */}
-                    {computed(() => groupSightingsByPlate(sightings.get() ?? []).some((g) => {
-                      const cls = classifyPlate(
-                        g.plate,
-                        g.state,
-                        (people.get() ?? []).flatMap((p) => p.vehicles ?? []),
-                        knownVehicles.get() ?? [],
-                      );
-                      return cls === "offender" || (cls === "unknown" && g.count >= 3);
-                    }))
+                    {computed(() =>
+                        groupSightingsByPlate(sightings.get() ?? []).some(
+                          (g) => {
+                            const cls = classifyPlate(
+                              g.plate,
+                              g.state,
+                              (people.get() ?? []).flatMap((p) =>
+                                p.vehicles ?? []
+                              ),
+                              knownVehicles.get() ?? [],
+                            );
+                            return cls === "offender" ||
+                              (cls === "unknown" && g.count >= 3);
+                          },
+                        )
+                      )
                       ? (
                         <cf-card style="background: #fef2f2; border: 1px solid #fecaca;">
                           <cf-vstack gap="2">
@@ -2122,7 +2144,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                 : null}
 
               {/* ====== ADMIN BOOTSTRAP: always visible to allow enabling manager ====== */}
-              {computed(() => !currentUserCanManageLotWatchAdmins(adminManagerCredential) && !personIsLotWatchAdmin(adminRegistry, reporterName.get() || ""))
+              {computed(() =>
+                  !currentUserCanManageLotWatchAdmins(adminManagerCredential) &&
+                  !personIsLotWatchAdmin(
+                    adminRegistry,
+                    reporterName.get() || "",
+                  )
+                )
                 ? (
                   <cf-card style="border: 1px dashed #6366f1;">
                     <cf-hstack justify="between" align="center" wrap gap="2">
@@ -2146,7 +2174,14 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                 : null}
 
               {/* ====== ADMIN SECTION (shown when adminModeEnabled OR manager can bootstrap) ====== */}
-              {computed(() => (adminMode.get() && personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) || currentUserCanManageLotWatchAdmins(adminManagerCredential))
+              {computed(() =>
+                  (adminMode.get() &&
+                    personIsLotWatchAdmin(
+                      adminRegistry,
+                      reporterName.get() || "",
+                    )) ||
+                  currentUserCanManageLotWatchAdmins(adminManagerCredential)
+                )
                 ? (
                   <cf-card style="border: 2px solid #6366f1; margin-top: 0.5rem;">
                     <cf-vstack gap="3">
@@ -2155,7 +2190,12 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                       {/* Admin Access */}
                       <cf-card>
                         <cf-vstack gap="2">
-                          <cf-hstack justify="between" align="center" wrap gap="2">
+                          <cf-hstack
+                            justify="between"
+                            align="center"
+                            wrap
+                            gap="2"
+                          >
                             <cf-vstack gap="1">
                               <cf-heading level={6}>Admin Access</cf-heading>
                               <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
@@ -2177,9 +2217,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             </cf-button>
                           </cf-hstack>
 
-                          {computed(() =>
-                            (people.get() ?? []).length === 0
-                          )
+                          {computed(() => (people.get() ?? []).length === 0)
                             ? (
                               <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
                                 No people in shared people cell. Type your name
@@ -2188,8 +2226,10 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             )
                             : null}
 
-                          {/* Reporter-name based admin toggle — uses baked computed to avoid
-                              computed-in-computed JSX with onClick (causes "handler used as lift" error) */}
+                          {
+                            /* Reporter-name based admin toggle — uses baked computed to avoid
+                              computed-in-computed JSX with onClick (causes "handler used as lift" error) */
+                          }
                           {[reporterAdminInfo].filter(Boolean).map((info) => {
                             const rName = info!.name;
                             const rIsAdmin = info!.isAdmin;
