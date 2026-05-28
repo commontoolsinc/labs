@@ -417,3 +417,87 @@ made before committing.
 
 - The spec and `wish.md` now list only `#profile`, `#profileName`,
   `#profileAvatar`, and `#profileSpace`.
+
+## Slice 11: Protect Profile Link and Trusted Wish Create UI
+
+### Ambiguity or Incorrect Spec
+
+- The earlier v1 boundary treated `homeSpaceCell.defaultPattern.profile` as a
+  durable but unprotected link. The requested behavior now requires protecting
+  that link with integrity too.
+- The persona wish UI initially could be implemented as raw runner markup. That
+  would make it hard to trust the UI surface that starts profile creation.
+- A direct handler that both writes the home link and starts the profile pattern
+  in a new space would cross spaces in one write transaction. The existing
+  runtime write isolation rejects that shape.
+- A direct trusted handler that writes the home `requestedProfileName` cell from
+  the wish-created UI does not by itself run the home pattern's reactive
+  profile-link lift. The existing home `createProfile` stream is still the
+  correct host boundary for the two-step creation flow.
+
+### Decision
+
+- `homeSpaceCell.defaultPattern.profile` now has static `"profile-link"`
+  add-integrity and is `WriteAuthorizedBy` the home pattern's profile-link
+  creation flow.
+- Profile creation keeps the two-step home implementation: the trusted create
+  surface sends the home `createProfile` stream, that stream writes the
+  requested profile name, and the reactive `.inSpace(name)` pattern factory
+  creates the profile link.
+- The missing-profile `#profile` wish UI now loads
+  `packages/patterns/system/profile-create.tsx` and renders that trusted
+  surface via `cf-render`. The pattern sends the same create-profile stream used
+  by the home profile tab and does not navigate.
+- The transient `requestedProfileName` trigger remains ordinary home default
+  state. The protected durable surface in this slice is the resulting
+  `homeSpaceCell.defaultPattern.profile` link.
+
+### Tests Added
+
+- `packages/runner/test/profile-owner-cfc.test.ts`
+  - The home profile link schema carries `"profile-link"` add-integrity and a
+    `writeAuthorizedBy` claim.
+  - Direct untrusted writes to the home profile link fail.
+- `packages/runner/test/wish.test.ts`
+  - Missing `#profile` UI is rendered through a `cf-render` profile-create
+    pattern placeholder instead of raw runner input markup.
+- `packages/patterns/integration/shared-profile.test.ts`
+  - The inline wish creation flow waits for the trusted
+    `ProfileCreateSurface` before submitting profile names for both identities.
+
+### Spec Correction Needed
+
+- The spec, `wish.md`, and `HOME_SPACE.md` now document that the home profile
+  link is CFC-protected and that persona wish creation UI is a trusted pattern
+  surface.
+
+## Slice 12: Headless Wish Persona UI Test Stabilization
+
+### Ambiguity or Incorrect Spec
+
+- The integration spec said to exercise the browser flow, but did not say how
+  to synchronize around a missing-profile wish that intentionally launches a
+  child pattern asynchronously.
+- After identity switching, old rendered wish-create surfaces can remain in the
+  document while the new identity's view settles. A selector-only synthetic
+  submit can hit a stale input.
+
+### Decision
+
+- The shared-profile integration now runs in headless mode for UI verification.
+- The test synchronizes on visible profile text and trusted profile-create
+  selectors instead of waiting for global runtime idle, because the wish-created
+  child pattern can keep the runtime from satisfying the generic idle probe.
+- The synthetic submit helper dispatches `cf-send` to all matching pierced
+  profile-create inputs so the active identity's trusted create surface receives
+  the event even when stale render trees are still present.
+
+### Tests Added
+
+- `packages/patterns/integration/shared-profile.test.ts`
+  - Verified with `HEADLESS=true deno task --cwd packages/patterns integration
+    --filter "shared profile"`.
+
+### Spec Correction Needed
+
+- None.

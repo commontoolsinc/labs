@@ -255,9 +255,19 @@ This is CFC-enforced, not UI-only. The UI may hide editing controls for
 non-owners, but that is only a convenience check.
 
 The home link write to `homeSpaceCell.defaultPattern.profile` is durable and
-must still be made by the authenticated user flow, but it is not CFC
-owner-protected in v1. It is intentionally outside the protected profile data
-surface for this first implementation.
+protected by CFC as profile-link data. It carries static `"profile-link"`
+integrity and is `WriteAuthorizedBy` the profile-link creation flow in the home
+default pattern. This is separate from the profile owner's
+`represents-principal` integrity on the profile default fields: v1 protects the
+link against direct untrusted writes, but does not add a second owner-specific
+atom to the home link itself.
+
+Profile creation UI rendered by `wish({ query: "#profile" })[UI]` must be
+vended through a trusted pattern surface, not raw runner-owned input markup. The
+trusted surface sends the same create-profile event used by the home profile tab
+and leaves navigation unchanged. The transient requested-name trigger that feeds
+this flow is ordinary home default-pattern state; the durable protected surface
+is the resulting `homeSpaceCell.defaultPattern.profile` link.
 
 The owner check should use `runtime.userIdentityDID` / `storageManager.as.did()`
 as the authenticated principal. It should not use the current collaboration
@@ -333,7 +343,7 @@ The optional `[UI]` for `wish({ query: "#profile" })` is persona-aware:
 
 - when the profile exists, render a link to the profile default pattern
 - when the profile is missing, render the same profile-name input as the home
-  profile tab
+  profile tab through the trusted profile-create pattern surface
 - submitting the input creates the profile through the home default pattern but
   does not navigate away from the current view
 - the wish UI should then reactively replace itself with the profile link once

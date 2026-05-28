@@ -73,6 +73,12 @@ Submitting a name starts `/api/patterns/system/profile-home.tsx` in a new
 profile space with `PatternFactory.inSpace(name)` and stores the resulting
 profile default-pattern link at `defaultPattern.profile`.
 
+The `defaultPattern.profile` link is CFC-protected profile-link data. It must be
+created by the home default pattern's trusted profile creation flow; direct
+untrusted writes to the link are rejected. The inline `#profile` wish UI uses a
+trusted profile-create pattern surface for the same creation event and does not
+navigate away from the current view.
+
 Patterns can discover profile data from any space:
 
 ```tsx

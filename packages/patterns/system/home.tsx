@@ -1,4 +1,5 @@
 import {
+  Cfc,
   computed,
   equals,
   handler,
@@ -8,8 +9,10 @@ import {
   Stream,
   UI,
   Writable,
+  WriteAuthorizedBy,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
+import ProfileCreate, { type CreateProfileEvent } from "./profile-create.tsx";
 import ProfileHome, { type ProfileHomeOutput } from "./profile-home.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
@@ -38,11 +41,6 @@ type SpaceEntry = {
   did?: string;
 };
 
-type CreateProfileEvent = {
-  detail?: { message?: string };
-  name?: string;
-};
-
 type HomeOutput = {
   [NAME]: string;
   [UI]: unknown;
@@ -51,7 +49,8 @@ type HomeOutput = {
   learned: Writable<LearnedSection>;
   spaces: Writable<SpaceEntry[]>;
   defaultAppUrl: Writable<string>;
-  profile?: ProfileHomeOutput;
+  profile?: TrustedProfileLink;
+  requestedProfileName: Writable<string>;
   createProfile: Stream<CreateProfileEvent>;
 };
 
@@ -127,7 +126,11 @@ const requestProfileCreation = handler<
   CreateProfileEvent,
   { requestedProfileName: Writable<string> }
 >((event, { requestedProfileName }) => {
-  const name = (event.name ?? event.detail?.message ?? "").trim();
+  if (event.key !== undefined && event.key !== "Enter") {
+    return;
+  }
+  const name = (event.name ?? event.detail?.message ?? event.target?.value ??
+    "").trim();
   if (name) {
     requestedProfileName.set(name);
   }
@@ -141,8 +144,15 @@ const createProfileFromName = lift<
   if (!trimmed) {
     return undefined;
   }
-  return ProfileHome.inSpace(trimmed)({ initialName: trimmed });
+  return ProfileHome.inSpace(trimmed)({
+    initialName: trimmed,
+  });
 });
+
+type TrustedProfileLink = Cfc<
+  WriteAuthorizedBy<ProfileHomeOutput, typeof createProfileFromName>,
+  { addIntegrity: ["profile-link"] }
+>;
 
 export default pattern<Record<string, never>, HomeOutput>((_) => {
   // OWN the data cells (.for for id stability)
@@ -151,8 +161,16 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
-  const requestedProfileName = new Writable("").for("requestedProfileName");
+  const requestedProfileName = new Writable("").for(
+    "requestedProfileName",
+  );
+  const createProfileStream = requestProfileCreation({ requestedProfileName });
   const profile = createProfileFromName({ name: requestedProfileName });
+  const profileCreate = ProfileCreate({
+    createProfile: createProfileStream,
+    inputId: "home-profile-name-input",
+    buttonId: "home-profile-create-button",
+  });
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -187,18 +205,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                     <cf-render $cell={profile as any} />
                   </cf-vstack>
                 )
-                : (
-                  <cf-vstack gap="1">
-                    <cf-message-input
-                      id="home-profile-name-input"
-                      placeholder="Your name..."
-                      appearance="rounded"
-                      oncf-send={requestProfileCreation({
-                        requestedProfileName,
-                      })}
-                    />
-                  </cf-vstack>
-                )}
+                : profileCreate}
             </cf-vstack>
           </cf-tab-panel>
           <cf-tab-panel value="spaces">
@@ -293,11 +300,12 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     spaces,
     defaultAppUrl,
     profile,
+    requestedProfileName,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
     removeFavorite: removeFavorite({ favorites }),
     addJournalEntry: addJournalEntry({ journal }),
-    createProfile: requestProfileCreation({ requestedProfileName }),
+    createProfile: createProfileStream,
   };
 });

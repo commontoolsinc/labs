@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -76,6 +77,31 @@ const createRuntime = () => {
     storageManager,
   });
   return { runtime, storageManager };
+};
+
+const compileHomePattern = async (runtime: Runtime) => {
+  const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+    /\/$/,
+    "",
+  );
+  const sourcePath = new URL(
+    "../../patterns/system/home.tsx",
+    import.meta.url,
+  ).pathname;
+  const program = await runtime.harness.resolve(
+    new FileSystemProgramResolver(sourcePath, repoRoot),
+  );
+  return await runtime.patternManager.compilePattern(program);
+};
+
+const resolveLocalSchemaRef = (root: JSONSchema, schema: JSONSchema) => {
+  const ref = (schema as { $ref?: string }).$ref;
+  if (!ref?.startsWith("#/$defs/")) {
+    return schema;
+  }
+  const defName = ref.slice("#/$defs/".length);
+  return (root as { $defs?: Record<string, JSONSchema> }).$defs?.[defName] ??
+    schema;
 };
 
 const setTrustedProfileWriter = (
@@ -267,6 +293,65 @@ describe("profile owner CFC policy", () => {
       expect(result.error?.message).toContain(
         "writeAuthorizedBy requires a trusted builtin identity",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("marks the home profile link as integrity-protected data", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const rootSchema = homePattern.resultSchema as JSONSchema;
+      const profileSchema = resolveLocalSchemaRef(
+        rootSchema,
+        (rootSchema as { properties?: Record<string, JSONSchema> }).properties
+          ?.profile ?? {},
+      ) as { ifc?: { addIntegrity?: unknown[]; writeAuthorizedBy?: unknown } };
+      expect(profileSchema.ifc?.addIntegrity).toContain("profile-link");
+      expect(profileSchema.ifc?.writeAuthorizedBy).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects direct untrusted writes to the home profile link", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const tx = runtime.edit();
+      const homeDefault = runtime.getCell(
+        alice.did(),
+        "home-profile-link-untrusted",
+        homePattern.resultSchema,
+        tx,
+      );
+      const profileDefault = runtime.getCell(
+        alice.did(),
+        "home-profile-link-untrusted-target",
+        undefined,
+        tx,
+      );
+      profileDefault.set({
+        name: "Ada",
+        avatar: "",
+        elements: [],
+      });
+      await tx.commit();
+
+      const writeTx = runtime.edit();
+      const protectedHomeDefault = runtime.getCell(
+        alice.did(),
+        "home-profile-link-untrusted",
+        homePattern.resultSchema,
+        writeTx,
+      );
+      protectedHomeDefault.key("profile").set(profileDefault);
+      writeTx.prepareCfc();
+      const result = await writeTx.commit();
+      expect(result.error?.message).toContain("trusted");
     } finally {
       await runtime.dispose();
       await storageManager.close();

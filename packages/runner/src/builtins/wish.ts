@@ -29,6 +29,8 @@ import { scopedCell } from "./scope-policy.ts";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
+const PROFILE_CREATE_TSX_PATH = getPatternEnvironment().apiUrl +
+  "api/patterns/system/profile-create.tsx";
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
   level: "warn",
@@ -261,7 +263,7 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
 function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
   const profileField = getHomeSpaceCell(ctx).key("defaultPattern").key(
     "profile",
-  );
+  ).resolveAsCell();
   if (profileField.getRaw() === undefined) {
     throw new WishError("homeSpaceCell.defaultPattern.profile is not set");
   }
@@ -960,6 +962,8 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
 // fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
 let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let suggestionPattern: Pattern | undefined;
+let profileCreatePatternFetchPromise: Promise<Pattern | undefined> | undefined;
+let profileCreatePattern: Pattern | undefined;
 
 async function fetchSuggestionPattern(
   runtime: Runtime,
@@ -983,25 +987,34 @@ async function fetchSuggestionPattern(
   }
 }
 
+async function fetchProfileCreatePattern(
+  runtime: Runtime,
+): Promise<Pattern | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(PROFILE_CREATE_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load profile-create.tsx");
+    }
+    const pattern = await runtime.patternManager.compilePattern(program);
+
+    if (!pattern) throw new WishError("Can't compile profile-create.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("Can't load profile-create.tsx", e);
+    return undefined;
+  }
+}
+
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
 function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("cf-cell-link", { $cell: cell });
-}
-
-function profileCreateUI(ctx: WishContext): VNode {
-  const createProfile = getHomeSpaceCell(ctx)
-    .key("defaultPattern")
-    .key("createProfile")
-    .resolveAsCell();
-  return h("cf-message-input", {
-    id: "wish-profile-name-input",
-    placeholder: "Your name...",
-    appearance: "rounded",
-    "oncf-send": createProfile,
-  });
 }
 
 function wishResultUI(
@@ -1163,12 +1176,23 @@ export function wish(
     }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
+  let profileCreatePatternInput:
+    | {
+      createProfile: Cell<unknown>;
+      inputId: string;
+      buttonId: string;
+    }
+    | undefined;
+  let profileCreatePatternResultCell: Cell<any> | undefined;
 
   addCancel(() => {
     cancelled = true;
     releaseCurrentSharedHashtagResolver();
     if (suggestionPatternResultCell) {
       runtime.runner.stop(suggestionPatternResultCell);
+    }
+    if (profileCreatePatternResultCell) {
+      runtime.runner.stop(profileCreatePatternResultCell);
     }
   });
 
@@ -1271,6 +1295,71 @@ export function wish(
     }
 
     return suggestionPatternResultCell;
+  }
+
+  function launchProfileCreatePattern(
+    ctx: WishContext,
+    providedTx?: IExtendedStorageTransaction,
+  ): Cell<any> {
+    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
+      .resolveAsCell();
+    void runtime.start(homeDefaultPattern).catch(() => {});
+    profileCreatePatternInput = {
+      createProfile: homeDefaultPattern.key("createProfile"),
+      inputId: "wish-profile-name-input",
+      buttonId: "wish-profile-create-button",
+    };
+    const tx = providedTx || runtime.edit();
+
+    if (!profileCreatePatternResultCell) {
+      profileCreatePatternResultCell = runtime.getCell(
+        parentCell.space,
+        { wish: { profileCreatePattern: cause } },
+        undefined,
+        tx,
+      );
+    }
+
+    if (!profileCreatePattern) {
+      if (!profileCreatePatternFetchPromise) {
+        profileCreatePatternFetchPromise = fetchProfileCreatePattern(runtime)
+          .then((pattern) => {
+            profileCreatePattern = pattern;
+            return pattern;
+          });
+      }
+      void profileCreatePatternFetchPromise.then((pattern) => {
+        if (!cancelled && pattern && profileCreatePatternResultCell) {
+          runtime.run(
+            undefined,
+            pattern,
+            profileCreatePatternInput,
+            profileCreatePatternResultCell,
+          );
+        }
+      });
+    } else if (!cancelled && profileCreatePatternResultCell) {
+      runtime.run(
+        tx,
+        profileCreatePattern,
+        profileCreatePatternInput,
+        profileCreatePatternResultCell,
+      );
+    }
+
+    if (!providedTx) {
+      runtime.prepareTxForCommit(tx);
+      tx.commit();
+    }
+
+    return profileCreatePatternResultCell;
+  }
+
+  function profileCreateUI(ctx: WishContext): VNode {
+    return h("cf-render", {
+      "data-profile-create-ui": "wish",
+      $cell: launchProfileCreatePattern(ctx, ctx.tx),
+    });
   }
 
   // Wish action, reactive to changes in inputsCell and any cell we read during

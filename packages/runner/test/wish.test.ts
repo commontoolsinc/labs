@@ -2441,7 +2441,6 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      const createProfile = homeDefaultCell.key("createProfile");
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();
@@ -2468,14 +2467,13 @@ describe("wish built-in", () => {
       const ui = result.key("profile").key(UI).get() as any;
       expect(state?.result).toBeUndefined();
       expect(String(state?.error)).toContain("profile");
-      expect(ui?.name).toBe("cf-message-input");
-      expect(ui?.props?.id).toBe("wish-profile-name-input");
-      expect(ui?.props?.placeholder).toBe("Your name...");
+      expect(ui?.name).toBe("cf-render");
+      expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
       expect(
-        result.key("profile").key(UI).key("props").key("oncf-send")
+        result.key("profile").key(UI).key("props").key("$cell")
           .resolveAsCell()
-          .equals(createProfile),
-      ).toBe(true);
+          .getRaw(),
+      ).toBeUndefined();
     });
 
     it("searches home default profile elements for hashtag wishes with profile scope", async () => {
