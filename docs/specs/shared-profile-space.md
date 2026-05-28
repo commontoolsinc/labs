@@ -105,9 +105,9 @@ in the profile space, so its normalized link carries the profile space DID:
 homeSpaceCell.defaultPattern.profile -> profile default pattern cell
 ```
 
-Earlier implementation slices added `homeSpaceCell.profileSpace` as a
-space-cell-shaped link. That shape is retained as a compatibility fallback for
-`wish()`, but the home creation UI writes `defaultPattern.profile`.
+`homeSpaceCell.profileSpace` is not part of the target v1 shape. Earlier
+implementation notes used that name for the durable link, but the implemented
+home-field convention is `homeSpaceCell.defaultPattern.profile`.
 
 ### Profile Space Identity
 
@@ -169,8 +169,10 @@ Default pattern creation needs a third case:
    `/api/patterns/system/default-app.tsx`
 
 A profile space is not identified by `space === userIdentityDID`. It is
-identified by the home-space `profileSpace` link or by the explicit
-profile-creation path before the link exists. Implementation options:
+identified by the profile default-pattern link at
+`homeSpaceCell.defaultPattern.profile`, whose normalized link carries the
+profile space DID, or by the explicit profile-creation path before the link
+exists. Implementation options:
 
 - Add `ensureProfileDefaultPattern(profileSpaceDID)` and
   `recreateProfileDefaultPattern(profileSpaceDID)` instead of overloading
@@ -247,10 +249,10 @@ Writes to those fields must satisfy the owner integrity and must be
 This is CFC-enforced, not UI-only. The UI may hide editing controls for
 non-owners, but that is only a convenience check.
 
-The home link write to `homeSpaceCell.profileSpace` is durable and must still
-be made by the authenticated user flow, but it is not CFC owner-protected in
-v1. It is intentionally outside the protected profile data surface for this
-first implementation.
+The home link write to `homeSpaceCell.defaultPattern.profile` is durable and
+must still be made by the authenticated user flow, but it is not CFC
+owner-protected in v1. It is intentionally outside the protected profile data
+surface for this first implementation.
 
 The owner check should use `runtime.userIdentityDID` / `storageManager.as.did()`
 as the authenticated principal. It should not use the current collaboration
@@ -275,9 +277,7 @@ that must change before `scope: ["profile"]` is exposed.
 ### Hashtag Search
 
 For hashtag queries, `scope: ["profile"]` searches
-`homeSpaceCell.defaultPattern.profile.elements`. If only the older
-`homeSpaceCell.profileSpace` link exists, `wish()` may fall back to
-`homeSpaceCell.profileSpace.defaultPattern.elements`.
+`homeSpaceCell.defaultPattern.profile.elements`.
 
 Matching follows the favorites behavior:
 
@@ -391,7 +391,7 @@ Add focused runner tests for `wish()`:
 
 ## Implementation Plan
 
-1. Add schemas and helper types for `profileSpace` on the space cell and
+1. Add schemas and helper types for the profile default-pattern link and
    `ProfileDefaultPattern` / `ProfileElement`.
 2. Add `PatternFactory.inSpace(...)` and use it for profile-space creation.
 3. Add the profile default pattern at

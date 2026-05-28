@@ -2250,7 +2250,7 @@ describe("wish built-in", () => {
       expect((favorites as any[])[0].tag).toEqual("test favorite");
     });
 
-    it("resolves well-known profile targets from the user's profile space", async () => {
+    it("resolves well-known profile targets from the home default profile link", async () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-profile-space",
       )).did();
@@ -2277,9 +2277,14 @@ describe("wish built-in", () => {
       tx = runtime.edit();
 
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
-      (homeSpaceCell as any).key("profileSpace").set(
-        runtime.getSpaceCell(profileSpaceDid),
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-link",
+        undefined,
+        tx,
       );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();
       await runtime.idle();
@@ -2317,15 +2322,10 @@ describe("wish built-in", () => {
         .toBe("Ada Lovelace");
     });
 
-    it("searches profile elements for hashtag wishes with profile scope", async () => {
+    it("searches home default profile elements for hashtag wishes with profile scope", async () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-profile-hashtag-space",
       )).did();
-      const profileSpaceCell = runtime.getSpaceCell(
-        profileSpaceDid,
-        undefined,
-        tx,
-      );
       const profileDefaultCell = runtime.getCell(
         profileSpaceDid,
         "profile-default-hashtag",
@@ -2349,16 +2349,20 @@ describe("wish built-in", () => {
           title: "Profile Card",
         }],
       });
-      profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
 
       await tx.commit();
       await runtime.idle();
       tx = runtime.edit();
 
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
-      (homeSpaceCell as any).key("profileSpace").set(
-        runtime.getSpaceCell(profileSpaceDid),
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-hashtag-link",
+        undefined,
+        tx,
       );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();
       await runtime.idle();
@@ -2429,7 +2433,7 @@ describe("wish built-in", () => {
 
       const state = result.key("profileName").get();
       expect(state?.result).toBeUndefined();
-      expect(String(state?.error)).toContain("profileSpace");
+      expect(String(state?.error)).toContain("profile");
     });
 
     it("resolves #default from pattern space, not home space", async () => {

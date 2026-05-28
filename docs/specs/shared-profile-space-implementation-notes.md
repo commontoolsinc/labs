@@ -252,5 +252,38 @@ made before committing.
 ### Spec Correction Needed
 
 - The primary durable link is `homeSpaceCell.defaultPattern.profile`, not
-  `homeSpaceCell.profileSpace`. `profileSpace` remains only as a compatibility
-  fallback in `wish()` until the earlier schema addition is removed or migrated.
+  `homeSpaceCell.profileSpace`.
+
+## Slice 5b: Wish Resolution From Home Profile Link
+
+### Ambiguity or Incorrect Spec
+
+- Earlier spec and runner tests still used `homeSpaceCell.profileSpace` as the
+  profile link source after the home implementation moved the durable link to
+  `homeSpaceCell.defaultPattern.profile`.
+- Backward compatibility for `homeSpaceCell.profileSpace` is no longer required
+  for this feature.
+
+### Decision
+
+- `wish()` now resolves profile targets from
+  `homeSpaceCell.defaultPattern.profile`.
+- `#profile` and `#profileDefault` return the linked profile default pattern.
+- `#profileName` and `#profileAvatar` read fields on that linked profile
+  default pattern.
+- `#profileSpace` derives the profile space from the linked profile default
+  pattern's normalized link and returns that space cell.
+- Profile-scoped hashtag search reads
+  `homeSpaceCell.defaultPattern.profile.elements`.
+
+### Tests Added
+
+- `packages/runner/test/wish.test.ts`
+  - Well-known profile targets resolve from the home default-pattern profile
+    link.
+  - Profile-scoped hashtag search reads profile elements through that link.
+  - Missing profile returns an error `WishState` containing `profile`.
+
+### Spec Correction Needed
+
+- Remove `homeSpaceCell.profileSpace` compatibility language from the spec.
