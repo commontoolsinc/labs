@@ -1046,3 +1046,70 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) 
     );
   },
 );
+
+Deno.test(
+  "Pipeline regression: side-writing computed marks writable inputs for materialization",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+}
+
+export default pattern<Input>(({ departments }) => {
+  const init = computed(() => {
+    if (departments.get().length === 0) departments.set(["Bakery"]);
+    return true;
+  });
+  return { init };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const liftMatch = output.match(/const init = __cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift()",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
+
+    assertStringIncludes(liftWindow, "materializerWriteInputPaths");
+    assertStringIncludes(liftWindow, '["departments"]');
+  },
+);
+
+Deno.test(
+  "Pipeline regression: readonly computed does not mark writable-looking inputs for materialization",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+}
+
+export default pattern<Input>(({ departments }) => {
+  const count = computed(() => departments.get().length);
+  return { count };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const liftMatch = output.match(/const count = __cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift()",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
+
+    assert(
+      !liftWindow.includes("materializerWriteInputPaths"),
+      "readonly computed() should remain a normal pull computation",
+    );
+  },
+);

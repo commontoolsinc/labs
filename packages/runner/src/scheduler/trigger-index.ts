@@ -35,8 +35,10 @@ export interface TriggerIndexState {
     action: Action,
     entities: Iterable<SpaceScopeAndURI>,
   ): void;
+  removeSpace(space: MemorySpace): void;
   collectReadersForWrite(write: IMemorySpaceAddress): Set<Action>;
   hasRegisteredTriggers(): boolean;
+  clear(): void;
   collectTriggeredActionsForChange(
     space: MemorySpace,
     change: IMemoryChange,
@@ -54,6 +56,31 @@ export interface TriggerSubscriptionState extends TriggerIndexState {
     actionId: string,
     entityCount: number,
   ) => void;
+}
+
+function removeActionFromTriggerMap(
+  triggerMap: Map<SpaceScopeAndURI, Map<Action, SortedAndCompactPaths>>,
+  entity: SpaceScopeAndURI,
+  action: Action,
+): void {
+  const pathsByAction = triggerMap.get(entity);
+  if (!pathsByAction) return;
+
+  pathsByAction.delete(action);
+  if (pathsByAction.size === 0) {
+    triggerMap.delete(entity);
+  }
+}
+
+function removeTriggerMapSpace(
+  triggerMap: Map<SpaceScopeAndURI, Map<Action, SortedAndCompactPaths>>,
+  spacePrefix: string,
+): void {
+  for (const entity of triggerMap.keys()) {
+    if (entity.startsWith(spacePrefix)) {
+      triggerMap.delete(entity);
+    }
+  }
 }
 
 export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
@@ -109,12 +136,20 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
     this.state.triggerIndex.removeActionFromEntities(action, entities);
   }
 
+  removeSpace(space: MemorySpace): void {
+    this.state.triggerIndex.removeSpace(space);
+  }
+
   collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
     return this.state.triggerIndex.collectReadersForWrite(write);
   }
 
   hasRegisteredTriggers(): boolean {
     return this.state.triggerIndex.hasRegisteredTriggers();
+  }
+
+  clear(): void {
+    this.state.triggerIndex.clear();
   }
 
   collectTriggeredActionsForChange(
@@ -187,9 +222,19 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     entities: Iterable<SpaceScopeAndURI>,
   ): void {
     for (const spaceAndURI of entities) {
-      this.triggers.get(spaceAndURI)?.delete(action);
-      this.nonRecursiveTriggers.get(spaceAndURI)?.delete(action);
+      removeActionFromTriggerMap(this.triggers, spaceAndURI, action);
+      removeActionFromTriggerMap(
+        this.nonRecursiveTriggers,
+        spaceAndURI,
+        action,
+      );
     }
+  }
+
+  removeSpace(space: MemorySpace): void {
+    const spacePrefix = `${space}/`;
+    removeTriggerMapSpace(this.triggers, spacePrefix);
+    removeTriggerMapSpace(this.nonRecursiveTriggers, spacePrefix);
   }
 
   collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
@@ -223,6 +268,11 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
 
   hasRegisteredTriggers(): boolean {
     return this.triggers.size > 0 || this.nonRecursiveTriggers.size > 0;
+  }
+
+  clear(): void {
+    this.triggers.clear();
+    this.nonRecursiveTriggers.clear();
   }
 
   collectTriggeredActionsForChange(

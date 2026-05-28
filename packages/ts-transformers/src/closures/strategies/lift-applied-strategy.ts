@@ -129,6 +129,29 @@ function getFirstParameterCapabilitySummary(
   return summary.params.find((param) => param.name === parameterName);
 }
 
+function createDeriveSchedulerOptions(
+  inputParamSummary: CapabilityParamSummary | undefined,
+  factory: ts.NodeFactory,
+): ts.ObjectLiteralExpression | undefined {
+  const writePaths = inputParamSummary?.writePaths ?? [];
+  if (writePaths.length === 0) return undefined;
+
+  return factory.createObjectLiteralExpression([
+    factory.createPropertyAssignment(
+      "materializerWriteInputPaths",
+      factory.createArrayLiteralExpression(
+        writePaths.map((path) =>
+          factory.createArrayLiteralExpression(
+            path.map((segment) => factory.createStringLiteral(segment)),
+            false,
+          )
+        ),
+        false,
+      ),
+    ),
+  ], false);
+}
+
 /**
  * Resolve capture name collisions with the original input parameter name.
  * If a capture has the same name as originalInputParamName, rename it (e.g., multiplier -> multiplier_1).
@@ -520,6 +543,10 @@ export function transformLiftAppliedCall(
       newCallback,
     );
   }
+  const schedulerOptions = createDeriveSchedulerOptions(
+    inputParamSummary,
+    factory,
+  );
 
   // Build the lift-applied call expression:
   //   __cfHelpers.lift<inputTypeNode, resultTypeNode>(newCallback)(mergedInput)
@@ -532,7 +559,7 @@ export function transformLiftAppliedCall(
     hasTypeParameter
       ? undefined
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
-    [newCallback],
+    [newCallback, ...(schedulerOptions ? [schedulerOptions] : [])],
   );
   const rebuiltCall = factory.createCallExpression(
     innerLiftCall,

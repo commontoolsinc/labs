@@ -173,11 +173,11 @@ export function applyPullTriggeredActionPlan(
 
   if (plan.operation === "mark-dirty") {
     state.markDirty(action);
+    const scheduledEffects = state.scheduleAffectedEffects(action);
     if (state.materializerIndex.isMaterializer(action)) {
       state.queueExecution();
-      return [];
     }
-    return state.scheduleAffectedEffects(action);
+    return scheduledEffects;
   }
 
   return [];

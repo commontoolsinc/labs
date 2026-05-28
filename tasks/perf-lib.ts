@@ -757,6 +757,7 @@ export function parseDenoTestLog(log: string): JUnitTestSuite[] {
 export const JOB_TO_LABEL: Record<string, string> = {
   "Package Integration Tests": "package-integration",
   "Pattern Integration Tests": "pattern-integration",
+  "Pattern Reload Integration Tests": "pattern-reload-integration",
   "Generated Patterns Integration Tests": "generated-patterns",
 };
 
@@ -837,6 +838,7 @@ const JOB_METRIC_NAMES: Record<string, string> = {
   // Legacy pre-matrix job name retained for older baselines and overrides.
   "CLI Integration Tests": "job: CLI Integration Tests",
   "Pattern Integration Tests": "job: Pattern Integration Tests",
+  "Pattern Reload Integration Tests": "job: Pattern Reload Integration Tests",
   "Generated Patterns Integration Tests":
     "job: Generated Patterns Integration Tests",
   "Runner Tests": "job: Runner Tests",
@@ -887,6 +889,11 @@ const STEP_METRIC_MATCHERS: StepMetricMatcher[] = [
     jobName: "Pattern Integration Tests",
     stepKeyword: "patterns integration",
     metricName: "step: patterns integration",
+  },
+  {
+    jobName: "Pattern Reload Integration Tests",
+    stepKeyword: "pattern reload integration",
+    metricName: "step: pattern reload integration",
   },
   {
     jobName: "Generated Patterns Integration Tests",

@@ -158,6 +158,16 @@ export type RuntimeTelemetryMarker = {
   handlerInfo?: SchedulerActionInfo;
   error?: string;
 } | {
+  type: "scheduler.event.commit";
+  handlerId: string;
+  handlerInfo?: SchedulerActionInfo;
+  readCount: number;
+  writeCount: number;
+  changedWriteCount: number;
+  writes: string[];
+  writesTruncated?: boolean;
+  error?: string;
+} | {
   type: "scheduler.event.preflight";
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;

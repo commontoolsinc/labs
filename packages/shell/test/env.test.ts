@@ -34,10 +34,12 @@ Deno.test({
     const mod = await withPatchedGlobals({
       $API_URL: "http://shell.test/",
       $EXPERIMENTAL_MODERN_DATA_MODEL: "true",
+      $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
     }, importFreshEnvModule);
 
     expect(mod.EXPERIMENTAL).toEqual({
       modernDataModel: true,
+      persistentSchedulerState: true,
     });
   },
 });

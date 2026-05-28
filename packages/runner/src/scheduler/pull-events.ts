@@ -91,5 +91,7 @@ export async function processPullQueuedEventDuringExecute(
     getActionTelemetryInfo: (target) => state.getActionTelemetryInfo(target),
     handleError: (error, target) => state.handleError(error, target),
     queueExecution: () => state.queueExecution(),
+    onEventCommitWrites: (sourceAction, writes) =>
+      state.onEventCommitWrites?.(sourceAction, writes),
   }, queuedEvent);
 }

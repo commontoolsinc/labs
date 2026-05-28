@@ -42,6 +42,7 @@ export class CrossStageState {
   readonly schemaHints: SchemaHints = new WeakMap();
   readonly capabilitySummaryRegistry: CapabilitySummaryRegistry = new WeakMap();
   readonly narrowedWrapperTypeRegistry = new WeakMap<ts.TypeNode, ts.Type>();
+  readonly schemaInjectedRegistry = new WeakSet<ts.Node>();
 
   // --- mapCallbackRegistry ---
 
@@ -126,6 +127,26 @@ export class CrossStageState {
 
   lookupNarrowedWrapper(wrapperNode: ts.TypeNode): ts.Type | undefined {
     return this.narrowedWrapperTypeRegistry.get(wrapperNode);
+  }
+
+  // --- schemaInjectedRegistry ---
+  //
+  // Marks builder call/new nodes that SchemaInjection has already finalized,
+  // so a later re-traversal of the transformer's own output skips re-injection
+  // instead of re-deriving "already injected?" from argument count. Replaces
+  // the scattered arg-count idempotency guards (e.g. `args.length >= 5`).
+  //
+  // Unlike the other marker sets, this one uses a plain `.has` with NO
+  // `getOriginalNode` fallback: it tags SYNTHETIC nodes WE produced, whose
+  // original (if any) is the *pre-injection* user call. Falling back to the
+  // original would wrongly report a not-yet-injected user node as injected.
+
+  markSchemaInjected(node: ts.Node): void {
+    this.schemaInjectedRegistry.add(node);
+  }
+
+  isSchemaInjected(node: ts.Node): boolean {
+    return this.schemaInjectedRegistry.has(node);
   }
 
   // --- shared helper: membership check with getOriginalNode fallback ---

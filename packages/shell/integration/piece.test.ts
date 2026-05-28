@@ -315,7 +315,9 @@ describe("shell piece tests", () => {
       throw error;
     } finally {
       pieceSinkCancel?.();
+      await shell.disposeRuntime();
       await cc.dispose();
+      await new Promise((resolve) => setTimeout(resolve, 100));
       if (identityPath) {
         await Deno.remove(dirname(identityPath), { recursive: true }).catch(
           () => {},

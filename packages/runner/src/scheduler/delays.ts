@@ -66,6 +66,10 @@ export class SchedulerDelays {
     }
   }
 
+  getNoDebounce(action: Action): boolean | undefined {
+    return this.noDebounce.get(action);
+  }
+
   canAutomaticallyDebounce(
     action: Action,
     context: {

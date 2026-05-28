@@ -259,6 +259,33 @@ Deno.test("extractMetrics aggregates pattern integration matrix shards", () => {
   );
 });
 
+Deno.test("extractMetrics records pattern reload integration job", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Pattern Reload Integration Tests",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:20Z",
+      [
+        makeStep(
+          "🧩 Run pattern reload integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:10Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Pattern Reload Integration Tests")?.durationSeconds,
+    80,
+  );
+  assertEquals(
+    metrics.get("step: pattern reload integration")?.durationSeconds,
+    60,
+  );
+});
+
 Deno.test("extractMetrics aggregates generated patterns matrix shards", () => {
   const metrics = extractMetrics(makeRun(), [
     makeJob(
@@ -359,6 +386,10 @@ Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
   assertEquals(
     timingArtifactLabel("test-timing-pattern-integration-1"),
     "pattern-integration",
+  );
+  assertEquals(
+    timingArtifactLabel("test-timing-pattern-reload-integration"),
+    "pattern-reload-integration",
   );
   assertEquals(
     timingArtifactLabel("test-timing-generated-patterns-1"),

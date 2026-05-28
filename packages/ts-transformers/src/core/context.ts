@@ -197,6 +197,25 @@ export class TransformationContext {
   }
 
   /**
+   * Mark a builder call/new node that SchemaInjection has finalized, so a
+   * later re-traversal of the transformer's own output skips re-injection.
+   * Replaces the arg-count idempotency guards in schema-injection.ts. See
+   * `schemaInjectedRegistry` docs in core/mod.ts (CT-1621).
+   */
+  markSchemaInjected(node: ts.Node): void {
+    this.options.state?.markSchemaInjected(node);
+  }
+
+  /**
+   * Whether SchemaInjection has already finalized this node. Returns false
+   * when no state is present (so a missing registry never suppresses a real
+   * first-pass injection).
+   */
+  isSchemaInjected(node: ts.Node): boolean {
+    return this.options.state?.isSchemaInjected(node) ?? false;
+  }
+
+  /**
    * Record a schema-generation hint for a node (and its original node, so the
    * hint survives visitor node-replacement). Overwrites any existing hint for
    * the node, matching the prior direct-`.set` behavior. See `SchemaHints`

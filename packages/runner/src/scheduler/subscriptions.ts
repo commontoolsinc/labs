@@ -47,6 +47,7 @@ export interface SchedulerSubscribeOptions {
   noDebounce?: boolean;
   throttle?: number;
   changeGroup?: ChangeGroup;
+  deferInitialExecution?: boolean;
 }
 
 export interface SchedulerResubscribeOptions {
