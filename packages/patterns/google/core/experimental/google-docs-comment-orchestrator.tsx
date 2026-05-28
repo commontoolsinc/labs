@@ -1,11 +1,9 @@
 import {
   computed,
   Default,
-  derive,
   generateObject,
   getPatternEnvironment,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
@@ -591,17 +589,10 @@ export default pattern<Input, Output>(
 
     // Fetch button disabled when not authenticated or fetching
     // Prefixed with _ as not currently used - preserved for potential future UI binding
-    const _fetchButtonDisabled = derive(
-      [isAuthenticated, isFetchingCell],
-      ([authenticated, fetching]: [boolean, boolean]) =>
-        !authenticated || fetching,
-    );
+    const _fetchButtonDisabled = !isAuthenticated || isFetchingCell.get();
 
     // Open comment count
-    const openCommentCount = computed(() => {
-      const c = commentsCell.get() ?? [];
-      return c.length;
-    });
+    const openCommentCount = (commentsCell.get() ?? []).length;
 
     // ==========================================================================
     // Per-Comment AI Generation
@@ -726,9 +717,9 @@ export default pattern<Input, Output>(
     // Single computed returning object - idiomatic pattern per CELLS_AND_REACTIVITY.md
     // ==========================================================================
 
-    // Boolean computed for ifElse condition
-    const hasAction = computed(() => pendingActionCell.get() !== null);
-    const hasLastError = computed(() => !!lastErrorCell.get());
+    // Boolean conditions for the confirmation UI
+    const hasAction = pendingActionCell.get() !== null;
+    const hasLastError = !!lastErrorCell.get();
 
     // Single computed for all action display values
     const actionDetails = computed(() => {
@@ -792,52 +783,52 @@ export default pattern<Input, Output>(
                     placeholder="https://docs.google.com/document/d/..."
                     style="flex: 1;"
                   />
-                  {ifElse(
-                    isAuthenticated,
-                    <cf-button
-                      variant="primary"
-                      type="button"
-                      disabled={isFetchingCell}
-                      onClick={fetchComments({
-                        docUrl: docUrlCell,
-                        auth,
-                        comments: commentsCell,
-                        docContent: docContentCell,
-                        isFetching: isFetchingCell,
-                        lastError: lastErrorCell,
-                      })}
-                    >
-                      {ifElse(
-                        computed(() => isFetchingCell.get() === true),
-                        <cf-hstack align="center" gap={1}>
-                          <cf-loader />
-                          <span>Fetching...</span>
-                        </cf-hstack>,
-                        "Fetch Comments",
-                      )}
-                    </cf-button>,
-                    null,
-                  )}
+                  {isAuthenticated
+                    ? (
+                      <cf-button
+                        variant="primary"
+                        type="button"
+                        disabled={isFetchingCell}
+                        onClick={fetchComments({
+                          docUrl: docUrlCell,
+                          auth,
+                          comments: commentsCell,
+                          docContent: docContentCell,
+                          isFetching: isFetchingCell,
+                          lastError: lastErrorCell,
+                        })}
+                      >
+                        {isFetchingCell.get() === true
+                          ? (
+                            <cf-hstack align="center" gap={1}>
+                              <cf-loader />
+                              <span>Fetching...</span>
+                            </cf-hstack>
+                          )
+                          : "Fetch Comments"}
+                      </cf-button>
+                    )
+                    : null}
                 </cf-hstack>
 
                 {/* Error display */}
-                {ifElse(
-                  computed(() => !!lastError),
-                  <div
-                    style={{
-                      marginTop: "8px",
-                      padding: "8px 12px",
-                      backgroundColor: "var(--cf-color-red-50, #fef2f2)",
-                      border: "1px solid var(--cf-color-red-200, #fecaca)",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      color: "var(--cf-color-red-700, #b91c1c)",
-                    }}
-                  >
-                    {lastError}
-                  </div>,
-                  null,
-                )}
+                {!!lastError
+                  ? (
+                    <div
+                      style={{
+                        marginTop: "8px",
+                        padding: "8px 12px",
+                        backgroundColor: "var(--cf-color-red-50, #fef2f2)",
+                        border: "1px solid var(--cf-color-red-200, #fecaca)",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        color: "var(--cf-color-red-700, #b91c1c)",
+                      }}
+                    >
+                      {lastError}
+                    </div>
+                  )
+                  : null}
               </cf-vstack>
             </cf-card>
 
@@ -864,31 +855,31 @@ export default pattern<Input, Output>(
                   </span>
                 </span>
                 <span style={{ color: "#888" }}>
-                  {ifElse(showGlobalPrompt, "\u25BC", "\u25B6")}
+                  {showGlobalPrompt ? "\u25BC" : "\u25B6"}
                 </span>
               </cf-hstack>
 
-              {ifElse(
-                showGlobalPrompt,
-                <div style={{ marginTop: "12px" }}>
-                  <cf-input
-                    $value={globalPrompt}
-                    placeholder="E.g., Be concise. Use formal language. Always acknowledge valid concerns before disagreeing."
-                    style="width: 100%;"
-                  />
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#888",
-                      marginTop: "4px",
-                    }}
-                  >
-                    These guidelines will be included in all AI-generated
-                    responses.
+              {showGlobalPrompt
+                ? (
+                  <div style={{ marginTop: "12px" }}>
+                    <cf-input
+                      $value={globalPrompt}
+                      placeholder="E.g., Be concise. Use formal language. Always acknowledge valid concerns before disagreeing."
+                      style="width: 100%;"
+                    />
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "#888",
+                        marginTop: "4px",
+                      }}
+                    >
+                      These guidelines will be included in all AI-generated
+                      responses.
+                    </div>
                   </div>
-                </div>,
-                null,
-              )}
+                )
+                : null}
             </cf-card>
 
             {/* Comments List */}
@@ -995,405 +986,406 @@ export default pattern<Input, Output>(
                           {item.content}
                         </div>
 
-                        {/* Reply count badge - use ifElse to avoid $alias leakage */}
-                        {ifElse(
-                          item.replyCount > 0,
-                          <span
-                            style={{
-                              display: "inline-block",
-                              marginTop: "4px",
-                              fontSize: "11px",
-                              padding: "2px 6px",
-                              borderRadius: "10px",
-                              backgroundColor:
-                                "var(--cf-color-surface-secondary, #f0f0f0)",
-                              color: "#666",
-                            }}
-                          >
-                            {item.replyCount}{" "}
-                            {ifElse(item.replyCount === 1, "reply", "replies")}
-                          </span>,
-                          null,
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Expanded content - use ifElse to avoid conditional && which can leak reactive values */}
-                    {ifElse(
-                      item.isExpanded,
-                      <div
-                        style={{
-                          borderTop:
-                            "1px solid var(--cf-color-border, #e0e0e0)",
-                          padding: "16px",
-                          backgroundColor:
-                            "var(--cf-color-surface-secondary, #fafafa)",
-                        }}
-                      >
-                        {/* Full quoted text - use ifElse for conditional content */}
-                        {ifElse(
-                          item.quotedFileContent !== null,
-                          <div
-                            style={{
-                              padding: "12px",
-                              marginBottom: "12px",
-                              borderLeft:
-                                "3px solid var(--cf-color-blue-500, #3b82f6)",
-                              backgroundColor: "white",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            <div
+                        {/* Reply count badge - ternary to avoid $alias leakage */}
+                        {item.replyCount > 0
+                          ? (
+                            <span
                               style={{
+                                display: "inline-block",
+                                marginTop: "4px",
                                 fontSize: "11px",
-                                color: "#888",
-                                marginBottom: "4px",
-                              }}
-                            >
-                              Highlighted text:
-                            </div>
-                            <div
-                              style={{ fontSize: "13px", fontStyle: "italic" }}
-                            >
-                              "{item.quotedFileContent?.value ?? ""}"
-                            </div>
-                          </div>,
-                          null,
-                        )}
-
-                        {/* Existing replies - use ifElse for conditional content */}
-                        {ifElse(
-                          item.replies.length > 0,
-                          <div>
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                fontWeight: 600,
-                                marginBottom: "8px",
+                                padding: "2px 6px",
+                                borderRadius: "10px",
+                                backgroundColor:
+                                  "var(--cf-color-surface-secondary, #f0f0f0)",
                                 color: "#666",
                               }}
                             >
-                              Previous replies:
-                            </div>
-                            {item.replies.map((reply) => (
+                              {item.replyCount}{" "}
+                              {item.replyCount === 1 ? "reply" : "replies"}
+                            </span>
+                          )
+                          : null}
+                      </div>
+                    </div>
+
+                    {/* Expanded content - ternary to avoid conditional && which can leak reactive values */}
+                    {item.isExpanded
+                      ? (
+                        <div
+                          style={{
+                            borderTop:
+                              "1px solid var(--cf-color-border, #e0e0e0)",
+                            padding: "16px",
+                            backgroundColor:
+                              "var(--cf-color-surface-secondary, #fafafa)",
+                          }}
+                        >
+                          {/* Full quoted text - ternary for conditional content */}
+                          {item.quotedFileContent !== null
+                            ? (
                               <div
                                 style={{
-                                  padding: "8px 12px",
-                                  marginBottom: "4px",
-                                  borderLeft: "2px solid #ddd",
+                                  padding: "12px",
+                                  marginBottom: "12px",
+                                  borderLeft:
+                                    "3px solid var(--cf-color-blue-500, #3b82f6)",
                                   backgroundColor: "white",
                                   borderRadius: "4px",
-                                  fontSize: "13px",
                                 }}
                               >
-                                <span style={{ fontWeight: 500 }}>
-                                  {reply.author.displayName}:
-                                </span>{" "}
-                                {reply.content}
+                                <div
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "#888",
+                                    marginBottom: "4px",
+                                  }}
+                                >
+                                  Highlighted text:
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "13px",
+                                    fontStyle: "italic",
+                                  }}
+                                >
+                                  "{item.quotedFileContent?.value ?? ""}"
+                                </div>
                               </div>
-                            ))}
-                          </div>,
-                          null,
-                        )}
-                      </div>,
-                      null,
-                    )}
+                            )
+                            : null}
+
+                          {/* Existing replies - ternary for conditional content */}
+                          {item.replies.length > 0
+                            ? (
+                              <div>
+                                <div
+                                  style={{
+                                    fontSize: "12px",
+                                    fontWeight: 600,
+                                    marginBottom: "8px",
+                                    color: "#666",
+                                  }}
+                                >
+                                  Previous replies:
+                                </div>
+                                {item.replies.map((reply) => (
+                                  <div
+                                    style={{
+                                      padding: "8px 12px",
+                                      marginBottom: "4px",
+                                      borderLeft: "2px solid #ddd",
+                                      backgroundColor: "white",
+                                      borderRadius: "4px",
+                                      fontSize: "13px",
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 500 }}>
+                                      {reply.author.displayName}:
+                                    </span>{" "}
+                                    {reply.content}
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                            : null}
+                        </div>
+                      )
+                      : null}
                   </div>
                 ))}
               </cf-vscroll>
 
               {/* AI Response Panel - OUTSIDE map, at pattern body level */}
-              {ifElse(
-                computed(() => !!expandedCommentIdCell.get()),
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "var(--cf-color-green-50, #f0fdf4)",
-                    borderRadius: "8px",
-                    border: "1px solid var(--cf-color-green-200, #bbf7d0)",
-                    marginTop: "12px",
-                  }}
-                >
+              {!!expandedCommentIdCell.get()
+                ? (
                   <div
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "12px",
+                      padding: "16px",
+                      backgroundColor: "var(--cf-color-green-50, #f0fdf4)",
+                      borderRadius: "8px",
+                      border: "1px solid var(--cf-color-green-200, #bbf7d0)",
+                      marginTop: "12px",
                     }}
                   >
-                    <span
+                    <div
                       style={{
-                        fontSize: "14px",
-                        fontWeight: 600,
-                        color: "var(--cf-color-green-700, #15803d)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "12px",
                       }}
                     >
-                      AI Suggested Response
-                    </span>
-                    <cf-button
-                      variant="pill"
-                      type="button"
-                      title="Generate a new response"
-                      onClick={regenerateResponse({
-                        commentStates: commentStatesCell,
-                        commentId: computed(() =>
-                          expandedCommentIdCell.get() ?? ""
-                        ),
-                      })}
-                    >
-                      Regenerate
-                    </cf-button>
-                  </div>
+                      <span
+                        style={{
+                          fontSize: "14px",
+                          fontWeight: 600,
+                          color: "var(--cf-color-green-700, #15803d)",
+                        }}
+                      >
+                        AI Suggested Response
+                      </span>
+                      <cf-button
+                        variant="pill"
+                        type="button"
+                        title="Generate a new response"
+                        onClick={regenerateResponse({
+                          commentStates: commentStatesCell,
+                          commentId: computed(() =>
+                            expandedCommentIdCell.get() ?? ""
+                          ),
+                        })}
+                      >
+                        Regenerate
+                      </cf-button>
+                    </div>
 
-                  {/* Response content - reads aiResponse directly at pattern body level */}
+                    {/* Response content - reads aiResponse directly at pattern body level */}
+                    <div
+                      style={{
+                        fontSize: "14px",
+                        lineHeight: 1.6,
+                        marginBottom: "16px",
+                      }}
+                    >
+                      {aiResponse.pending
+                        ? (
+                          <span style={{ color: "#888" }}>
+                            Generating response...
+                          </span>
+                        )
+                        : aiResponse.result?.suggestedResponse
+                        ? <div>{aiResponse.result?.suggestedResponse}</div>
+                        : (
+                          <span style={{ color: "#888" }}>
+                            Expand a comment to generate an AI response
+                          </span>
+                        )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div
+                      style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
+                    >
+                      <cf-button
+                        variant="primary"
+                        type="button"
+                        disabled={aiResponse.pending ||
+                          !aiResponse.result?.suggestedResponse}
+                        onClick={prepareReply({
+                          docUrl: docUrlCell,
+                          comments: commentsCell,
+                          commentId: computed(() =>
+                            expandedCommentIdCell.get() ?? ""
+                          ),
+                          responseText: computed(() =>
+                            aiResponse.result?.suggestedResponse ?? ""
+                          ),
+                          resolve: false,
+                          pendingAction: pendingActionCell,
+                        })}
+                      >
+                        Reply
+                      </cf-button>
+                      <cf-button
+                        variant="secondary"
+                        type="button"
+                        disabled={aiResponse.pending ||
+                          !aiResponse.result?.suggestedResponse}
+                        onClick={prepareReply({
+                          docUrl: docUrlCell,
+                          comments: commentsCell,
+                          commentId: computed(() =>
+                            expandedCommentIdCell.get() ?? ""
+                          ),
+                          responseText: computed(() =>
+                            aiResponse.result?.suggestedResponse ?? ""
+                          ),
+                          resolve: true,
+                          pendingAction: pendingActionCell,
+                        })}
+                      >
+                        Reply + Resolve
+                      </cf-button>
+                      <cf-button
+                        variant="ghost"
+                        type="button"
+                        onClick={skipComment({
+                          commentId: computed(() =>
+                            expandedCommentIdCell.get() ?? ""
+                          ),
+                          commentStates: commentStatesCell,
+                          expandedCommentId: expandedCommentIdCell,
+                        })}
+                      >
+                        Skip
+                      </cf-button>
+                    </div>
+                  </div>
+                )
+                : (
                   <div
                     style={{
+                      padding: "16px",
+                      textAlign: "center",
+                      color: "#888",
                       fontSize: "14px",
-                      lineHeight: 1.6,
-                      marginBottom: "16px",
+                      marginTop: "12px",
                     }}
                   >
-                    {ifElse(
-                      aiResponse.pending,
-                      <span style={{ color: "#888" }}>
-                        Generating response...
-                      </span>,
-                      ifElse(
-                        aiResponse.result?.suggestedResponse,
-                        <div>{aiResponse.result?.suggestedResponse}</div>,
-                        <span style={{ color: "#888" }}>
-                          Expand a comment to generate an AI response
-                        </span>,
-                      ),
-                    )}
+                    Select a comment to generate an AI response
                   </div>
-
-                  {/* Action Buttons */}
-                  <div
-                    style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
-                  >
-                    <cf-button
-                      variant="primary"
-                      type="button"
-                      disabled={computed(() => aiResponse.pending ||
-                        !aiResponse.result?.suggestedResponse
-                      )}
-                      onClick={prepareReply({
-                        docUrl: docUrlCell,
-                        comments: commentsCell,
-                        commentId: computed(() =>
-                          expandedCommentIdCell.get() ?? ""
-                        ),
-                        responseText: computed(() =>
-                          aiResponse.result?.suggestedResponse ?? ""
-                        ),
-                        resolve: false,
-                        pendingAction: pendingActionCell,
-                      })}
-                    >
-                      Reply
-                    </cf-button>
-                    <cf-button
-                      variant="secondary"
-                      type="button"
-                      disabled={computed(() =>
-                        aiResponse.pending ||
-                        !aiResponse.result?.suggestedResponse
-                      )}
-                      onClick={prepareReply({
-                        docUrl: docUrlCell,
-                        comments: commentsCell,
-                        commentId: computed(() =>
-                          expandedCommentIdCell.get() ?? ""
-                        ),
-                        responseText: computed(() =>
-                          aiResponse.result?.suggestedResponse ?? ""
-                        ),
-                        resolve: true,
-                        pendingAction: pendingActionCell,
-                      })}
-                    >
-                      Reply + Resolve
-                    </cf-button>
-                    <cf-button
-                      variant="ghost"
-                      type="button"
-                      onClick={skipComment({
-                        commentId: computed(() =>
-                          expandedCommentIdCell.get() ?? ""
-                        ),
-                        commentStates: commentStatesCell,
-                        expandedCommentId: expandedCommentIdCell,
-                      })}
-                    >
-                      Skip
-                    </cf-button>
-                  </div>
-                </div>,
-                <div
-                  style={{
-                    padding: "16px",
-                    textAlign: "center",
-                    color: "#888",
-                    fontSize: "14px",
-                    marginTop: "12px",
-                  }}
-                >
-                  Select a comment to generate an AI response
-                </div>,
-              )}
+                )}
             </cf-card>
 
             {/* Trusted Confirmation Component - renders inline when pendingAction is set */}
             {/* TRUST BOUNDARY: executeAction lives in google-docs-comment-confirm.tsx */}
-            {ifElse(
-              hasAction,
-              <cf-card
-                style={{
-                  padding: "20px",
-                  marginTop: "16px",
-                  border: "2px solid #f59e0b",
-                  backgroundColor: "#fffbeb",
-                  borderRadius: "8px",
-                }}
-              >
-                {/* Header */}
-                <cf-hstack
-                  align="center"
-                  gap={2}
-                  style={{ marginBottom: "16px" }}
-                >
-                  <span style={{ fontSize: "24px" }}>⚠️</span>
-                  <cf-heading level={4}>
-                    Confirm Action on Google Docs
-                  </cf-heading>
-                </cf-hstack>
-
-                {/* Action type badge */}
-                <div
+            {hasAction
+              ? (
+                <cf-card
                   style={{
-                    display: "inline-block",
-                    padding: "4px 12px",
-                    backgroundColor: "#fef3c7",
-                    border: "1px solid #f59e0b",
-                    borderRadius: "4px",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                    marginBottom: "12px",
+                    padding: "20px",
+                    marginTop: "16px",
+                    border: "2px solid #f59e0b",
+                    backgroundColor: "#fffbeb",
+                    borderRadius: "8px",
                   }}
                 >
-                  {actionDetails?.typeLabel}
-                </div>
+                  {/* Header */}
+                  <cf-hstack
+                    align="center"
+                    gap={2}
+                    style={{ marginBottom: "16px" }}
+                  >
+                    <span style={{ fontSize: "24px" }}>⚠️</span>
+                    <cf-heading level={4}>
+                      Confirm Action on Google Docs
+                    </cf-heading>
+                  </cf-hstack>
 
-                {/* Context info */}
-                <cf-vstack gap={2} style={{ marginBottom: "16px" }}>
-                  <div style={{ fontSize: "14px", color: "#666" }}>
-                    <strong>Document:</strong> {actionDetails?.docUrlShort}
-                  </div>
-                  <div style={{ fontSize: "14px", color: "#666" }}>
-                    <strong>Comment by:</strong> {actionDetails?.commentAuthor}
-                  </div>
-                  {ifElse(
-                    computed(() => !!actionDetails?.hasQuotedText),
-                    <div
-                      style={{
-                        fontSize: "14px",
-                        color: "#666",
-                        padding: "8px",
-                        backgroundColor: "#fff",
-                        borderLeft: "3px solid #ddd",
-                        fontStyle: "italic",
-                      }}
-                    >
-                      "{actionDetails?.quotedText}"
-                    </div>,
-                    null,
-                  )}
-                  <div style={{ fontSize: "14px", color: "#333" }}>
-                    <strong>Original comment:</strong>{" "}
-                    {actionDetails?.commentContent}
-                  </div>
-                </cf-vstack>
-
-                {/* Your response */}
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#fff",
-                    border: "1px solid #ddd",
-                    borderRadius: "4px",
-                    marginBottom: "16px",
-                  }}
-                >
+                  {/* Action type badge */}
                   <div
                     style={{
-                      fontSize: "12px",
-                      color: "#666",
-                      marginBottom: "4px",
+                      display: "inline-block",
+                      padding: "4px 12px",
+                      backgroundColor: "#fef3c7",
+                      border: "1px solid #f59e0b",
+                      borderRadius: "4px",
+                      fontSize: "14px",
                       fontWeight: "600",
+                      marginBottom: "12px",
                     }}
                   >
-                    Your response:
+                    {actionDetails?.typeLabel}
                   </div>
-                  <div style={{ fontSize: "14px" }}>
-                    {actionDetails?.responseText}
-                  </div>
-                </div>
 
-                {/* Error display */}
-                {ifElse(
-                  hasLastError,
+                  {/* Context info */}
+                  <cf-vstack gap={2} style={{ marginBottom: "16px" }}>
+                    <div style={{ fontSize: "14px", color: "#666" }}>
+                      <strong>Document:</strong> {actionDetails?.docUrlShort}
+                    </div>
+                    <div style={{ fontSize: "14px", color: "#666" }}>
+                      <strong>Comment by:</strong>{" "}
+                      {actionDetails?.commentAuthor}
+                    </div>
+                    {!!actionDetails?.hasQuotedText
+                      ? (
+                        <div
+                          style={{
+                            fontSize: "14px",
+                            color: "#666",
+                            padding: "8px",
+                            backgroundColor: "#fff",
+                            borderLeft: "3px solid #ddd",
+                            fontStyle: "italic",
+                          }}
+                        >
+                          "{actionDetails?.quotedText}"
+                        </div>
+                      )
+                      : null}
+                    <div style={{ fontSize: "14px", color: "#333" }}>
+                      <strong>Original comment:</strong>{" "}
+                      {actionDetails?.commentContent}
+                    </div>
+                  </cf-vstack>
+
+                  {/* Your response */}
                   <div
                     style={{
                       padding: "12px",
-                      backgroundColor: "#fef2f2",
-                      border: "1px solid #ef4444",
+                      backgroundColor: "#fff",
+                      border: "1px solid #ddd",
                       borderRadius: "4px",
                       marginBottom: "16px",
-                      color: "#dc2626",
-                      fontSize: "14px",
                     }}
                   >
-                    {lastErrorCell}
-                  </div>,
-                  null,
-                )}
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "#666",
+                        marginBottom: "4px",
+                        fontWeight: "600",
+                      }}
+                    >
+                      Your response:
+                    </div>
+                    <div style={{ fontSize: "14px" }}>
+                      {actionDetails?.responseText}
+                    </div>
+                  </div>
 
-                {/* Action buttons */}
-                <cf-hstack gap={2} justify="end">
-                  <cf-button
-                    variant="secondary"
-                    type="button"
-                    disabled={isExecutingCell}
-                    onClick={cancelAction({ action: pendingActionCell })}
-                  >
-                    Cancel
-                  </cf-button>
-                  <cf-button
-                    variant="primary"
-                    type="button"
-                    disabled={isExecutingCell}
-                    onClick={executeAction({
-                      action: pendingActionCell,
-                      auth,
-                      comments: commentsCell,
-                      commentStates: commentStatesCell,
-                      expandedCommentId: expandedCommentIdCell,
-                      lastError: lastErrorCell,
-                      isExecuting: isExecutingCell,
-                    })}
-                  >
-                    {ifElse(
-                      isExecutingCell,
-                      "Posting...",
-                      <span>✓ Post {actionDetails?.typeLabel}</span>,
-                    )}
-                  </cf-button>
-                </cf-hstack>
-              </cf-card>,
-              null,
-            )}
+                  {/* Error display */}
+                  {hasLastError
+                    ? (
+                      <div
+                        style={{
+                          padding: "12px",
+                          backgroundColor: "#fef2f2",
+                          border: "1px solid #ef4444",
+                          borderRadius: "4px",
+                          marginBottom: "16px",
+                          color: "#dc2626",
+                          fontSize: "14px",
+                        }}
+                      >
+                        {lastErrorCell}
+                      </div>
+                    )
+                    : null}
+
+                  {/* Action buttons */}
+                  <cf-hstack gap={2} justify="end">
+                    <cf-button
+                      variant="secondary"
+                      type="button"
+                      disabled={isExecutingCell}
+                      onClick={cancelAction({ action: pendingActionCell })}
+                    >
+                      Cancel
+                    </cf-button>
+                    <cf-button
+                      variant="primary"
+                      type="button"
+                      disabled={isExecutingCell}
+                      onClick={executeAction({
+                        action: pendingActionCell,
+                        auth,
+                        comments: commentsCell,
+                        commentStates: commentStatesCell,
+                        expandedCommentId: expandedCommentIdCell,
+                        lastError: lastErrorCell,
+                        isExecuting: isExecutingCell,
+                      })}
+                    >
+                      {isExecutingCell.get()
+                        ? "Posting..."
+                        : <span>✓ Post {actionDetails?.typeLabel}</span>}
+                    </cf-button>
+                  </cf-hstack>
+                </cf-card>
+              )
+              : null}
           </cf-vstack>
         </cf-screen>
       ),

@@ -22,8 +22,6 @@
  */
 import {
   computed,
-  derive,
-  ifElse,
   NAME,
   pattern,
   toIndentedDebugString,
@@ -472,37 +470,28 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const flightTrackerResult = flightTrackerWish.result;
   const profileResult = profileWish.result;
 
-  // Use derive to extract upcomingFlights from the piece result
-  const upcomingFlights = derive(
-    flightTrackerResult,
-    (tracker) => tracker?.upcomingFlights ?? [],
-  );
+  // Extract upcomingFlights from the piece result
+  const upcomingFlights = flightTrackerResult?.upcomingFlights ?? [];
 
-  // Extract home address from profile using derive
-  const homeAddress = derive(
-    profileResult,
-    (prof: ProfileOutput | undefined) => {
-      const addrs = prof?.addresses ?? [];
-      const home = addrs.find((a: Address) => a.label === "Home");
-      if (home && home.street) {
-        return `${home.street}, ${home.city}, ${home.state} ${home.zip}`.trim();
-      }
-      return null;
-    },
-  );
-
-  // Check if we have flight data
-  const isConnected = computed(() => {
-    return flightTrackerResult !== undefined;
+  // Extract home address from profile (statement body needs a computed)
+  const homeAddress = computed(() => {
+    const prof: ProfileOutput | undefined = profileResult;
+    const addrs = prof?.addresses ?? [];
+    const home = addrs.find((a: Address) => a.label === "Home");
+    if (home && home.street) {
+      return `${home.street}, ${home.city}, ${home.state} ${home.zip}`.trim();
+    }
+    return null;
   });
 
-  // Generate event groups for each flight
+  // Check if we have flight data
+  const isConnected = flightTrackerResult !== undefined;
+
+  // Generate event groups for each flight (whole-array map stays a computed)
   const eventGroups = computed(() => {
-    const flights = upcomingFlights;
-    const addr = homeAddress;
-    return flights
+    return upcomingFlights
       .filter((f) => f.status !== "cancelled")
-      .map((f) => generateFlightEvents(f, addr));
+      .map((f) => generateFlightEvents(f, homeAddress));
   });
 
   // Flatten to all events
@@ -516,26 +505,26 @@ export default pattern<PatternInput, PatternOutput>(() => {
     return events;
   });
 
-  // Just flight events
-  const flightEvents = computed(() => {
-    return allEvents.filter((e) => e.eventType === "flight");
-  });
+  // Just flight events (filter callback reads reactive fields → keep computed)
+  const flightEvents = computed(() =>
+    allEvents.filter((e) => e.eventType === "flight")
+  );
 
-  // Just travel events
-  const travelEvents = computed(() => {
-    return allEvents.filter(
+  // Just travel events (filter callback reads reactive fields → keep computed)
+  const travelEvents = computed(() =>
+    allEvents.filter(
       (e) => e.eventType === "travel-to" || e.eventType === "travel-from",
-    );
-  });
+    )
+  );
 
   // Flight count
-  const flightCount = computed(() => upcomingFlights?.length ?? 0);
+  const flightCount = upcomingFlights?.length ?? 0;
 
   // State for expanded sections (reserved for future debug UI)
   const _showDebug = new Writable(false);
 
   return {
-    [NAME]: computed(() => `Flight Calendar (${flightCount} flights)`),
+    [NAME]: `Flight Calendar (${flightCount} flights)`,
 
     flightCount,
     events: allEvents,
@@ -557,13 +546,9 @@ export default pattern<PatternInput, PatternOutput>(() => {
             <div
               style={{
                 padding: "12px 16px",
-                backgroundColor: computed(() =>
-                  isConnected ? "#d1fae5" : "#fef3c7"
-                ),
+                backgroundColor: isConnected ? "#d1fae5" : "#fef3c7",
                 borderRadius: "8px",
-                border: computed(() =>
-                  isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-                ),
+                border: isConnected ? "1px solid #10b981" : "1px solid #f59e0b",
               }}
             >
               <div
@@ -578,17 +563,13 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     width: "10px",
                     height: "10px",
                     borderRadius: "50%",
-                    backgroundColor: computed(() =>
-                      isConnected ? "#10b981" : "#f59e0b"
-                    ),
+                    backgroundColor: isConnected ? "#10b981" : "#f59e0b",
                   }}
                 />
                 <span>
-                  {ifElse(
-                    isConnected,
-                    "Connected to flight tracker",
-                    "Looking for flight tracker (#unitedFlights)...",
-                  )}
+                  {isConnected
+                    ? "Connected to flight tracker"
+                    : "Looking for flight tracker (#unitedFlights)..."}
                 </span>
               </div>
             </div>
@@ -597,13 +578,9 @@ export default pattern<PatternInput, PatternOutput>(() => {
             <div
               style={{
                 padding: "12px 16px",
-                backgroundColor: computed(() =>
-                  homeAddress ? "#eff6ff" : "#f3f4f6"
-                ),
+                backgroundColor: homeAddress ? "#eff6ff" : "#f3f4f6",
                 borderRadius: "8px",
-                border: computed(() =>
-                  homeAddress ? "1px solid #3b82f6" : "1px solid #d1d5db"
-                ),
+                border: homeAddress ? "1px solid #3b82f6" : "1px solid #d1d5db",
               }}
             >
               <div
@@ -614,7 +591,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 }}
               >
                 <span style={{ fontSize: "16px" }}>
-                  {ifElse(homeAddress, "Home address found", "No home address")}
+                  {homeAddress ? "Home address found" : "No home address"}
                 </span>
               </div>
               <div
@@ -622,7 +599,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                   fontSize: "12px",
                   color: "#6b7280",
                   marginTop: "4px",
-                  display: computed(() => (homeAddress ? "block" : "none")),
+                  display: homeAddress ? "block" : "none",
                 }}
               >
                 {homeAddress}
@@ -666,7 +643,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     color: "#059669",
                   }}
                 >
-                  {computed(() => allEvents?.length ?? 0)}
+                  {allEvents?.length ?? 0}
                 </div>
                 <div style={{ fontSize: "12px", color: "#666" }}>
                   Calendar Events
@@ -685,7 +662,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     color: "#d97706",
                   }}
                 >
-                  {computed(() => travelEvents?.length ?? 0)}
+                  {travelEvents?.length ?? 0}
                 </div>
                 <div style={{ fontSize: "12px", color: "#666" }}>
                   Travel Blocks
@@ -696,9 +673,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
             {/* Event Groups */}
             <div
               style={{
-                display: computed(() =>
-                  eventGroups?.length > 0 ? "block" : "none"
-                ),
+                display: eventGroups?.length > 0 ? "block" : "none",
               }}
             >
               <h3
@@ -723,39 +698,37 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     }}
                   >
                     {/* Travel To */}
-                    {ifElse(
-                      computed(() => !!group.travelTo),
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "12px",
-                          padding: "8px 12px",
-                          marginBottom: "8px",
-                          backgroundColor: computed(() =>
-                            group.travelTo?.color ?? "#f3f4f6"
-                          ),
-                          borderRadius: "8px",
-                        }}
-                      >
-                        <span style={{ fontSize: "16px" }}>car</span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                            {computed(() => group.travelTo?.title ?? "")}
-                          </div>
-                          <div style={{ fontSize: "12px", color: "#374151" }}>
-                            {computed(() =>
-                              group.travelTo
+                    {!!group.travelTo
+                      ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "12px",
+                            padding: "8px 12px",
+                            marginBottom: "8px",
+                            backgroundColor: group.travelTo?.color ?? "#f3f4f6",
+                            borderRadius: "8px",
+                          }}
+                        >
+                          <span style={{ fontSize: "16px" }}>car</span>
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{ fontWeight: "600", fontSize: "14px" }}
+                            >
+                              {group.travelTo?.title ?? ""}
+                            </div>
+                            <div style={{ fontSize: "12px", color: "#374151" }}>
+                              {group.travelTo
                                 ? `${
                                   formatTime12h(group.travelTo.startTime)
                                 } - ${formatTime12h(group.travelTo.endTime)}`
-                                : ""
-                            )}
+                                : ""}
+                            </div>
                           </div>
                         </div>
-                      </div>,
-                      null,
-                    )}
+                      )
+                      : null}
 
                     {/* Flight */}
                     <div
@@ -783,39 +756,38 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     </div>
 
                     {/* Travel From */}
-                    {ifElse(
-                      computed(() => !!group.travelFrom),
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "12px",
-                          padding: "8px 12px",
-                          marginTop: "8px",
-                          backgroundColor: computed(() =>
-                            group.travelFrom?.color ?? "#f3f4f6"
-                          ),
-                          borderRadius: "8px",
-                        }}
-                      >
-                        <span style={{ fontSize: "16px" }}>car</span>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                            {computed(() => group.travelFrom?.title ?? "")}
-                          </div>
-                          <div style={{ fontSize: "12px", color: "#374151" }}>
-                            {computed(() =>
-                              group.travelFrom
+                    {!!group.travelFrom
+                      ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "12px",
+                            padding: "8px 12px",
+                            marginTop: "8px",
+                            backgroundColor: group.travelFrom?.color ??
+                              "#f3f4f6",
+                            borderRadius: "8px",
+                          }}
+                        >
+                          <span style={{ fontSize: "16px" }}>car</span>
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{ fontWeight: "600", fontSize: "14px" }}
+                            >
+                              {group.travelFrom?.title ?? ""}
+                            </div>
+                            <div style={{ fontSize: "12px", color: "#374151" }}>
+                              {group.travelFrom
                                 ? `${
                                   formatTime12h(group.travelFrom.startTime)
                                 } - ${formatTime12h(group.travelFrom.endTime)}`
-                                : ""
-                            )}
+                                : ""}
+                            </div>
                           </div>
                         </div>
-                      </div>,
-                      null,
-                    )}
+                      )
+                      : null}
                   </div>
                 ))}
               </cf-vstack>
@@ -824,9 +796,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
             {/* No flights message */}
             <div
               style={{
-                display: computed(() =>
-                  isConnected && flightCount === 0 ? "block" : "none"
-                ),
+                display: isConnected && flightCount === 0 ? "block" : "none",
                 padding: "24px",
                 textAlign: "center",
                 color: "#6b7280",
@@ -892,7 +862,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                       whiteSpace: "pre-wrap",
                     }}
                   >
-                    {computed(() => toIndentedDebugString(allEvents))}
+                    {toIndentedDebugString(allEvents)}
                   </pre>
                 </div>
               </div>
