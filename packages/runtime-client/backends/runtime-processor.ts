@@ -450,7 +450,16 @@ export class RuntimeProcessor {
   handleCellGet(
     request: CellGetRequest,
   ): JSONValueResponse {
-    const cell = getCell(this.runtime, request.cell);
+    let cell = getCell(this.runtime, request.cell);
+    if (request.meta !== undefined) {
+      const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
+      const link = getMetaLink(rootCell, request.meta);
+      if (link === undefined) return { value: undefined };
+      cell = this.runtime.getCellFromLink({
+        ...link,
+        path: [...link.path, ...request.cell.path],
+      });
+    }
     const value = cell.get();
     const converted = convertCellsToLinks(value, {
       includeSchema: true,

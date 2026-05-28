@@ -1526,42 +1526,37 @@ async function collectNotebookSourceState(page: Page): Promise<{
       readCell?: (options: {
         id: string;
         path?: string[];
+        meta?: "argument" | "internal";
       }) => Promise<unknown>;
-      __eventInvocationTrace?: unknown[];
     } | undefined;
     await api?.rt?.idle?.();
 
-    const markers = (api?.__eventInvocationTrace ?? []) as Array<{
-      type?: string;
-      handlerId?: string;
-      handlerInfo?: { moduleName?: string };
-      writes?: string[];
-    }>;
-    const notebookCommits = markers.filter((marker) =>
-      marker.type === "scheduler.event.commit" &&
-      (
-        marker.handlerId?.includes("/api/patterns/notes/notebook.tsx") ||
-        marker.handlerInfo?.moduleName?.includes("notebook")
-      )
-    );
-    const notebookNotesWrite = notebookCommits.at(-1)?.writes?.find((write) =>
-      write.includes("/value/argument/notes")
-    );
-    const notebookEntityId = notebookNotesWrite?.match(
-      /\/(of:[^/]+)\/value\/argument\/notes/,
-    )?.[1];
+    const appState = globalThis.app?.serialize?.();
+    const view = appState?.view;
+    const notebookEntityId = view && typeof view === "object" &&
+        "pieceId" in view && typeof view.pieceId === "string"
+      ? view.pieceId
+      : undefined;
     if (!notebookEntityId || !api?.readCell) {
       return { notebookEntityId };
     }
 
-    const notebookArgument = await api.readCell({
-      id: notebookEntityId,
-      path: ["argument"],
-    });
-    const notebookInternal = await api.readCell({
-      id: notebookEntityId,
-      path: ["internal"],
-    });
+    let notebookArgument: unknown;
+    let notebookInternal: unknown;
+    const originalLog = console.log;
+    try {
+      console.log = () => {};
+      notebookArgument = await api.readCell({
+        id: notebookEntityId,
+        meta: "argument",
+      });
+      notebookInternal = await api.readCell({
+        id: notebookEntityId,
+        meta: "internal",
+      });
+    } finally {
+      console.log = originalLog;
+    }
 
     return {
       notebookEntityId,
