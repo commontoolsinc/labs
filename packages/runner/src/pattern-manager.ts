@@ -229,7 +229,9 @@ export class PatternManager {
     let patternId: string | undefined;
     if ("patternId" in input) {
       patternId = input.patternId;
-    } else if (input && typeof input === "object") {
+    } else if (
+      input && (typeof input === "object" || typeof input === "function")
+    ) {
       patternId = this.patternToIdMap.get(
         this.findOriginalPattern(input as Pattern),
       );
@@ -238,7 +240,10 @@ export class PatternManager {
     if (!patternId) throw new Error("Pattern is not registered");
 
     const cell = this.patternMetaCellById.get(patternId);
-    if (cell) return cell.get();
+    if (cell) {
+      const meta = cell.get();
+      if (meta) return meta;
+    }
 
     // If we don't have a stored cell yet, return whatever pending/meta we have
     const pending = this.pendingMetaById.get(patternId) ?? {};
