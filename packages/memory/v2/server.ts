@@ -821,10 +821,11 @@ export class Server {
           },
         };
       }
-      const snapshots = Engine.listSchedulerActionSnapshots(
+      const page = Engine.listSchedulerActionSnapshots(
         engine,
         message.query,
-      ).map((snapshot) => ({
+      );
+      const snapshots = page.snapshots.map((snapshot) => ({
         observationId: snapshot.observationId,
         commitSeq: snapshot.commitSeq,
         observedAtSeq: snapshot.observedAtSeq,
@@ -845,6 +846,7 @@ export class Server {
         ok: {
           serverSeq: Engine.serverSeq(engine),
           snapshots,
+          ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
         },
       };
     } catch (error) {

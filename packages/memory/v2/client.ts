@@ -1,5 +1,6 @@
 import {
   type ClientCommit,
+  compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntitySnapshot,
@@ -11,7 +12,6 @@ import {
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
   type ResponseMessage,
-  sameMemoryProtocolFlags,
   type SchedulerActionSnapshotQuery,
   type SchedulerSnapshotListResult,
   type SessionEffectMessage,
@@ -216,7 +216,7 @@ export class Client {
       const helloOk = parseHelloOk(message);
       if (helloOk !== null) {
         const expectedFlags = getMemoryProtocolFlags();
-        if (!sameMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
+        if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           const error = new Error(
             `memory flag mismatch: client=${
               toCompactDebugString(expectedFlags)

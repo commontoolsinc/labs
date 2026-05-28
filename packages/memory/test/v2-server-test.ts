@@ -536,7 +536,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
   }
 });
 
-Deno.test("memory v2 server rejects handshakes when flags disagree", async () => {
+Deno.test("memory v2 server rejects handshakes when data-model flags disagree", async () => {
   const server = createServer("memory://memory-v2-server-handshake-flags");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -562,6 +562,29 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
         } server=${JSON.stringify(HELLO_FLAGS)}`,
       },
     });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server accepts scheduler-state flag mismatch", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-handshake-scheduler-flag",
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary({
+      type: "hello",
+      protocol: MEMORY_PROTOCOL,
+      flags: {
+        ...HELLO_FLAGS,
+        persistentSchedulerState: !HELLO_FLAGS.persistentSchedulerState,
+      },
+    }));
+
+    assertEquals(shiftMessage(messages), HELLO_OK);
   } finally {
     await server.close();
   }

@@ -5,6 +5,7 @@ import {
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import {
+  compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
@@ -129,6 +130,17 @@ describe("memory v2 flags", () => {
 
     resetDataModelConfig();
     resetPersistentSchedulerStateConfig();
+  });
+
+  it("treats scheduler-state persistence as an optional capability", () => {
+    assert(compatibleMemoryProtocolFlags(
+      { modernDataModel: true, persistentSchedulerState: true },
+      { modernDataModel: true, persistentSchedulerState: false },
+    ));
+    assertFalse(compatibleMemoryProtocolFlags(
+      { modernDataModel: true, persistentSchedulerState: true },
+      { modernDataModel: false, persistentSchedulerState: true },
+    ));
   });
 });
 

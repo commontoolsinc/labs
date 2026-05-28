@@ -334,7 +334,7 @@
 - Decision: `currentKnownWrites` should mean the post-observation scheduling
   write view computed with the same rules as resubscription. Persisting the
   pre-run writer-index value can stale rehydrated writer indexes by one run, so
-  the code should be aligned to the spec in the next implementation slice.
+  the code and regression coverage now align with that rule.
 
 ## 2026-05-20 - CI Follow-up: Raw Action Identity
 
@@ -571,3 +571,24 @@
   materializer side-write behavior.
 - Validation so far:
   - `deno test -A packages/runner/test/scheduler-effects.test.ts`
+
+## 2026-05-27 - Review Hardening
+
+- Decision: `persistentSchedulerState` is an optional memory protocol capability,
+  not a required wire-compatibility flag. Data-model mismatch still rejects the
+  handshake, but scheduler-state flag mismatch connects and the server-side flag
+  controls whether scheduler observation rows are written or served.
+- Added cursor pagination to `scheduler.snapshot.list` so bulk startup callers do
+  not need one unbounded response. Rehydration lookups that filter by action id
+  still receive a single-row page.
+- Subscription-time storage rehydration now has a timeout fallback. If the
+  snapshot query hangs, the scheduler drops that pending snapshot attempt and
+  schedules the normal initial run; late snapshot results cannot overwrite newer
+  in-memory state.
+- Event commits remain fire-and-forget after local application. The event commit
+  telemetry path now caps written-path samples so a broad event write does not
+  allocate or publish an unbounded telemetry payload.
+- Cleanup: trigger-index unsubscribe/dispose paths prune empty entity buckets and
+  the index exposes a space-level removal hook for unload paths; memory-v2
+  scheduler read/write index reconciliation now shares the diff loop, and
+  scheduler observation row writes wrap database failures with operation context.

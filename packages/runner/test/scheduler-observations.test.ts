@@ -630,6 +630,48 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("falls back to an initial run when storage rehydration times out", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime } = testRuntime;
+      const provider = runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: () => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      provider.listSchedulerActionSnapshots = () => new Promise(() => {});
+
+      let runs = 0;
+      const rehydrateTimeoutAction = () => {
+        runs++;
+      };
+      runtime.scheduler.subscribe(rehydrateTimeoutAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:timeout-rehydrate-process",
+          processGeneration: 1,
+          timeoutMs: 1,
+        },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await runtime.idle();
+
+      expect(runs).toBe(1);
+      expect(runtime.scheduler.isDirty(rehydrateTimeoutAction)).toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("persists no-op cross-space observations in the owner space", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {
       pullMode: "enabled",

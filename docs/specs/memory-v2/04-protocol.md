@@ -66,9 +66,9 @@ If the server accepts the protocol, it returns:
 }
 ```
 
-If the server does not support the requested version or the advertised flags do
-not match what it implements, it returns a typed error response and does not
-mark the connection ready.
+If the server does not support the requested version or the required data-model
+flags do not match what it implements, it returns a typed error response and
+does not mark the connection ready.
 
 For backward compatibility with older peers, both ends also accept the legacy
 field name `richStorableValues` in incoming `hello`/`hello.ok` messages and
@@ -82,7 +82,10 @@ allowed to write and serve internal scheduler observations. It defaults to
 `false` when absent. When `false`, clients should not send scheduler observation
 payloads, servers ignore scheduler observation payloads if received, and
 snapshot-list requests return no scheduler snapshots even if older scheduler
-rows exist in the database.
+rows exist in the database. This flag is negotiated as an optional capability:
+a client and server may connect when their scheduler-state flags differ, and
+the server's flag controls the scheduler-observation data plane for that
+connection.
 
 ### 4.1.2 Logical Sessions and Resume
 

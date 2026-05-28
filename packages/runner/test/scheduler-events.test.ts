@@ -18,6 +18,7 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -283,6 +284,63 @@ describe("event handling", () => {
     await listCell.pull();
 
     expect(listCell.get()).toEqual([1]);
+  });
+
+  it("should cap event commit telemetry write samples", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "should cap event commit telemetry write samples 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    const targetCells = Array.from({ length: 40 }, (_, index) => {
+      const cell = runtime.getCell<number>(
+        space,
+        `should cap event commit telemetry write samples target ${index}`,
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      return cell;
+    });
+    await tx.commit();
+
+    const commitMarkers: RuntimeTelemetryMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{
+        marker: RuntimeTelemetryMarker;
+      }>).detail.marker;
+      if (marker.type === "scheduler.event.commit") {
+        commitMarkers.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const eventHandler: EventHandler = (handlerTx, event) => {
+        for (const cell of targetCells) {
+          cell.withTx(handlerTx).set(event);
+        }
+      };
+      runtime.scheduler.addEventHandler(
+        eventHandler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+
+      runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+      await waitForSchedulerCondition(runtime, () => commitMarkers.length > 0);
+
+      const marker = commitMarkers.at(-1);
+      expect(marker?.type).toBe("scheduler.event.commit");
+      if (marker?.type === "scheduler.event.commit") {
+        expect(marker.writeCount).toBe(40);
+        expect(marker.writes.length).toBe(25);
+        expect(marker.writesTruncated).toBe(true);
+      }
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
   });
 
   it("should preserve queued event appends to multiple arrays", async () => {

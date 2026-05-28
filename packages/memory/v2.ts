@@ -321,6 +321,15 @@ export interface SchedulerActionSnapshotQuery {
   pieceId?: string;
   processGeneration?: number;
   actionId?: string;
+  limit?: number;
+  cursor?: SchedulerActionSnapshotCursor;
+}
+
+export interface SchedulerActionSnapshotCursor {
+  ownerSpace?: string;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
 }
 
 export interface SchedulerActionSnapshotResult {
@@ -336,6 +345,7 @@ export interface SchedulerActionSnapshotResult {
 export interface SchedulerSnapshotListResult {
   serverSeq: number;
   snapshots: SchedulerActionSnapshotResult[];
+  nextCursor?: SchedulerActionSnapshotCursor;
 }
 
 export interface SchedulerSnapshotListRequest {
@@ -433,6 +443,17 @@ export const sameMemoryProtocolFlags = (
 ): boolean =>
   left.modernDataModel === right.modernDataModel &&
   left.persistentSchedulerState === right.persistentSchedulerState;
+
+/**
+ * Scheduler-state persistence is an optional capability, not a data-model wire
+ * contract. Peers with different scheduler flags can still share memory data;
+ * the server's flag controls whether scheduler observation rows are accepted
+ * and served on that connection.
+ */
+export const compatibleMemoryProtocolFlags = (
+  left: MemoryProtocolFlags,
+  right: MemoryProtocolFlags,
+): boolean => left.modernDataModel === right.modernDataModel;
 
 /**
  * Parses and normalizes incoming wire-protocol flags. Accepts either the

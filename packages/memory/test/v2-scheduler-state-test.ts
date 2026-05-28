@@ -9,6 +9,7 @@ import {
   getLatestSchedulerActionSnapshot,
   getSchedulerActionState,
   headSeq,
+  listSchedulerActionSnapshots,
   markSchedulerReadersDirtyForWrites,
   open as openEngine,
   type SchedulerActionObservation,
@@ -143,6 +144,61 @@ Deno.test("memory v2 stores no-op scheduler observations without semantic commit
     });
     assertEquals(snapshot?.observation.actionId, observation.actionId);
     assertEquals(snapshot?.observation.reads, [sourceRead]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 paginates scheduler action snapshots", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    for (let index = 0; index < 5; index++) {
+      upsertSchedulerObservation(engine, {
+        branch: "",
+        observedAtSeq: headSeq(engine),
+        observation: observationForAction(
+          `pattern.tsx:computed:${index}`,
+          { currentKnownWrites: [] },
+        ),
+      });
+    }
+
+    const firstPage = listSchedulerActionSnapshots(engine, {
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      limit: 2,
+    });
+    assertEquals(
+      firstPage.snapshots.map((snapshot) => snapshot.observation.actionId),
+      ["pattern.tsx:computed:0", "pattern.tsx:computed:1"],
+    );
+    assertExists(firstPage.nextCursor);
+
+    const secondPage = listSchedulerActionSnapshots(engine, {
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      limit: 2,
+      cursor: firstPage.nextCursor,
+    });
+    assertEquals(
+      secondPage.snapshots.map((snapshot) => snapshot.observation.actionId),
+      ["pattern.tsx:computed:2", "pattern.tsx:computed:3"],
+    );
+    assertExists(secondPage.nextCursor);
+
+    const finalPage = listSchedulerActionSnapshots(engine, {
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      limit: 2,
+      cursor: secondPage.nextCursor,
+    });
+    assertEquals(
+      finalPage.snapshots.map((snapshot) => snapshot.observation.actionId),
+      ["pattern.tsx:computed:4"],
+    );
+    assertEquals(finalPage.nextCursor, undefined);
   } finally {
     close(engine);
     await Deno.remove(path);

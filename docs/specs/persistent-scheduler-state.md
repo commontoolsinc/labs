@@ -302,8 +302,9 @@ watermark, because each space has an independent SQLite database.
 
 `actualChangedWrites` is the transaction's changed write set. `currentKnownWrites`
 is the scheduler's post-observation active scheduling write set after applying
-the same rule used by resubscription: merge the new actual writes, declared
-writes, and the previous current-known writes into the next scheduling-write
+the same rule used by resubscription: prefer the run's latest precise writes;
+when the run has no effective writes, keep the previous current-known writes; and
+fall back to declared writes only when the action has no prior current-known
 view. It must not be a stale pre-run snapshot of the action's old writer index.
 Persisting both is important: if a later run writes the same value,
 `actualChangedWrites` can be empty while the action still owns a current output
@@ -549,6 +550,12 @@ cross-space dirty propagation for inactive readers until a future run rewrites
 or repairs the mirror rows. A later production hardening pass should add
 explicit repair or `unknown` marking for mirror failures, but this spec does not
 require distributed atomicity.
+
+In-memory read-trigger indexes must also be cleaned up when actions unsubscribe
+or a scheduler instance is disposed. Mirror rows are durable, but the runner's
+live trigger maps should not retain empty per-entity buckets after a piece or
+space unloads; a space unload can drop every trigger-index entity for that
+space without touching durable mirror rows.
 
 For inactive-piece dirtying, the write owner must be able to find readers even
 when the reader's piece is not running. With one SQLite database per space, that
@@ -852,8 +859,15 @@ The implemented snapshot lookup surface is:
 - runner storage-provider method `listSchedulerActionSnapshots()`
 
 The query filters by branch, piece id, process generation, and optionally action
-id. The protocol result intentionally carries `observation` as `unknown`; the
-runner owns validation and casting to `SchedulerActionObservationV1`.
+id. Bulk listing is cursor-paginated in deterministic owner-space, piece,
+generation, action order. The protocol result intentionally carries
+`observation` as `unknown`; the runner owns validation and casting to
+`SchedulerActionObservationV1`.
+
+Subscription-time storage rehydration is bounded. If the snapshot request does
+not resolve before the rehydration timeout, the scheduler drops that pending
+snapshot attempt and schedules the action for the normal initial run path. A
+late snapshot result must not overwrite newer in-memory dirty or clean state.
 
 ## Phased Plan
 
@@ -879,7 +893,10 @@ attach scheduler observations to transactions, memory clients do not request
 scheduler snapshots, and the memory server does not write scheduler observation
 rows, dirty rows, or cross-space mirrors. Snapshot-list requests intentionally
 return an empty result while the flag is off, even if a previous flagged run
-left scheduler rows in the SQLite database.
+left scheduler rows in the SQLite database. Unlike `modernDataModel`, this flag
+is not a required memory protocol compatibility flag: mismatched peers may still
+connect, and the server-side flag determines whether scheduler observation rows
+are accepted and served.
 
 ### Phase 1: Observe Without Rehydrating
 

@@ -32,6 +32,7 @@ const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
+const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
 export interface EventQueueWakeState {
   timer: ReturnType<typeof setTimeout> | null;
@@ -457,11 +458,16 @@ export async function dispatchQueuedEvent(state: {
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
     const changedWrites = collectChangedWritesForTransaction(tx, log);
+    const telemetryWrites = log.writes
+      .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
+      .map(formatEventCommitAddress);
     // Do not await event commits here. commit() applies the transaction
     // locally before returning, and the scheduler must let later client work
     // continue against that speculative state while server confirmation is in
-    // flight. If the server rejects it, dependent speculative transactions are
-    // rejected as well and the normal retry path reruns the event.
+    // flight. Downstream dirtying below is based on those locally applied
+    // changed writes, not server-confirmed durability. If the server rejects
+    // the commit, dependent speculative transactions are rejected as well and
+    // the normal retry path reruns the event.
     tx.commit().then((result) => {
       if (!result.error && changedWrites.length > 0) {
         state.onEventCommitWrites?.(action, changedWrites);
@@ -473,7 +479,10 @@ export async function dispatchQueuedEvent(state: {
         readCount: log.reads.length + log.shallowReads.length,
         writeCount: log.writes.length,
         changedWriteCount: changedWrites.length,
-        writes: log.writes.map(formatEventCommitAddress),
+        writes: telemetryWrites,
+        ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
+          ? { writesTruncated: true }
+          : {}),
         ...(result.error ? { error: result.error.message } : {}),
       });
       if (result.error && retriesLeft > 0) {

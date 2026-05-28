@@ -15,11 +15,14 @@ import {
   type Operation,
   type PatchOp,
   type Reference,
+  type SchedulerActionSnapshotCursor,
   type SessionId,
 } from "../v2.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
 const DEFAULT_SCOPE_KEY = "space" as const;
+const DEFAULT_SCHEDULER_SNAPSHOT_LIST_LIMIT = 500;
+const MAX_SCHEDULER_SNAPSHOT_LIST_LIMIT = 1_000;
 
 const normalizeScope = (scope: CellScope | undefined): CellScope =>
   scope ?? DEFAULT_SCOPE;
@@ -795,6 +798,11 @@ export interface SchedulerObservationSnapshotWithState
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
+}
+
+export interface SchedulerObservationSnapshotPage {
+  snapshots: SchedulerObservationSnapshotWithState[];
+  nextCursor?: SchedulerActionSnapshotCursor;
 }
 
 export interface SchedulerReaderIndexEntry {
@@ -1674,10 +1682,20 @@ export const listSchedulerActionSnapshots = (
     pieceId?: string;
     processGeneration?: number;
     actionId?: string;
+    limit?: number;
+    cursor?: SchedulerActionSnapshotCursor;
   } = {},
-): SchedulerObservationSnapshotWithState[] => {
+): SchedulerObservationSnapshotPage => {
+  const limit = clampSchedulerSnapshotListLimit(options.limit);
+  const cursorOwnerSpace = options.cursor
+    ? normalizeSchedulerOwnerSpace(options.cursor.ownerSpace)
+    : null;
   const rows = engine.database.prepare(`
     SELECT
+      s.owner_space,
+      s.piece_id,
+      s.process_generation,
+      s.action_id,
       s.observation_id,
       COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
       s.observed_at_seq AS observed_at_seq,
@@ -1702,7 +1720,27 @@ export const listSchedulerActionSnapshots = (
         s.process_generation = :process_generation
       )
       AND (:action_id IS NULL OR s.action_id = :action_id)
+      AND (
+        :cursor_owner_space IS NULL OR
+        s.owner_space > :cursor_owner_space OR
+        (
+          s.owner_space = :cursor_owner_space AND
+          s.piece_id > :cursor_piece_id
+        ) OR
+        (
+          s.owner_space = :cursor_owner_space AND
+          s.piece_id = :cursor_piece_id AND
+          s.process_generation > :cursor_process_generation
+        ) OR
+        (
+          s.owner_space = :cursor_owner_space AND
+          s.piece_id = :cursor_piece_id AND
+          s.process_generation = :cursor_process_generation AND
+          s.action_id > :cursor_action_id
+        )
+      )
     ORDER BY s.owner_space, s.piece_id, s.process_generation, s.action_id
+    LIMIT :limit_plus_one
   `).all({
     branch: options.branch ?? DEFAULT_BRANCH,
     owner_space: options.ownerSpace !== undefined
@@ -1711,7 +1749,16 @@ export const listSchedulerActionSnapshots = (
     piece_id: options.pieceId ?? null,
     process_generation: options.processGeneration ?? null,
     action_id: options.actionId ?? null,
+    cursor_owner_space: cursorOwnerSpace,
+    cursor_piece_id: options.cursor?.pieceId ?? null,
+    cursor_process_generation: options.cursor?.processGeneration ?? null,
+    cursor_action_id: options.cursor?.actionId ?? null,
+    limit_plus_one: limit + 1,
   }) as {
+    owner_space: string;
+    piece_id: string;
+    process_generation: number;
+    action_id: string;
     observation_id: number;
     commit_seq: number | null;
     observed_at_seq: number;
@@ -1721,7 +1768,8 @@ export const listSchedulerActionSnapshots = (
     unknown_reason: string | null;
   }[];
 
-  return rows.map((row) => ({
+  const pageRows = rows.slice(0, limit);
+  const snapshots = pageRows.map((row) => ({
     observationId: row.observation_id,
     commitSeq: row.commit_seq,
     observedAtSeq: row.observed_at_seq,
@@ -1737,6 +1785,25 @@ export const listSchedulerActionSnapshots = (
       ? { unknownReason: row.unknown_reason }
       : {}),
   }));
+  const lastRow = rows.length > limit ? pageRows.at(-1) : undefined;
+  const nextOwnerSpace = lastRow
+    ? denormalizeSchedulerOwnerSpace(lastRow.owner_space)
+    : undefined;
+  return {
+    snapshots,
+    ...(lastRow
+      ? {
+        nextCursor: {
+          ...(nextOwnerSpace !== undefined
+            ? { ownerSpace: nextOwnerSpace }
+            : {}),
+          pieceId: lastRow.piece_id,
+          processGeneration: lastRow.process_generation,
+          actionId: lastRow.action_id,
+        },
+      }
+      : {}),
+  };
 };
 
 export const findSchedulerReadersForWrite = (
@@ -2192,6 +2259,16 @@ function denormalizeSchedulerOwnerSpace(
   return ownerSpace === "" ? undefined : ownerSpace;
 }
 
+function clampSchedulerSnapshotListLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return DEFAULT_SCHEDULER_SNAPSHOT_LIST_LIMIT;
+  }
+  return Math.max(
+    1,
+    Math.min(MAX_SCHEDULER_SNAPSHOT_LIST_LIMIT, Math.trunc(limit)),
+  );
+}
+
 function encodeSchedulerDependencySnapshot(
   observation: SchedulerActionObservation,
 ): string {
@@ -2263,6 +2340,27 @@ function selectSchedulerSnapshotRow(
   }) as SchedulerSnapshotRow | undefined;
 }
 
+class SchedulerObservationPersistenceError extends Error {
+  override name = "SchedulerObservationPersistenceError";
+
+  constructor(operation: string, cause: unknown) {
+    super(`scheduler observation persistence failed during ${operation}`, {
+      cause,
+    });
+  }
+}
+
+function runSchedulerObservationStatement<Result>(
+  operation: string,
+  run: () => Result,
+): Result {
+  try {
+    return run();
+  } catch (cause) {
+    throw new SchedulerObservationPersistenceError(operation, cause);
+  }
+}
+
 function insertSchedulerObservationRow(
   engine: Engine,
   options: {
@@ -2273,39 +2371,41 @@ function insertSchedulerObservationRow(
     payload: string;
   },
 ): number {
-  engine.database.prepare(`
-    INSERT INTO scheduler_observation (
-      branch,
-      commit_seq,
-      observed_at_seq,
-      session_id,
-      local_seq,
-      piece_id,
-      action_id,
-      process_generation,
-      payload
-    )
-    VALUES (
-      :branch,
-      :commit_seq,
-      :observed_at_seq,
-      :session_id,
-      :local_seq,
-      :piece_id,
-      :action_id,
-      :process_generation,
-      :payload
-    )
-  `).run({
-    branch: options.branch,
-    commit_seq: options.commitSeq,
-    observed_at_seq: options.observedAtSeq,
-    session_id: null,
-    local_seq: null,
-    piece_id: options.observation.pieceId,
-    action_id: options.observation.actionId,
-    process_generation: options.observation.processGeneration,
-    payload: options.payload,
+  runSchedulerObservationStatement("insert observation row", () => {
+    engine.database.prepare(`
+      INSERT INTO scheduler_observation (
+        branch,
+        commit_seq,
+        observed_at_seq,
+        session_id,
+        local_seq,
+        piece_id,
+        action_id,
+        process_generation,
+        payload
+      )
+      VALUES (
+        :branch,
+        :commit_seq,
+        :observed_at_seq,
+        :session_id,
+        :local_seq,
+        :piece_id,
+        :action_id,
+        :process_generation,
+        :payload
+      )
+    `).run({
+      branch: options.branch,
+      commit_seq: options.commitSeq,
+      observed_at_seq: options.observedAtSeq,
+      session_id: null,
+      local_seq: null,
+      piece_id: options.observation.pieceId,
+      action_id: options.observation.actionId,
+      process_generation: options.observation.processGeneration,
+      payload: options.payload,
+    });
   });
   const row = engine.database.prepare(`SELECT last_insert_rowid() AS id`)
     .get() as { id: number };
@@ -2322,24 +2422,26 @@ function updateSchedulerObservationRow(
     payload: string;
   },
 ): void {
-  engine.database.prepare(`
-    UPDATE scheduler_observation
-    SET
-      commit_seq = :commit_seq,
-      observed_at_seq = :observed_at_seq,
-      piece_id = :piece_id,
-      action_id = :action_id,
-      process_generation = :process_generation,
-      payload = :payload
-    WHERE observation_id = :observation_id
-  `).run({
-    observation_id: options.observationId ?? null,
-    commit_seq: options.commitSeq,
-    observed_at_seq: options.observedAtSeq,
-    piece_id: options.observation.pieceId,
-    action_id: options.observation.actionId,
-    process_generation: options.observation.processGeneration,
-    payload: options.payload,
+  runSchedulerObservationStatement("update observation row", () => {
+    engine.database.prepare(`
+      UPDATE scheduler_observation
+      SET
+        commit_seq = :commit_seq,
+        observed_at_seq = :observed_at_seq,
+        piece_id = :piece_id,
+        action_id = :action_id,
+        process_generation = :process_generation,
+        payload = :payload
+      WHERE observation_id = :observation_id
+    `).run({
+      observation_id: options.observationId ?? null,
+      commit_seq: options.commitSeq,
+      observed_at_seq: options.observedAtSeq,
+      piece_id: options.observation.pieceId,
+      action_id: options.observation.actionId,
+      process_generation: options.observation.processGeneration,
+      payload: options.payload,
+    });
   });
 }
 
@@ -2356,43 +2458,45 @@ function recordSchedulerObservationReplay(
     payload: string;
   },
 ): void {
-  engine.database.prepare(`
-    INSERT INTO scheduler_observation_replay (
-      branch,
-      session_id,
-      local_seq,
-      status,
-      reason,
-      observation_id,
-      observed_at_seq,
-      payload
-    )
-    VALUES (
-      :branch,
-      :session_id,
-      :local_seq,
-      :status,
-      :reason,
-      :observation_id,
-      :observed_at_seq,
-      :payload
-    )
-    ON CONFLICT (branch, session_id, local_seq)
-    DO UPDATE SET
-      status = excluded.status,
-      reason = excluded.reason,
-      observation_id = excluded.observation_id,
-      observed_at_seq = excluded.observed_at_seq,
-      payload = excluded.payload
-  `).run({
-    branch: options.branch,
-    session_id: options.sessionId,
-    local_seq: options.localSeq,
-    status: options.status,
-    reason: options.reason ?? null,
-    observation_id: options.observationId ?? null,
-    observed_at_seq: options.observedAtSeq,
-    payload: options.payload,
+  runSchedulerObservationStatement("record observation replay", () => {
+    engine.database.prepare(`
+      INSERT INTO scheduler_observation_replay (
+        branch,
+        session_id,
+        local_seq,
+        status,
+        reason,
+        observation_id,
+        observed_at_seq,
+        payload
+      )
+      VALUES (
+        :branch,
+        :session_id,
+        :local_seq,
+        :status,
+        :reason,
+        :observation_id,
+        :observed_at_seq,
+        :payload
+      )
+      ON CONFLICT (branch, session_id, local_seq)
+      DO UPDATE SET
+        status = excluded.status,
+        reason = excluded.reason,
+        observation_id = excluded.observation_id,
+        observed_at_seq = excluded.observed_at_seq,
+        payload = excluded.payload
+    `).run({
+      branch: options.branch,
+      session_id: options.sessionId,
+      local_seq: options.localSeq,
+      status: options.status,
+      reason: options.reason ?? null,
+      observation_id: options.observationId ?? null,
+      observed_at_seq: options.observedAtSeq,
+      payload: options.payload,
+    });
   });
 }
 
@@ -2520,6 +2624,46 @@ function schedulerReadIndexEntries(
   });
 }
 
+function reconcileSchedulerIndexRows<Row>(
+  options: {
+    existingRows: Row[];
+    nextRows: Row[];
+    keyForRow: (row: Row) => string;
+    deleteAllRows: () => void;
+    deleteRow: (row: Row) => void;
+    insertRow: (row: Row) => void;
+  },
+): void {
+  const existingRowsByKey = new Map(options.existingRows.map((row) => [
+    options.keyForRow(row),
+    row,
+  ]));
+  const nextRowsByKey = new Map(options.nextRows.map((row) => [
+    options.keyForRow(row),
+    row,
+  ]));
+
+  const hasSharedKey = [...nextRowsByKey.keys()].some((key) =>
+    existingRowsByKey.has(key)
+  );
+  if (!hasSharedKey && options.existingRows.length > 0) {
+    options.deleteAllRows();
+    existingRowsByKey.clear();
+  }
+
+  for (const [key, row] of existingRowsByKey) {
+    if (!nextRowsByKey.has(key)) {
+      options.deleteRow(row);
+    }
+  }
+
+  for (const [key, row] of nextRowsByKey) {
+    if (!existingRowsByKey.has(key)) {
+      options.insertRow(row);
+    }
+  }
+}
+
 function reconcileSchedulerReadRows(
   engine: Engine,
   options: {
@@ -2560,29 +2704,6 @@ function reconcileSchedulerReadRows(
     options.observationId,
     options.observation,
   );
-  const existingKeys = new Map(existingRows.map((row) => [
-    schedulerReadIndexKey(row),
-    row,
-  ]));
-  const nextKeys = new Map(nextRows.map((row) => [
-    schedulerReadIndexKey(row),
-    row,
-  ]));
-
-  const sharedKeys = [...nextKeys.keys()].filter((key) =>
-    existingKeys.has(key)
-  );
-  if (sharedKeys.length === 0 && existingRows.length > 0) {
-    engine.database.prepare(`
-      DELETE FROM scheduler_read_index
-      WHERE branch = :branch
-        AND COALESCE(owner_space, '') = :owner_space
-        AND piece_id = :piece_id
-        AND process_generation = :process_generation
-        AND action_id = :action_id
-    `).run(params);
-    existingKeys.clear();
-  }
 
   const deleteReadRow = engine.database.prepare(`
     DELETE FROM scheduler_read_index
@@ -2597,21 +2718,6 @@ function reconcileSchedulerReadRows(
       AND process_generation = :process_generation
       AND action_id = :action_id
   `);
-  for (const [key, row] of existingKeys) {
-    if (nextKeys.has(key)) continue;
-    deleteReadRow.run({
-      branch: row.branch,
-      owner_space: row.owner_space,
-      read_space: row.read_space,
-      read_id: row.read_id,
-      read_scope: row.read_scope,
-      read_path: row.read_path,
-      read_kind: row.read_kind,
-      piece_id: row.piece_id,
-      process_generation: row.process_generation,
-      action_id: row.action_id,
-    });
-  }
 
   const insertReadRow = engine.database.prepare(`
     INSERT INTO scheduler_read_index (
@@ -2641,12 +2747,36 @@ function reconcileSchedulerReadRows(
       :observation_id
     )
   `);
-  for (const [key, row] of nextKeys) {
-    if (existingKeys.has(key)) continue;
-    insertReadRow.run({
-      ...row,
-    });
-  }
+  reconcileSchedulerIndexRows({
+    existingRows,
+    nextRows,
+    keyForRow: schedulerReadIndexKey,
+    deleteAllRows: () => {
+      engine.database.prepare(`
+        DELETE FROM scheduler_read_index
+        WHERE branch = :branch
+          AND COALESCE(owner_space, '') = :owner_space
+          AND piece_id = :piece_id
+          AND process_generation = :process_generation
+          AND action_id = :action_id
+      `).run(params);
+    },
+    deleteRow: (row) => {
+      deleteReadRow.run({
+        branch: row.branch,
+        owner_space: row.owner_space,
+        read_space: row.read_space,
+        read_id: row.read_id,
+        read_scope: row.read_scope,
+        read_path: row.read_path,
+        read_kind: row.read_kind,
+        piece_id: row.piece_id,
+        process_generation: row.process_generation,
+        action_id: row.action_id,
+      });
+    },
+    insertRow: (row) => insertReadRow.run({ ...row }),
+  });
 }
 
 function schedulerReadIndexKey(row: SchedulerReadIndexRow): string {
@@ -2740,29 +2870,6 @@ function reconcileSchedulerWriteRows(
     options.observationId,
     options.observation,
   );
-  const existingKeys = new Map(existingRows.map((row) => [
-    schedulerWriteIndexKey(row),
-    row,
-  ]));
-  const nextKeys = new Map(nextRows.map((row) => [
-    schedulerWriteIndexKey(row),
-    row,
-  ]));
-
-  const sharedKeys = [...nextKeys.keys()].filter((key) =>
-    existingKeys.has(key)
-  );
-  if (sharedKeys.length === 0 && existingRows.length > 0) {
-    engine.database.prepare(`
-      DELETE FROM scheduler_write_index
-      WHERE branch = :branch
-        AND owner_space = :owner_space
-        AND piece_id = :piece_id
-        AND process_generation = :process_generation
-        AND action_id = :action_id
-    `).run(params);
-    existingKeys.clear();
-  }
 
   const deleteWriteRow = engine.database.prepare(`
     DELETE FROM scheduler_write_index
@@ -2777,21 +2884,6 @@ function reconcileSchedulerWriteRows(
       AND process_generation = :process_generation
       AND action_id = :action_id
   `);
-  for (const [key, row] of existingKeys) {
-    if (nextKeys.has(key)) continue;
-    deleteWriteRow.run({
-      branch: row.branch,
-      owner_space: row.owner_space,
-      write_space: row.write_space,
-      write_id: row.write_id,
-      write_scope: row.write_scope,
-      write_path: row.write_path,
-      write_kind: row.write_kind,
-      piece_id: row.piece_id,
-      process_generation: row.process_generation,
-      action_id: row.action_id,
-    });
-  }
 
   const insertWriteRow = engine.database.prepare(`
     INSERT INTO scheduler_write_index (
@@ -2821,12 +2913,36 @@ function reconcileSchedulerWriteRows(
       :observation_id
     )
   `);
-  for (const [key, row] of nextKeys) {
-    if (existingKeys.has(key)) continue;
-    insertWriteRow.run({
-      ...row,
-    });
-  }
+  reconcileSchedulerIndexRows({
+    existingRows,
+    nextRows,
+    keyForRow: schedulerWriteIndexKey,
+    deleteAllRows: () => {
+      engine.database.prepare(`
+        DELETE FROM scheduler_write_index
+        WHERE branch = :branch
+          AND owner_space = :owner_space
+          AND piece_id = :piece_id
+          AND process_generation = :process_generation
+          AND action_id = :action_id
+      `).run(params);
+    },
+    deleteRow: (row) => {
+      deleteWriteRow.run({
+        branch: row.branch,
+        owner_space: row.owner_space,
+        write_space: row.write_space,
+        write_id: row.write_id,
+        write_scope: row.write_scope,
+        write_path: row.write_path,
+        write_kind: row.write_kind,
+        piece_id: row.piece_id,
+        process_generation: row.process_generation,
+        action_id: row.action_id,
+      });
+    },
+    insertRow: (row) => insertWriteRow.run({ ...row }),
+  });
 }
 
 function schedulerWriteIndexKey(row: SchedulerWriteIndexRow): string {

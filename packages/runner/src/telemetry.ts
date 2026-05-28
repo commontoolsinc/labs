@@ -165,6 +165,7 @@ export type RuntimeTelemetryMarker = {
   writeCount: number;
   changedWriteCount: number;
   writes: string[];
+  writesTruncated?: boolean;
   error?: string;
 } | {
   type: "scheduler.event.preflight";

@@ -214,6 +214,7 @@ const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
+const DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS = 10_000;
 
 type PendingDependencyCollectionState =
   SchedulerSubscribeActionState["pendingDependencyCollectionState"];
@@ -222,6 +223,7 @@ type SchedulerStorageRehydrationOptions =
   & SchedulerObservationIdentity
   & {
     space: MemorySpace;
+    timeoutMs?: number;
   };
 
 // Re-export types that tests expect from scheduler
@@ -720,22 +722,23 @@ export class Scheduler {
     const token = Symbol("scheduler-initial-rehydration");
     this.initialRehydrationTokens.set(action, token);
     const task = (async () => {
-      const rehydrated = await this.rehydrateActionFromStorage(
+      const rehydrated = await this.runInitialActionRehydrationWithTimeout(
         action,
-        options.space,
-        {
-          ...(options.branch !== undefined ? { branch: options.branch } : {}),
-          ownerSpace: options.ownerSpace ?? options.space,
-          pieceId: options.pieceId,
-          ...(options.processGeneration !== undefined
-            ? { processGeneration: options.processGeneration }
-            : {}),
-        },
-        {
-          shouldApply: () =>
-            this.canApplyInitialActionRehydration(action, token),
-        },
+        options,
+        token,
       );
+      if (rehydrated === "timeout") {
+        if (this.canApplyInitialActionRehydration(action, token)) {
+          logger.warn("scheduler-rehydrate", () => [
+            "Timed out rehydrating scheduler action; falling back to initial run",
+            this.getActionId(action),
+            options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+          ]);
+          this.initialRehydrationTokens.delete(action);
+          this.scheduleInitialActionRun(action);
+        }
+        return;
+      }
       if (!this.canApplyInitialActionRehydration(action, token)) {
         return;
       }
@@ -761,6 +764,46 @@ export class Scheduler {
         this.initialRehydrationTokens.delete(action);
       }
     });
+  }
+
+  private async runInitialActionRehydrationWithTimeout(
+    action: Action,
+    options: SchedulerStorageRehydrationOptions,
+    token: symbol,
+  ): Promise<boolean | "timeout"> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMs = Math.max(
+      0,
+      options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+    );
+    const timeout = new Promise<"timeout">((resolve) => {
+      timeoutId = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        this.rehydrateActionFromStorage(
+          action,
+          options.space,
+          {
+            ...(options.branch !== undefined ? { branch: options.branch } : {}),
+            ownerSpace: options.ownerSpace ?? options.space,
+            pieceId: options.pieceId,
+            ...(options.processGeneration !== undefined
+              ? { processGeneration: options.processGeneration }
+              : {}),
+          },
+          {
+            shouldApply: () =>
+              this.canApplyInitialActionRehydration(action, token),
+          },
+        ),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 
   private canApplyInitialActionRehydration(
@@ -1280,6 +1323,7 @@ export class Scheduler {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;
     }
+    this.triggerIndex.clear();
     cancelEventQueueWakeState(this.eventQueueWakeState);
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {

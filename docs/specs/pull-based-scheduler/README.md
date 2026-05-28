@@ -713,7 +713,11 @@ Dispatching a queued event:
 - Runs the handler in an immediate runtime transaction.
 - Records trusted event policy inputs from annotated writes and from actual
   transaction write candidates.
-- Calls `runtime.prepareTxForCommit(tx)` and commits.
+- Calls `runtime.prepareTxForCommit(tx)` and starts the commit without awaiting
+  server confirmation. The transaction is applied locally before the commit
+  promise resolves, so the scheduler can continue against speculative local
+  state; if the server rejects the commit, dependent speculative transactions are
+  rejected and the normal retry path reruns the event.
 - On commit error, retries by unshifting the event back to the head of the queue
   while retries remain.
 - Runs the internal `onCommit` callback after the final commit result, including
@@ -804,6 +808,7 @@ The scheduler emits these telemetry markers directly:
 - `scheduler.dependencies.update`
 - `scheduler.run`
 - `scheduler.invocation`
+- `scheduler.event.commit`, with counts and a capped sample of written paths
 - `scheduler.event.preflight` when event preflight telemetry is enabled
 - `scheduler.non-settling`
 
