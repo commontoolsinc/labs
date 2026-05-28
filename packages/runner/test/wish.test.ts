@@ -453,6 +453,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("allPieces").get()?.result).toEqual(piecesData);
@@ -506,6 +507,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
@@ -558,6 +560,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
@@ -589,6 +592,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
@@ -2244,6 +2248,188 @@ describe("wish built-in", () => {
       expect(favorites).toBeDefined();
       expect(Array.isArray(favorites)).toBe(true);
       expect((favorites as any[])[0].tag).toEqual("test favorite");
+    });
+
+    it("resolves well-known profile targets from the user's profile space", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-space",
+      )).did();
+      const profileSpaceCell = runtime.getSpaceCell(
+        profileSpaceDid,
+        undefined,
+        tx,
+      );
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+      profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      (homeSpaceCell as any).key("profileSpace").set(
+        runtime.getSpaceCell(profileSpaceDid),
+      );
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return {
+          profile: wish({ query: "#profile" }),
+          profileDefault: wish({ query: "#profileDefault" }),
+          profileName: wish({ query: "#profileName" }),
+          profileAvatar: wish({ query: "#profileAvatar" }),
+          profileSpace: wish({ query: "#profileSpace" }),
+        };
+      });
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-targets-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Ada Lovelace");
+      expect(result.key("profileDefault").get()?.result?.name).toBe(
+        "Ada Lovelace",
+      );
+      expect(result.key("profileName").get()?.result).toBe("Ada Lovelace");
+      expect(result.key("profileAvatar").get()?.result).toBe("ada.png");
+      expect(result.key("profileSpace").get()?.result?.defaultPattern?.name)
+        .toBe("Ada Lovelace");
+    });
+
+    it("searches profile elements for hashtag wishes with profile scope", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-hashtag-space",
+      )).did();
+      const profileSpaceCell = runtime.getSpaceCell(
+        profileSpaceDid,
+        undefined,
+        tx,
+      );
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default-hashtag",
+        undefined,
+        tx,
+      );
+      const profileCard = runtime.getCell(
+        profileSpaceDid,
+        "profile-card",
+        undefined,
+        tx,
+      );
+      profileCard.set({ title: "Profile Card", kind: "card" });
+      profileDefaultCell.set({
+        name: "Ada",
+        avatar: "",
+        elements: [{
+          cell: profileCard,
+          tag: "#profile-card",
+          userTags: ["person"],
+          title: "Profile Card",
+        }],
+      });
+      profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      (homeSpaceCell as any).key("profileSpace").set(
+        runtime.getSpaceCell(profileSpaceDid),
+      );
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        byUserTag: wish({ query: "#person", scope: ["profile"] }),
+        byTag: wish({ query: "#profile-card", scope: ["profile"] }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-hashtag-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("byUserTag").get()?.result?.title).toBe(
+        "Profile Card",
+      );
+      expect(result.key("byTag").get()?.result?.kind).toBe("card");
+    });
+
+    it("does not parse profile scope as an arbitrary DID", async () => {
+      const wishPattern = pattern(() => ({
+        missing: wish({ query: "#missing", scope: ["profile"] }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-scope-reserved-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("missing").get();
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
+      expect(String(state?.error)).not.toContain("did");
+    });
+
+    it("returns an error state instead of throwing when profile space is missing", async () => {
+      const wishPattern = pattern(() => ({
+        profileName: wish({ query: "#profileName" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-missing-profile-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("profileName").get();
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profileSpace");
     });
 
     it("resolves #default from pattern space, not home space", async () => {
