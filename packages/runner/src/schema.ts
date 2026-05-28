@@ -9,6 +9,7 @@ import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   type FabricValue,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -828,10 +829,7 @@ function annotateWithBackToCellSymbols(
   if (!extensible || isCellResultForDereferencing(value)) {
     // We have to do a shallow clone of `value`. See function header comment
     // for details.
-    value = cloneIfNecessary(value as FabricValue, {
-      frozen: false,
-      deep: false,
-    });
+    value = shallowMutableClone(value as FabricValue);
   }
 
   // Non-enumerable, so that {...obj} won't copy these symbols
