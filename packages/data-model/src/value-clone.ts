@@ -98,6 +98,18 @@ export function cloneIfNecessary<T extends FabricValue>(
 }
 
 /**
+ * Shallow-thaws a `FabricValue` to a fresh mutable top-level copy: the
+ * top-level container is always copied, while its children stay
+ * identity-shared with the input. Equivalent to
+ * `cloneIfNecessary(value, { frozen: false, deep: false, force: true })`.
+ *
+ * @param value - An already-valid `FabricValue`.
+ */
+export function shallowMutableClone<T extends FabricValue>(value: T): T {
+  return cloneIfNecessary(value, { frozen: false, deep: false, force: true });
+}
+
+/**
  * Performs the unified clone for both shallow and deep modes.
  *
  * When `deep` is true, recursively clones containers and detects circular

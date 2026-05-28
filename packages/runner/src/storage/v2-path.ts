@@ -2,6 +2,7 @@ import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
   isArrayIndexPropertyName,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/memory/interface";
@@ -90,25 +91,6 @@ export const readValueAtPath = (
   return current as FabricValue | undefined;
 };
 
-const shallowCloneContainer = <
-  Container extends Record<string, unknown> | unknown[],
->(
-  value: Container,
-): Container => {
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    Object.assign(copy, value);
-    return copy as Container;
-  }
-
-  const copy = Object.create(Object.getPrototypeOf(value)) as Record<
-    string,
-    unknown
-  >;
-  Object.assign(copy, value);
-  return copy as Container;
-};
-
 const getPathSegmentValue = (
   value: Record<string, unknown> | unknown[],
   segment: string,
@@ -136,7 +118,10 @@ export const cloneWithValueAtPath = (
   }
 
   const baseRoot = (root ?? {}) as Record<string, unknown>;
-  const nextRoot = shallowCloneContainer(baseRoot);
+  const nextRoot = shallowMutableClone(baseRoot as FabricValue) as Record<
+    string,
+    unknown
+  >;
   let currentClone: Record<string, unknown> | unknown[] = nextRoot;
   let currentBase: unknown = baseRoot;
   for (let index = 0; index < path.length - 1; index += 1) {
@@ -149,7 +134,7 @@ export const cloneWithValueAtPath = (
       )
       : undefined;
     const nextChild = isRecord(existing) || Array.isArray(existing)
-      ? shallowCloneContainer(existing)
+      ? shallowMutableClone(existing as FabricValue)
       : createPathContainer(nextSegment);
     setPathSegmentValue(currentClone, segment, nextChild);
     currentClone = nextChild as Record<string, unknown> | unknown[];
@@ -190,7 +175,10 @@ export const cloneWithoutPath = (
     return root;
   }
 
-  const nextRoot = shallowCloneContainer(root);
+  const nextRoot = shallowMutableClone(root as FabricValue) as Record<
+    string,
+    unknown
+  >;
   let currentClone: Record<string, unknown> | unknown[] = nextRoot;
   let currentBase: Record<string, unknown> | unknown[] = root;
   for (let index = 0; index < path.length - 1; index += 1) {
@@ -198,7 +186,9 @@ export const cloneWithoutPath = (
     const next = getPathSegmentValue(currentBase, segment) as
       | Record<string, unknown>
       | unknown[];
-    const nextClone = shallowCloneContainer(next);
+    const nextClone = shallowMutableClone(next as FabricValue) as
+      | Record<string, unknown>
+      | unknown[];
     setPathSegmentValue(currentClone, segment, nextClone);
     currentClone = nextClone;
     currentBase = next;
