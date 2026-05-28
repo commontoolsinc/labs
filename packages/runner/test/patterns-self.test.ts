@@ -145,8 +145,9 @@ describe("Pattern Runner - SELF", () => {
     // Check the serialized pattern structure
     const serialized = JSON.parse(JSON.stringify(selfRefPattern));
 
-    // The self field in the result should be an alias to resultRef
-    expect(serialized.result.self.$alias.path).toEqual(["resultRef"]);
+    // The self field in the result should be an alias to result
+    expect(serialized.result.self.$alias.cell).toEqual("result");
+    expect(serialized.result.self.$alias.path).toEqual([]);
   });
 
   it("should allow SELF in pattern function as well as pattern", async () => {

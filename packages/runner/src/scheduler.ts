@@ -208,6 +208,7 @@ import type {
   TriggerTraceScheduledEffect,
 } from "./scheduler/types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
+
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {

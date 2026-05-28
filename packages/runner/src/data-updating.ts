@@ -1099,8 +1099,8 @@ export function addCommonIDfromObjectID(
  * Returns true if `target` is the immediate parent of `base` in the same document.
  *
  * Example:
- * - base.path = ["internal", "__#1", "next"]
- * - target.path = ["internal", "__#1"]
+ * - base.path = ["__#1", "next"]
+ * - target.path = ["__#1"]
  *
  * This is used to decide when to collapse a self/parent link that would create
  * a tight self-loop (e.g., obj.next -> obj) while allowing references to

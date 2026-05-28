@@ -14,6 +14,7 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 /** The shape of fetchData's input cell. */
@@ -166,10 +167,17 @@ export function fetchData(
       );
       internal = scopedCell(runtime, tx, baseInternal, outputScope);
 
-      pending.setSourceCell(parentCell);
-      result.setSourceCell(parentCell);
-      error.setSourceCell(parentCell);
-      internal.setSourceCell(parentCell);
+      // Link the new result cells to the parent result cell
+      setResultCell(pending, parentCell);
+      setResultCell(result, parentCell);
+      setResultCell(error, parentCell);
+      setResultCell(internal, parentCell);
+      // Link the new result cells to the pattern cell too
+      const patternCellPtr = parentCell.key("pattern");
+      setPatternCell(pending, patternCellPtr);
+      setPatternCell(result, patternCellPtr);
+      setPatternCell(error, patternCellPtr);
+      setPatternCell(internal, patternCellPtr);
 
       // Kick off sync in the background
       pending.sync();

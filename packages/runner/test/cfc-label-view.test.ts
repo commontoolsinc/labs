@@ -120,7 +120,7 @@ describe("CFC label view helpers", () => {
     expect(cfcLabelViewForCell(cell)).toBeUndefined();
   });
 
-  it("does not ask source cells for label display", () => {
+  it("does not ask result metadata for label display", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({
         id: "of:labelled-result-cell",
@@ -128,8 +128,8 @@ describe("CFC label view helpers", () => {
         type: "application/json",
         path: [],
       }),
-      getSourceCell: () => {
-        throw new Error("source cell should not be consulted");
+      getMetaRaw: () => {
+        throw new Error("result metadata should not be consulted");
       },
     };
 
@@ -1279,37 +1279,7 @@ describe("CFC label view helpers", () => {
     });
   });
 
-  it("skips source-cell metadata for result-cell internal paths", () => {
-    const sourceCell = {
-      getAsNormalizedFullLink: () => ({
-        id: "of:source-cell",
-        space: "did:key:test",
-        type: "application/json",
-        path: [],
-      }),
-      runtime: {
-        readTx: () => ({
-          readOrThrow: () => ({
-            cfc: {
-              version: 1,
-              schemaHash: "test-schema",
-              labelMap: {
-                version: 1,
-                entries: [{
-                  path: ["internal", "__#3"],
-                  label: {
-                    integrity: [{
-                      kind: "authored-by",
-                      subject: "alice",
-                    }],
-                  },
-                }],
-              },
-            },
-          }),
-        }),
-      },
-    };
+  it("skips result metadata for result-cell internal paths", () => {
     const resultCell = {
       getAsNormalizedFullLink: () => ({
         id: "of:result-cell",
@@ -1322,7 +1292,9 @@ describe("CFC label view helpers", () => {
           readOrThrow: () => undefined,
         }),
       },
-      getSourceCell: () => sourceCell,
+      getMetaRaw: () => {
+        throw new Error("result metadata should not be consulted");
+      },
     };
 
     expect(cfcLabelViewForCell(resultCell)).toBeUndefined();

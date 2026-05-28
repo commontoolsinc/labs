@@ -28,7 +28,8 @@ export type HarnessChatRequestMethod =
   | "cancel_turn"
   | "close_session"
   | "status"
-  | "list_events";
+  | "list_events"
+  | "list_turns";
 
 export type HarnessChatSessionLifecycle =
   | "idle"
@@ -204,6 +205,11 @@ export interface HarnessChatListEventsParams {
   limit?: number;
 }
 
+export interface HarnessChatListTurnsParams {
+  sessionId?: string;
+  status?: HarnessChatTurnLifecycle;
+}
+
 export type HarnessChatRequestParamsByMethod = {
   start_session: HarnessChatStartSessionParams;
   start_turn: HarnessChatStartTurnParams;
@@ -211,6 +217,7 @@ export type HarnessChatRequestParamsByMethod = {
   close_session: HarnessChatCloseSessionParams;
   status: HarnessChatStatusParams;
   list_events: HarnessChatListEventsParams;
+  list_turns: HarnessChatListTurnsParams;
 };
 
 export type HarnessChatRequestEnvelope<
@@ -230,6 +237,7 @@ export interface HarnessChatError {
     | "invalid_request"
     | "session_exists"
     | "session_not_found"
+    | "turn_exists"
     | "turn_not_found"
     | "turn_already_running"
     | "turn_canceled"
@@ -269,6 +277,7 @@ export interface HarnessChatTurnStatus {
   updatedAt: string;
   endedAt?: string;
   cancelReason?: string;
+  error?: HarnessChatError;
 }
 
 export interface HarnessChatSessionStatus {
@@ -294,6 +303,16 @@ export interface HarnessChatSessionStatus {
 
 export interface HarnessChatStatusResult {
   sessions: readonly HarnessChatSessionStatus[];
+}
+
+export interface HarnessChatTurnRecord {
+  sessionId: string;
+  turn: HarnessChatTurnStatus;
+  input: HarnessChatTurnInput;
+  context?: HarnessChatContext;
+  policy: HarnessChatPolicy;
+  browserAccess?: HarnessChatBrowserAccessLease;
+  metadata?: Record<string, unknown>;
 }
 
 export interface HarnessChatToolCallSummary {
@@ -389,6 +408,11 @@ export type HarnessChatStructuredEvent =
     usage?: HarnessChatGatewayUsage;
   }
   | {
+    kind: "turn_failed";
+    turnId: string;
+    error: HarnessChatError;
+  }
+  | {
     kind: "status_changed";
     session: HarnessChatSessionStatus;
   }
@@ -417,6 +441,10 @@ export interface HarnessChatEventEnvelope<
 export interface HarnessChatListEventsResult {
   events: readonly HarnessChatEventEnvelope[];
   latestSequence: number;
+}
+
+export interface HarnessChatListTurnsResult {
+  turns: readonly HarnessChatTurnRecord[];
 }
 
 export interface CreateHarnessChatSessionStatusOptions {
@@ -507,6 +535,14 @@ export const createHarnessChatErrorResponse = (
   error,
 });
 
+const clearSessionActiveTurn = (
+  status: HarnessChatSessionStatus,
+): Omit<HarnessChatSessionStatus, "activeTurn" | "activeTurnId"> => {
+  const { activeTurn: _activeTurn, activeTurnId: _activeTurnId, ...rest } =
+    status;
+  return rest;
+};
+
 export const reduceHarnessChatSessionStatus = (
   status: HarnessChatSessionStatus,
   envelope: HarnessChatEventEnvelope,
@@ -545,8 +581,30 @@ export const reduceHarnessChatSessionStatus = (
       };
     }
     case "turn_completed": {
-      const { activeTurn: _activeTurn, activeTurnId: _activeTurnId, ...rest } =
-        status;
+      const rest = clearSessionActiveTurn(status);
+      if (status.status === "closed" || status.status === "failed") {
+        return {
+          ...rest,
+          reusable: false,
+          updatedAt,
+        };
+      }
+      return {
+        ...rest,
+        status: "idle",
+        reusable: true,
+        updatedAt,
+      };
+    }
+    case "turn_failed": {
+      const rest = clearSessionActiveTurn(status);
+      if (status.status === "closed" || status.status === "failed") {
+        return {
+          ...rest,
+          reusable: false,
+          updatedAt,
+        };
+      }
       return {
         ...rest,
         status: "idle",
@@ -557,8 +615,7 @@ export const reduceHarnessChatSessionStatus = (
     case "status_changed":
       return envelope.event.session;
     case "session_closed": {
-      const { activeTurn: _activeTurn, activeTurnId: _activeTurnId, ...rest } =
-        status;
+      const rest = clearSessionActiveTurn(status);
       return {
         ...rest,
         status: "closed",
@@ -574,12 +631,15 @@ export const reduceHarnessChatSessionStatus = (
           updatedAt,
         };
       }
-      return {
-        ...status,
-        status: "failed",
-        reusable: false,
-        updatedAt,
-      };
+      {
+        const rest = clearSessionActiveTurn(status);
+        return {
+          ...rest,
+          status: "failed",
+          reusable: false,
+          updatedAt,
+        };
+      }
     default:
       return {
         ...status,

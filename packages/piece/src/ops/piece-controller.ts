@@ -1,10 +1,10 @@
 import {
   Cell,
   type CellPath,
-  getPatternIdFromResultCell,
+  getMetaLink,
   NAME,
-  Pattern,
-  PatternMeta,
+  type Pattern,
+  type PatternMeta,
   resolveCellPath,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -107,7 +107,8 @@ export class PieceController<T = unknown> {
   }
 
   async getPattern(): Promise<Pattern> {
-    const patternId = getPatternIdFromPiece(this.#cell);
+    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
+    if (!patternId) throw new Error("piece missing pattern ID");
     const runtime = this.#manager.runtime;
     const pattern = await runtime.patternManager.loadPattern(
       patternId,
@@ -117,7 +118,8 @@ export class PieceController<T = unknown> {
   }
 
   getPatternMeta(): Promise<PatternMeta> {
-    const patternId = getPatternIdFromPiece(this.#cell);
+    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
+    if (!patternId) throw new Error("piece missing pattern ID");
     const space = this.#manager.getSpace();
     return this.#manager.runtime.patternManager.loadPatternMeta(
       patternId,
@@ -154,9 +156,3 @@ async function execute(
 ): Promise<void> {
   await manager.runWithPattern(pattern, pieceId, input, options);
 }
-
-export const getPatternIdFromPiece = (piece: Cell<unknown>): string => {
-  const patternId = getPatternIdFromResultCell(piece);
-  if (!patternId) throw new Error("piece missing pattern ID");
-  return patternId;
-};

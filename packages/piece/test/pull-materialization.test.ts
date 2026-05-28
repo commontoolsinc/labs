@@ -23,7 +23,7 @@ function doublePattern(): Pattern {
       },
     },
     result: {
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     },
     nodes: [
       {
@@ -31,8 +31,8 @@ function doublePattern(): Pattern {
           type: "javascript",
           implementation: (input: number) => input * 2,
         },
-        inputs: { $alias: { path: ["argument", "input"] } },
-        outputs: { $alias: { path: ["internal", "output"] } },
+        inputs: { $alias: { cell: "argument", path: ["input"] } },
+        outputs: { $alias: { cell: "internal", path: ["output"] } },
       },
     ],
   };
@@ -53,7 +53,7 @@ function tenfoldPattern(): Pattern {
       },
     },
     result: {
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     },
     nodes: [
       {
@@ -61,8 +61,8 @@ function tenfoldPattern(): Pattern {
           type: "javascript",
           implementation: (input: number) => input * 10,
         },
-        inputs: { $alias: { path: ["argument", "input"] } },
-        outputs: { $alias: { path: ["internal", "output"] } },
+        inputs: { $alias: { cell: "argument", path: ["input"] } },
+        outputs: { $alias: { cell: "internal", path: ["output"] } },
       },
     ],
   };
@@ -86,7 +86,7 @@ function namedPattern(name: string, multiplier: number): Pattern {
     },
     result: {
       [NAME]: name,
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     },
     nodes: [
       {
@@ -94,8 +94,8 @@ function namedPattern(name: string, multiplier: number): Pattern {
           type: "javascript",
           implementation: (input: number) => input * multiplier,
         },
-        inputs: { $alias: { path: ["argument", "input"] } },
-        outputs: { $alias: { path: ["internal", "output"] } },
+        inputs: { $alias: { cell: "argument", path: ["input"] } },
+        outputs: { $alias: { cell: "internal", path: ["output"] } },
       },
     ],
   };
@@ -152,7 +152,6 @@ describe("piece pull materialization", () => {
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
-      undefined,
       { start: true },
     );
     const controller = new PieceController(manager, piece);
@@ -170,7 +169,6 @@ describe("piece pull materialization", () => {
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
-      undefined,
       { start: true },
     );
     const controller = new PieceController(manager, piece);
@@ -184,7 +182,6 @@ describe("piece pull materialization", () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
-      undefined,
       undefined,
       { start: true },
     );
@@ -205,7 +202,7 @@ describe("piece pull materialization", () => {
     const pattern = doublePattern();
     const patternId = "test-pattern-id";
     const originalSetup = manager.runtime.setup.bind(manager.runtime);
-    const originalGetPatternMeta = manager.runtime.patternManager.getPatternMeta
+    const originalGetPatternId = manager.runtime.patternManager.getPatternId
       .bind(manager.runtime.patternManager);
     const originalSyncPatternById = manager.syncPatternById.bind(manager);
     let setupResolved = false;
@@ -221,11 +218,9 @@ describe("piece pull materialization", () => {
       });
     }) as typeof manager.runtime.setup;
 
-    const getPatternMetaStub: unknown = () => ({
-      id: patternId,
-    });
-    manager.runtime.patternManager.getPatternMeta =
-      getPatternMetaStub as typeof manager.runtime.patternManager.getPatternMeta;
+    const getPatternIdStub: unknown = () => patternId;
+    manager.runtime.patternManager.getPatternId =
+      getPatternIdStub as typeof manager.runtime.patternManager.getPatternId;
 
     manager.syncPatternById = ((id: string) => {
       expect(id).toBe(patternId);
@@ -244,7 +239,7 @@ describe("piece pull materialization", () => {
       await pending;
     } finally {
       manager.runtime.setup = originalSetup;
-      manager.runtime.patternManager.getPatternMeta = originalGetPatternMeta;
+      manager.runtime.patternManager.getPatternId = originalGetPatternId;
       manager.syncPatternById = originalSyncPatternById;
     }
   });
@@ -253,7 +248,6 @@ describe("piece pull materialization", () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
-      undefined,
       undefined,
       { start: true },
     );
@@ -279,7 +273,6 @@ describe("piece pull materialization", () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, namedPattern("double", 2)),
       { input: 5 },
-      undefined,
       undefined,
       { start: true },
     );

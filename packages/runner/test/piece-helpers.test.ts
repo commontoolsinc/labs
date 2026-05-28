@@ -1,6 +1,17 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
-import { parseCellPath, resolveCellPath } from "../src/piece-helpers.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  getResultCellWithSourceSchema,
+  parseCellPath,
+  resolveCellPath,
+} from "../src/piece-helpers.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const signer = await Identity.fromPassphrase("test piece helpers");
+const space = signer.did();
 
 interface FakeCell {
   get(): unknown;
@@ -65,5 +76,87 @@ describe("resolveCellPath", () => {
       Error,
       'encountered non-object at "theme"',
     );
+  });
+});
+
+describe("getResultCellWithSourceSchema", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("uses result schema metadata to annotate child result cells", () => {
+    const resultSchema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        detail: {
+          type: "object",
+          properties: {
+            count: { type: "number" },
+          },
+          required: ["count"],
+        },
+      },
+      required: ["title", "detail"],
+    } as const;
+    const resultCell = runtime.getCell(
+      space,
+      "piece helper result schema metadata",
+      undefined,
+      tx,
+    );
+    resultCell.setMetaRaw("schema", resultSchema);
+
+    const titleCell = getResultCellWithSourceSchema(
+      resultCell.key("title"),
+    );
+    const countCell = getResultCellWithSourceSchema(
+      resultCell.key("detail").key("count"),
+    );
+
+    assertEquals(titleCell.getAsNormalizedFullLink().schema, {
+      type: "string",
+    });
+    assertEquals(countCell.getAsNormalizedFullLink().schema, {
+      type: "number",
+    });
+  });
+
+  it("keeps an explicit link schema instead of replacing it from metadata", () => {
+    const resultSchema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+      },
+      required: ["title"],
+    } as const;
+    const explicitSchema = { type: "number" } as const;
+    const resultCell = runtime.getCell(
+      space,
+      "piece helper explicit schema",
+      undefined,
+      tx,
+    );
+    resultCell.setMetaRaw("schema", resultSchema);
+
+    const explicitCell = resultCell.key("title").asSchema(explicitSchema);
+    const annotated = getResultCellWithSourceSchema(explicitCell);
+
+    assertEquals(annotated.getAsNormalizedFullLink().schema, explicitSchema);
   });
 });

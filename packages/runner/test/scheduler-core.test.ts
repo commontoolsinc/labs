@@ -1310,6 +1310,39 @@ describe("scheduler", () => {
     await readTx.commit();
   });
 
+  it("should track getMetaRaw reads in the normal scheduler read log", async () => {
+    const testCell = runtime.getCell<{ value: number }>(
+      space,
+      "meta-read-log-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ value: 1 });
+    testCell.setMetaRaw("slug", "tracked-slug");
+    tx.commit();
+    tx = runtime.edit();
+
+    const readTx = runtime.edit();
+    expect(testCell.withTx(readTx).getMetaRaw("slug")).toBe("tracked-slug");
+
+    const log = txToReactivityLog(readTx);
+    expect(
+      log.reads.some((addr) =>
+        addr.id === testCell.getAsNormalizedFullLink().id &&
+        addr.path.length === 1 &&
+        addr.path[0] === "slug"
+      ),
+    ).toBe(true);
+    expect(
+      log.shallowReads.some((addr) =>
+        addr.id === testCell.getAsNormalizedFullLink().id &&
+        addr.path[0] === "slug"
+      ),
+    ).toBe(false);
+
+    await readTx.commit();
+  });
+
   it("should track read without load for scheduling and still trigger on writes", async () => {
     const sourceCell = runtime.getCell<number>(
       space,

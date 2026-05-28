@@ -26,21 +26,16 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
-import {
-  type CellScope,
-  ID,
-  NAME,
-  type Pattern,
-  TYPE,
-} from "../builder/types.ts";
+import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
+import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { schemaToTypeString } from "../schema-format.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
   createLLMFriendlyLink,
+  getMetaLink,
   matchLLMFriendlyLink,
   type NormalizedFullLink,
   parseLink,
@@ -239,10 +234,10 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
-  const internalProcessSchema = getInternalProcessCellSchema(cell);
-  if (isNontrivialSchema(internalProcessSchema)) {
-    return internalProcessSchema;
-  }
+  // TODO(@ubik2): Previously, we checked the cell for an internal link,
+  // and if we found it, we attached the pattern's schema. I think that
+  // should all be handled properly by the new sigil links that include
+  // the schema, but leaving this until I verify.
 
   // Extract schema from cell, including from resultSchema of associated pattern
   const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
@@ -270,40 +265,6 @@ function getCellSchema(
 
   // Fall back to minimal schema based on current value
   return buildMinimalSchemaFromValue(cell);
-}
-
-function getInternalProcessCellSchema(
-  cell: Cell<unknown>,
-): JSONSchema | undefined {
-  const link = cell.getAsNormalizedFullLink();
-  if (link.path[0] !== "internal") {
-    return undefined;
-  }
-
-  try {
-    const tx = cell.runtime.readTx(
-      (cell as unknown as { tx?: IExtendedStorageTransaction }).tx,
-    );
-    const patternId = tx.readValueOrThrow(
-      { ...link, path: [TYPE] },
-      { meta: { ...ignoreReadForScheduling, ...internalVerifierRead } },
-    );
-    if (typeof patternId !== "string") {
-      return undefined;
-    }
-
-    const pattern = cell.runtime.patternManager.patternById(patternId);
-    if (pattern?.internalSchema === undefined) {
-      return undefined;
-    }
-    return cell.runtime.cfc.schemaAtPath(
-      pattern.internalSchema,
-      link.path.slice(1),
-    );
-  } catch (e) {
-    logger.debug("llm", "getInternalProcessCellSchema failed:", e);
-    return undefined;
-  }
 }
 
 function buildMinimalSchemaFromValue(piece: Cell<any>): JSONSchema | undefined {
@@ -2168,12 +2129,13 @@ async function handleRead(
   schema = cell.schema ?? schema;
   let value = schema ? cell.get() : cell.getRaw();
   if (value === undefined) {
-    const sourceCell = cell.getSourceCell()?.resolveAsCell()
-      .asSchemaFromLinks();
-    if (sourceCell) {
-      await sourceCell.pull();
-      schema = sourceCell.schema ?? getCellSchema(sourceCell);
-      cell = schema ? sourceCell.asSchema(schema) : sourceCell;
+    // If our cell is an intermediate with a parent result, follow that
+    const parentLink = getMetaLink(cell, "result");
+    if (parentLink !== undefined) {
+      const parentCell = cell.runtime.getCellFromLink(parentLink);
+      await parentCell.pull();
+      schema = parentCell.schema ?? getCellSchema(parentCell);
+      cell = schema ? parentCell.asSchema(schema) : parentCell;
       value = schema ? cell.get() : cell.getRaw();
     }
   }
@@ -2208,17 +2170,16 @@ function handleUpdateArgument(
   const cell = resolved.cellRef;
   const updates = resolved.updates;
 
-  // Get the source cell (process cell) that stores the pattern metadata
-  const sourceCell = cell.getSourceCell();
-  if (!sourceCell) {
+  const argumentLink = getMetaLink(cell, "argument");
+  if (argumentLink === undefined) {
     throw new Error(
-      "Target is not a pattern instance - no source cell found. " +
+      "Target is not a pattern instance - no argument cell found. " +
         "updateArgument only works with running patterns (e.g., from invoke() or attached patterns).",
     );
   }
 
   // Access the argument cell
-  const argumentCell = sourceCell.key("argument");
+  const argumentCell = runtime.getCellFromLink(argumentLink);
   const cellifiedValue = traverseAndCellify(
     runtime,
     argumentCell.space,

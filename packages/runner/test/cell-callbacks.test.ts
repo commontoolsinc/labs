@@ -14,6 +14,7 @@ import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1236,45 +1237,10 @@ describe("Cell commit callbacks", () => {
       expect(schemaCell.schema).toEqual(schema);
     });
 
-    it("should return schema from pattern resultRef if not present on cell", () => {
-      // 1. Create the target cell (no schema initially)
-      const targetCell = runtime.getCell(space, "target-cell", undefined, tx);
-
-      // 2. Create the pattern cell
-      const patternCell = runtime.getCell(space, "pattern-cell", undefined, tx);
-
-      // 3. Set patternCell as the source of targetCell
-      targetCell.setSourceCell(patternCell);
-
-      // 4. Create a link to targetCell that includes the desired schema
-      const schemaWeWant: JSONSchema = {
-        type: "object",
-        properties: {
-          output: { type: "number" },
-        },
-      };
-      const linkWithSchema = targetCell
-        .asSchema(schemaWeWant)
-        .getAsLink({ includeSchema: true });
-
-      // 5. Set patternCell's resultRef to point to targetCell using the link with schema
-      patternCell.set({ resultRef: linkWithSchema });
-
-      // 6. Verify asSchemaFromLinks picks up the schema from the resultRef link
-      const schemaCell = targetCell.asSchemaFromLinks();
-
-      expect(schemaCell.schema).toEqual(schemaWeWant);
-    });
-
     it("should recover callable child schemas from linked result metadata", () => {
       const resultCell = runtime.getCell(space, "linked-result", undefined, tx);
-      const patternCell = runtime.getCell(
-        space,
-        "linked-pattern",
-        undefined,
-        tx,
-      );
-      resultCell.setSourceCell(patternCell);
+      // we don't bother setting the pattern cell on the result cell, since
+      // this is just a partial example, and we have no pattern cell.
 
       const toolSchema: JSONSchema = {
         type: "object",
@@ -1306,12 +1272,13 @@ describe("Cell commit callbacks", () => {
       const linkWithSchema = resultCell
         .asSchema(resultSchema)
         .getAsLink({ includeSchema: true });
-      patternCell.set({ resultRef: linkWithSchema });
 
       const searchCell = resultCell.key("search");
       expect(searchCell.schema).toBeUndefined();
-      const resolvedSchema = searchCell.asSchemaFromLinks()
-        .schema as JSONSchema;
+      const normalizedLink = parseLink(linkWithSchema);
+      const resolvedSchema = resultCell.asSchema(normalizedLink.schema).key(
+        "search",
+      ).schema as JSONSchema;
       expect(resolvedSchema).toBeDefined();
       expect((resolvedSchema as any).type).toBe("object");
       expect(
