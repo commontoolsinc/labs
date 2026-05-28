@@ -25,11 +25,12 @@ default pattern initially owns:
 - owner-only handlers for adding profile elements from a fixed catalog or a
   pattern URL
 
-The user's home space links to the profile space through a well-known field on
-the home space cell. If the link is missing, the home pattern renders a
-"Create profile" control. Creating the profile creates or locates the profile
-space, ensures its profile default pattern, then stores the link on the home
-space cell.
+The user's home space links to the profile through a well-known field on the
+home default pattern, following the same durable field pattern as favorites. If
+the link is missing, the home pattern renders a profile-name input. Submitting a
+name starts the profile default pattern in a new profile space via
+`PatternFactory.inSpace(...)` and stores the created profile default-pattern link
+on the home default pattern.
 
 `wish()` gains a profile search scope for hashtag queries. A profile-scoped wish
 searches pieces in the current user's profile space whose descriptions or user
@@ -71,9 +72,12 @@ mentionables hashtag paths.
 - The current home pattern owns durable cells such as `favorites`, `journal`,
   `learned`, `spaces`, and `defaultAppUrl` on the home default pattern.
 - The current docs say favorites are on `spaceCell.favorites`, but current code
-  uses `homeSpaceCell.defaultPattern.favorites`. This spec follows the user's
-  requested profile link shape: the profile-space link is a field on the home
-  space cell itself.
+  uses `homeSpaceCell.defaultPattern.favorites`. The implemented profile flow
+  follows that actual shape and stores the profile link at
+  `homeSpaceCell.defaultPattern.profile`.
+- `PatternFactory.inSpace(space?: string | AnyCell<unknown>)` exists. DID
+  strings and cell arguments resolve synchronously; named spaces and omitted
+  spaces resolve during async action/handler post-run.
 - `wish()` currently supports scope values `"~"` for home favorites, `"."` for
   current-space mentionables, and arbitrary DIDs for other spaces.
 - The string `#profile` was previously a well-known home target that resolved
@@ -83,48 +87,40 @@ mentionables hashtag paths.
 
 ## Data Model
 
-### Home Space Cell
+### Home Default Pattern Link
 
-Add a well-known field to the home space cell:
+Add a well-known field to the home default pattern:
 
 ```ts
-type HomeSpaceCell = {
-  defaultPattern?: Cell<unknown>;
-  profileSpace?: Cell<ProfileSpaceCell>;
+type HomeDefaultPattern = {
+  favorites: Favorite[];
+  profile?: Cell<ProfileDefaultPattern>;
 };
 ```
 
-`profileSpace` is a cell link to the root space cell of the user's profile
-space. It must not point directly at the profile default pattern. Linking to the
-space cell keeps the profile space model parallel to all other spaces:
+`profile` is a cell link to the profile default pattern. The linked cell lives
+in the profile space, so its normalized link carries the profile space DID:
 
 ```ts
-homeSpaceCell.profileSpace -> profileSpaceCell
-profileSpaceCell.defaultPattern -> profile default pattern piece
+homeSpaceCell.defaultPattern.profile -> profile default pattern cell
 ```
 
-The runner `spaceCellSchema` must include `profileSpace` as a cell-valued
-property so traversal, pull, and cross-space link following can load the profile
-space root.
+Earlier implementation slices added `homeSpaceCell.profileSpace` as a
+space-cell-shaped link. That shape is retained as a compatibility fallback for
+`wish()`, but the home creation UI writes `defaultPattern.profile`.
 
 ### Profile Space Identity
 
-The profile space DID must be per-user and stable. Do not use
-`createSession({ spaceName: "profile" })`, because named spaces are currently
-derived from a shared `"common user"` identity and would not be user-specific.
-
-The implementation should introduce a profile-space identity helper, for
-example:
+Profile creation uses `PatternFactory.inSpace(...)`:
 
 ```ts
-const profileSpaceIdentity = await userIdentity.derive("common-fabric-profile");
+const profile = ProfileHome.inSpace(spaceName)({ initialName: name });
 ```
 
-The resulting DID is the profile space DID. The home-space `profileSpace` link
-is the durable pointer and is the source of truth after creation. If a future
-space-creation flow chooses a random profile space DID instead, it must still
-store that link on the home space cell and must not rely on a human-readable
-space name.
+When `spaceName` is a non-DID string, the runner resolves it during async
+post-run through the existing named-space derivation path. When the argument is
+omitted, the runner generates a fresh DID. The home default pattern's `profile`
+link is the durable source of truth after creation.
 
 ### Profile Default Pattern Output
 
@@ -188,26 +184,26 @@ profile-space creation/link path.
 
 ## Home Pattern Flow
 
-The home pattern reads `homeSpaceCell.profileSpace`.
+The home pattern owns `homeDefaultPattern.profile`.
 
-If `profileSpace` is missing:
+If `profile` is missing:
 
-- render a `Create profile` button in the home profile tab
-- clicking it calls an owner-only host/runtime operation or stream that:
-  1. derives or creates the profile space DID
-  2. gets the profile space cell
-  3. ensures the profile default pattern
-  4. writes the profile space cell link to `homeSpaceCell.profileSpace`
-  5. navigates to or renders the created profile
+- render an input field for the user's profile name
+- submitting it stores the requested name, which drives a profile-creation
+  action/lift
+- that action starts `system/profile-home.tsx` with `.inSpace(name)`, passes the
+  submitted name as the initial profile name, and writes the resulting profile
+  default-pattern link to `homeDefaultPattern.profile`
 
-If `profileSpace` is present:
+If `profile` is present:
 
-- render a link to the profile space
 - render the profile default pattern or a compact summary based on
-  `profileSpace.defaultPattern.name` and `avatar`
+  `profile.name` and `profile.avatar`
 
-This write should target the home space cell, not the home default pattern, so a
-custom home pattern can be replaced without losing the profile-space link.
+This write targets the home default pattern because that is the current durable
+home-field convention used by favorites. If custom home pattern replacement
+needs to preserve profile links independently, that should be handled as a
+separate migration.
 
 ## Adding Profile Elements
 
@@ -279,6 +275,8 @@ that must change before `scope: ["profile"]` is exposed.
 ### Hashtag Search
 
 For hashtag queries, `scope: ["profile"]` searches
+`homeSpaceCell.defaultPattern.profile.elements`. If only the older
+`homeSpaceCell.profileSpace` link exists, `wish()` may fall back to
 `homeSpaceCell.profileSpace.defaultPattern.elements`.
 
 Matching follows the favorites behavior:
@@ -314,17 +312,17 @@ extension rather than a new default.
 
 ### Well-Known Profile Targets
 
-`wish({ query: "#profile" })` resolves to the current user's
-`profileSpace.defaultPattern`.
+`wish({ query: "#profile" })` resolves to the current user's profile default
+pattern.
 
 Add these explicit profile targets:
 
 ```tsx
-wish({ query: "#profile" })            // profileSpace.defaultPattern
-wish({ query: "#profileSpace" })       // the profile space cell
-wish({ query: "#profileDefault" })     // profileSpace.defaultPattern
-wish({ query: "#profileName" })        // profileSpace.defaultPattern.name
-wish({ query: "#profileAvatar" })      // profileSpace.defaultPattern.avatar
+wish({ query: "#profile" })            // homeDefault.profile
+wish({ query: "#profileSpace" })       // the profile space cell, derived from the profile link
+wish({ query: "#profileDefault" })     // homeDefault.profile
+wish({ query: "#profileName" })        // homeDefault.profile.name
+wish({ query: "#profileAvatar" })      // homeDefault.profile.avatar
 ```
 
 If the old learned-summary shortcut remains useful, it should get a new explicit
@@ -364,13 +362,12 @@ The integration test should:
 3. add or open the demo pattern
 4. assert the demo has no profile name yet
 5. navigate to the home view
-6. click `Create profile`
-7. set the profile name and avatar in the profile default pattern UI
-8. return to the ordinary space and open the demo pattern
-9. assert the rendered text is the profile name
-10. optionally create a second ordinary space with the same identity and assert
+6. submit the profile name in the home profile tab
+7. return to the ordinary space and open the demo pattern
+8. assert the rendered text is the profile name
+9. optionally create a second ordinary space with the same identity and assert
     the same profile name renders there too
-11. for multi-user coverage, log in as a second identity against the same
+10. for multi-user coverage, log in as a second identity against the same
     shared ordinary space/piece, create that user's profile, and assert the demo
     renders the second user's name without changing the first user's profile
 
@@ -386,9 +383,9 @@ shape for switching identities while keeping a shared piece under test.
 Add focused runner tests for `wish()`:
 
 - `scope: ["profile"]` is not treated as a DID
-- profile hashtag search reads `homeSpaceCell.profileSpace.defaultPattern`
+- profile hashtag search reads `homeSpaceCell.defaultPattern.profile`
 - mixed scope ordering is stable
-- missing `profileSpace` returns an empty/error `WishState` without throwing out
+- missing profile link returns an empty/error `WishState` without throwing out
   of the scheduler action
 - `wish({ query: "#profile" })` returns the profile default pattern
 
@@ -396,11 +393,11 @@ Add focused runner tests for `wish()`:
 
 1. Add schemas and helper types for `profileSpace` on the space cell and
    `ProfileDefaultPattern` / `ProfileElement`.
-2. Add a profile-space identity helper and profile creation operation.
+2. Add `PatternFactory.inSpace(...)` and use it for profile-space creation.
 3. Add the profile default pattern at
    `packages/patterns/system/profile-home.tsx`.
-4. Add profile default-pattern creation in `packages/piece`, preferably as an
-   explicit profile-specific controller method.
+4. Add profile default-pattern creation in `packages/piece` for explicit
+   profile-space controller flows.
 5. Update the home pattern to render missing and linked profile states.
 6. Update `WishParams.scope`, `wish()` parsing, and hashtag search for
    `"profile"`.
