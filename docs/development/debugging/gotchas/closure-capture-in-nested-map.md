@@ -6,10 +6,11 @@
 > which closed the policy gap our ticket flagged. The diagnostic also
 > unified so both error strings point at the same conceptual violation.
 >
-> The original failing shape no longer aborts at construction. Recipe A
-> below (map the cell directly, no `.get()` / `??`) is now the recommended
-> idiom and works cleanly. Recipe B (pre-bake into a top-level `computed`)
-> is still a reasonable choice when you also want to project/filter.
+> The original failing shape no longer aborts at construction **on
+> runtimes that include CT-1626 / PR #3726**. Recipe A below (map the cell
+> directly, no `.get()` / `??`) is now the recommended idiom and works
+> cleanly post-fix. Recipe B (pre-bake into a top-level `computed`) is
+> still a reasonable choice when you also want to project/filter.
 >
 > Keep this doc — the *anti-pattern* of writing
 > `(cell.get() ?? []).map((p) => p.name)` inside a row `.map` is still a
