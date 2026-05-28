@@ -1,9 +1,9 @@
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
-  isArrayIndexPropertyName,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";

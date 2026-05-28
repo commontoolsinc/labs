@@ -47,10 +47,6 @@ import {
   isFabricValueLegacy,
   shallowFabricFromNativeValueLegacy,
 } from "./fabric-value-legacy.ts";
-export {
-  isArrayIndexPropertyName,
-  isArrayWithOnlyIndexProperties,
-} from "@commonfabric/utils/arrays";
 
 //
 // Configuration flags

@@ -1,8 +1,8 @@
 import {
   cloneIfNecessary,
   getDataModelConfig,
-  isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { unclaimed } from "@commonfabric/memory/fact";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";

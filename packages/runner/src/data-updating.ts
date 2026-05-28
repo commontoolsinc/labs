@@ -4,9 +4,9 @@ import {
   FabricInstance,
   type FabricObject,
   type FabricValue,
-  isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";

@@ -3,9 +3,9 @@ import { getLogger } from "@commonfabric/utils/logger";
 import {
   type FabricObject,
   type FabricValue,
-  isArrayIndexPropertyName,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,

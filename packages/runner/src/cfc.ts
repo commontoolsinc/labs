@@ -8,7 +8,7 @@ import type {
   SchemaScope,
 } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
-import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
   cfcSchemaIsFalse,

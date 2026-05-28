@@ -14,10 +14,8 @@ import {
   cloneForMutation,
   CloneForMutationError,
 } from "@commonfabric/data-model/value-clone";
-import {
-  type FabricValue,
-  isArrayIndexPropertyName,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type {

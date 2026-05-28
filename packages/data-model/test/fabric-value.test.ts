@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   fabricFromNativeValue,
-  isArrayIndexPropertyName,
   isFabricCompatible,
   isFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
 } from "../src/fabric-value.ts";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
 import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 
