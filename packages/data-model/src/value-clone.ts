@@ -1,6 +1,6 @@
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
 import { isArrayIndexPropertyName } from "./array-utils.ts";
@@ -552,4 +552,122 @@ function createMissingContainer(
  */
 function isMutableHandle(value: unknown): boolean {
   return isPlainContainer(value) || value instanceof FabricInstance;
+}
+
+// =============================================================================
+// Frozen path edits (`cloneWithValueAtPath` / `cloneWithoutValueAtPath`)
+// =============================================================================
+//
+// Copy-on-write path edits that return a deep-frozen result. Both build on
+// `cloneForMutation` (so they share its spine-thaw and missing-intermediate
+// handling) and differ only in what they do at the leaf.
+
+const readChildAt = (
+  container: Record<string, unknown> | unknown[],
+  key: string,
+): FabricValue | undefined =>
+  (Array.isArray(container) ? container[Number(key)] : container[key]) as
+    | FabricValue
+    | undefined;
+
+const hasChildAt = (
+  container: Record<string, unknown> | unknown[],
+  key: string,
+): boolean => {
+  if (Array.isArray(container)) {
+    const index = Number(key);
+    return Number.isInteger(index) && index >= 0 && index < container.length;
+  }
+  return Object.hasOwn(container, key);
+};
+
+const writeChildAt = (
+  container: FabricValue,
+  key: string,
+  value: FabricValue,
+): void => {
+  if (Array.isArray(container)) {
+    (container as FabricValue[])[Number(key)] = value;
+  } else {
+    (container as Record<string, FabricValue>)[key] = value;
+  }
+};
+
+/**
+ * Returns a deep-frozen clone of `root` with `value` set at `path`, creating
+ * missing intermediate containers as needed (their array-vs-object shape is
+ * chosen from the next path segment, per `cloneForMutation`'s `createMissing`).
+ * Subtrees off the mutated spine are shared by identity. An empty `path`
+ * replaces the whole value.
+ *
+ * Like `cloneForMutation`, descent through a *present* non-container along the
+ * path -- a primitive, or a `FabricInstance`/`FabricPrimitive` -- throws a
+ * `CloneForMutationError` rather than silently replacing that leaf with fresh
+ * spine structure.
+ */
+export function cloneWithValueAtPath(
+  root: FabricValue | undefined,
+  path: readonly string[],
+  value: FabricValue | undefined,
+): FabricValue {
+  if (path.length === 0) {
+    return cloneIfNecessary(value as FabricValue);
+  }
+  const lastKey = path[path.length - 1]!;
+  const { value: newRoot, pathValue } = cloneForMutation(
+    (root ?? {}) as FabricValue,
+    path.slice(0, -1),
+    { createMissing: true, nextKeyAfterPath: lastKey },
+  );
+  writeChildAt(pathValue, lastKey, cloneIfNecessary(value as FabricValue));
+  return deepFreeze(newRoot);
+}
+
+/**
+ * Returns a deep-frozen clone of `root` with the value at `path` removed
+ * (object key deleted, or array element spliced out). Subtrees off the
+ * mutated spine are shared by identity.
+ *
+ * When `path` is genuinely absent -- a missing key, an out-of-range array
+ * index, or a non-plain-container (primitive / `FabricInstance` /
+ * `FabricPrimitive`) anywhere along the way -- there is nothing to remove, so
+ * `root` is returned unchanged (deep-frozen). An `undefined` `root` or empty
+ * `path` returns `undefined` (whole-value removal).
+ */
+export function cloneWithoutValueAtPath(
+  root: FabricValue | undefined,
+  path: readonly string[],
+): FabricValue | undefined {
+  if (root === undefined || path.length === 0) {
+    return undefined;
+  }
+
+  // Pre-walk: confirm the full path is reachable through plain containers and
+  // the final slot is present. Anything else means "nothing to remove" -- and
+  // gating on `isPlainContainer` (rather than a bare object check) is what
+  // keeps us from descending into a `FabricInstance`/`FabricPrimitive`.
+  let parent: FabricValue = root;
+  for (let i = 0; i < path.length - 1; i++) {
+    if (!isPlainContainer(parent)) return deepFreeze(root);
+    const child = readChildAt(parent, path[i]!);
+    if (child === undefined) return deepFreeze(root);
+    parent = child;
+  }
+  if (
+    !isPlainContainer(parent) || !hasChildAt(parent, path[path.length - 1]!)
+  ) {
+    return deepFreeze(root);
+  }
+
+  const { value: newRoot, pathValue } = cloneForMutation(
+    root,
+    path.slice(0, -1),
+  );
+  const lastKey = path[path.length - 1]!;
+  if (Array.isArray(pathValue)) {
+    (pathValue as FabricValue[]).splice(Number(lastKey), 1);
+  } else {
+    delete (pathValue as Record<string, FabricValue>)[lastKey];
+  }
+  return deepFreeze(newRoot);
 }
