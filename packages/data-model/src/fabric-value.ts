@@ -25,6 +25,7 @@ export {
   type CloneForMutationResult,
   cloneIfNecessary,
   type CloneOptions,
+  shallowMutableClone,
 } from "./value-clone.ts";
 
 import type {
