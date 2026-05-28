@@ -557,10 +557,10 @@ function isMutableHandle(value: unknown): boolean {
 const readChildAt = (
   container: Record<string, unknown> | unknown[],
   key: string,
-): FabricValue | undefined =>
-  (Array.isArray(container) ? container[Number(key)] : container[key]) as
-    | FabricValue
-    | undefined;
+): FabricValue =>
+  (Array.isArray(container)
+    ? container[Number(key)]
+    : container[key]) as FabricValue;
 
 /**
  * Helper for the path-edit functions, which indicates whether `container` has
@@ -609,20 +609,20 @@ const writeChildAt = (
  * spine structure.
  */
 export function cloneWithValueAtPath(
-  root: FabricValue | undefined,
+  root: FabricValue,
   path: readonly string[],
-  value: FabricValue | undefined,
+  value: FabricValue,
 ): FabricValue {
   if (path.length === 0) {
-    return cloneIfNecessary(value as FabricValue);
+    return cloneIfNecessary(value);
   }
   const lastKey = path[path.length - 1]!;
   const { value: newRoot, pathValue } = cloneForMutation(
-    (root ?? {}) as FabricValue,
+    root ?? {},
     path.slice(0, -1),
     { createMissing: true, nextKeyAfterPath: lastKey },
   );
-  writeChildAt(pathValue, lastKey, cloneIfNecessary(value as FabricValue));
+  writeChildAt(pathValue, lastKey, cloneIfNecessary(value));
   return deepFreeze(newRoot);
 }
 
@@ -638,9 +638,9 @@ export function cloneWithValueAtPath(
  * `path` returns `undefined` (whole-value removal).
  */
 export function cloneWithoutValueAtPath(
-  root: FabricValue | undefined,
+  root: FabricValue,
   path: readonly string[],
-): FabricValue | undefined {
+): FabricValue {
   if (root === undefined || path.length === 0) {
     return undefined;
   }
