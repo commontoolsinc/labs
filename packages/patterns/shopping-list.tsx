@@ -528,7 +528,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                           {itemWithAisle.item.title}
                         </div>
                         {/* Show aisle - prefer user override, then AI result */}
-                        {!!itemWithAisle.item.aisleOverride
+                        {itemWithAisle.item.aisleOverride
                           ? (
                             <span
                               style={{

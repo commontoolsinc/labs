@@ -504,7 +504,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                       }
                     })}
                   </div>
-                  {!!result.get()?.eventId
+                  {result.get()?.eventId
                     ? (
                       <div style={{ fontSize: "12px", color: "#047857" }}>
                         Event ID: {result.get()?.eventId}
@@ -1001,7 +1001,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                     </div>
 
                     {/* Location */}
-                    {!!pendingOp.get()?.event.location
+                    {pendingOp.get()?.event.location
                       ? (
                         <div
                           style={{

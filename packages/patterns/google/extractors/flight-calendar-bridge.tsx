@@ -698,7 +698,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     }}
                   >
                     {/* Travel To */}
-                    {!!group.travelTo
+                    {group.travelTo
                       ? (
                         <div
                           style={{
@@ -756,7 +756,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                     </div>
 
                     {/* Travel From */}
-                    {!!group.travelFrom
+                    {group.travelFrom
                       ? (
                         <div
                           style={{

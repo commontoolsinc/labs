@@ -812,7 +812,7 @@ export default pattern<Input, Output>(
                 </cf-hstack>
 
                 {/* Error display */}
-                {!!lastError
+                {lastError
                   ? (
                     <div
                       style={{
@@ -1097,7 +1097,7 @@ export default pattern<Input, Output>(
               </cf-vscroll>
 
               {/* AI Response Panel - OUTSIDE map, at pattern body level */}
-              {!!expandedCommentIdCell.get()
+              {expandedCommentIdCell.get()
                 ? (
                   <div
                     style={{
@@ -1288,7 +1288,7 @@ export default pattern<Input, Output>(
                       <strong>Comment by:</strong>{" "}
                       {actionDetails?.commentAuthor}
                     </div>
-                    {!!actionDetails?.hasQuotedText
+                    {actionDetails?.hasQuotedText
                       ? (
                         <div
                           style={{
