@@ -174,6 +174,28 @@ describe("PatternManager program persistence", () => {
     const meta = await runtime.patternManager.loadPatternMeta(patternId, space);
     expect(meta.program?.main).toEqual("/legacy.ts");
   });
+
+  it("returns metadata for a registered compiled pattern factory", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern(() => ({ name: 'factory meta' }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    const meta = runtime.patternManager.getPatternMeta(compiled);
+
+    expect(patternId).toBeDefined();
+    expect(meta.program?.main).toEqual("/main.ts");
+  });
 });
 
 describe("PatternManager.loadPattern error handling", () => {

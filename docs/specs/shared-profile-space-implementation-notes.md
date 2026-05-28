@@ -287,3 +287,46 @@ made before committing.
 ### Spec Correction Needed
 
 - Remove `homeSpaceCell.profileSpace` compatibility language from the spec.
+
+## Slice 7: Browser Integration For Shared Profile Names
+
+### Ambiguity or Incorrect Spec
+
+- The home profile controls needed stable test selectors. The spec described the
+  flow but did not name the UI hooks.
+- A profile-aware demo pattern renders data from the viewer's home space, so its
+  result needs user scope even though the piece is opened from a shared space.
+- Persistent piece creation uncovered two runner/piece timing issues:
+  `PatternManager.getPatternMeta()` did not accept compiled pattern factories
+  because they are functions, and a saved pattern meta cell can exist before its
+  value is loaded locally.
+
+### Decision
+
+- Added `#home-profile-name-input` and `#home-profile-summary` to the home
+  profile UI.
+- Added `packages/patterns/shared-profile-demo/main.tsx`, a minimal user-scoped
+  demo pattern that renders `wish({ query: "#profileName" })`.
+- Added browser coverage that opens one shared piece as two different
+  identities and verifies each identity resolves its own home profile.
+- Fixed `PatternManager.getPatternMeta()` to look up function pattern factories
+  and to fall back to in-memory metadata when the cached metadata cell exists
+  but has not loaded a value yet.
+- Moved persistent setup's known-pattern-id lookup before runtime setup so
+  source sync can use the already-registered pattern id reliably.
+
+### Tests Added
+
+- `packages/patterns/integration/shared-profile.test.ts`
+  - First identity sees no profile, creates a home profile, and sees that name
+    in the shared demo piece.
+  - Second identity opens the same shared piece, sees no profile, creates its
+    own home profile, and sees the second name.
+- `packages/runner/test/pattern-manager.test.ts`
+  - Registered compiled pattern factories return metadata by factory object.
+
+### Spec Correction Needed
+
+- The spec should call out that profile-aware shared patterns may need
+  user-scoped results when rendered output directly depends on the viewer's
+  profile.

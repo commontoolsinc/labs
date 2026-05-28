@@ -37,6 +37,11 @@ searches pieces in the current user's profile space whose descriptions or user
 tags contain the requested hashtag, analogous to the existing favorites and
 mentionables hashtag paths.
 
+Patterns that render viewer-specific profile data from a shared space should
+make that rendered result user-scoped. For example, a shared demo pattern that
+directly renders `wish({ query: "#profileName" })` should use a user-scoped
+result schema so each viewer sees their own profile projection.
+
 ## Goals
 
 - Provide one durable profile per authenticated user.

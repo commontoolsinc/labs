@@ -180,7 +180,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
               {profile
                 ? (
                   <cf-vstack gap="2">
-                    <cf-hstack gap="2" align="center">
+                    <cf-hstack id="home-profile-summary" gap="2" align="center">
                       <strong>{profile.name}</strong>
                       <span style={{ color: "#888" }}>{profile.avatar}</span>
                     </cf-hstack>
@@ -190,6 +190,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                 : (
                   <cf-vstack gap="1">
                     <cf-message-input
+                      id="home-profile-name-input"
                       placeholder="Your name..."
                       appearance="rounded"
                       oncf-send={requestProfileCreation({
