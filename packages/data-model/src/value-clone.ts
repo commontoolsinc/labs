@@ -57,6 +57,10 @@ function trackForCircularity(
  * fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
+ * Cyclic values are not supported: a deep clone (the default) throws on a
+ * detected cycle. This is not a real restriction, as a `FabricValue` is
+ * JSON-shaped and therefore acyclic.
+ *
  * @param value - An already-valid `FabricValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
  */
@@ -593,7 +597,7 @@ const hasChildAt = (
  * Like `cloneForMutation`, descent through a *present* non-container along the
  * path -- a primitive, or a `FabricInstance`/`FabricPrimitive` -- throws a
  * `CloneForMutationError` rather than silently replacing that leaf with fresh
- * spine structure.
+ * spine structure. Cyclic values are not supported (see `cloneIfNecessary`).
  */
 export function cloneWithValueAtPath(
   root: FabricValue,
@@ -625,7 +629,8 @@ export function cloneWithValueAtPath(
  * `FabricPrimitive`) anywhere along the way -- there is nothing to remove, so
  * a deep-frozen clone of `root` is returned (identity when `root` is already
  * deep-frozen). An `undefined` `root` or empty `path` returns `undefined`
- * (whole-value removal).
+ * (whole-value removal). Cyclic values are not supported (see
+ * `cloneIfNecessary`).
  */
 export function cloneWithoutValueAtPath(
   root: FabricValue,
