@@ -32,3 +32,37 @@ made before committing.
 ### Spec Correction Needed
 
 - Completed in `docs/specs/shared-profile-space.md`.
+
+## Slice 2: CFC Owner Policy
+
+### Ambiguity or Incorrect Spec
+
+- Existing `RepresentsCurrentUser<T>` only resolves to the transaction's acting
+  principal. That is not enough for profile fields because Bob using a trusted
+  surface against Alice's profile must not relabel Alice's profile as Bob's.
+- Existing CFC enforcement deliberately rejected literal DID subjects in
+  `represents-principal` atoms, so the profile schema factory needed a narrow
+  host-authored escape hatch for exact owner-DID policy.
+
+### Decision
+
+- Added `ifc.ownerPrincipal` as a stable CFC policy claim for host-created
+  schemas. A protected profile field embeds both `ownerPrincipal: ownerDid` and
+  `addIntegrity: [{ kind: "represents-principal", subject: ownerDid }]`.
+- `ownerPrincipal` requires a trust snapshot, an acting principal matching the
+  owner DID, `writeAuthorizedBy`, and `uiContract`.
+- Literal DID principal atoms remain rejected when `ownerPrincipal` is absent,
+  preserving the existing pattern-authored fail-closed behavior.
+
+### Tests Added
+
+- `packages/runner/test/profile-owner-cfc.test.ts`
+  - Alice-created protected profile fields persist Alice owner integrity.
+  - Bob cannot write Alice's protected profile fields through the trusted
+    profile writer.
+  - Missing trust snapshot and missing trusted writer both fail.
+
+### Spec Correction Needed
+
+- The spec said a profile schema factory may be needed. Implementation confirms
+  that need and uses `ifc.ownerPrincipal` as the internal policy marker.

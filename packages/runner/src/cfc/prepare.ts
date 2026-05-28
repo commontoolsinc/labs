@@ -193,6 +193,31 @@ const hasLiteralDidCurrentPrincipalClaim = (value: unknown): boolean => {
   return false;
 };
 
+const literalDidSubjectsForPrincipalClaim = (
+  value: unknown,
+  kind: string,
+  subjects: string[] = [],
+): string[] => {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      literalDidSubjectsForPrincipalClaim(entry, kind, subjects);
+    }
+    return subjects;
+  }
+  if (isCurrentPrincipalClaimAtom(value) && value.kind === kind) {
+    if (typeof value.subject === "string" && value.subject.startsWith("did:")) {
+      subjects.push(value.subject);
+    }
+    return subjects;
+  }
+  if (isRecord(value)) {
+    for (const entry of Object.values(value)) {
+      literalDidSubjectsForPrincipalClaim(entry, kind, subjects);
+    }
+  }
+  return subjects;
+};
+
 const metadataAppliesToPath = (
   metadata: CfcMetadata,
   path: readonly string[],
@@ -905,6 +930,48 @@ const currentPrincipalIntegrityReason = (
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const currentPrincipalValues = [...integrity, ...addIntegrity];
   if (currentPrincipalValues.length === 0) {
+    return undefined;
+  }
+  const ownerPrincipal = ifc.ownerPrincipal;
+  if (ownerPrincipal !== undefined) {
+    if (
+      typeof ownerPrincipal !== "string" ||
+      !ownerPrincipal.startsWith("did:")
+    ) {
+      return `ownerPrincipal must be a DID at /${path.join("/")}`;
+    }
+    const representedOwners = literalDidSubjectsForPrincipalClaim(
+      currentPrincipalValues,
+      "represents-principal",
+    );
+    if (!representedOwners.some((subject) => subject === ownerPrincipal)) {
+      return `ownerPrincipal requires matching represents-principal integrity at /${
+        path.join("/")
+      }`;
+    }
+    const trustSnapshot = tx.getCfcState().trustSnapshot;
+    if (trustSnapshot === undefined) {
+      return `ownerPrincipal requires a trust snapshot at /${path.join("/")}`;
+    }
+    if (!trustSnapshot.id) {
+      return `ownerPrincipal requires a trust snapshot id at /${
+        path.join("/")
+      }`;
+    }
+    if (!trustSnapshot.actingPrincipal) {
+      return `ownerPrincipal requires an acting principal at /${
+        path.join("/")
+      }`;
+    }
+    if (trustSnapshot.actingPrincipal !== ownerPrincipal) {
+      return `ownerPrincipal mismatch at /${path.join("/")}`;
+    }
+    if (ifc.writeAuthorizedBy === undefined) {
+      return `ownerPrincipal requires writeAuthorizedBy at /${path.join("/")}`;
+    }
+    if (ifc.uiContract === undefined) {
+      return `ownerPrincipal requires uiContract at /${path.join("/")}`;
+    }
     return undefined;
   }
   if (hasLiteralDidCurrentPrincipalClaim(currentPrincipalValues)) {
