@@ -1069,12 +1069,15 @@ export default pattern<Input>(({ departments }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const deriveStart = output.indexOf("const init = __cfHelpers.derive(");
-    assert(deriveStart >= 0, "expected computed() to lower to derive()");
-    const deriveWindow = output.slice(deriveStart, deriveStart + 1400);
+    const liftMatch = output.match(/const init = __cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift()",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
 
-    assertStringIncludes(deriveWindow, "materializerWriteInputPaths");
-    assertStringIncludes(deriveWindow, '["departments"]');
+    assertStringIncludes(liftWindow, "materializerWriteInputPaths");
+    assertStringIncludes(liftWindow, '["departments"]');
   },
 );
 
@@ -1097,12 +1100,15 @@ export default pattern<Input>(({ departments }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const deriveStart = output.indexOf("const count = __cfHelpers.derive(");
-    assert(deriveStart >= 0, "expected computed() to lower to derive()");
-    const deriveWindow = output.slice(deriveStart, deriveStart + 1200);
+    const liftMatch = output.match(/const count = __cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift()",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
 
     assert(
-      !deriveWindow.includes("materializerWriteInputPaths"),
+      !liftWindow.includes("materializerWriteInputPaths"),
       "readonly computed() should remain a normal pull computation",
     );
   },
