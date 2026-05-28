@@ -13,10 +13,8 @@ import type {
   SchemaPathSelector,
   Unit,
 } from "@commonfabric/memory/interface";
-import {
-  type FabricValue,
-  isArrayIndexPropertyName,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues

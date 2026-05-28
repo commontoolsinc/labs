@@ -10,9 +10,9 @@ import {
   FabricInstance,
   type FabricValue,
   getDataModelConfig,
-  isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";

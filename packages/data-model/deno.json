@@ -24,7 +24,6 @@
     ]
   },
   "exports": {
-    "./array-utils": "./src/array-utils.ts",
     "./BaseReconstructionContext": "./src/BaseReconstructionContext.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
     "./EmptyReconstructionContext": "./src/EmptyReconstructionContext.ts",

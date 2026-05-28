@@ -1,4 +1,4 @@
-import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 

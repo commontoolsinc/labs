@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./arrays": "./src/arrays.ts",
     "./base64url": "./src/base64url.ts",
     "./bigint": "./src/bigint.ts",
     "./cache": "./src/cache.ts",

@@ -4,8 +4,8 @@ import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import {
   cloneForMutation,
   type CloneForMutationResult,
-  isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
