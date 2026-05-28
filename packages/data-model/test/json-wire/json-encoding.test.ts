@@ -39,28 +39,28 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
 // ============================================================================
 
 describe("json-encoding", () => {
-  it("round-trip preserves undefined", () => {
+  it("round-trip preserves `undefined`", () => {
     expect(roundTrip(undefined)).toBe(undefined);
   });
 
-  it("round-trip preserves bigint", () => {
+  it("round-trip preserves `bigint`", () => {
     expect(roundTrip(42n as FabricValue)).toBe(42n);
   });
 
-  it("jsonFromValue encodes undefined to tagged JSON", () => {
+  it("`jsonFromValue()` encodes `undefined` to tagged JSON", () => {
     expectWireFormat(undefined, { "/Undefined@1": null });
   });
 
-  it("jsonFromValue encodes bigint to tagged JSON", () => {
+  it("`jsonFromValue()` encodes `bigint` to tagged JSON", () => {
     expectWireFormat(42n as FabricValue, { "/BigInt@1": "Kg" });
   });
 
-  it("valueFromJson decodes tagged undefined", () => {
+  it("`valueFromJson()` decodes tagged `undefined`", () => {
     const json = 'fvj1:{"\/Undefined@1":null}';
     expect(valueFromJson(json, mockRuntime)).toBe(undefined);
   });
 
-  it("valueFromJson decodes tagged bigint", () => {
+  it("`valueFromJson()` decodes tagged `bigint`", () => {
     const json = 'fvj1:{"\/BigInt@1":"Kg"}';
     expect(valueFromJson(json, mockRuntime)).toBe(42n);
   });
@@ -75,7 +75,7 @@ describe("json-encoding", () => {
     expect(roundTrip(value)).toEqual([1, "two", null]);
   });
 
-  it("round-trip preserves null", () => {
+  it("round-trip preserves `null`", () => {
     expect(roundTrip(null)).toBe(null);
   });
 
@@ -116,7 +116,7 @@ describe("json-encoding", () => {
   });
 
   describe("slash-prefixed keys and legacy markers", () => {
-    it("{ '/': value } round-trips via /object escaping", () => {
+    it('`{ "/": value }` round-trips via `/object` escaping', () => {
       // Write path wraps in /object, read path unwraps it.
       const sigilLink = {
         "/": { "link@1": { id: "of:bafyabc", path: [], space: "did:key:z1" } },
@@ -124,7 +124,7 @@ describe("json-encoding", () => {
       expect(roundTrip(sigilLink)).toEqual(sigilLink);
     });
 
-    it("nested { '/': value } within object round-trips", () => {
+    it('nested `{ "/": value }` within object round-trips', () => {
       const value = {
         name: "test",
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
@@ -136,17 +136,17 @@ describe("json-encoding", () => {
       );
     });
 
-    it("{ '/': 'string' } round-trips via /object escaping", () => {
+    it('`{ "/": "string" }` round-trips via `/object` escaping', () => {
       const entityId = { "/": "bafyabc123" } as FabricValue;
       expect(roundTrip(entityId)).toEqual(entityId);
     });
 
-    it("$stream marker passes through unchanged", () => {
+    it("`$stream` marker passes through unchanged", () => {
       const value = { $stream: true } as FabricValue;
       expect(roundTrip(value)).toEqual({ $stream: true });
     });
 
-    it("@Error marker passes through unchanged", () => {
+    it("`@Error` marker passes through unchanged", () => {
       const value = {
         "@Error": { name: "TypeError", message: "oops", stack: "" },
       } as FabricValue;
@@ -155,7 +155,7 @@ describe("json-encoding", () => {
       });
     });
 
-    it("$alias marker with nested { '/': value } round-trips", () => {
+    it('`$alias` marker with nested `{ "/": value }` round-trips', () => {
       const value = {
         $alias: { path: ["value", "name"], cell: { "/": "bafyabc" } },
       } as FabricValue;
@@ -180,7 +180,7 @@ describe("json-encoding", () => {
       expect((decoded.items as unknown[])[2]).toBe(undefined);
     });
 
-    it("{ '/': value } inside array round-trips", () => {
+    it('`{ "/": value }` inside array round-trips', () => {
       const value = [
         { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
         { "/": { "link@1": { id: "of:bafydef", path: ["x"] } } },
@@ -200,7 +200,7 @@ describe("json-encoding", () => {
       expect(seemsLikeJsonEncodedFabricValue("fvj1:")).toBe(true);
     });
 
-    it("recognizes the actual output of jsonFromValue (round-trip check)", () => {
+    it("recognizes the actual output of `jsonFromValue()` (round-trip check)", () => {
       const encoded = jsonFromValue({ a: 1, b: 42n } as FabricValue);
       expect(seemsLikeJsonEncodedFabricValue(encoded)).toBe(true);
     });
@@ -237,7 +237,7 @@ describe("json-encoding", () => {
     });
   });
 
-  describe("valueFromJson without a runtime argument", () => {
+  describe("`valueFromJson()` without a runtime argument", () => {
     it("decodes a plain object", () => {
       expect(valueFromJson('fvj1:{"a":1}')).toEqual({ a: 1 });
     });
@@ -281,7 +281,7 @@ describe("json-encoding", () => {
       expect(result.b).toBe(42n);
     });
 
-    it("throws on a class instance (FabricError)", () => {
+    it("throws on a class instance (`FabricError`)", () => {
       const err = FabricError.fromNativeError(new Error("test"));
       const json = jsonFromValue(err as FabricValue);
       expect(() => plainObjectFromJson(json)).toThrow(/instance/);

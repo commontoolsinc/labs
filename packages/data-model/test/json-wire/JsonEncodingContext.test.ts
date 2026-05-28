@@ -77,14 +77,14 @@ describe("JsonEncodingContext", () => {
   // Public API: Uint8Array boundary
   // --------------------------------------------------------------------------
 
-  describe("Uint8Array public API", () => {
-    it("encodeToBytes returns Uint8Array", () => {
+  describe("`Uint8Array` public API", () => {
+    it("`encodeToBytes()` returns `Uint8Array`", () => {
       const { context } = makeTestContext();
       const result = context.encodeToBytes(42);
       expect(result).toBeInstanceOf(Uint8Array);
     });
 
-    it("encodeToBytes produces valid JSON bytes", () => {
+    it("`encodeToBytes()` produces valid JSON bytes", () => {
       const { context } = makeTestContext();
       const bytes = context.encodeToBytes(
         { a: 1 } as unknown as FabricValue,
@@ -93,7 +93,7 @@ describe("JsonEncodingContext", () => {
       expect(JSON.parse(json)).toEqual({ a: 1 });
     });
 
-    it("decodeFromBytes accepts Uint8Array", () => {
+    it("`decodeFromBytes()` accepts `Uint8Array`", () => {
       const { context, runtime } = makeTestContext();
       const bytes = new TextEncoder().encode(JSON.stringify({ a: 1 }));
       const result = context.decodeFromBytes(
@@ -103,7 +103,7 @@ describe("JsonEncodingContext", () => {
       expect(result.a).toBe(1);
     });
 
-    it("round-trips through Uint8Array", () => {
+    it("round-trips through `Uint8Array`", () => {
       const { context, runtime } = makeTestContext();
       const value = {
         name: "test",
@@ -118,7 +118,7 @@ describe("JsonEncodingContext", () => {
       expect(result.count).toBe(42);
     });
 
-    it("round-trips FabricError through Uint8Array", () => {
+    it("round-trips `FabricError` through `Uint8Array`", () => {
       const { context, runtime } = makeTestContext();
       const err = FabricError.fromNativeError(new TypeError("oops"));
       const bytes = context.encodeToBytes(err as FabricValue);
@@ -132,14 +132,14 @@ describe("JsonEncodingContext", () => {
       expect(se.message).toBe("oops");
     });
 
-    it("round-trips undefined through Uint8Array", () => {
+    it("round-trips `undefined` through `Uint8Array`", () => {
       const { context, runtime } = makeTestContext();
       const bytes = context.encodeToBytes(undefined);
       const result = context.decodeFromBytes(bytes, runtime);
       expect(result).toBe(undefined);
     });
 
-    it("round-trips complex structure through Uint8Array", () => {
+    it("round-trips complex structure through `Uint8Array`", () => {
       const { context, runtime } = makeTestContext();
       const value = {
         users: [{ name: "Alice" }, { name: "Bob" }],
@@ -163,27 +163,27 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("primitives round-trip", () => {
-    it("passes through null", () => {
+    it("passes through `null`", () => {
       expect(roundTrip(null)).toBe(null);
     });
 
-    it("passes through true", () => {
+    it("passes through `true`", () => {
       expect(roundTrip(true)).toBe(true);
     });
 
-    it("passes through false", () => {
+    it("passes through `false`", () => {
       expect(roundTrip(false)).toBe(false);
     });
 
-    it("passes through 0", () => {
+    it("passes through `0`", () => {
       expect(roundTrip(0)).toBe(0);
     });
 
-    it("passes through 42", () => {
+    it("passes through `42`", () => {
       expect(roundTrip(42)).toBe(42);
     });
 
-    it("passes through 3.14", () => {
+    it("passes through `3.14`", () => {
       expect(roundTrip(3.14)).toBe(3.14);
     });
 
@@ -191,7 +191,7 @@ describe("JsonEncodingContext", () => {
       expect(roundTrip("")).toBe("");
     });
 
-    it("passes through 'hello'", () => {
+    it("passes through `hello`", () => {
       expect(roundTrip("hello")).toBe("hello");
     });
 
@@ -201,7 +201,7 @@ describe("JsonEncodingContext", () => {
       expect(roundTrip('with"quotes')).toBe('with"quotes');
     });
 
-    it("passes through Number.MAX_SAFE_INTEGER", () => {
+    it("passes through `Number.MAX_SAFE_INTEGER`", () => {
       expect(roundTrip(Number.MAX_SAFE_INTEGER)).toBe(
         Number.MAX_SAFE_INTEGER,
       );
@@ -218,7 +218,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("undefined", () => {
-    it("serializes to { '/Undefined@1': null }", () => {
+    it('serializes to `{ "/Undefined@1": null }`', () => {
       const result = toWireFormat(undefined);
       expect(result).toEqual({ "/Undefined@1": null });
     });
@@ -244,7 +244,7 @@ describe("JsonEncodingContext", () => {
       expect("b" in result).toBe(true); // key preserved
     });
 
-    it("is distinct from null", () => {
+    it("is distinct from `null`", () => {
       const serializedNull = toWireFormat(null);
       const serializedUndef = toWireFormat(undefined);
       expect(serializedNull).not.toEqual(serializedUndef);
@@ -256,37 +256,37 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("bigint", () => {
-    it("serializes 42n to base64 of two's complement bytes", () => {
+    it("serializes `42n` to base64 of two's complement bytes", () => {
       const result = toWireFormat(42n as FabricValue);
       // 42n -> [0x2a] -> base64 "Kg"
       expect(result).toEqual({ "/BigInt@1": "Kg" });
     });
 
-    it("serializes 0n to base64 'AA'", () => {
+    it('serializes `0n` to base64 `"AA"`', () => {
       const result = toWireFormat(0n as FabricValue);
       // 0n -> [0x00] -> base64 "AA"
       expect(result).toEqual({ "/BigInt@1": "AA" });
     });
 
-    it("serializes -1n to base64url '_w'", () => {
+    it('serializes `-1n` to base64url `"_w"`', () => {
       const result = toWireFormat(-1n as FabricValue);
       // -1n -> [0xFF] -> base64url "_w"
       expect(result).toEqual({ "/BigInt@1": "_w" });
     });
 
-    it("serializes 1n to base64 'AQ'", () => {
+    it('serializes `1n` to base64 `"AQ"`', () => {
       const result = toWireFormat(1n as FabricValue);
       // 1n -> [0x01] -> base64 "AQ"
       expect(result).toEqual({ "/BigInt@1": "AQ" });
     });
 
-    it("serializes 128n with sign-extension byte", () => {
+    it("serializes `128n` with sign-extension byte", () => {
       const result = toWireFormat(128n as FabricValue);
       // 128n -> [0x00, 0x80] -> base64 "AIA"
       expect(result).toEqual({ "/BigInt@1": "AIA" });
     });
 
-    it("base64 output is unpadded (no trailing =)", () => {
+    it("base64 output is unpadded (no trailing `=`)", () => {
       // 42n produces 1 byte -> 2 base64 chars (would be "Kg==" with padding)
       const result = toWireFormat(42n as FabricValue) as Record<
         string,
@@ -312,12 +312,12 @@ describe("JsonEncodingContext", () => {
       expect(result).toBe(0n);
     });
 
-    it("round-trips 1n", () => {
+    it("round-trips `1n`", () => {
       const result = roundTrip(1n as FabricValue);
       expect(result).toBe(1n);
     });
 
-    it("round-trips -1n", () => {
+    it("round-trips `-1n`", () => {
       const result = roundTrip(-1n as FabricValue);
       expect(result).toBe(-1n);
     });
@@ -334,19 +334,19 @@ describe("JsonEncodingContext", () => {
       expect(result).toBe(big);
     });
 
-    it("round-trips boundary value 127n", () => {
+    it("round-trips boundary value `127n`", () => {
       expect(roundTrip(127n as FabricValue)).toBe(127n);
     });
 
-    it("round-trips boundary value 128n", () => {
+    it("round-trips boundary value `128n`", () => {
       expect(roundTrip(128n as FabricValue)).toBe(128n);
     });
 
-    it("round-trips boundary value -128n", () => {
+    it("round-trips boundary value `-128n`", () => {
       expect(roundTrip(-128n as FabricValue)).toBe(-128n);
     });
 
-    it("round-trips boundary value -129n", () => {
+    it("round-trips boundary value `-129n`", () => {
       expect(roundTrip(-129n as FabricValue)).toBe(-129n);
     });
 
@@ -365,7 +365,7 @@ describe("JsonEncodingContext", () => {
       expect(result.b).toBe(42n);
     });
 
-    it("is distinct from number", () => {
+    it("is distinct from `number`", () => {
       const serializedNum = toWireFormat(42);
       const serializedBig = toWireFormat(42n as FabricValue);
       expect(serializedNum).not.toEqual(serializedBig);
@@ -386,7 +386,7 @@ describe("JsonEncodingContext", () => {
       expect(result).toBe(42n);
     });
 
-    it("deserializes non-string state to ProblematicValue", () => {
+    it("deserializes non-string state to `ProblematicValue`", () => {
       const data = { "/BigInt@1": 42 } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -395,19 +395,19 @@ describe("JsonEncodingContext", () => {
       expect(prob.state).toBe(42);
     });
 
-    it("deserializes null state to ProblematicValue", () => {
+    it("deserializes `null` state to `ProblematicValue`", () => {
       const data = { "/BigInt@1": null } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicValue);
     });
 
-    it("deserializes object state to ProblematicValue", () => {
+    it("deserializes object state to `ProblematicValue`", () => {
       const data = { "/BigInt@1": { bad: true } } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicValue);
     });
 
-    it("deserializes empty base64 string to ProblematicValue", () => {
+    it("deserializes empty base64 string to `ProblematicValue`", () => {
       const data = { "/BigInt@1": "" } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -421,49 +421,49 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("SpecialNumber", () => {
-    it('serializes -0 to /SpecialNumber@1 with state "-0"', () => {
+    it('serializes `-0` to `/SpecialNumber@1` with state `"-0"`', () => {
       expect(toWireFormat(-0)).toEqual({ "/SpecialNumber@1": "-0" });
     });
 
-    it('serializes NaN to /SpecialNumber@1 with state "NaN"', () => {
+    it('serializes `NaN` to `/SpecialNumber@1` with state `"NaN"`', () => {
       expect(toWireFormat(NaN)).toEqual({ "/SpecialNumber@1": "NaN" });
     });
 
-    it('serializes +Infinity to /SpecialNumber@1 with state "+Infinity"', () => {
+    it('serializes `+Infinity` to `/SpecialNumber@1` with state `"+Infinity"`', () => {
       expect(toWireFormat(Infinity)).toEqual({
         "/SpecialNumber@1": "+Infinity",
       });
     });
 
-    it('serializes -Infinity to /SpecialNumber@1 with state "-Infinity"', () => {
+    it('serializes `-Infinity` to `/SpecialNumber@1` with state `"-Infinity"`', () => {
       expect(toWireFormat(-Infinity)).toEqual({
         "/SpecialNumber@1": "-Infinity",
       });
     });
 
-    it("does not intercept +0 (round-trips as a plain number)", () => {
+    it("does not intercept `+0` (round-trips as a plain number)", () => {
       expect(toWireFormat(0)).toBe(0);
       expect(roundTrip(0)).toBe(0);
     });
 
-    it("round-trips -0 (preserves sign of zero)", () => {
+    it("round-trips `-0` (preserves sign of zero)", () => {
       const result = roundTrip(-0);
       expect(Object.is(result, -0)).toBe(true);
     });
 
-    it("round-trips NaN", () => {
+    it("round-trips `NaN`", () => {
       expect(Number.isNaN(roundTrip(NaN))).toBe(true);
     });
 
-    it("round-trips +Infinity", () => {
+    it("round-trips `+Infinity`", () => {
       expect(roundTrip(Infinity)).toBe(Infinity);
     });
 
-    it("round-trips -Infinity", () => {
+    it("round-trips `-Infinity`", () => {
       expect(roundTrip(-Infinity)).toBe(-Infinity);
     });
 
-    it('any NaN bit pattern serializes as the literal "NaN"', () => {
+    it('any `NaN` bit pattern serializes as the literal `"NaN"`', () => {
       const view = new DataView(new ArrayBuffer(8));
       view.setBigUint64(0, 0x7ff8000000000001n, false);
       const nonCanonicalNaN = view.getFloat64(0, false);
@@ -498,7 +498,7 @@ describe("JsonEncodingContext", () => {
       expect(result.ninf).toBe(-Infinity);
     });
 
-    it("non-string state -> ProblematicValue (lenient)", () => {
+    it("non-string state -> `ProblematicValue` (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
       const runtime = new TestReconstructionContext();
       const encoded = ENCODING_PREFIX +
@@ -510,7 +510,7 @@ describe("JsonEncodingContext", () => {
       );
     });
 
-    it("unknown literal -> ProblematicValue (lenient)", () => {
+    it("unknown literal -> `ProblematicValue` (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
       const runtime = new TestReconstructionContext();
       const encoded = ENCODING_PREFIX +
@@ -528,13 +528,13 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("Symbol", () => {
-    it("serializes Symbol.for('foo') to /Symbol@1 with the key as state", () => {
+    it('serializes `Symbol.for("foo")` to `/Symbol@1` with the key as state', () => {
       expect(toWireFormat(Symbol.for("foo") as FabricValue)).toEqual({
         "/Symbol@1": "foo",
       });
     });
 
-    it("serializes Symbol.for('') (empty key)", () => {
+    it('serializes `Symbol.for("")` (empty key)', () => {
       expect(toWireFormat(Symbol.for("") as FabricValue)).toEqual({
         "/Symbol@1": "",
       });
@@ -574,7 +574,7 @@ describe("JsonEncodingContext", () => {
       expect(result.flag).toBe(Symbol.for("ready"));
     });
 
-    it("does not intercept Symbol(desc) (unique / uninterned)", () => {
+    it("does not intercept `Symbol(desc)` (unique / uninterned)", () => {
       // canSerialize() returns false for unique symbols. The handler does not
       // claim them, which means they fall through to the registry's default
       // unhandled-value treatment rather than being silently coerced into a
@@ -588,7 +588,7 @@ describe("JsonEncodingContext", () => {
         .toBe(false);
     });
 
-    it("non-string state -> ProblematicValue (lenient)", () => {
+    it("non-string state -> `ProblematicValue` (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
       const runtime = new TestReconstructionContext();
       const encodedJson = ENCODING_PREFIX +
@@ -606,7 +606,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("FabricEpochNsec", () => {
-    it("serializes to /EpochNsec@1 with flat base64", () => {
+    it("serializes to `/EpochNsec@1` with flat base64", () => {
       const sn = new FabricEpochNsec(0n);
       const result = toWireFormat(sn as FabricValue) as Record<
         string,
@@ -675,7 +675,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("FabricEpochDays", () => {
-    it("serializes to /EpochDays@1 with flat base64", () => {
+    it("serializes to `/EpochDays@1` with flat base64", () => {
       const sd = new FabricEpochDays(0n);
       const result = toWireFormat(sd as FabricValue) as Record<
         string,
@@ -732,8 +732,8 @@ describe("JsonEncodingContext", () => {
   // Date -> FabricEpochNsec conversion
   // --------------------------------------------------------------------------
 
-  describe("Date -> FabricEpochNsec conversion", () => {
-    it("converts Date(0) to FabricEpochNsec(0n)", () => {
+  describe("`Date` -> `FabricEpochNsec` conversion", () => {
+    it("converts `Date(0)` to `FabricEpochNsec(0n)`", () => {
       setDataModelConfig(true);
       try {
         const date = new Date(0);
@@ -747,7 +747,7 @@ describe("JsonEncodingContext", () => {
       }
     });
 
-    it("converts Date to nanoseconds (msec * 1_000_000)", () => {
+    it("converts `Date` to nanoseconds (`msec * 1_000_000`)", () => {
       setDataModelConfig(true);
       try {
         const date = new Date("2024-01-01T00:00:00.000Z");
@@ -762,7 +762,7 @@ describe("JsonEncodingContext", () => {
       }
     });
 
-    it("converts negative Date to negative nanoseconds", () => {
+    it("converts negative `Date` to negative nanoseconds", () => {
       setDataModelConfig(true);
       try {
         const date = new Date(-86400000); // -1 day
@@ -782,7 +782,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("FabricError", () => {
-    it("serializes basic FabricError to /Error@1", () => {
+    it("serializes basic `FabricError` to `/Error@1`", () => {
       const se = FabricError.fromNativeError(new Error("test"));
       const result = toWireFormat(
         se as FabricValue,
@@ -794,7 +794,7 @@ describe("JsonEncodingContext", () => {
       expect(state.message).toBe("test");
     });
 
-    it("round-trips basic Error via FabricError", () => {
+    it("round-trips basic `Error` via `FabricError`", () => {
       const se = FabricError.fromNativeError(new Error("hello"));
       const result = roundTrip(
         se as FabricValue,
@@ -805,7 +805,7 @@ describe("JsonEncodingContext", () => {
       expect(result.message).toBe("hello");
     });
 
-    it("round-trips TypeError", () => {
+    it("round-trips `TypeError`", () => {
       const se = FabricError.fromNativeError(new TypeError("bad type"));
       const result = roundTrip(
         se as FabricValue,
@@ -816,7 +816,7 @@ describe("JsonEncodingContext", () => {
       expect(result.message).toBe("bad type");
     });
 
-    it("round-trips RangeError", () => {
+    it("round-trips `RangeError`", () => {
       const se = FabricError.fromNativeError(new RangeError("out of range"));
       const result = roundTrip(
         se as FabricValue,
@@ -826,7 +826,7 @@ describe("JsonEncodingContext", () => {
       expect(result.name).toBe("RangeError");
     });
 
-    it("round-trips Error with cause", () => {
+    it("round-trips `Error` with cause", () => {
       const inner = FabricError.fromNativeError(new Error("inner"));
       const outer = FabricError.fromNativeError(
         new Error("outer", { cause: inner }),
@@ -843,7 +843,7 @@ describe("JsonEncodingContext", () => {
       ).toBe("inner");
     });
 
-    it("round-trips Error with custom properties", () => {
+    it("round-trips `Error` with custom properties", () => {
       const err = new Error("oops");
       (err as unknown as Record<string, unknown>).code = 42;
       (err as unknown as Record<string, unknown>).detail = "more info";
@@ -861,7 +861,7 @@ describe("JsonEncodingContext", () => {
       ).toBe("more info");
     });
 
-    it("round-trips Error with custom name", () => {
+    it("round-trips `Error` with custom `name`", () => {
       const err = new Error("custom");
       err.name = "MyCustomError";
       const se = FabricError.fromNativeError(err);
@@ -872,7 +872,7 @@ describe("JsonEncodingContext", () => {
       expect(result.message).toBe("custom");
     });
 
-    it("wire format has name: null when name matches type (TypeError)", () => {
+    it("wire format has `name: null` when `name` matches `type` (`TypeError`)", () => {
       // TypeError: name === constructor.name === "TypeError"
       const se = FabricError.fromNativeError(new TypeError("type check"));
       const result = toWireFormat(
@@ -884,7 +884,7 @@ describe("JsonEncodingContext", () => {
       expect(state.message).toBe("type check");
     });
 
-    it("wire format has explicit name when name differs from type", () => {
+    it("wire format has explicit `name` when `name` differs from `type`", () => {
       const err = new Error("custom");
       err.name = "MyCustomError";
       const se = FabricError.fromNativeError(err);
@@ -897,7 +897,7 @@ describe("JsonEncodingContext", () => {
       expect(state.message).toBe("custom");
     });
 
-    it("round-trips TypeError preserving name === type identity", () => {
+    it("round-trips `TypeError` preserving `name === type` identity", () => {
       // After round-trip, name and type should both be "TypeError",
       // and the Error should reconstruct as a TypeError instance.
       const se = FabricError.fromNativeError(new TypeError("rt"));
@@ -909,7 +909,7 @@ describe("JsonEncodingContext", () => {
       expect(result.toNativeValue(true).constructor.name).toBe("TypeError");
     });
 
-    it("round-trips Error with mismatched name and type", () => {
+    it("round-trips `Error` with mismatched `name` and `type`", () => {
       // Error constructor is "Error" but name is overridden.
       const err = new Error("mismatch");
       err.name = "CustomName";
@@ -922,12 +922,12 @@ describe("JsonEncodingContext", () => {
       expect(result.toNativeValue(true).constructor.name).toBe("Error");
     });
 
-    it("has typeTag property", () => {
+    it("has `.typeTag` property", () => {
       const se = FabricError.fromNativeError(new Error("test"));
       expect(se.typeTag).toBe("Error@1");
     });
 
-    it("round-trips FabricError with pre-converted cause (raw Error)", () => {
+    it("round-trips `FabricError` with pre-converted cause (raw `Error`)", () => {
       // Simulates what fabricFromNativeValue produces: a FabricError
       // wrapping an Error whose cause is itself a FabricError (not a
       // raw Error). The serializer's recurse on [DECONSTRUCT] output
@@ -989,7 +989,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("sparse arrays", () => {
-    it("serializes [1,,3] with /hole", () => {
+    it("serializes `[1,,3]` with `/hole`", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3] as FabricValue;
       const result = toWireFormat(arr) as JsonWireValue[];
@@ -999,7 +999,7 @@ describe("JsonEncodingContext", () => {
       expect(result[2]).toBe(3);
     });
 
-    it("round-trips [1,,3] preserving holes", () => {
+    it("round-trips `[1,,3]` preserving holes", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3] as FabricValue;
       const result = roundTrip(arr) as FabricValue[];
@@ -1019,7 +1019,7 @@ describe("JsonEncodingContext", () => {
       expect(result[2]).toBe(5);
     });
 
-    it("round-trips [1,,,,5]", () => {
+    it("round-trips `[1,,,,5]`", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5] as FabricValue;
       const result = roundTrip(arr) as FabricValue[];
@@ -1031,7 +1031,7 @@ describe("JsonEncodingContext", () => {
       expect(result[4]).toBe(5);
     });
 
-    it("round-trips all-holes array [,,,]", () => {
+    it("round-trips all-holes array `[,,,]`", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [, , ,] as FabricValue;
       const result = roundTrip(arr) as FabricValue[];
@@ -1051,7 +1051,7 @@ describe("JsonEncodingContext", () => {
       expect(result[1000000]).toBe("x");
     });
 
-    it("round-trips interleaved holes and undefined", () => {
+    it("round-trips interleaved holes and `undefined`", () => {
       // [1, <hole>, undefined, <hole>, 3]
       const arr = new Array(5) as FabricValue[];
       arr[0] = 1;
@@ -1069,7 +1069,7 @@ describe("JsonEncodingContext", () => {
       expect(result[4]).toBe(3);
     });
 
-    it("serializes interleaved holes/undefined correctly", () => {
+    it("serializes interleaved holes/`undefined` correctly", () => {
       const arr = new Array(5) as FabricValue[];
       arr[0] = 1;
       arr[2] = undefined;
@@ -1112,7 +1112,7 @@ describe("JsonEncodingContext", () => {
       expect(result.outer.inner).toBe(42);
     });
 
-    it("preserves undefined values in objects", () => {
+    it("preserves `undefined` values in objects", () => {
       const obj = { a: 1, b: undefined } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.a).toBe(1);
@@ -1184,48 +1184,48 @@ describe("JsonEncodingContext", () => {
   describe("/object escaping", () => {
     // --- /quote: literal-only /-keyed objects ---
 
-    it("emits /quote for single-key literal /-prefixed object", () => {
+    it("emits `/quote` for single-key literal `/`-prefixed object", () => {
       const obj = { "/myKey": "val" } as unknown as FabricValue;
       expect(toWireFormat(obj)).toEqual({ "/quote": { "/myKey": "val" } });
     });
 
-    it("round-trips {'/myKey': 'val'}", () => {
+    it('round-trips `{ "/myKey": "val" }`', () => {
       const obj = { "/myKey": "val" } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["/myKey"]).toBe("val");
     });
 
-    it("emits /quote for {'/Link@1': 'fake'} (looks like tag but is literal user data)", () => {
+    it('emits `/quote` for `{ "/Link@1": "fake" }` (looks like tag but is literal user data)', () => {
       const obj = { "/Link@1": "fake" } as unknown as FabricValue;
       expect(toWireFormat(obj)).toEqual({ "/quote": { "/Link@1": "fake" } });
     });
 
-    it("round-trips {'/Link@1': 'fake'}", () => {
+    it('round-trips `{ "/Link@1": "fake" }`', () => {
       const obj = { "/Link@1": "fake" } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["/Link@1"]).toBe("fake");
     });
 
-    it("emits /quote for multi-key literal object with one /-prefixed key", () => {
+    it("emits `/quote` for multi-key literal object with one `/`-prefixed key", () => {
       const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
       expect(toWireFormat(obj)).toEqual({ "/quote": { a: 1, "/b": 2 } });
     });
 
-    it("round-trips multi-key literal object with one /-prefixed key", () => {
+    it("round-trips multi-key literal object with one `/`-prefixed key", () => {
       const obj = { a: 1, "/b": 2 } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["a"]).toBe(1);
       expect(result["/b"]).toBe(2);
     });
 
-    it("emits /quote for multi-key literal object with multiple /-prefixed keys", () => {
+    it("emits `/quote` for multi-key literal object with multiple `/`-prefixed keys", () => {
       const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
       expect(toWireFormat(obj)).toEqual({
         "/quote": { "/a": 1, "/b": 2, c: 3 },
       });
     });
 
-    it("round-trips multi-key literal object with multiple /-prefixed keys", () => {
+    it("round-trips multi-key literal object with multiple `/`-prefixed keys", () => {
       const obj = { "/a": 1, "/b": 2, c: 3 } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["/a"]).toBe(1);
@@ -1233,12 +1233,12 @@ describe("JsonEncodingContext", () => {
       expect(result["c"]).toBe(3);
     });
 
-    it("emits /quote when value is a plain nested object (no /-keys inside)", () => {
+    it("emits `/quote` when value is a plain nested object (no `/`-keys inside)", () => {
       const obj = { "/x": { a: 1 } } as unknown as FabricValue;
       expect(toWireFormat(obj)).toEqual({ "/quote": { "/x": { a: 1 } } });
     });
 
-    it("round-trips /-keyed object whose value is a plain nested object", () => {
+    it("round-trips `/`-keyed object whose value is a plain nested object", () => {
       const obj = { "/x": { a: 1 } } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<
         string,
@@ -1249,7 +1249,7 @@ describe("JsonEncodingContext", () => {
 
     // --- /object: any value requires encoding ---
 
-    it("emits /quote for doubly-nested /-prefixed literal object (whole subtree is literal)", () => {
+    it("emits `/quote` for doubly-nested `/`-prefixed literal object (whole subtree is literal)", () => {
       const obj = { "/x": { "/y": 123 } } as unknown as FabricValue;
       const wire = toWireFormat(obj);
       // Whole subtree is deep-literal → single /quote wrap of original structure.
@@ -1263,7 +1263,7 @@ describe("JsonEncodingContext", () => {
       expect(result["/x"]["/y"]).toBe(123);
     });
 
-    it("boundary contrast: literal subtree uses /quote, Fabric type uses /object", () => {
+    it("boundary contrast: literal subtree uses `/quote`, Fabric type uses `/object`", () => {
       // All-literal: single /quote wraps the whole structure.
       const literal = { "/x": { "/y": 123 } } as unknown as FabricValue;
       expect(toWireFormat(literal)).toEqual({
@@ -1279,14 +1279,14 @@ describe("JsonEncodingContext", () => {
       });
     });
 
-    it("emits /object for /-keyed object with FabricError value", () => {
+    it("emits `/object` for `/`-keyed object with `FabricError` value", () => {
       const err = FabricError.fromNativeError(new TypeError("eep!"));
       const obj = { "/x": err } as unknown as FabricValue;
       const wire = toWireFormat(obj);
       expect(Object.keys(wire as object)).toEqual(["/object"]);
     });
 
-    it("round-trips FabricError as value inside /-prefixed key object", () => {
+    it("round-trips `FabricError` as value inside `/`-prefixed key object", () => {
       const err = FabricError.fromNativeError(new TypeError("eep!"));
       const obj = { "/x": err } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
@@ -1296,7 +1296,7 @@ describe("JsonEncodingContext", () => {
       );
     });
 
-    it("round-trips FabricEpochDays as value inside /-prefixed key object", () => {
+    it("round-trips `FabricEpochDays` as value inside `/`-prefixed key object", () => {
       const day = new FabricEpochDays(42n);
       const obj = { "/x": day } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
@@ -1304,7 +1304,7 @@ describe("JsonEncodingContext", () => {
       expect((result["/x"] as unknown as FabricEpochDays).value).toBe(42n);
     });
 
-    it("emits /object for mixed: literal and encoded values", () => {
+    it("emits `/object` for mixed: literal and encoded values", () => {
       const obj = {
         "/a": "literal",
         "/b": FabricError.fromNativeError(new Error("oops")),
@@ -1313,7 +1313,7 @@ describe("JsonEncodingContext", () => {
       expect(Object.keys(wire as object)).toEqual(["/object"]);
     });
 
-    it("round-trips mixed literal+encoded /-keyed object", () => {
+    it("round-trips mixed literal+encoded `/`-keyed object", () => {
       const obj = {
         "/a": "literal",
         "/b": FabricError.fromNativeError(new Error("oops")),
@@ -1325,7 +1325,7 @@ describe("JsonEncodingContext", () => {
 
     // --- General ---
 
-    it("malformed wire: multi-key object with /-prefixed key produces ProblematicValue", () => {
+    it("malformed wire: multi-key object with `/`-prefixed key produces `ProblematicValue`", () => {
       // Wire data without /quote or /object wrapper — decoder must not silently
       // round-trip it as a plain object.
       const data = { a: 1, "/b": 2 } as JsonWireValue;
@@ -1333,7 +1333,7 @@ describe("JsonEncodingContext", () => {
       expect(result).toBeInstanceOf(ProblematicValue);
     });
 
-    it("malformed wire: bare /-keyed object produces ProblematicValue", () => {
+    it("malformed wire: bare `/`-keyed object produces `ProblematicValue`", () => {
       // Per spec §9, a single-key object whose key is bare "/" (empty tag
       // after stripping the leading slash) is an encoding error. Decoding must
       // produce a ProblematicValue, not an UnknownValue with an empty tag.
@@ -1342,19 +1342,19 @@ describe("JsonEncodingContext", () => {
       expect(result).toBeInstanceOf(ProblematicValue);
     });
 
-    it("does not wrap plain object with no /-prefixed keys", () => {
+    it("does not wrap plain object with no `/`-prefixed keys", () => {
       const obj = { a: 1, b: 2 } as unknown as FabricValue;
       expect(toWireFormat(obj)).toEqual({ a: 1, b: 2 });
     });
 
-    it("/object-wrapped multi-key object with /-prefixed key deserializes correctly", () => {
+    it("`/object`-wrapped multi-key object with `/`-prefixed key deserializes correctly", () => {
       const data = { "/object": { a: 1, "/b": 2 } } as JsonWireValue;
       const result = fromWireFormat(data) as Record<string, FabricValue>;
       expect(result["a"]).toBe(1);
       expect(result["/b"]).toBe(2);
     });
 
-    it("round-trips nested object containing /-prefixed key", () => {
+    it("round-trips nested object containing `/`-prefixed key", () => {
       const obj = { outer: { "/inner": 1 } } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<
         string,
@@ -1363,7 +1363,7 @@ describe("JsonEncodingContext", () => {
       expect(result["outer"]["/inner"]).toBe(1);
     });
 
-    it("single-key /-prefixed object still routes through unwrapTag (no regression)", () => {
+    it("single-key `/`-prefixed object still routes through `unwrapTag()` (no regression)", () => {
       // Single-key /Tag@N objects are handled by unwrapTag, not the plain-object
       // path — confirm they still produce UnknownValue (unrecognized tag), not
       // ProblematicValue from the new multi-key guard.
@@ -1373,7 +1373,7 @@ describe("JsonEncodingContext", () => {
       expect((result as unknown as UnknownValue).typeTag).toBe("Future@7");
     });
 
-    it("decoder strips exactly one /quote layer — inner /quote is preserved literally", () => {
+    it("decoder strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
       // Wire form { "/quote": { "/quote": "x" } } is a /quote-wrapped literal
       // whose content happens to be { "/quote": "x" }. Decoding must return
       // { "/quote": "x" } as a frozen plain object — NOT recurse into it and
@@ -1383,7 +1383,7 @@ describe("JsonEncodingContext", () => {
       expect(result["/quote"]).toBe("x");
     });
 
-    it("round-trips object whose value is a /quote-keyed literal", () => {
+    it("round-trips object whose value is a `/quote`-keyed literal", () => {
       // { "/x": { "/quote": "inner" } } — the value at "/x" is user data that
       // happens to have a /quote key. Must survive encode→decode intact.
       const obj = { "/x": { "/quote": "inner" } } as unknown as FabricValue;
@@ -1400,7 +1400,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("/quote handling", () => {
-    it("deserializes /quote as literal (no inner deserialization)", () => {
+    it("deserializes `/quote` as literal (no inner deserialization)", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
       } as JsonWireValue;
@@ -1410,7 +1410,7 @@ describe("JsonEncodingContext", () => {
       expect(obj["/Link@1"]).toEqual({ id: "abc" });
     });
 
-    it("deep-freezes /quote result objects", () => {
+    it("deep-freezes `/quote` result objects", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
       } as JsonWireValue;
@@ -1419,7 +1419,7 @@ describe("JsonEncodingContext", () => {
       expect(Object.isFrozen(result["/Link@1"])).toBe(true);
     });
 
-    it("deep-freezes /quote result arrays", () => {
+    it("deep-freezes `/quote` result arrays", () => {
       const data = {
         "/quote": [1, { nested: "obj" }, [2, 3]],
       } as JsonWireValue;
@@ -1429,7 +1429,7 @@ describe("JsonEncodingContext", () => {
       expect(Object.isFrozen(result[2])).toBe(true);
     });
 
-    it("mutation of /quote result throws", () => {
+    it("mutation of `/quote` result throws", () => {
       const data = {
         "/quote": { key: "val" },
       } as JsonWireValue;
@@ -1445,7 +1445,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("unknown type tags", () => {
-    it("decode() produces UnknownValue for unrecognized tags", () => {
+    it("`decode()` produces `UnknownValue` for unrecognized tags", () => {
       const data = {
         "/FutureType@2": { some: "data" },
       } as JsonWireValue;
@@ -1456,7 +1456,7 @@ describe("JsonEncodingContext", () => {
       expect(unknown.state).toEqual({ some: "data" });
     });
 
-    it("encode preserves UnknownValue tag in wire format", () => {
+    it("`encode()` preserves `UnknownValue` tag in wire format", () => {
       // Encoding an UnknownValue produces the original tagged form.
       const us = new UnknownValue("FutureType@2", { some: "data" });
       const wireFormat = toWireFormat(us as FabricValue);
@@ -1465,7 +1465,7 @@ describe("JsonEncodingContext", () => {
       });
     });
 
-    it("UnknownValue round-trips through encode/decode", () => {
+    it("`UnknownValue` round-trips through encode/decode", () => {
       const us = new UnknownValue("FutureType@2", { some: "data" });
       const result = roundTrip(us as FabricValue);
       expect(result).toBeInstanceOf(UnknownValue);
@@ -1474,7 +1474,7 @@ describe("JsonEncodingContext", () => {
       expect(unknown.state).toEqual({ some: "data" });
     });
 
-    it("/hole outside array context becomes UnknownValue", () => {
+    it("`/hole` outside array context becomes `UnknownValue`", () => {
       const data = { "/hole": 5 } as JsonWireValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
@@ -1518,7 +1518,7 @@ describe("JsonEncodingContext", () => {
       );
     });
 
-    it("throws on FabricInstance whose state references itself", () => {
+    it("throws on `FabricInstance` whose state references itself", () => {
       const { context } = makeTestContext();
       // Create an UnknownValue whose state transitively references itself.
       const us = new UnknownValue("Test@1", null);
@@ -1545,8 +1545,8 @@ describe("JsonEncodingContext", () => {
   // ProblematicValue (lenient mode)
   // --------------------------------------------------------------------------
 
-  describe("ProblematicValue (lenient mode)", () => {
-    it("encode preserves ProblematicValue's original tag and state", () => {
+  describe("`ProblematicValue` (lenient mode)", () => {
+    it("`encode()` preserves `ProblematicValue`'s original tag and state", () => {
       const prob = new ProblematicValue(
         "BadType@1",
         "original data",
@@ -1636,7 +1636,7 @@ describe("JsonEncodingContext", () => {
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
-    it("deserialized /object-unwrapped objects are frozen", () => {
+    it("deserialized `/object`-unwrapped objects are frozen", () => {
       const data = { "/object": { "/myKey": "val" } } as JsonWireValue;
       const result = fromWireFormat(data) as Record<
         string,
@@ -1650,7 +1650,7 @@ describe("JsonEncodingContext", () => {
   // TypeHandler.deserialize() deep-frozen contract (arm-1 only)
   // --------------------------------------------------------------------------
 
-  describe("TypeHandler.deserialize() deep-frozen contract", () => {
+  describe("`TypeHandler.deserialize()` deep-frozen contract", () => {
     // The contract is scoped to the type-handler dispatch arm only: anything
     // returned via a registered `TypeHandler` is guaranteed deep-frozen at
     // the `deserialize()` boundary, so callers do not each have to freeze.
@@ -1667,7 +1667,7 @@ describe("JsonEncodingContext", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient-mode ProblematicValue from a handler is deep-frozen", () => {
+    it("lenient-mode `ProblematicValue` from a handler is deep-frozen", () => {
       // `/BigInt@1` with non-string state fails handler validation; the
       // lenient catch produces a ProblematicValue -- still an arm-1 return,
       // so the contract deep-freezes it (not a crash: it is the value
@@ -1695,7 +1695,7 @@ describe("JsonEncodingContext", () => {
   // Deep-frozen wire invariant: decode() / decodeFromBytes() symmetry
   // --------------------------------------------------------------------------
 
-  describe("deep-frozen wire invariant (decode/decodeFromBytes symmetry)", () => {
+  describe("deep-frozen wire invariant (`decode()`/`decodeFromBytes()` symmetry)", () => {
     // Every `JsonWireValue` handed to `deserialize()` must be deep-frozen, so
     // both `deserialize()` entry points must produce equally deep-frozen
     // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
@@ -1756,7 +1756,7 @@ describe("JsonEncodingContext", () => {
       });
     }
 
-    it("string path deep-freezes /quote content at every depth (regression for decode() vs fromBytes())", () => {
+    it("string path deep-freezes `/quote` content at every depth (regression for `decode()` vs `fromBytes()`)", () => {
       const wire = {
         "/quote": { outer: { inner: [1, 2] } },
       } as JsonWireValue;
@@ -1777,7 +1777,7 @@ describe("JsonEncodingContext", () => {
       }).toThrow();
     });
 
-    it("bytes path deep-freezes /quote content at every depth", () => {
+    it("bytes path deep-freezes `/quote` content at every depth", () => {
       const wire = {
         "/quote": { outer: { inner: [{ deep: 1 }] } },
       } as JsonWireValue;
@@ -1794,7 +1794,7 @@ describe("JsonEncodingContext", () => {
       }).toThrow();
     });
 
-    it("serialize() output for /quote-routed values is itself deep-frozen (flat and nested)", () => {
+    it("`serialize()` output for `/quote`-routed values is itself deep-frozen (flat and nested)", () => {
       // White-box: the serialized /quote tree is transient -- encode() and
       // encodeToBytes() immediately JSON.stringify it and discard it -- so
       // its frozen-ness is not observable via the public API. Reach into the
@@ -1827,7 +1827,7 @@ describe("JsonEncodingContext", () => {
       expect(isDeepFrozen(nested)).toBe(true);
     });
 
-    it("serialize→/quote→decode round-trip is deep-frozen end-to-end", () => {
+    it("`serialize()`→`/quote`→`decode()` round-trip is deep-frozen end-to-end", () => {
       // An object whose keys are all /-prefixed but whose values are all
       // quote-safe routes through the serialize-side /quote path, then back
       // through the deserialize /quote `return state` arm.
@@ -1846,7 +1846,7 @@ describe("JsonEncodingContext", () => {
   // --------------------------------------------------------------------------
 
   describe("JsonEncodingContext", () => {
-    it("encode returns a prefixed JSON string", () => {
+    it("`encode()` returns a prefixed JSON string", () => {
       const ctx = new JsonEncodingContext();
       const result = ctx.encode(42);
       expect(typeof result).toBe("string");
@@ -1854,14 +1854,14 @@ describe("JsonEncodingContext", () => {
       expect(JSON.parse(result.slice(ENCODING_PREFIX.length))).toBe(42);
     });
 
-    it("decode parses a prefixed JSON string back to a value", () => {
+    it("`decode()` parses a prefixed JSON string back to a value", () => {
       const ctx = new JsonEncodingContext();
       const runtime = new TestReconstructionContext();
       const result = ctx.decode(ENCODING_PREFIX + "42", runtime);
       expect(result).toBe(42);
     });
 
-    it("encode/decode round-trip for tagged types", () => {
+    it("`encode()`/`decode()` round-trip for tagged types", () => {
       const ctx = new JsonEncodingContext();
       const runtime = new TestReconstructionContext();
       const se = FabricError.fromNativeError(new Error("test"));
@@ -1871,7 +1871,7 @@ describe("JsonEncodingContext", () => {
       expect((decoded as unknown as FabricError).message).toBe("test");
     });
 
-    it("encodeToBytes/decodeFromBytes round-trip", () => {
+    it("`encodeToBytes()`/`decodeFromBytes()` round-trip", () => {
       const ctx = new JsonEncodingContext();
       const runtime = new TestReconstructionContext();
       const data = {
@@ -1888,12 +1888,12 @@ describe("JsonEncodingContext", () => {
       expect(decoded.error).toBeInstanceOf(FabricError);
     });
 
-    it("lenient defaults to false", () => {
+    it("`.lenient` defaults to false", () => {
       const ctx = new JsonEncodingContext();
       expect(ctx.lenient).toBe(false);
     });
 
-    it("lenient can be set to true", () => {
+    it("`.lenient` can be set to true", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
       expect(ctx.lenient).toBe(true);
     });
@@ -1929,7 +1929,7 @@ describe("JsonEncodingContext", () => {
       expect("debug" in meta).toBe(true);
     });
 
-    it("round-trips FabricError in array", () => {
+    it("round-trips `FabricError` in array", () => {
       const se = FabricError.fromNativeError(new Error("oops"));
       const arr = [1, se, 3] as unknown as FabricValue;
       const result = roundTrip(arr) as FabricValue[];
@@ -1941,7 +1941,7 @@ describe("JsonEncodingContext", () => {
       expect(result[2]).toBe(3);
     });
 
-    it("round-trips FabricError as object value", () => {
+    it("round-trips `FabricError` as object value", () => {
       const obj = {
         error: FabricError.fromNativeError(new Error("fail")),
         code: 500,
