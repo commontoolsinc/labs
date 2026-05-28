@@ -356,3 +356,41 @@ made before committing.
 ### Spec Correction Needed
 
 - None.
+
+## Slice 9: Profile Wish Persona UI
+
+### Ambiguity or Incorrect Spec
+
+- The original browser flow assumed profile creation required navigating to the
+  home profile tab. The desired persona wish UI should create the profile in
+  place from any pattern rendering `wish({ query: "#profile" })[UI]`.
+- Existing result UI forwarding used the wished result cell's own `[UI]`. For
+  `#profile`, that would render the full profile default pattern UI rather than
+  a compact persona link.
+
+### Decision
+
+- `wish({ query: "#profile" })[UI]` and
+  `wish({ query: "#profileDefault" })[UI]` now render `cf-cell-link` when a
+  profile exists.
+- If the profile is missing, the same wishes render a `cf-message-input` wired
+  to `homeSpaceCell.defaultPattern.createProfile`. Submitting a name creates the
+  profile without navigating away from the current view.
+- The shared-profile demo renders both `#profileName` and the `#profile` wish UI
+  so integration coverage exercises the inline creation surface directly.
+
+### Tests Added
+
+- `packages/runner/test/wish.test.ts`
+  - `#profile` wish UI renders a profile link when the profile exists.
+  - `#profile` wish UI renders the profile creation input wired to the home
+    create-profile handler when the profile is missing.
+- `packages/patterns/integration/shared-profile.test.ts`
+  - Each identity creates its profile from the shared demo piece's inline wish
+    UI.
+  - The inline wish UI reacts into a profile link after profile creation.
+
+### Spec Correction Needed
+
+- The spec and `wish.md` now document that profile persona wish UI is
+  non-navigating and reactive.

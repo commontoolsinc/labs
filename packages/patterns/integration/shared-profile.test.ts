@@ -62,16 +62,11 @@ describe("shared profile integration test", () => {
     });
     await waitForRuntimeIdle(page);
     await waitForText(page, "#shared-profile-name", "No profile");
+    await waitForText(page, "#shared-profile-wish-ui", "Send");
 
-    await createHomeProfile(shell, page, identity, "Ada Lovelace");
-
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceDid: sharedSpaceDid as `did:${string}:${string}`, pieceId },
-      identity,
-    });
-    await waitForRuntimeIdle(page);
+    await sendMessageInput(page, "#wish-profile-name-input", "Ada Lovelace");
     await waitForText(page, "#shared-profile-name", "Ada Lovelace");
+    await waitForSelector(page, "#shared-profile-wish-ui cf-cell-link");
 
     await shell.login(secondIdentity);
     await shell.waitForState({
@@ -80,43 +75,19 @@ describe("shared profile integration test", () => {
     });
     await waitForRuntimeIdle(page);
     await waitForText(page, "#shared-profile-name", "No profile");
+    await waitForText(page, "#shared-profile-wish-ui", "Send");
 
-    await createHomeProfile(shell, page, secondIdentity, "Grace Hopper");
-
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceDid: sharedSpaceDid as `did:${string}:${string}`, pieceId },
-      identity: secondIdentity,
-    });
-    await waitForRuntimeIdle(page);
+    await sendMessageInput(page, "#wish-profile-name-input", "Grace Hopper");
     await waitForText(page, "#shared-profile-name", "Grace Hopper");
+    await waitForSelector(page, "#shared-profile-wish-ui cf-cell-link");
   });
 });
 
-async function createHomeProfile(
-  shell: ShellIntegration,
-  page: Page,
-  identity: Identity,
-  name: string,
-) {
-  await shell.goto({
-    frontendUrl: FRONTEND_URL,
-    view: { builtin: "home" },
-    identity,
-  });
-  await waitForRuntimeIdle(page);
-  await clickCfTab(page, "profile");
-  await sendMessageInput(page, "#home-profile-name-input", name);
-  await waitForRuntimeIdle(page);
-  await waitForText(page, "#home-profile-summary", name);
-}
-
-async function clickCfTab(page: Page, value: string) {
-  const tab = await page.waitForSelector(`cf-tab[value="${value}"]`, {
+async function waitForSelector(page: Page, selector: string) {
+  await page.waitForSelector(selector, {
     strategy: "pierce",
     timeout: SHARED_PROFILE_TIMEOUT,
   });
-  await tab.click();
 }
 
 async function sendMessageInput(page: Page, selector: string, message: string) {

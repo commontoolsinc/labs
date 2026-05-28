@@ -330,6 +330,17 @@ wish({ query: "#profileName" })        // homeDefault.profile.name
 wish({ query: "#profileAvatar" })      // homeDefault.profile.avatar
 ```
 
+The optional `[UI]` for `wish({ query: "#profile" })` and
+`wish({ query: "#profileDefault" })` is persona-aware:
+
+- when the profile exists, render a link to the profile default pattern
+- when the profile is missing, render the same profile-name input as the home
+  profile tab
+- submitting the input creates the profile through the home default pattern but
+  does not navigate away from the current view
+- the wish UI should then reactively replace itself with the profile link once
+  `homeDefault.profile` is written
+
 If the old learned-summary shortcut remains useful, it should get a new explicit
 target instead of overloading `#profile`.
 
@@ -340,23 +351,30 @@ Add a browser integration test with a demo pattern.
 ### Demo Pattern
 
 Create a small test/demo pattern that renders the current user's shared profile
-name:
+name and profile wish UI:
 
 ```tsx
 export default pattern(() => {
+  const profile = wish({ query: "#profile" });
   const name = wish<string>({ query: "#profileName" });
   return {
     [NAME]: "Profile Name Demo",
-    [UI]: <div>{name.result ?? "No profile"}</div>,
+    [UI]: (
+      <div>
+        <div>{name.result ?? "No profile"}</div>
+        <div>{profile}</div>
+      </div>
+    ),
   };
 });
 ```
 
 The test should assert both states:
 
-1. before profile creation, the demo renders the missing-profile state or a
-   structured wish error
+1. before profile creation, the demo renders the missing-profile state and the
+   inline profile creation input from `wish({ query: "#profile" })[UI]`
 2. after profile creation and name entry, the demo renders the profile name
+   and the profile wish UI renders a link to the profile
 
 ### Browser Flow
 
@@ -366,13 +384,12 @@ The integration test should:
 2. navigate to a fresh ordinary space
 3. add or open the demo pattern
 4. assert the demo has no profile name yet
-5. navigate to the home view
-6. submit the profile name in the home profile tab
-7. return to the ordinary space and open the demo pattern
-8. assert the rendered text is the profile name
-9. optionally create a second ordinary space with the same identity and assert
+5. submit the profile name through the demo's inline profile wish UI
+6. assert the rendered text is the profile name
+7. assert the inline profile wish UI has reacted into a profile link
+8. optionally create a second ordinary space with the same identity and assert
     the same profile name renders there too
-10. for multi-user coverage, log in as a second identity against the same
+9. for multi-user coverage, log in as a second identity against the same
     shared ordinary space/piece, create that user's profile, and assert the demo
     renders the second user's name without changing the first user's profile
 

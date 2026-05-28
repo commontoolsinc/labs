@@ -109,6 +109,14 @@ wish({ query: "#profileAvatar" }) // profile.avatar
 wish({ query: "#profileSpace" }) // profile space cell
 ```
 
+The optional `[UI]` for `wish({ query: "#profile" })` and
+`wish({ query: "#profileDefault" })` renders a link to the profile default
+pattern when the profile exists. If the viewer has not created a profile yet, it
+renders the same profile-name input used by the home profile tab. Submitting a
+name creates the viewer's profile through the home default pattern and leaves the
+current view in place; the wish UI reacts into the profile link once the profile
+link exists.
+
 When rendering profile data from a shared piece, use a user-scoped result schema
 for the rendered output so each viewer sees their own home profile projection.
 

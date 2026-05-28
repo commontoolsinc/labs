@@ -2322,6 +2322,110 @@ describe("wish built-in", () => {
         .toBe("Ada Lovelace");
     });
 
+    it("renders #profile wish UI as a link when the profile exists", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-ui-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-ui-default",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-ui-link",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-ui-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const ui = result.key("profile").key(UI).get() as any;
+      expect(ui?.name).toBe("cf-cell-link");
+      expect(
+        result.key("profile").key(UI).key("props").key("$cell")
+          .resolveAsCell()
+          .get()?.name,
+      ).toBe("Ada Lovelace");
+    });
+
+    it("renders #profile wish UI as a create-profile input when the profile is missing", async () => {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-create-ui",
+        undefined,
+        tx,
+      );
+      const createProfile = homeDefaultCell.key("createProfile");
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-missing-profile-ui-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("profile").get();
+      const ui = result.key("profile").key(UI).get() as any;
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
+      expect(ui?.name).toBe("cf-message-input");
+      expect(ui?.props?.id).toBe("wish-profile-name-input");
+      expect(ui?.props?.placeholder).toBe("Your name...");
+      expect(
+        result.key("profile").key(UI).key("props").key("oncf-send")
+          .resolveAsCell()
+          .equals(createProfile),
+      ).toBe(true);
+    });
+
     it("searches home default profile elements for hashtag wishes with profile scope", async () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-profile-hashtag-space",

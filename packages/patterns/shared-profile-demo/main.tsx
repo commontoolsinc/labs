@@ -2,6 +2,7 @@ import { computed, NAME, pattern, UI, wish } from "commonfabric";
 
 export default pattern(
   () => {
+    const profileWish = wish({ query: "#profile" });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const displayName = computed(() => profileNameWish.result ?? "No profile");
     const status = computed(() =>
@@ -20,6 +21,7 @@ export default pattern(
             </h2>
             <div id="shared-profile-name">{displayName}</div>
             <div id="shared-profile-status">{status}</div>
+            <div id="shared-profile-wish-ui">{profileWish}</div>
           </cf-vstack>
         </cf-screen>
       ),
