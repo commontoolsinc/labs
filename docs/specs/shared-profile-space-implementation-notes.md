@@ -216,3 +216,41 @@ made before committing.
 - The home/profile creation flow should use `PatternFactory.inSpace(...)` from a
   trusted handler/action boundary rather than expecting named-space derivation to
   be available during ordinary synchronous pattern graph construction.
+
+## Slice 6b: Home Profile Creation Flow
+
+### Ambiguity or Incorrect Spec
+
+- The earlier spec expected a host/runtime operation to write
+  `homeSpaceCell.profileSpace`. With `PatternFactory.inSpace(...)`, the home
+  pattern can create a profile default pattern directly and store the resulting
+  profile link on its own durable output.
+- The current home implementation pattern for durable well-known fields matches
+  favorites: fields live on `homeSpaceCell.defaultPattern`, not directly on the
+  root home space cell.
+- `profile-home.tsx` could not initialize its owned `name` cell from a reactive
+  input directly. Owned writable cells must start from static values.
+
+### Decision
+
+- Home now exports `profile?: ProfileHomeOutput` and `createProfile`.
+- The profile tab accepts a name via `cf-message-input`; the handler stores the
+  requested name in a durable `requestedProfileName` cell.
+- A lift reacts to `requestedProfileName` and returns
+  `ProfileHome.inSpace(name)({ initialName: name })`. The returned profile
+  default-pattern link becomes `home.defaultPattern.profile`.
+- `profile-home.tsx` accepts `initialName?: string` and applies it through a
+  small lift that writes the owned `name` cell once when it is empty.
+
+### Tests Added
+
+- `packages/patterns/system/home.test.tsx`
+  - Home starts with no profile.
+  - Sending a profile name creates a profile link.
+  - The linked profile exposes the submitted name.
+
+### Spec Correction Needed
+
+- The primary durable link is `homeSpaceCell.defaultPattern.profile`, not
+  `homeSpaceCell.profileSpace`. `profileSpace` remains only as a compatibility
+  fallback in `wish()` until the earlier schema addition is removed or migrated.

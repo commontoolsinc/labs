@@ -2,6 +2,7 @@ import {
   computed,
   equals,
   handler,
+  lift,
   NAME,
   pattern,
   Stream,
@@ -51,6 +52,11 @@ export type ProfileHomeOutput = {
   setAvatar: Stream<SetProfileAvatarEvent>;
   addElement: Stream<AddProfileElementEvent>;
   removeElement: Stream<RemoveProfileElementEvent>;
+  initialNameApplied: string;
+};
+
+export type ProfileHomeInput = {
+  initialName?: string;
 };
 
 const ProfileCatalogCard = pattern<{ title: string }, ProfileElementCell>(
@@ -129,6 +135,17 @@ const setAvatar = handler<SetProfileAvatarEvent, { avatar: Writable<string> }>(
   (event, state) => state.avatar.set(event.avatar),
 );
 
+const applyInitialName = lift<
+  { initialName?: string; name: Writable<string> },
+  string
+>(({ initialName, name }) => {
+  const trimmed = initialName?.trim() ?? "";
+  if (trimmed && !name.get()) {
+    name.set(trimmed);
+  }
+  return name.get();
+});
+
 const addCatalogElement = handler<void, {
   elements: Writable<ProfileElement[]>;
   userTags: string[];
@@ -178,104 +195,111 @@ const removeElementCell = handler<void, {
   );
 });
 
-export default pattern<Record<string, never>, ProfileHomeOutput>(() => {
-  const name = new Writable("").for("name");
-  const avatar = new Writable("").for("avatar");
-  const elements = new Writable<ProfileElement[]>([]).for("elements");
-  const patternUrl = new Writable("").for("patternUrl");
-  const elementTitle = new Writable("").for("elementTitle");
-  const elementTag = new Writable("").for("elementTag");
-  const userTagsText = new Writable("").for("userTagsText");
+export default pattern<ProfileHomeInput, ProfileHomeOutput>(
+  ({ initialName }) => {
+    const name = new Writable("").for("name");
+    const avatar = new Writable("").for("avatar");
+    const elements = new Writable<ProfileElement[]>([]).for("elements");
+    const patternUrl = new Writable("").for("patternUrl");
+    const elementTitle = new Writable("").for("elementTitle");
+    const elementTag = new Writable("").for("elementTag");
+    const userTagsText = new Writable("").for("userTagsText");
 
-  const parsedUserTags = computed(() =>
-    userTagsText.get().split(",").map((tag) => tag.trim()).filter((tag) =>
-      tag.length > 0
-    )
-  );
+    const parsedUserTags = computed(() =>
+      userTagsText.get().split(",").map((tag) => tag.trim()).filter((tag) =>
+        tag.length > 0
+      )
+    );
+    const initialNameApplied = applyInitialName({ initialName, name });
 
-  return {
-    [NAME]: "Profile",
-    name,
-    avatar,
-    elements,
-    setName: setName({ name }),
-    setAvatar: setAvatar({ avatar }),
-    addElement: addElement({ elements }),
-    removeElement: removeElement({ elements }),
-    [UI]: (
-      <cf-screen>
-        <cf-toolbar slot="header" sticky>
-          <div slot="start">
-            <h2 style={{ margin: 0, fontSize: "18px" }}>Profile</h2>
-          </div>
-        </cf-toolbar>
+    return {
+      [NAME]: "Profile",
+      name,
+      avatar,
+      elements,
+      setName: setName({ name }),
+      setAvatar: setAvatar({ avatar }),
+      addElement: addElement({ elements }),
+      removeElement: removeElement({ elements }),
+      initialNameApplied,
+      [UI]: (
+        <cf-screen>
+          <cf-toolbar slot="header" sticky>
+            <div slot="start">
+              <h2 style={{ margin: 0, fontSize: "18px" }}>Profile</h2>
+            </div>
+          </cf-toolbar>
 
-        <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "720px" }}>
-          <cf-vstack gap="2">
-            <label>Name</label>
-            <cf-input $value={name} placeholder="Your name" />
+          <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "720px" }}>
+            <cf-vstack gap="2">
+              <label>Name</label>
+              <cf-input $value={name} placeholder="Your name" />
+            </cf-vstack>
+
+            <cf-vstack gap="2">
+              <label>Avatar</label>
+              <cf-input $value={avatar} placeholder="Avatar URL or text" />
+            </cf-vstack>
+
+            <cf-vstack gap="2">
+              <label>Tags</label>
+              <cf-input $value={userTagsText} placeholder="person, work" />
+            </cf-vstack>
+
+            <cf-hstack gap="2">
+              <cf-button
+                onClick={addCatalogElement({
+                  elements,
+                  userTags: parsedUserTags,
+                })}
+              >
+                Add profile card
+              </cf-button>
+            </cf-hstack>
+
+            <cf-vstack gap="2">
+              <label>Pattern URL</label>
+              <cf-input $value={patternUrl} placeholder="/api/patterns/..." />
+              <cf-input $value={elementTitle} placeholder="Title" />
+              <cf-input $value={elementTag} placeholder="Tag" />
+              <cf-button
+                onClick={addUrlElement({
+                  elements,
+                  patternUrl,
+                  title: elementTitle,
+                  tag: elementTag,
+                  userTags: parsedUserTags,
+                })}
+              >
+                Add URL element
+              </cf-button>
+            </cf-vstack>
+
+            <cf-vstack gap="2">
+              {elements.map((element) => (
+                <cf-hstack gap="2" align="center">
+                  <cf-cell-link $cell={element.cell}>
+                    {element.title ?? element.tag}
+                  </cf-cell-link>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
+                    {element.userTags.map((tag) => `#${tag}`).join(" ")}
+                  </span>
+                  <cf-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={removeElementCell({
+                      elements,
+                      cell: element.cell,
+                    })}
+                  >
+                    Remove
+                  </cf-button>
+                </cf-hstack>
+              ))}
+            </cf-vstack>
           </cf-vstack>
-
-          <cf-vstack gap="2">
-            <label>Avatar</label>
-            <cf-input $value={avatar} placeholder="Avatar URL or text" />
-          </cf-vstack>
-
-          <cf-vstack gap="2">
-            <label>Tags</label>
-            <cf-input $value={userTagsText} placeholder="person, work" />
-          </cf-vstack>
-
-          <cf-hstack gap="2">
-            <cf-button
-              onClick={addCatalogElement({
-                elements,
-                userTags: parsedUserTags,
-              })}
-            >
-              Add profile card
-            </cf-button>
-          </cf-hstack>
-
-          <cf-vstack gap="2">
-            <label>Pattern URL</label>
-            <cf-input $value={patternUrl} placeholder="/api/patterns/..." />
-            <cf-input $value={elementTitle} placeholder="Title" />
-            <cf-input $value={elementTag} placeholder="Tag" />
-            <cf-button
-              onClick={addUrlElement({
-                elements,
-                patternUrl,
-                title: elementTitle,
-                tag: elementTag,
-                userTags: parsedUserTags,
-              })}
-            >
-              Add URL element
-            </cf-button>
-          </cf-vstack>
-
-          <cf-vstack gap="2">
-            {elements.map((element) => (
-              <cf-hstack gap="2" align="center">
-                <cf-cell-link $cell={element.cell}>
-                  {element.title ?? element.tag}
-                </cf-cell-link>
-                <span style={{ color: "var(--cf-color-text-secondary)" }}>
-                  {element.userTags.map((tag) => `#${tag}`).join(" ")}
-                </span>
-                <cf-button
-                  size="sm"
-                  variant="ghost"
-                  onClick={removeElementCell({ elements, cell: element.cell })}
-                >
-                  Remove
-                </cf-button>
-              </cf-hstack>
-            ))}
-          </cf-vstack>
-        </cf-vstack>
-      </cf-screen>
-    ),
-  };
-});
+        </cf-screen>
+      ),
+    };
+  },
+);

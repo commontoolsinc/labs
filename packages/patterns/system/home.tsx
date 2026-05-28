@@ -2,12 +2,15 @@ import {
   computed,
   equals,
   handler,
+  lift,
   NAME,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
+import ProfileHome, { type ProfileHomeOutput } from "./profile-home.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
 // Types from favorites-manager.tsx
@@ -33,6 +36,23 @@ type JournalEntry = {
 type SpaceEntry = {
   name: string;
   did?: string;
+};
+
+type CreateProfileEvent = {
+  detail?: { message?: string };
+  name?: string;
+};
+
+type HomeOutput = {
+  [NAME]: string;
+  [UI]: unknown;
+  favorites: Writable<Favorite[]>;
+  journal: Writable<JournalEntry[]>;
+  learned: Writable<LearnedSection>;
+  spaces: Writable<SpaceEntry[]>;
+  defaultAppUrl: Writable<string>;
+  profile?: ProfileHomeOutput;
+  createProfile: Stream<CreateProfileEvent>;
 };
 
 // Handler to add a favorite
@@ -103,13 +123,36 @@ const removeSpaceHandler = handler<
   spaces.set(filtered);
 });
 
-export default pattern((_) => {
+const requestProfileCreation = handler<
+  CreateProfileEvent,
+  { requestedProfileName: Writable<string> }
+>((event, { requestedProfileName }) => {
+  const name = (event.name ?? event.detail?.message ?? "").trim();
+  if (name) {
+    requestedProfileName.set(name);
+  }
+});
+
+const createProfileFromName = lift<
+  { name: string },
+  ProfileHomeOutput | undefined
+>(({ name }) => {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return ProfileHome.inSpace(trimmed)({ initialName: trimmed });
+});
+
+export default pattern<Record<string, never>, HomeOutput>((_) => {
   // OWN the data cells (.for for id stability)
   const favorites = new Writable<Favorite[]>([]).for("favorites");
   const journal = new Writable<JournalEntry[]>([]).for("journal");
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
+  const requestedProfileName = new Writable("").for("requestedProfileName");
+  const profile = createProfileFromName({ name: requestedProfileName });
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -132,28 +175,29 @@ export default pattern((_) => {
           <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
           <cf-tab-panel value="profile">
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
-              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>
 
-              <cf-vstack gap="1">
-                <cf-textarea
-                  $value={learned.key("summary")}
-                  placeholder="Write a short profile summary about yourself..."
-                  rows={6}
-                  style={{
-                    width: "100%",
-                    fontFamily: "system-ui, sans-serif",
-                    fontSize: "14px",
-                    lineHeight: "1.5",
-                    padding: "12px",
-                    border: "1px solid #e5e5e7",
-                    borderRadius: "8px",
-                    resize: "vertical",
-                  }}
-                />
-                <span style={{ fontSize: "11px", color: "#888" }}>
-                  Edit your profile summary above.
-                </span>
-              </cf-vstack>
+              {profile
+                ? (
+                  <cf-vstack gap="2">
+                    <cf-hstack gap="2" align="center">
+                      <strong>{profile.name}</strong>
+                      <span style={{ color: "#888" }}>{profile.avatar}</span>
+                    </cf-hstack>
+                    <cf-render $cell={profile as any} />
+                  </cf-vstack>
+                )
+                : (
+                  <cf-vstack gap="1">
+                    <cf-message-input
+                      placeholder="Your name..."
+                      appearance="rounded"
+                      oncf-send={requestProfileCreation({
+                        requestedProfileName,
+                      })}
+                    />
+                  </cf-vstack>
+                )}
             </cf-vstack>
           </cf-tab-panel>
           <cf-tab-panel value="spaces">
@@ -247,10 +291,12 @@ export default pattern((_) => {
     learned,
     spaces,
     defaultAppUrl,
+    profile,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
     removeFavorite: removeFavorite({ favorites }),
     addJournalEntry: addJournalEntry({ journal }),
+    createProfile: requestProfileCreation({ requestedProfileName }),
   };
 });
