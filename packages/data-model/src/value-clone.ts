@@ -103,13 +103,6 @@ export function cloneIfNecessary<T extends FabricValue>(
  * identity-shared with the input. Equivalent to
  * `cloneIfNecessary(value, { frozen: false, deep: false, force: true })`.
  *
- * This is the canonical helper for the copy-on-write "spine" pattern:
- * shallow-clone each container along a mutated path, mutate the copies in
- * place, then `deepFreeze()` the assembled tree at the boundary. Routing
- * through `cloneIfNecessary` preserves the class of any `FabricInstance` /
- * `FabricPrimitive` it copies (via their own `shallowClone()` /
- * immutable-passthrough), unlike a bare `Object.assign`-based shallow copy.
- *
  * @param value - An already-valid `FabricValue`.
  */
 export function shallowMutableClone<T extends FabricValue>(value: T): T {
