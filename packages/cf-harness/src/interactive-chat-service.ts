@@ -11,6 +11,8 @@ import {
   type HarnessChatBrowserAccessLease,
   type HarnessChatErrorResponse,
   type HarnessChatEventEnvelope,
+  type HarnessChatListEventsParams,
+  type HarnessChatListEventsResult,
   type HarnessChatPolicy,
   type HarnessChatRequestEnvelope,
   type HarnessChatResponse,
@@ -29,6 +31,7 @@ import type {
   HarnessToolTranscriptMessage,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
+import type { HarnessChatSessionStore } from "./session-store.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -52,6 +55,7 @@ export interface CreateHarnessInteractiveChatServiceOptions {
   now?: () => string;
   randomUUID?: () => string;
   onEvent?: HarnessInteractiveChatEventListener;
+  sessionStore?: HarnessChatSessionStore;
 }
 
 interface HarnessInteractiveChatSessionRecord {
@@ -228,8 +232,10 @@ export class HarnessInteractiveChatService {
   readonly #now: () => string;
   readonly #randomUUID: () => string;
   readonly #onEvent?: HarnessInteractiveChatEventListener;
+  readonly #sessionStore?: HarnessChatSessionStore;
   readonly #sessions = new Map<string, HarnessInteractiveChatSessionRecord>();
   readonly #events: HarnessChatEventEnvelope[] = [];
+  #emitQueue: Promise<void> = Promise.resolve();
   #sequence = 0;
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
@@ -239,12 +245,56 @@ export class HarnessInteractiveChatService {
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#randomUUID = options.randomUUID ?? defaultRandomUUID;
     this.#onEvent = options.onEvent;
+    this.#sessionStore = options.sessionStore;
   }
 
-  events(sessionId?: string): readonly HarnessChatEventEnvelope[] {
-    return sessionId === undefined
-      ? [...this.#events]
-      : this.#events.filter((event) => event.sessionId === sessionId);
+  async initializeFromStore(): Promise<void> {
+    if (this.#sessionStore === undefined) {
+      return;
+    }
+    this.#sessions.clear();
+    for (const snapshot of await this.#sessionStore.listSessions()) {
+      this.#sessions.set(snapshot.session.sessionId, {
+        status: snapshot.session,
+        transcript: [...snapshot.transcript],
+        canceledTurnIds: new Set(),
+      });
+    }
+    this.#events.splice(
+      0,
+      this.#events.length,
+      ...await this.#sessionStore.listEvents(),
+    );
+    this.#sequence = Math.max(
+      await this.#sessionStore.latestSequence(),
+      ...this.#events.map((event) => event.sequence),
+    );
+  }
+
+  events(
+    sessionId?: string,
+    options: Omit<HarnessChatListEventsParams, "sessionId"> = {},
+  ): readonly HarnessChatEventEnvelope[] {
+    const afterSequence = options.afterSequence ?? 0;
+    const filtered = this.#events.filter((event) =>
+      (sessionId === undefined || event.sessionId === sessionId) &&
+      event.sequence > afterSequence
+    );
+    return options.limit === undefined
+      ? [...filtered]
+      : filtered.slice(0, options.limit);
+  }
+
+  listEvents(
+    params: HarnessChatListEventsParams = {},
+  ): HarnessChatListEventsResult {
+    return {
+      events: this.events(params.sessionId, {
+        afterSequence: params.afterSequence,
+        limit: params.limit,
+      }),
+      latestSequence: this.#sequence,
+    };
   }
 
   status(sessionId?: string): HarnessChatStatusResult {
@@ -312,6 +362,11 @@ export class HarnessInteractiveChatService {
           request.requestId,
           this.status(request.params.sessionId),
         );
+      case "list_events":
+        return createHarnessChatOkResponse(
+          request.requestId,
+          this.listEvents(request.params),
+        );
       default:
         return createHarnessChatErrorResponse(requestId, {
           code: "invalid_request",
@@ -325,6 +380,12 @@ export class HarnessInteractiveChatService {
     params: HarnessChatStartSessionParams,
   ): Promise<HarnessChatResponse<HarnessChatSessionStatus>> {
     const sessionId = params.sessionId ?? this.#randomUUID();
+    if (this.#sessions.has(sessionId)) {
+      return sessionExistsError(requestId, sessionId);
+    }
+    if (await this.#sessionStore?.getSession(sessionId) !== undefined) {
+      return sessionExistsError(requestId, sessionId);
+    }
     if (this.#sessions.has(sessionId)) {
       return sessionExistsError(requestId, sessionId);
     }
@@ -345,10 +406,15 @@ export class HarnessInteractiveChatService {
       transcript: [],
       canceledTurnIds: new Set(),
     });
-    await this.#emit(session.sessionId, undefined, {
-      kind: "session_started",
-      session,
-    });
+    try {
+      await this.#emit(session.sessionId, undefined, {
+        kind: "session_started",
+        session,
+      });
+    } catch (error) {
+      this.#sessions.delete(session.sessionId);
+      throw error;
+    }
     return createHarnessChatOkResponse(requestId, session);
   }
 
@@ -538,6 +604,7 @@ export class HarnessInteractiveChatService {
             return;
           }
           observedTranscriptLength = event.transcript.length;
+          record.transcript = [...event.transcript];
           await this.#emitTranscriptEvent(session.sessionId, turnId, event);
         },
       });
@@ -665,17 +732,42 @@ export class HarnessInteractiveChatService {
     turnId: string | undefined,
     event: HarnessChatStructuredEvent,
   ): Promise<void> {
+    const emitTask = this.#emitQueue.then(() =>
+      this.#emitImmediately(sessionId, turnId, event)
+    );
+    this.#emitQueue = emitTask.catch(() => undefined);
+    return await emitTask;
+  }
+
+  async #emitImmediately(
+    sessionId: string,
+    turnId: string | undefined,
+    event: HarnessChatStructuredEvent,
+  ): Promise<void> {
+    const sequence = this.#sequence + 1;
     const envelope = createHarnessChatEventEnvelope({
       sessionId,
       ...(turnId !== undefined ? { turnId } : {}),
-      sequence: ++this.#sequence,
+      sequence,
       emittedAt: this.#now(),
       event,
     });
-    this.#events.push(envelope);
     const record = this.#sessions.get(sessionId);
-    if (record !== undefined) {
-      record.status = reduceHarnessChatSessionStatus(record.status, envelope);
+    const nextStatus = record === undefined
+      ? undefined
+      : reduceHarnessChatSessionStatus(record.status, envelope);
+    if (record !== undefined && nextStatus !== undefined) {
+      await this.#sessionStore?.saveSessionAndAppendEvent({
+        session: nextStatus,
+        transcript: record.transcript,
+      }, envelope);
+    } else {
+      await this.#sessionStore?.appendEvent(envelope);
+    }
+    this.#sequence = sequence;
+    this.#events.push(envelope);
+    if (record !== undefined && nextStatus !== undefined) {
+      record.status = nextStatus;
     }
     await this.#onEvent?.(envelope);
   }

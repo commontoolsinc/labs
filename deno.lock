@@ -1885,6 +1885,11 @@
       "npm:zod@^3.24.1"
     ],
     "members": {
+      "packages/cf-harness": {
+        "dependencies": [
+          "jsr:@db/sqlite@0.12"
+        ]
+      },
       "packages/cli": {
         "dependencies": [
           "jsr:@cliffy/table@^1.0.0-rc.8"
