@@ -197,6 +197,8 @@ declare module "@commonfabric/api" {
     throttle?: number;
     /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
+    /** Run this module's result in a specific space. */
+    targetSpace?: MemorySpace;
   }
 }
 

@@ -174,3 +174,45 @@ made before committing.
 - None for behavior. Test command expectations should mention that the nested
   profile wish cases require running `packages/runner/test/wish.test.ts` or the
   broader `--filter wish`, not only `--filter profile`.
+
+## Slice 6a: PatternFactory.inSpace Runtime Primitive
+
+### Ambiguity or Incorrect Spec
+
+- `PatternFactory.inSpace(spaceName)` cannot synchronously derive a named-space
+  DID because the existing derivation path is async. Random DID generation is
+  also async because it creates a key pair.
+- Starting a child pattern in another space cannot happen in the same
+  transaction that writes the source-space link; storage transactions only allow
+  one writer space.
+- Pattern-call output cells are opaque proxies, so runtime-only annotations must
+  be keyed through the underlying cell rather than public proxy methods.
+
+### Decision
+
+- Added `PatternFactory.inSpace(space?: string | AnyCell<unknown>)`,
+  analogous to `.asScope()`.
+- DID strings and `AnyCell` arguments resolve synchronously at factory-call time.
+  Cell arguments use the referenced cell's current space.
+- Non-DID strings and omitted spaces are resolved during async action/handler
+  post-run. Non-DID strings use the existing named-space session derivation;
+  omitted spaces generate a fresh identity DID.
+- Cross-space child pattern starts are deferred until after the source-space
+  transaction commits, so the source link write and target-space pattern writes
+  happen in separate transactions.
+
+### Tests Added
+
+- `packages/runner/test/pattern-scope.test.ts`
+  - `.inSpace(did)` routes a child pattern result to that DID space.
+  - `.inSpace(name)` resolves the name during action post-run and stores the
+    child link to the derived space.
+  - `.inSpace(cell)` routes a child pattern result to the cell's space.
+  - `.inSpace()` without an argument generates a fresh DID during action
+    post-run.
+
+### Spec Correction Needed
+
+- The home/profile creation flow should use `PatternFactory.inSpace(...)` from a
+  trusted handler/action boundary rather than expecting named-space derivation to
+  be available during ordinary synchronous pattern graph construction.

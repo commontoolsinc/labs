@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { Identity } from "@commonfabric/identity";
+import { createSession, Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
@@ -449,6 +449,195 @@ Deno.test("pattern factory .asScope() sets child pattern result scope", async ()
       runtime.getCellFromLink(childLink!).getSourceCell()
         ?.getAsNormalizedFullLink().scope,
       "user",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern factory .inSpace() routes child pattern result to DID space", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+  const targetSpace = (await Identity.fromPassphrase(
+    "pattern factory inSpace child target",
+  )).did();
+
+  try {
+    const { pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const Child = pattern<{ value: string }>(({ value }) => ({ value }));
+    const Root = pattern(() => ({
+      child: Child.inSpace(targetSpace)({ value: "child" }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "pattern factory inSpace child result",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {}, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const childLink = parseLink(result.key("child").getRaw(), result);
+    assertEquals(childLink?.space, targetSpace);
+    assertEquals(await result.key("child", "value").pull(), "child" as any);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern factory .inSpace() resolves named spaces during action postRun", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+  const spaceName = `pattern-factory-in-space-${crypto.randomUUID()}`;
+  const expectedSpace = (await createSession({
+    identity: signer,
+    spaceName,
+  })).space;
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const Child = pattern<{ value: string }>(({ value }) => ({ value }));
+    const makeChild = lift(({ value }: { value: string }) =>
+      Child.inSpace(spaceName)({ value })
+    );
+    const Root = pattern<{ value: string }>((state) => ({
+      child: makeChild({ value: state.value }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "pattern factory named inSpace action result",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { value: "named child" }, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const actionLink = parseLink(result.key("child").getRaw(), result);
+    const actionResult = runtime.getCellFromLink(actionLink!);
+    const childLink = parseLink(actionResult.getRaw(), actionResult);
+    assertEquals(childLink?.space, expectedSpace);
+    assertEquals(
+      await result.key("child", "value").pull(),
+      "named child" as any,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern factory .inSpace() with a cell uses that cell's space", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+  const targetSpace = (await Identity.fromPassphrase(
+    "pattern factory inSpace anchor cell target",
+  )).did();
+
+  try {
+    const anchor = runtime.getCell(
+      targetSpace,
+      "inSpace anchor",
+      undefined,
+      tx,
+    );
+    const { pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const Child = pattern<{ value: string }>(({ value }) => ({ value }));
+    const Root = pattern(() => ({
+      child: Child.inSpace(anchor)({ value: "anchored child" }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "pattern factory cell inSpace result",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {}, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const childLink = parseLink(result.key("child").getRaw(), result);
+    assertEquals(childLink?.space, targetSpace);
+    assertEquals(
+      await result.key("child", "value").pull(),
+      "anchored child" as any,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern factory .inSpace() without a space creates a fresh DID space during action postRun", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const Child = pattern<{ value: string }>(({ value }) => ({ value }));
+    const makeChild = lift(({ value }: { value: string }) =>
+      Child.inSpace()({ value })
+    );
+    const Root = pattern<{ value: string }>((state) => ({
+      child: makeChild({ value: state.value }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "pattern factory random inSpace action result",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { value: "random child" }, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const actionLink = parseLink(result.key("child").getRaw(), result);
+    const actionResult = runtime.getCellFromLink(actionLink!);
+    const childLink = parseLink(actionResult.getRaw(), actionResult);
+    assertEquals(childLink?.space.startsWith("did:key:"), true);
+    assertEquals(childLink?.space === space, false);
+    assertEquals(
+      await result.key("child", "value").pull(),
+      "random child" as any,
     );
   } finally {
     await runtime.dispose();

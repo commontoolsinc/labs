@@ -35,6 +35,7 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
+  type Module,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -461,6 +462,8 @@ interface CauseContainer {
   cause: unknown | undefined;
 }
 
+const inSpaceAnnotations = new WeakMap<OpaqueCell<unknown>, unknown>();
+
 /**
  * CellImpl - Unified cell implementation that handles both regular cells and
  * streams.
@@ -587,6 +590,36 @@ export class CellImpl<T extends FabricValue>
     this._causeContainer.cause = cause;
 
     return this as unknown as Cell<T>;
+  }
+
+  setInSpaceAnnotation(space: unknown): void {
+    const top = this._causeContainer.cell;
+    inSpaceAnnotations.set(top, space);
+    if (typeof space === "string" && isMemorySpaceDID(space)) {
+      this.setUnlinkedSpace(space as MemorySpace);
+    } else {
+      const spaceCell = asCellImpl(space);
+      if (spaceCell) {
+        this.setUnlinkedSpace(spaceCell.getAsNormalizedFullLink().space);
+      }
+    }
+  }
+
+  getInSpaceAnnotation(): unknown {
+    return inSpaceAnnotations.get(this._causeContainer.cell);
+  }
+
+  setUnlinkedSpace(space: MemorySpace): void {
+    if (this._causeContainer.id || this._link.id) {
+      throw new Error(
+        "Cannot set space: cell already has a link.",
+      );
+    }
+    this._causeContainer.space = space;
+    this._link = { ...this._link, space };
+    for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
+      (node.module as Module).targetSpace = space;
+    }
   }
 
   /**
@@ -1966,6 +1999,35 @@ export class CellImpl<T extends FabricValue>
       "Copy trap: Something is trying to traverse a cell.",
     );
   }
+}
+
+function isMemorySpaceDID(value: string): boolean {
+  return /^did:[^:]+:.+/.test(value);
+}
+
+export function setCellInSpaceAnnotation(
+  cell: unknown,
+  space: unknown,
+): void {
+  asCellImpl(cell)?.setInSpaceAnnotation(space);
+}
+
+export function getCellInSpaceAnnotation(cell: unknown): unknown {
+  return asCellImpl(cell)?.getInSpaceAnnotation();
+}
+
+export function setCellUnlinkedSpace(
+  cell: unknown,
+  space: MemorySpace,
+): void {
+  asCellImpl(cell)?.setUnlinkedSpace(space);
+}
+
+function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
+  if (!isCell(cell)) return undefined;
+  const maybeToCell = (cell as { [toCell]?: () => Cell<unknown> })[toCell];
+  const unproxied = typeof maybeToCell === "function" ? maybeToCell() : cell;
+  return unproxied as unknown as CellImpl<FabricValue>;
 }
 
 function subscribeToReferencedDocs<T>(
