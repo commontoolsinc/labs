@@ -55,7 +55,11 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { type LastNode, resolveLink } from "./link-resolution.ts";
+import {
+  type LastNode,
+  readMaybeLink,
+  resolveLink,
+} from "./link-resolution.ts";
 import {
   type Action,
   ignoreReadForScheduling,
@@ -1181,7 +1185,22 @@ export class CellImpl<T extends FabricValue>
         }
         const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
         if (isCellScope(asCellScope)) {
-          currentLink = { ...currentLink, scope: asCellScope };
+          let linkedCell: NormalizedFullLink | undefined;
+          try {
+            linkedCell = readMaybeLink(
+              this.runtime.readTx(this.tx),
+              currentLink as NormalizedFullLink,
+            );
+          } catch {
+            linkedCell = undefined;
+          }
+          if (linkedCell !== undefined) {
+            currentLink = {
+              ...linkedCell,
+              scope: asCellScope,
+              schema: currentLink.schema,
+            };
+          }
         }
       }
     }

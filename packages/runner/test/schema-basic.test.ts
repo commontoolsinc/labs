@@ -6,7 +6,7 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Cell, isCell } from "../src/cell.ts";
+import { type Cell, createCell, isCell } from "../src/cell.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -725,7 +725,7 @@ describe("Schema - Basic Types and References", () => {
       expect(innerStringCell.get()).toBe("hello double asCell");
     });
 
-    it("should honor scoped asCell object entries", () => {
+    it("should apply scoped asCell object entries when following links", () => {
       const outer = runtime.getCell<{ current: Cell<string> }>(
         space,
         "scoped-ascell-object-entry",
@@ -743,7 +743,30 @@ describe("Schema - Basic Types and References", () => {
       );
 
       const currentCell = outer.key("current");
-      expect(currentCell.getAsNormalizedFullLink().scope).toBe("user");
+      expect(currentCell.getAsNormalizedFullLink().scope).toBe("space");
+
+      const target = runtime.getCell<string>(
+        space,
+        "scoped-ascell-object-entry-target",
+        { type: "string" } as const satisfies JSONSchema,
+        tx,
+      );
+      createCell<string>(
+        runtime,
+        { ...target.getAsNormalizedFullLink(), scope: "user" },
+        tx,
+      ).set("target value");
+      outer.set({ current: target });
+
+      const linkedCurrentCell = outer.key("current");
+      expect(linkedCurrentCell.getAsNormalizedFullLink()).toMatchObject({
+        id: target.getAsNormalizedFullLink().id,
+        scope: "user",
+        path: [],
+      });
+      const linkedTarget = linkedCurrentCell.get();
+      expect(isCell(linkedTarget)).toBe(true);
+      expect(linkedTarget.get()).toBe("target value");
     });
 
     it("should preserve nested asCell wrappers through anyOf branches", () => {

@@ -844,6 +844,115 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
   }
 });
 
+Deno.test("lift can read session-scoped cell passed from pattern input", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const sessionTargetBase = runtime.getCell<string | null>(
+      space,
+      "lift captured session target",
+      undefined,
+      tx,
+    );
+    const sessionTarget = createCell<string | null>(
+      runtime,
+      { ...sessionTargetBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    sessionTarget.set("a");
+    const sessionTargetBaseLink = sessionTargetBase.getAsNormalizedFullLink();
+    const sessionTargetLink = sessionTarget.getAsNormalizedFullLink();
+    assertEquals(sessionTargetBaseLink.scope, "space");
+    assertEquals(sessionTargetLink, {
+      ...sessionTargetBaseLink,
+      scope: "session",
+    });
+    assertEquals(sessionTarget.get(), "a");
+
+    const inputSchema = {
+      type: "object",
+      properties: {
+        sessionTarget: {
+          anyOf: [{ type: "string" }, { type: "null" }],
+          asCell: [{ kind: "cell", scope: "session" }],
+        },
+      },
+      required: ["sessionTarget"],
+    } as const;
+
+    const isSessionOpen = lift(
+      {
+        type: "object",
+        properties: {
+          sessionTarget: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+          id: { type: "string" },
+        },
+        required: ["sessionTarget", "id"],
+      },
+      { type: "boolean" },
+      (
+        { sessionTarget, id }: {
+          sessionTarget: Cell<string | null>;
+          id: string;
+        },
+      ) => sessionTarget.get() === id,
+    );
+
+    const Root = pattern<{
+      sessionTarget: Cell<string | null>;
+    }>(({ sessionTarget }) => ({
+      isOpen: isSessionOpen({
+        sessionTarget,
+        id: "a",
+      }),
+    }), inputSchema);
+
+    const resultCell = runtime.getCell(
+      space,
+      "lift reads session scoped cell passed from pattern input",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {
+      sessionTarget,
+    }, resultCell);
+    const argumentCell = runtime.getCellFromLink(
+      getMetaLink(result, "argument")!,
+      undefined,
+      tx,
+    );
+    const argumentSessionTarget = argumentCell.key("sessionTarget");
+    const storedArgumentTargetLink = parseLink(
+      argumentSessionTarget.getRawUntyped(),
+      argumentSessionTarget,
+    )!;
+    assertEquals(storedArgumentTargetLink.id, sessionTargetLink.id);
+    assertEquals(storedArgumentTargetLink.path, sessionTargetLink.path);
+    assertEquals(storedArgumentTargetLink.space, sessionTargetLink.space);
+    assertEquals(storedArgumentTargetLink.scope, sessionTargetLink.scope);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(result.key("isOpen").get() as unknown, true);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("map updates when derived list is narrowed by session input", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
