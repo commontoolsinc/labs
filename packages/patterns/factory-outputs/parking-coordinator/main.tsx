@@ -295,8 +295,7 @@ const personIsParkingAdmin = (
 const currentActorName = (
   selectedPersonName: Writable<string>,
   people: PeopleCell,
-): string =>
-  selectedPersonName.get() || (people.get() ?? [])[0]?.name || "";
+): string => selectedPersonName.get() || (people.get() ?? [])[0]?.name || "";
 
 const currentParkingAdminRole = (
   registry: ParkingAdminRegistryCell,

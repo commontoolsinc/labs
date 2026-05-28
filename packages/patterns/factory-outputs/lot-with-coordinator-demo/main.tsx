@@ -9,22 +9,12 @@
  * Both patterns also share `spots` per Lot Watch DESIGN §3a so the operator
  * doesn't need to maintain two spot lists.
  */
-import {
-  action,
-  computed,
-  NAME,
-  pattern,
-  UI,
-  Writable,
-} from "commonfabric";
+import { action, computed, NAME, pattern, UI, Writable } from "commonfabric";
 
 import ParkingCoordinator, {
   DEFAULT_SPOTS,
 } from "../parking-coordinator/main.tsx";
-import type {
-  ParkingSpot,
-  Person,
-} from "../parking-coordinator/main.tsx";
+import type { ParkingSpot, Person } from "../parking-coordinator/main.tsx";
 
 import LotWatch from "../lot-watch/main.tsx";
 
@@ -121,8 +111,8 @@ export default pattern<Record<string, never>, Out>(() => {
               🔗 Composed demo
             </span>
             <span style="font-size: 0.7rem; color: var(--cf-color-gray-600);">
-              These two patterns share the same `people` cell. Tag a plate
-              as "Gideon's car" in Lot Watch and Gideon appears in Parking
+              These two patterns share the same `people` cell. Tag a plate as
+              "Gideon's car" in Lot Watch and Gideon appears in Parking
               Coordinator's people list.
             </span>
           </cf-vstack>
