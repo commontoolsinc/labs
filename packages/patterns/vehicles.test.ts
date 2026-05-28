@@ -114,6 +114,28 @@ Deno.test("normalizeVehicle: uppercases provided state", () => {
   assertEquals(result.plateState, "WA");
 });
 
+Deno.test("normalizeVehicle: invalid state falls back to CA", () => {
+  // Junk codes ("XX", "ZZ", whitespace) would otherwise pollute downstream
+  // classification matches keyed on (plateId, plateState).
+  const xx = normalizeVehicle({
+    plateId: "P1",
+    plateState: "XX",
+    color: "",
+    make: "",
+    model: "",
+  });
+  assertEquals(xx.plateState, "CA");
+
+  const blanks = normalizeVehicle({
+    plateId: "P2",
+    plateState: "   ",
+    color: "",
+    make: "",
+    model: "",
+  });
+  assertEquals(blanks.plateState, "CA");
+});
+
 Deno.test("normalizeVehicle: valid make kept, invalid make dropped", () => {
   const valid = normalizeVehicle({
     plateId: "P1",

@@ -8,8 +8,17 @@
  * 4. Dedup/grouping: repeat plates group with count 2, blank-plate description fallback
  * 5. Report computeds: spot-occupancy counts; repeat-offender leaderboard ordering
  * 6. Admin gating: curation actions are no-ops without admin credential
- * 7. LLM extraction: TODO — mocking generateObject at boundary is not feasible in
- *    the current harness. Skipped to avoid blocking other cases.
+ * 7. LLM extraction (Phase 2): NOT unit-tested. `generateObject` is invoked
+ *    inline during the pattern body and returns a reactive result/error pair;
+ *    the test harness has no boundary seam to intercept the model call, and we
+ *    won't hit a live model in tests. Coverage strategy:
+ *    - `extractionPending: false` and `extractionError: ""` on saved sightings
+ *      are asserted implicitly by the s1/s2 capture cases.
+ *    - The end-to-end "photo → extracted plate/description flows into the
+ *      editable draft fields → save" path is covered by browser verification
+ *      (see PR #3712 description + lot-watch design doc §7). Treat as a
+ *      tracked follow-up: add a generateObject seam (e.g. an injectable
+ *      extractor input) to enable unit-testing this without a live model.
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
@@ -635,6 +644,130 @@ export default pattern(() => {
   );
 
   // ============================================================
+  // Subject 8: Admin gating — full matrix of curation actions
+  //   - saveGuest and assignToPerson no-op without an active admin
+  //     (s6 only covered markVehicle + delete; we add the missing two)
+  //   - Positive path: with the admin reporter set, ALL THREE curation
+  //     paths actually mutate (markVehicle, saveGuest, assignToPerson).
+  //     `assignToPerson` is the cross-pattern write into `people` — the
+  //     headline "that's <person>'s car" UX — and previously had ZERO
+  //     test coverage.
+  // ============================================================
+  const s8 = LotWatch({
+    // Seed Alice so openAssign has a name to default into the picker.
+    people: [{ name: "Alice", vehicles: [] }],
+  });
+
+  // Capture two sightings on different plates so markVehicle (offender) and
+  // saveGuest (guest) write distinct entries we can count.
+  const action_s8_capture_x = action(() => {
+    s8.captureSighting.send({
+      spotNumber: "1",
+      image: fakeImage as never,
+      description: "X car",
+      plateNumber: "X1",
+      plateState: "CA",
+      notes: "",
+    });
+  });
+  const action_s8_capture_y = action(() => {
+    s8.captureSighting.send({
+      spotNumber: "5",
+      image: fakeImage as never,
+      description: "Y car",
+      plateNumber: "Y1",
+      plateState: "CA",
+      notes: "",
+    });
+  });
+
+  // --- Negative: saveGuest without admin ---
+  // openGuest sets guestTarget; saveGuest reads it. The admin check is the
+  // ONLY thing that should block knownVehicles from gaining an entry.
+  const action_s8_open_guest_no_admin = action(() => {
+    const id = s8.sightings[1]?.id ?? "";
+    s8.openGuest.send({ id });
+  });
+  const action_s8_save_guest_no_admin = action(() => {
+    s8.saveGuest.send();
+  });
+  const assert_s8_save_guest_no_admin_noop = computed(() =>
+    len(s8.knownVehicles) === 0
+  );
+
+  // --- Negative: assignToPerson without admin ---
+  // openAssign sets assignTarget AND defaults assignPersonName to Alice
+  // (since people=[Alice]). assignToPerson would then write into Alice's
+  // vehicles, EXCEPT the admin gate blocks it — assert Alice is still empty.
+  const action_s8_open_assign_no_admin = action(() => {
+    const id = s8.sightings[0]?.id ?? "";
+    s8.openAssign.send({ id });
+  });
+  const action_s8_assign_no_admin = action(() => {
+    s8.assignToPerson.send();
+  });
+  const assert_s8_assign_no_admin_noop = computed(() => {
+    const alice = s8.people.find((p) => p.name === "Alice");
+    return alice !== undefined && (alice.vehicles ?? []).length === 0;
+  });
+
+  // --- Establish admin: enable manager + toggle Alice + reporterName=Alice
+  const action_s8_enable_manager = action(() => s8.enableAdminManager.send());
+  const action_s8_toggle_alice = action(() => {
+    s8.togglePersonAdmin.send({ name: "Alice" });
+  });
+  const action_s8_set_reporter_alice = action(() => {
+    s8.setReporterName.send({ name: "Alice" });
+  });
+
+  // --- Positive: markVehicle now mutates ---
+  const action_s8_mark_x_offender = action(() => {
+    s8.markVehicle.send({
+      plateNumber: "X1",
+      plateState: "CA",
+      category: "offender",
+      org: "Local Butcher Shop",
+    });
+  });
+  const assert_s8_mark_succeeds = computed(() => {
+    const kvs = [...s8.knownVehicles];
+    return kvs.some((kv) =>
+      kv.plateNumber === "X1" && kv.category === "offender"
+    );
+  });
+
+  // --- Positive: saveGuest now mutates (Y1 added as guest) ---
+  const action_s8_open_guest_admin = action(() => {
+    const id = s8.sightings[1]?.id ?? "";
+    s8.openGuest.send({ id });
+  });
+  const action_s8_save_guest_admin = action(() => {
+    s8.saveGuest.send();
+  });
+  const assert_s8_save_guest_succeeds = computed(() => {
+    const kvs = [...s8.knownVehicles];
+    return kvs.some((kv) => kv.plateNumber === "Y1" && kv.category === "guest");
+  });
+
+  // --- Positive: assignToPerson writes the plate into Alice's vehicles
+  // This is the cross-pattern write — the headline UX. Without this
+  // assertion, the feature is effectively untested.
+  const action_s8_open_assign_admin = action(() => {
+    const id = s8.sightings[0]?.id ?? "";
+    s8.openAssign.send({ id });
+  });
+  const action_s8_assign_admin = action(() => {
+    s8.assignToPerson.send();
+  });
+  const assert_s8_assign_succeeds = computed(() => {
+    const alice = s8.people.find((p) => p.name === "Alice");
+    if (!alice) return false;
+    return (alice.vehicles ?? []).some((v) =>
+      v.plateId === "X1" && v.plateState === "CA"
+    );
+  });
+
+  // ============================================================
   // Test sequence
   // ============================================================
   return {
@@ -691,10 +824,38 @@ export default pattern(() => {
       { assertion: assert_s7_ours_beats_offender },
       { assertion: assert_s7_offender_beats_guest },
       { assertion: assert_s7_empty_plate_unknown },
+
+      // S8: Admin-gating full matrix + positive cross-pattern write
+      { action: action_s8_capture_x },
+      { action: action_s8_capture_y },
+      // Negative: saveGuest no-admin
+      { action: action_s8_open_guest_no_admin },
+      { action: action_s8_save_guest_no_admin },
+      { assertion: assert_s8_save_guest_no_admin_noop },
+      // Negative: assignToPerson no-admin
+      { action: action_s8_open_assign_no_admin },
+      { action: action_s8_assign_no_admin },
+      { assertion: assert_s8_assign_no_admin_noop },
+      // Establish admin
+      { action: action_s8_enable_manager },
+      { action: action_s8_toggle_alice },
+      { action: action_s8_set_reporter_alice },
+      // Positive: markVehicle mutates
+      { action: action_s8_mark_x_offender },
+      { assertion: assert_s8_mark_succeeds },
+      // Positive: saveGuest mutates
+      { action: action_s8_open_guest_admin },
+      { action: action_s8_save_guest_admin },
+      { assertion: assert_s8_save_guest_succeeds },
+      // Positive: assignToPerson writes into people (cross-pattern UX)
+      { action: action_s8_open_assign_admin },
+      { action: action_s8_assign_admin },
+      { assertion: assert_s8_assign_succeeds },
     ],
     s1,
     s2,
     s3,
     s6,
+    s8,
   };
 });

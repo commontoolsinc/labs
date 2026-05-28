@@ -401,15 +401,20 @@ export const formatVehicle = (v: Vehicle): string => {
 export const normalizePlateId = (raw: string): string =>
   raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-// Constrain one vehicle to the catalog: normalize plate, default+uppercase state,
+// Constrain one vehicle to the catalog: normalize plate, default+validate state,
 // and DROP any color/make/model not in the fixed sets. Model is only kept when a
 // valid make is set AND the model belongs to that make (fixes stale-cascade data).
+// `plateState` is uppercased+trimmed and required to be a real US state code;
+// anything else (blank, "XX", whitespace) falls back to "CA" — without this,
+// junk states would pollute downstream classification matches.
 export const normalizeVehicle = (v: Vehicle): Vehicle => {
   const make = VEHICLE_MAKES.includes(v.make) ? v.make : "";
   const model = make && modelsForMake(make).includes(v.model) ? v.model : "";
+  const rawState = (v.plateState ?? "").trim().toUpperCase();
+  const plateState = US_STATES.includes(rawState) ? rawState : "CA";
   return {
     plateId: normalizePlateId(v.plateId),
-    plateState: (v.plateState || "CA").toUpperCase(),
+    plateState,
     color: VEHICLE_COLORS.includes(v.color) ? v.color : "",
     make,
     model,

@@ -196,6 +196,7 @@ export interface LotWatchOutput {
   }>;
   deleteSighting: Stream<{ id: string }>;
   selectTab: Stream<{ tab: "capture" | "sightings" | "report" }>;
+  setReporterName: Stream<{ name: string }>;
   markVehicle: Stream<{
     plateNumber: string;
     plateState: string;
@@ -372,6 +373,13 @@ const fmtWhen = (ts: number): string => {
 // Admin helpers (DESIGN §6) — module-scope pure functions, mirror coordinator
 // ============================================================
 
+// Demo-only identity model: the admin SUBJECT keys on the actor's free-text
+// `reporterName` (a perUser cell set by the user themselves on the capture
+// tab), exactly like parking-coordinator's `personName` subject. That means
+// any user can become an admin by typing an existing admin's name into the
+// reporter field — fine for a single-tenant lot demo, NOT acceptable for
+// production. Replace `reporterName` with a stable identity (user DID /
+// profile cell) before relying on this gate for real authorization.
 const lotWatchAdminSubject = (personName: string): LotWatchAdminSubject => ({
   personName,
 });
@@ -601,6 +609,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // `.set()` in an inline onClick.
     const setDraftSpot = action<{ spot: string }>(({ spot }) => {
       draftSpot.set(spot);
+    });
+
+    // Programmatic setter for the perUser `reporterName`. The UI binds the
+    // capture tab's "Your name" cf-input directly via `$value={reporterName}`,
+    // but tests (and any non-UI caller) need a Stream seam to set it.
+    const setReporterName = action<{ name: string }>(({ name }) => {
+      reporterName.set(name);
     });
 
     // Phase 2: copy the LLM extraction into the editable draft fields. The
@@ -1111,13 +1126,19 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     });
 
     // DESIGN §10: Report tab computeds — all over PerSpace sightings (guard ?? [])
-    // Spot occupancy frequency
+    // Spot occupancy frequency — derived from the `spots` cell (NOT a hardcoded
+    // ["1","5","12","13"] list) so the report stays correct when spots are
+    // added/removed/relabeled in parking-coordinator.
     const spotOccupancy = computed(() => {
       const all = sightings.get() ?? [];
       const ourVehicles = (people.get() ?? []).flatMap((p) => p.vehicles ?? []);
       const knownList = knownVehicles.get() ?? [];
-      const spotNums = ["1", "5", "12", "13"];
-      return spotNums.map((spotNum) => {
+      const allSpots = (spots.get() ?? []).filter((s) => {
+        const isActive = (s as ParkingSpot).active;
+        return isActive === undefined || isActive === true;
+      });
+      return allSpots.map((spot) => {
+        const spotNum = spot.spotNumber;
         const forSpot = all.filter((s) => s.spotNumber === spotNum);
         const nonOurs = forSpot.filter((s) => {
           const cls = classifyPlate(
@@ -2308,6 +2329,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       captureSighting,
       deleteSighting,
       selectTab,
+      setReporterName,
       markVehicle,
       removeKnownVehicle,
       openAssign,
