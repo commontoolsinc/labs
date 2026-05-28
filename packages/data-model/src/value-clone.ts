@@ -1,6 +1,6 @@
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -56,6 +56,9 @@ function trackForCircularity(
  * Unlike `fabricFromNativeValue()` (which converts native JS values into
  * fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
+ *
+ * Cyclic values are not yet supported: a deep clone (the default) throws on a
+ * detected cycle. Handling cycles here is intended future work.
  *
  * @param value - An already-valid `FabricValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
@@ -214,10 +217,6 @@ export function cloneHelper(
       );
   }
 }
-
-// =============================================================================
-// `cloneForMutation`
-// =============================================================================
 
 /**
  * Categorical kinds of error that `cloneForMutation()` can fail with.
@@ -552,4 +551,120 @@ function createMissingContainer(
  */
 function isMutableHandle(value: unknown): boolean {
   return isPlainContainer(value) || value instanceof FabricInstance;
+}
+
+/**
+ * Helper for the path-edit functions, which reads the child of `container` at
+ * `key`. A `key` that isn't a canonical array index never addresses an array
+ * element (so e.g. `length` or a non-canonical `08` reads as absent).
+ */
+const readChildAt = (
+  container: Record<string, unknown> | unknown[],
+  key: string,
+): FabricValue => {
+  if (Array.isArray(container) && !isArrayIndexPropertyName(key)) {
+    return undefined;
+  }
+  return (container as Record<string, unknown>)[key] as FabricValue;
+};
+
+/**
+ * Helper for the path-edit functions, which indicates whether `container` has
+ * an own child at `key`. A `key` that isn't a canonical array index is never
+ * an array element (excludes `length` and number-looking-but-non-canonical
+ * names like `08`); `Object.hasOwn` then also treats sparse holes and
+ * out-of-range indices as absent, so removing one is a no-op rather than a
+ * shift-inducing splice.
+ */
+const hasChildAt = (
+  container: Record<string, unknown> | unknown[],
+  key: string,
+): boolean => {
+  if (Array.isArray(container) && !isArrayIndexPropertyName(key)) {
+    return false;
+  }
+  return Object.hasOwn(container, key);
+};
+
+/**
+ * Returns a deep-frozen clone of `root` with `value` set at `path`, creating
+ * missing intermediate containers as needed (their array-vs-object shape is
+ * chosen from the next path segment, per `cloneForMutation`'s `createMissing`).
+ * Subtrees off the mutated spine are shared by identity. An empty `path`
+ * replaces the whole value.
+ *
+ * Like `cloneForMutation`, descent through a *present* non-container along the
+ * path -- a primitive, or a `FabricInstance`/`FabricPrimitive` -- throws a
+ * `CloneForMutationError` rather than silently replacing that leaf with fresh
+ * spine structure. Cyclic values are not yet supported (see `cloneIfNecessary`).
+ */
+export function cloneWithValueAtPath(
+  root: FabricValue,
+  path: readonly string[],
+  value: FabricValue,
+): FabricValue {
+  if (path.length === 0) {
+    return cloneIfNecessary(value);
+  }
+  const lastKey = path[path.length - 1]!;
+  const { value: newRoot, pathValue } = cloneForMutation(
+    root ?? {},
+    path.slice(0, -1),
+    { createMissing: true, nextKeyAfterPath: lastKey },
+  );
+  // A canonical array-index `lastKey` indexes (and extends) an array
+  // `pathValue` directly; otherwise it's a plain object key.
+  (pathValue as Record<string, FabricValue>)[lastKey] = cloneIfNecessary(value);
+  return deepFreeze(newRoot);
+}
+
+/**
+ * Returns a deep-frozen clone of `root` with the value at `path` removed
+ * (object key deleted, or array element spliced out). Subtrees off the
+ * mutated spine are shared by identity.
+ *
+ * When `path` is genuinely absent -- a missing key, an out-of-range array
+ * index, or a non-plain-container (primitive / `FabricInstance` /
+ * `FabricPrimitive`) anywhere along the way -- there is nothing to remove, so
+ * a deep-frozen clone of `root` is returned (identity when `root` is already
+ * deep-frozen). An `undefined` `root` or empty `path` returns `undefined`
+ * (whole-value removal). Cyclic values are not yet supported (see
+ * `cloneIfNecessary`).
+ */
+export function cloneWithoutValueAtPath(
+  root: FabricValue,
+  path: readonly string[],
+): FabricValue {
+  if (root === undefined || path.length === 0) {
+    return undefined;
+  }
+
+  // Pre-walk: confirm the full path is reachable through plain containers and
+  // the final slot is present. Anything else means "nothing to remove" -- and
+  // gating on `isPlainContainer` (rather than a bare object check) is what
+  // keeps us from descending into a `FabricInstance`/`FabricPrimitive`.
+  let parent: FabricValue = root;
+  for (let i = 0; i < path.length - 1; i++) {
+    if (!isPlainContainer(parent)) return cloneIfNecessary(root);
+    const child = readChildAt(parent, path[i]!);
+    if (child === undefined) return cloneIfNecessary(root);
+    parent = child;
+  }
+  if (
+    !isPlainContainer(parent) || !hasChildAt(parent, path[path.length - 1]!)
+  ) {
+    return cloneIfNecessary(root);
+  }
+
+  const { value: newRoot, pathValue } = cloneForMutation(
+    root,
+    path.slice(0, -1),
+  );
+  const lastKey = path[path.length - 1]!;
+  if (Array.isArray(pathValue)) {
+    (pathValue as FabricValue[]).splice(Number(lastKey), 1);
+  } else {
+    delete (pathValue as Record<string, FabricValue>)[lastKey];
+  }
+  return deepFreeze(newRoot);
 }

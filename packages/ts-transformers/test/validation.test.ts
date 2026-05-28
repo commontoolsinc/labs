@@ -2218,6 +2218,28 @@ Deno.test("OpaqueRef .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows .get() on Writable feeding a computation at a binding (auto-wrapped)",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ layout: Writable<string> }>(({ layout }) => {
+        const len = layout.get().trim().length;
+        return { len };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "binding-site .get() feeding a computation is auto-wrapped, not an error",
+      );
+    },
+  );
+
+  await t.step(
     "allows .get() on Cell pattern input",
     async () => {
       const source =

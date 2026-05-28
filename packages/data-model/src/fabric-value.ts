@@ -25,6 +25,8 @@ export {
   type CloneForMutationResult,
   cloneIfNecessary,
   type CloneOptions,
+  cloneWithoutValueAtPath,
+  cloneWithValueAtPath,
   shallowMutableClone,
 } from "./value-clone.ts";
 

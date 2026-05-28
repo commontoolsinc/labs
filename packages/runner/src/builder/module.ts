@@ -1,5 +1,6 @@
 import type {
   CellScope,
+  Frame,
   Handler,
   HandlerFactory,
   JSONSchema,
@@ -625,10 +626,10 @@ function prepareInspectableImplementation<
   return wrapped as T;
 }
 
-function resolveLocationFromFunctionSource(
+export function resolveLocationFromFunctionSource(
   fn: (...args: any[]) => unknown,
+  frame: Frame | undefined = getTopFrame(),
 ): string | null {
-  const frame = getTopFrame();
   const context = frame?.sourceLocationContext;
   const harness = frame?.runtime?.harness;
   if (!context || !harness) {
