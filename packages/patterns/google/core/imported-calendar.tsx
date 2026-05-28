@@ -15,9 +15,7 @@ import {
   Cell,
   computed,
   Default,
-  derive,
   handler,
-  ifElse,
   NAME,
   nonPrivateRandom,
   pattern,
@@ -386,13 +384,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   const lastDropTime = new Cell(0);
 
   // Computed Values
-  const importedEventCount = derive(
-    importedEvents,
-    (evts: CalendarEvent[]) => evts?.length || 0,
-  );
-  const localEventCount = computed(() => localEvents.get().length);
-  const eventCount = computed(() => importedEventCount + localEventCount);
-  const weekDates = computed(() => getWeekDates(startDate.get(), 7));
+  const importedEventCount = importedEvents?.length || 0;
+  const localEventCount = localEvents.get().length;
+  const eventCount = importedEventCount + localEventCount;
+  const weekDates = getWeekDates(startDate.get(), 7);
   const todayDate = getTodayDate();
 
   // Navigation Actions
@@ -475,7 +470,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
     editingEventIndex.set(-1);
   });
 
-  // Computed Styles for View Toggle
+  // Computed Styles for View Toggle.
+  // Whole-object bindings at pattern-factory scope must stay wrapped in
+  // computed(): a bare object-literal initializer is a disallowed top-level
+  // value under SES verification.
   const dayButtonStyle = computed(() => ({
     ...STYLES.button.base,
     backgroundColor: visibleDays.get() === 1 ? "#3b82f6" : "#fff",
@@ -490,7 +488,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
   // ===== Render =====
   return {
-    [NAME]: computed(() => `${title} (${eventCount})`),
+    [NAME]: `${title} (${eventCount})`,
     [UI]: (
       <cf-screen>
         {/* Header */}
@@ -627,11 +625,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       style={{
                         ...STYLES.colorSwatch,
                         backgroundColor: c,
-                        border: computed(() =>
-                          newEventColor.get() === c
-                            ? "2px solid #111"
-                            : "2px solid transparent"
-                        ),
+                        border: newEventColor.get() === c
+                          ? "2px solid #111"
+                          : "2px solid transparent",
                       }}
                       onClick={colorActions[idx]}
                     />
@@ -760,11 +756,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       style={{
                         ...STYLES.colorSwatch,
                         backgroundColor: c,
-                        border: computed(() =>
-                          editEventColor.get() === c
-                            ? "2px solid #111"
-                            : "2px solid transparent"
-                        ),
+                        border: editEventColor.get() === c
+                          ? "2px solid #111"
+                          : "2px solid transparent",
                       }}
                       onClick={editColorActions[idx]}
                     />
@@ -850,21 +844,22 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
                 {/* Day Columns */}
                 {COLUMN_INDICES.map((colIdx) => {
-                  // Use computed() to properly extract values from the computed array
-                  const columnDate = computed(() => weekDates[colIdx] || "");
-                  const isToday = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate);
-                  const dateHeader = derive(weekDates, (dates) => {
-                    const d = dates?.[colIdx];
+                  // Extract per-column values from the reactive weekDates array
+                  const columnDate = weekDates[colIdx] || "";
+                  const isToday = weekDates?.[colIdx] === todayDate;
+                  const dateHeader = computed(() => {
+                    const d = weekDates?.[colIdx];
                     return d ? formatDateHeader(d) : "";
                   });
-                  const displayStyle = computed(() =>
-                    colIdx < visibleDays.get() ? "flex" : "none"
-                  );
-                  const headerBg = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate ? "#eff6ff" : "transparent");
-                  const headerColor = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate ? "#2563eb" : "#374151");
+                  const displayStyle = colIdx < visibleDays.get()
+                    ? "flex"
+                    : "none";
+                  const headerBg = weekDates?.[colIdx] === todayDate
+                    ? "#eff6ff"
+                    : "transparent";
+                  const headerColor = weekDates?.[colIdx] === todayDate
+                    ? "#2563eb"
+                    : "#374151";
 
                   // Drop handler for moving/resizing local events
                   const handleDayDrop = action((e: {
@@ -993,13 +988,15 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         >
                           {dateHeader}
                         </div>
-                        {ifElse(
-                          isToday,
-                          <div style={{ fontSize: "0.6rem", color: "#3b82f6" }}>
-                            Today
-                          </div>,
-                          null,
-                        )}
+                        {isToday
+                          ? (
+                            <div
+                              style={{ fontSize: "0.6rem", color: "#3b82f6" }}
+                            >
+                              Today
+                            </div>
+                          )
+                          : null}
                       </div>
 
                       {/* Time Grid with Drop Zone */}
@@ -1027,66 +1024,55 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   );
                 })}
 
-                {/* Event Blocks - using derive() to compute everything at once */}
+                {/* Event Blocks - extract display properties per event */}
                 {importedEvents.map((evt: any) => {
-                  // Use derive() to extract display properties
-                  // All derives guard against undefined events
-                  const evtTitle = derive(
-                    evt,
-                    (e) =>
-                      e?.summary || "(No title)",
+                  // Project display properties from the event.
+                  // All projections guard against undefined events.
+                  const evtTitle = evt?.summary || "(No title)";
+                  const evtColor = getColorForCalendar(
+                    evt?.calendarId || "default",
                   );
-                  const evtColor = derive(
-                    evt,
-                    (e) =>
-                      getColorForCalendar(e?.calendarId || "default"),
-                  );
-                  const evtLocation = derive(evt, (e) =>
-                    e?.location || "");
-                  const evtTimeRange = derive(evt, (e) => {
-                    if (!e) {
+                  const evtLocation = evt?.location || "";
+                  const evtTimeRange = computed(() => {
+                    if (!evt) {
                       return "";
                     }
-                    const startTime = e.isAllDay
+                    const startTime = evt.isAllDay
                       ? "00:00"
-                      : extractTime(e.startDateTime);
-                    const endTime = e.isAllDay
+                      : extractTime(evt.startDateTime);
+                    const endTime = evt.isAllDay
                       ? "23:59"
-                      : extractTime(e.endDateTime);
+                      : extractTime(evt.endDateTime);
                     return `${startTime} - ${endTime}`;
                   });
-                  const hasLocation = derive(
-                    evt,
-                    (e) =>
-                      (e?.location || "").length > 0,
-                  );
+                  const hasLocation = (evt?.location || "").length > 0;
 
                   // Build direct event edit link: /r/eventedit/{base64(eventId + " " + calendarId)}
                   // This loads faster than the full calendar view
-                  const googleLink = derive(evt, (e) => {
-                    if (!e) {
+                  const googleLink = computed(() => {
+                    if (!evt) {
                       return "";
                     }
-                    if (!e.id || !e.calendarId) {
-                      return e.htmlLink || "";
+                    if (!evt.id || !evt.calendarId) {
+                      return evt.htmlLink || "";
                     }
                     try {
-                      const combined = `${e.id} ${e.calendarId}`;
+                      const combined = `${evt.id} ${evt.calendarId}`;
                       const encoded = btoa(combined);
                       return `https://calendar.google.com/calendar/u/0/r/eventedit/${encoded}`;
                     } catch {
                       // Fallback to htmlLink if encoding fails
-                      return e.htmlLink || "";
+                      return evt.htmlLink || "";
                     }
                   });
 
-                  // Compute position/visibility in single derive
-                  // Note: startDate and visibleDays are new Cell(), so access with .get()
-                  const styles = derive(evt, (e) => {
+                  // Compute position/visibility once.
+                  // Note: startDate and visibleDays are new Writable(), so access with .get()
+                  const styles = computed(() => {
                     const weekStart = startDate.get();
                     const visibleCount = visibleDays.get();
-                    const eventDate = e
-                      ? extractDate(e.start || e.startDateTime)
+                    const eventDate = evt
+                      ? extractDate(evt.start || evt.startDateTime)
                       : null;
 
                     const hidden = {
@@ -1114,12 +1100,12 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       return hidden;
                     }
 
-                    const startTime = e.isAllDay
+                    const startTime = evt.isAllDay
                       ? "00:00"
-                      : extractTime(e.startDateTime);
-                    const endTime = e.isAllDay
+                      : extractTime(evt.startDateTime);
+                    const endTime = evt.isAllDay
                       ? "23:59"
-                      : extractTime(e.endDateTime);
+                      : extractTime(evt.endDateTime);
                     const startMin = timeToMinutes(startTime) - DAY_START * 60;
                     const endMin = timeToMinutes(endTime) - DAY_START * 60;
                     const top = (startMin / 60) * HOUR_HEIGHT;
@@ -1186,19 +1172,19 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                         }}
                       >
                         {evtTimeRange}
-                        {ifElse(
-                          hasLocation,
-                          <div
-                            style={{
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            📍 {evtLocation}
-                          </div>,
-                          null,
-                        )}
+                        {hasLocation
+                          ? (
+                            <div
+                              style={{
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              📍 {evtLocation}
+                            </div>
+                          )
+                          : null}
                       </div>
                     </a>
                   );
@@ -1377,23 +1363,22 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
         </div>
 
         {/* Empty State */}
-        {ifElse(
-          computed(() =>
-            eventCount === 0
-          ),
-          <div
-            slot="footer"
-            style={{
-              textAlign: "center",
-              padding: "16px",
-              color: "#6b7280",
-              fontSize: "0.875rem",
-            }}
-          >
-            No events yet. Click "+ Add" or click on a time slot to create one.
-          </div>,
-          null,
-        )}
+        {eventCount === 0
+          ? (
+            <div
+              slot="footer"
+              style={{
+                textAlign: "center",
+                padding: "16px",
+                color: "#6b7280",
+                fontSize: "0.875rem",
+              }}
+            >
+              No events yet. Click "+ Add" or click on a time slot to create
+              one.
+            </div>
+          )
+          : null}
       </cf-screen>
     ),
     title,

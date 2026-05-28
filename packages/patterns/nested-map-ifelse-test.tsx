@@ -16,7 +16,6 @@ import {
   Cell,
   computed,
   Default,
-  derive,
   handler,
   ifElse,
   NAME,
@@ -102,10 +101,10 @@ const resetItems = handler<
 );
 
 export default pattern<Input>(({ items, log }) => {
-  // Derive categories from items
-  const categories = derive({ items }, ({ items: arr }: { items: Item[] }) => {
+  // Categories from items
+  const categories = computed(() => {
     const cats = new Set<string>();
-    for (const item of arr) {
+    for (const item of items) {
       cats.add(item.category || "Uncategorized");
     }
     return Array.from(cats).sort();

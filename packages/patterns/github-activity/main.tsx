@@ -1,7 +1,6 @@
 import {
   computed,
   Default,
-  derive,
   fetchData,
   generateText,
   NAME,
@@ -93,30 +92,27 @@ export default pattern<{
         </div>
 
         <cf-cell-context $cell={summary.pending}>
-          {derive(
-            [summary.pending, summary.result],
-            ([pending, result]) =>
-              pending
-                ? (
-                  <div style="margin-bottom: 16px;">
-                    <cf-loader show-elapsed /> Generating summary...
-                  </div>
-                )
-                : result
-                ? (
-                  <div style="margin-bottom: 16px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
-                    <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">
-                      Activity Summary
-                    </h3>
-                    <p style="margin: 0; line-height: 1.5;">{result}</p>
-                  </div>
-                )
-                : null,
-          )}
+          {summary.pending
+            ? (
+              <div style="margin-bottom: 16px;">
+                <cf-loader show-elapsed /> Generating summary...
+              </div>
+            )
+            : summary.result
+            ? (
+              <div style="margin-bottom: 16px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
+                <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">
+                  Activity Summary
+                </h3>
+                <p style="margin: 0; line-height: 1.5;">{summary.result}</p>
+              </div>
+            )
+            : null}
         </cf-cell-context>
 
         <cf-cell-context $cell={commits}>
-          {derive(commits, (commitList) => {
+          {computed(() => {
+            const commitList = commits;
             if (!commitList || commitList.length === 0) {
               return (
                 <div style="padding: 16px; text-align: center; color: #666;">

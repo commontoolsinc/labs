@@ -29,7 +29,6 @@
 import {
   computed,
   Default,
-  derive,
   handler,
   NAME,
   nonPrivateRandom,
@@ -208,7 +207,7 @@ const parseVisitDate = (draft: string | undefined): number => {
 };
 
 // Label for a visit derived purely from its own timestamp — never from the
-// current clock, so it stays idempotent inside reactive derives (timestamps
+// current clock, so it stays idempotent inside reactive computations (timestamps
 // read against "now" belong in handlers, not computeds). Reads like
 // "Tuesday, May 20".
 const visitLabel = (wentAt: number): string => {
@@ -553,30 +552,23 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     });
     const boundClearHistory = clearHistory({ history, myName, adminName });
 
-    const userCount = derive(users, (u) => u.length);
-    const optionCount = derive(options, (o) => o.length);
-    const voteCount = derive(votes, (v) => v.length);
-    const historyCount = derive(history, (h) => h.length);
-    const hasHistory = derive(history, (h) => h.length > 0);
+    const userCount = users.length;
+    const optionCount = options.length;
+    const voteCount = votes.length;
+    const historyCount = history.length;
+    const hasHistory = history.length > 0;
     // Most-recent-first, capped — the "Recently eaten" card stays compact.
-    const recentHistory = derive(
-      history,
-      (h) => [...h].sort((a, b) => b.wentAt - a.wentAt).slice(0, 8),
+    // Whole-array transform over a reactive array → computed (a single lift
+    // over the array), not bare; see 04-finding-map-on-reactive-array.md.
+    const recentHistory = computed(() =>
+      [...history].sort((a, b) => b.wentAt - a.wentAt).slice(0, 8)
     );
-    const isJoined = derive(myName, (n) => trimmedName(n) !== "");
-    const isAdmin = derive(
-      { myName, adminName },
-      ({ myName, adminName }) =>
-        trimmedName(myName) !== "" &&
-        trimmedName(myName) === trimmedName(adminName),
-    );
-    const joinHint = derive(
-      adminName,
-      (a) =>
-        trimmedName(a) === ""
-          ? "First to join becomes the host."
-          : `Hosted by ${trimmedName(a)}.`,
-    );
+    const isJoined = trimmedName(myName) !== "";
+    const isAdmin = trimmedName(myName) !== "" &&
+      trimmedName(myName) === trimmedName(adminName);
+    const joinHint = trimmedName(adminName) === ""
+      ? "First to join becomes the host."
+      : `Hosted by ${trimmedName(adminName)}.`;
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
@@ -585,23 +577,12 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       clearHistoryConfirmPending.get()
     );
     const isClaimHostRevealed = computed(() => claimHostRevealed.get());
-    const ranked = derive(
-      { options, votes, users },
-      ({ options, votes, users }) => tallyOptions(options, votes, users),
-    );
+    const ranked = tallyOptions(options, votes, users);
 
-    const topChoice = derive(
-      { ranked, voteCount },
-      ({ ranked, voteCount }) =>
-        voteCount > 0 && ranked.length > 0 ? ranked[0] : null,
-    );
+    const topChoice = voteCount > 0 && ranked.length > 0 ? ranked[0] : null;
     // A joined viewer who is not the current host can take the host role.
-    const canClaimHost = derive(
-      { myName, adminName },
-      ({ myName, adminName }) =>
-        trimmedName(myName) !== "" &&
-        trimmedName(myName) !== trimmedName(adminName),
-    );
+    const canClaimHost = trimmedName(myName) !== "" &&
+      trimmedName(myName) !== trimmedName(adminName);
 
     return {
       [NAME]: "Cozy lunch poll",
@@ -1045,23 +1026,14 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 {options.map((option) => {
                   const oid = option.id;
                   const optionTitle = option.title;
-                  const myVote = derive(
-                    { votes, myName, optionId: oid },
-                    ({ votes, myName, optionId }) =>
-                      myVoteFor(votes, trimmedName(myName), optionId),
-                  );
-                  const rank = derive(
-                    { ranked, optionId: oid },
-                    ({ ranked, optionId }) => {
-                      const idx = ranked.findIndex(
-                        (t) => t.option.id === optionId,
-                      );
-                      return idx >= 0 ? idx + 1 : 0;
-                    },
-                  );
-                  const isRemoveConfirm = computed(() =>
-                    removeConfirmTarget.get() === oid
-                  );
+                  const myVote = myVoteFor(votes, trimmedName(myName), oid);
+                  const rank = computed(() => {
+                    const idx = ranked.findIndex(
+                      (t) => t.option.id === oid,
+                    );
+                    return idx >= 0 ? idx + 1 : 0;
+                  });
+                  const isRemoveConfirm = removeConfirmTarget.get() === oid;
                   // The castVote handler toggles per-color: clicking your
                   // active color clears, a different color updates, none
                   // pushes. JSX dispatches one event per click; the handler
@@ -1531,13 +1503,13 @@ export default pattern<CozyPollInput, CozyPollOutput>(
           </cf-screen>
         </cf-theme>
       ),
-      question: derive(question, (q) => q),
-      options: derive(options, (o) => o),
-      votes: derive(votes, (v) => v),
-      users: derive(users, (u) => u),
-      history: derive(history, (h) => h),
-      adminName: derive(adminName, (a) => a),
-      myName: derive(myName, (n) => n),
+      question,
+      options,
+      votes,
+      users,
+      history,
+      adminName,
+      myName,
       userCount,
       optionCount,
       voteCount,

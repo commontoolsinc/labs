@@ -1,7 +1,6 @@
 import {
   computed,
   Default,
-  derive,
   handler,
   NAME,
   pattern,
@@ -302,9 +301,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                         <cf-vstack gap="2">
                           {messagesInSelectedRoom.map((message) => {
                             const author = message.author;
-                            const isMine = derive({ author, name }, (
-                              { author, name },
-                            ) => author === senderName(name.get()));
+                            const isMine = author === senderName(name.get());
                             return (
                               <div
                                 style={{

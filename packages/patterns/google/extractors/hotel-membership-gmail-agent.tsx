@@ -7,10 +7,9 @@
  * Usage: wish({ query: "#hotelMemberships" }) to get discovered memberships.
  */
 import {
+  computed,
   Default,
-  derive,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
@@ -237,53 +236,46 @@ const HotelMembershipExtractorV2 = pattern<
     const allMemberships = memberships;
 
     // Track counts (simplified without wish)
-    const localMembershipCount = derive(
-      memberships,
-      (list) => list?.length || 0,
-    );
+    const localMembershipCount = memberships?.length || 0;
 
     // ========================================================================
     // MULTI-ACCOUNT DETECTION
     // ========================================================================
 
     // Find brands with multiple different membership numbers
-    const brandsWithMultipleAccounts = derive(
-      allMemberships,
-      (list: MembershipRecord[]) => {
-        const brandNumbers: Record<string, Set<string>> = {};
+    const brandsWithMultipleAccounts = computed(() => {
+      const list = allMemberships as MembershipRecord[];
+      const brandNumbers: Record<string, Set<string>> = {};
 
-        for (const m of (list || [])) {
-          if (!m) continue; // Skip null/undefined entries during hydration
-          if (!brandNumbers[m.hotelBrand]) {
-            brandNumbers[m.hotelBrand] = new Set();
-          }
-          brandNumbers[m.hotelBrand].add(m.membershipNumber);
+      for (const m of (list || [])) {
+        if (!m) continue; // Skip null/undefined entries during hydration
+        if (!brandNumbers[m.hotelBrand]) {
+          brandNumbers[m.hotelBrand] = new Set();
         }
+        brandNumbers[m.hotelBrand].add(m.membershipNumber);
+      }
 
-        const multiAccountBrands: Record<
-          string,
-          { numbers: string[]; memberships: MembershipRecord[] }
-        > = {};
+      const multiAccountBrands: Record<
+        string,
+        { numbers: string[]; memberships: MembershipRecord[] }
+      > = {};
 
-        for (const [brand, numbers] of Object.entries(brandNumbers)) {
-          if (numbers.size > 1) {
-            multiAccountBrands[brand] = {
-              numbers: Array.from(numbers),
-              memberships: (list || []).filter((m) =>
-                m && m.hotelBrand === brand
-              ),
-            };
-          }
+      for (const [brand, numbers] of Object.entries(brandNumbers)) {
+        if (numbers.size > 1) {
+          multiAccountBrands[brand] = {
+            numbers: Array.from(numbers),
+            memberships: (list || []).filter((m) =>
+              m && m.hotelBrand === brand
+            ),
+          };
         }
+      }
 
-        return multiAccountBrands;
-      },
-    );
+      return multiAccountBrands;
+    });
 
-    const hasMultipleAccounts = derive(
-      brandsWithMultipleAccounts,
-      (brands) => Object.keys(brands).length > 0,
-    );
+    const hasMultipleAccounts =
+      Object.keys(brandsWithMultipleAccounts).length > 0;
 
     // ========================================================================
     // AGENT GOAL
@@ -291,68 +283,68 @@ const HotelMembershipExtractorV2 = pattern<
     // IMPORTANT: Do NOT derive from memberships! Changing the goal during a scan
     // triggers an infinite loop (goal changes → agent restarts → finds membership
     // → goal changes → agent restarts...). Only derive from scan settings.
-    const agentGoal = derive(
-      [maxSearches, currentScanMode],
-      ([max, scanMode]: [number, ScanMode]) => {
-        const isQuickMode = max > 0;
-        const isRecentMode = scanMode === "recent";
-        const dateFilter = isRecentMode ? getRecentDateFilter() : "";
+    const agentGoal = computed(() => {
+      const max = maxSearches;
+      const scanMode = currentScanMode;
+      const isQuickMode = max > 0;
+      const isRecentMode = scanMode === "recent";
+      const dateFilter = isRecentMode ? getRecentDateFilter() : "";
 
-        return `Find hotel loyalty program membership numbers in my Gmail.
+      return `Find hotel loyalty program membership numbers in my Gmail.
 
 ${
-          isRecentMode
-            ? `📅 RECENT SCAN MODE: Only searching emails from the last 7 days.
+        isRecentMode
+          ? `📅 RECENT SCAN MODE: Only searching emails from the last 7 days.
 Date filter to use: ${dateFilter}
 `
-            : ""
-        }
+          : ""
+      }
 ${
-          isQuickMode
-            ? `\n⚠️ QUICK TEST MODE: Limited to ${max} searches. Focus on high-value queries!\n`
-            : ""
-        }
+        isQuickMode
+          ? `\n⚠️ QUICK TEST MODE: Limited to ${max} searches. Focus on high-value queries!\n`
+          : ""
+      }
 
 Your task:
 1. Use searchGmail to search for hotel loyalty emails${
-          isRecentMode ? ` (ADD "${dateFilter}" to ALL queries!)` : ""
-        }
+        isRecentMode ? ` (ADD "${dateFilter}" to ALL queries!)` : ""
+      }
 2. Analyze the returned emails for membership numbers
 3. When you find a membership: IMMEDIATELY call reportMembership to save it
 4. Move on to the next brand after 1-2 queries per brand
 
 ${
-          isQuickMode
-            ? "PRIORITY QUERIES (use these first in quick mode):"
-            : "EFFECTIVE QUERIES (proven to find memberships):"
-        }
+        isQuickMode
+          ? "PRIORITY QUERIES (use these first in quick mode):"
+          : "EFFECTIVE QUERIES (proven to find memberships):"
+      }
 ${
-          EFFECTIVE_QUERIES.slice(0, isQuickMode ? 5 : EFFECTIVE_QUERIES.length)
-            .map((q, i) => {
-              const query = isRecentMode ? `(${q}) ${dateFilter}` : q;
-              return `${i + 1}. ${query}`;
-            }).join("\n")
-        }
+        EFFECTIVE_QUERIES.slice(0, isQuickMode ? 5 : EFFECTIVE_QUERIES.length)
+          .map((q, i) => {
+            const query = isRecentMode ? `(${q}) ${dateFilter}` : q;
+            return `${i + 1}. ${query}`;
+          }).join("\n")
+      }
 
 Hotel brands to search for:
 ${
-          ALL_BRANDS.map((b) => {
-            switch (b) {
-              case "Marriott":
-                return "- Marriott (Marriott Bonvoy)";
-              case "Hilton":
-                return "- Hilton (Hilton Honors)";
-              case "Hyatt":
-                return "- Hyatt (World of Hyatt)";
-              case "IHG":
-                return "- IHG (IHG One Rewards)";
-              case "Accor":
-                return "- Accor (ALL - Accor Live Limitless)";
-              default:
-                return "- " + b;
-            }
-          }).join("\n")
-        }
+        ALL_BRANDS.map((b) => {
+          switch (b) {
+            case "Marriott":
+              return "- Marriott (Marriott Bonvoy)";
+            case "Hilton":
+              return "- Hilton (Hilton Honors)";
+            case "Hyatt":
+              return "- Hyatt (World of Hyatt)";
+            case "IHG":
+              return "- IHG (IHG One Rewards)";
+            case "Accor":
+              return "- Accor (ALL - Accor Live Limitless)";
+            default:
+              return "- " + b;
+          }
+        }).join("\n")
+      }
 
 In email bodies, look for patterns like:
 - "Member #" or "Membership Number:" followed by digits
@@ -371,31 +363,30 @@ When you find a membership, call reportMembership with:
 
 IMPORTANT: Call reportMembership for EACH membership as you find it. Don't wait!
 ${
-          isRecentMode
-            ? "\nIMPORTANT: ALWAYS include the date filter in your search queries!"
-            : ""
-        }
+        isRecentMode
+          ? "\nIMPORTANT: ALWAYS include the date filter in your search queries!"
+          : ""
+      }
 ${
-          isQuickMode
-            ? "\nNote: If you hit the search limit, stop and return what you found."
-            : ""
-        }
+        isQuickMode
+          ? "\nNote: If you hit the search limit, stop and return what you found."
+          : ""
+      }
 
 ⚠️ STOPPING RULES - FOLLOW THESE STRICTLY:
 - Search each brand with AT MOST 2 queries, then move to the next brand
 - After checking all ${ALL_BRANDS.length} brands (${
-          ALL_BRANDS.join(", ")
-        }), STOP and return your summary
+        ALL_BRANDS.join(", ")
+      }), STOP and return your summary
 - Do NOT keep searching the same brand with variations
 - Do NOT search more than ~${
-          ALL_BRANDS.length * 2
-        } total queries (2 per brand max)
+        ALL_BRANDS.length * 2
+      } total queries (2 per brand max)
 - If a brand has no results after 1-2 tries, move on - don't keep trying
 - When you've covered all brands, IMMEDIATELY produce your final summary
 
 YOUR FINAL OUTPUT should summarize: which brands you searched, how many memberships found, and any issues.`;
-      },
-    );
+    });
 
     // ========================================================================
     // SHARED SIGNAL CELL (for foundItems feature)
@@ -404,7 +395,7 @@ YOUR FINAL OUTPUT should summarize: which brands you searched, how many membersh
     // This follows the "share cells by making them inputs" pattern
     // See: community-docs/superstitions/2025-12-04-share-cells-between-composed-patterns.md
     const itemFoundSignal = new Writable<number>(0);
-    // Track last membership count in a Writable (closure vars don't persist in derive)
+    // Track last membership count in a Writable (closure vars don't persist across recomputations)
     const lastMembershipCountCell = new Writable<number>(0);
 
     // ========================================================================
@@ -467,30 +458,27 @@ Report memberships as you find them. Don't wait until the end.`,
     // When reportMembership successfully adds a membership, signal the base pattern.
     // This is the idiomatic pattern: tool writes to state cell, parent watches and increments signal.
     // See: community-docs research on tool-to-parent communication patterns
-    // NOTE: Using Cells to track state because closure vars don't persist across derive executions
-    derive(
-      [memberships, lastMembershipCountCell],
-      ([list, _lastCountRef]: [MembershipRecord[], number]) => {
-        // NOTE: derive doesn't unwrap locally-created cells, only pattern input cells
-        // So we use .get() to read the actual value
-        // See: community-docs/superstitions/2025-12-08-locally-created-cells-not-unwrapped-in-derive.md
-        const currentCount = list?.length || 0;
-        const lastCount = lastMembershipCountCell.get() || 0;
-        if (currentCount > lastCount) {
-          // New membership was added - signal the base pattern to mark the query
-          if (DEBUG_HOTEL) {
-            console.log(
-              `[HotelMembership] New membership detected (${lastCount} -> ${currentCount}), signaling itemFoundSignal`,
-            );
-          }
-          // Increment the signal - base pattern watches this and marks the query
-          const currentSignal = itemFoundSignal.get() || 0;
-          itemFoundSignal.set(currentSignal + 1);
-          // Update last count cell - prevents this derive from running again with same condition
-          lastMembershipCountCell.set(currentCount);
+    // NOTE: Using Cells to track state because closure vars don't persist across recomputations.
+    // Side-effect-only reactive computation (return unused); statement body → computed.
+    computed(() => {
+      // Locally-created cells are read with .get(); pattern input cells (memberships)
+      // are read bare in a compute context.
+      const currentCount = memberships?.length || 0;
+      const lastCount = lastMembershipCountCell.get() || 0;
+      if (currentCount > lastCount) {
+        // New membership was added - signal the base pattern to mark the query
+        if (DEBUG_HOTEL) {
+          console.log(
+            `[HotelMembership] New membership detected (${lastCount} -> ${currentCount}), signaling itemFoundSignal`,
+          );
         }
-      },
-    );
+        // Increment the signal - base pattern watches this and marks the query
+        const currentSignal = itemFoundSignal.get() || 0;
+        itemFoundSignal.set(currentSignal + 1);
+        // Update last count cell - prevents this computation from running again with same condition
+        lastMembershipCountCell.set(currentCount);
+      }
+    });
 
     // ========================================================================
     // CUSTOM SCAN HANDLERS (with mode support)
@@ -521,49 +509,36 @@ Report memberships as you find them. Don't wait until the end.`,
     // DERIVED VALUES
     // ========================================================================
     // Use allMemberships (local + imported) for display
-    const totalMemberships = derive(
-      allMemberships,
-      (list) => list?.length || 0,
-    );
+    const totalMemberships = allMemberships?.length || 0;
 
-    // Pre-compute button label (outside ifElse to avoid reactive loops)
-    const fullScanLabel = derive(
-      maxSearches,
-      (max) => max > 0 ? "⚡ Quick Scan" : "🔍 Full Scan",
-    );
+    // Button label
+    const fullScanLabel = maxSearches > 0 ? "⚡ Quick Scan" : "🔍 Full Scan";
 
-    // Pre-compute scan mode message
-    const scanModeMessage = derive(
-      currentScanMode,
-      (mode: ScanMode) =>
-        mode === "recent"
-          ? "📅 Recent mode: searching last 7 days only"
-          : "🔍 Full mode: searching all emails",
-    );
+    // Scan mode message
+    const scanModeMessage = currentScanMode === "recent"
+      ? "📅 Recent mode: searching last 7 days only"
+      : "🔍 Full mode: searching all emails";
 
-    // Pre-compute scan mode short label for debug
-    const scanModeLabel = derive(
-      currentScanMode,
-      (mode: ScanMode) => mode === "recent" ? "📅 Recent" : "🔍 Full",
-    );
+    // Scan mode short label for debug
+    const scanModeLabel = currentScanMode === "recent"
+      ? "📅 Recent"
+      : "🔍 Full";
 
-    // Pre-compute button disabled state (just scanning for now - simpler)
+    // Button disabled state (just scanning for now - simpler)
     // Auth check is handled by showing auth UI first
-    const buttonsDisabled = derive(isScanning, (scanning: boolean) => scanning);
+    const buttonsDisabled = isScanning;
 
-    const groupedMemberships = derive(
-      allMemberships,
-      (list: MembershipRecord[]) => {
-        const groups: Record<string, MembershipRecord[]> = {};
-        if (!list) return groups;
-        for (const m of list) {
-          if (!m) continue; // Skip null/undefined entries during hydration
-          if (!groups[m.hotelBrand]) groups[m.hotelBrand] = [];
-          groups[m.hotelBrand].push(m);
-        }
-        return groups;
-      },
-    );
+    const groupedMemberships = computed(() => {
+      const list = allMemberships as MembershipRecord[];
+      const groups: Record<string, MembershipRecord[]> = {};
+      if (!list) return groups;
+      for (const m of list) {
+        if (!m) continue; // Skip null/undefined entries during hydration
+        if (!groups[m.hotelBrand]) groups[m.hotelBrand] = [];
+        groups[m.hotelBrand].push(m);
+      }
+      return groups;
+    });
 
     // ========================================================================
     // UI - Compose base searcher with custom membership display
@@ -591,91 +566,91 @@ Report memberships as you find them. Don't wait until the end.`,
               {searcher.ui.auth}
 
               {/* Scan Mode Selection - Only show when authenticated */}
-              {ifElse(
-                searcher.isAuthenticated,
-                <div
-                  style={{
-                    padding: "16px",
-                    background: "#f8fafc",
-                    borderRadius: "8px",
-                    border: "1px solid #e2e8f0",
-                  }}
-                >
+              {searcher.isAuthenticated
+                ? (
                   <div
                     style={{
-                      fontSize: "14px",
-                      fontWeight: "600",
-                      marginBottom: "12px",
-                      color: "#475569",
+                      padding: "16px",
+                      background: "#f8fafc",
+                      borderRadius: "8px",
+                      border: "1px solid #e2e8f0",
                     }}
                   >
-                    Scan Mode
-                  </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <cf-button
-                      onClick={startFullScan}
-                      size="lg"
-                      style="flex: 1;"
-                      disabled={buttonsDisabled}
+                    <div
+                      style={{
+                        fontSize: "14px",
+                        fontWeight: "600",
+                        marginBottom: "12px",
+                        color: "#475569",
+                      }}
                     >
-                      {fullScanLabel}
-                    </cf-button>
-                    <cf-button
-                      onClick={startRecentScan}
-                      variant="secondary"
-                      size="lg"
-                      style="flex: 1;"
-                      disabled={buttonsDisabled}
+                      Scan Mode
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <cf-button
+                        onClick={startFullScan}
+                        size="lg"
+                        style="flex: 1;"
+                        disabled={buttonsDisabled}
+                      >
+                        {fullScanLabel}
+                      </cf-button>
+                      <cf-button
+                        onClick={startRecentScan}
+                        variant="secondary"
+                        size="lg"
+                        style="flex: 1;"
+                        disabled={buttonsDisabled}
+                      >
+                        📅 Check Recent
+                      </cf-button>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "#94a3b8",
+                        marginTop: "8px",
+                        textAlign: "center",
+                      }}
                     >
-                      📅 Check Recent
-                    </cf-button>
+                      Full = all emails • Recent = last 7 days only
+                    </div>
                   </div>
+                )
+                : null}
+
+              {/* Stop button when scanning */}
+              {isScanning
+                ? (
+                  <cf-button
+                    onClick={searcher.stopScan}
+                    variant="secondary"
+                    size="lg"
+                    style="width: 100%;"
+                  >
+                    ⏹ Stop Scan
+                  </cf-button>
+                )
+                : null}
+
+              {/* Scan mode indicator during scan */}
+              {isScanning
+                ? (
                   <div
                     style={{
-                      fontSize: "11px",
-                      color: "#94a3b8",
-                      marginTop: "8px",
+                      padding: "8px 12px",
+                      background: "#f0fdf4",
+                      border: "1px solid #bbf7d0",
+                      borderRadius: "6px",
+                      fontSize: "13px",
+                      color: "#166534",
                       textAlign: "center",
                     }}
                   >
-                    Full = all emails • Recent = last 7 days only
+                    {scanModeMessage}
                   </div>
-                </div>,
-                null,
-              )}
-
-              {/* Stop button when scanning */}
-              {ifElse(
-                isScanning,
-                <cf-button
-                  onClick={searcher.stopScan}
-                  variant="secondary"
-                  size="lg"
-                  style="width: 100%;"
-                >
-                  ⏹ Stop Scan
-                </cf-button>,
-                null,
-              )}
-
-              {/* Scan mode indicator during scan */}
-              {ifElse(
-                isScanning,
-                <div
-                  style={{
-                    padding: "8px 12px",
-                    background: "#f0fdf4",
-                    border: "1px solid #bbf7d0",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    color: "#166534",
-                    textAlign: "center",
-                  }}
-                >
-                  {scanModeMessage}
-                </div>,
-                null,
-              )}
+                )
+                : null}
 
               {/* Progress UI from base pattern */}
               {searcher.ui.progress}
@@ -686,115 +661,112 @@ Report memberships as you find them. Don't wait until the end.`,
               </div>
 
               {/* Multi-Account Warning */}
-              {derive(
-                [hasMultipleAccounts, brandsWithMultipleAccounts],
-                ([hasMulti, multiBrands]) =>
-                  hasMulti
-                    ? (
-                      <div
-                        style={{
-                          padding: "16px",
-                          background: "#fffbeb",
-                          border: "1px solid #fde68a",
-                          borderRadius: "8px",
-                        }}
-                      >
+              {hasMultipleAccounts
+                ? (
+                  <div
+                    style={{
+                      padding: "16px",
+                      background: "#fffbeb",
+                      border: "1px solid #fde68a",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "14px",
+                        fontWeight: "600",
+                        color: "#92400e",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      Multiple Accounts Detected
+                    </div>
+                    <div style={{ fontSize: "13px", color: "#78350f" }}>
+                      {Object.entries(brandsWithMultipleAccounts).map((
+                        [brand, data],
+                        brandIdx,
+                      ) => (
                         <div
+                          key={brandIdx}
                           style={{
-                            fontSize: "14px",
-                            fontWeight: "600",
-                            color: "#92400e",
                             marginBottom: "8px",
+                            padding: "8px",
+                            background: "white",
+                            borderRadius: "4px",
                           }}
                         >
-                          Multiple Accounts Detected
-                        </div>
-                        <div style={{ fontSize: "13px", color: "#78350f" }}>
-                          {Object.entries(multiBrands).map((
-                            [brand, data],
-                            brandIdx,
-                          ) => (
-                            <div
-                              key={brandIdx}
+                          <div
+                            style={{
+                              fontWeight: "600",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            {brand}
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#666" }}>
+                            Found {data.numbers.length}{" "}
+                            different membership numbers:
+                            <ul
                               style={{
-                                marginBottom: "8px",
-                                padding: "8px",
-                                background: "white",
-                                borderRadius: "4px",
+                                margin: "4px 0 0 16px",
+                                padding: "0",
                               }}
                             >
-                              <div
-                                style={{
-                                  fontWeight: "600",
-                                  marginBottom: "4px",
-                                }}
-                              >
-                                {brand}
-                              </div>
-                              <div style={{ fontSize: "12px", color: "#666" }}>
-                                Found {data.numbers.length}{" "}
-                                different membership numbers:
-                                <ul
-                                  style={{
-                                    margin: "4px 0 0 16px",
-                                    padding: "0",
-                                  }}
-                                >
-                                  {data.numbers.map(
-                                    (num: string, i: number) => {
-                                      const membership = data.memberships.find((
-                                        m: MembershipRecord,
-                                      ) => m.membershipNumber === num);
-                                      return (
-                                        <li
-                                          key={i}
-                                          style={{ marginBottom: "2px" }}
-                                        >
-                                          <code
-                                            style={{
-                                              background: "#f3f4f6",
-                                              padding: "2px 6px",
-                                              borderRadius: "2px",
-                                            }}
-                                          >
-                                            {num}
-                                          </code>
-                                          {membership?.tier && (
-                                            <span style={{ marginLeft: "4px" }}>
-                                              ({membership.tier})
-                                            </span>
-                                          )}
-                                        </li>
-                                      );
-                                    },
-                                  )}
-                                </ul>
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: "11px",
-                                  color: "#92400e",
-                                  marginTop: "4px",
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                This could be: old vs new account, family
-                                member, or work vs personal
-                              </div>
-                            </div>
-                          ))}
+                              {data.numbers.map(
+                                (num: string, i: number) => {
+                                  const membership = data.memberships.find((
+                                    m: MembershipRecord,
+                                  ) => m.membershipNumber === num);
+                                  return (
+                                    <li
+                                      key={i}
+                                      style={{ marginBottom: "2px" }}
+                                    >
+                                      <code
+                                        style={{
+                                          background: "#f3f4f6",
+                                          padding: "2px 6px",
+                                          borderRadius: "2px",
+                                        }}
+                                      >
+                                        {num}
+                                      </code>
+                                      {membership?.tier && (
+                                        <span style={{ marginLeft: "4px" }}>
+                                          ({membership.tier})
+                                        </span>
+                                      )}
+                                    </li>
+                                  );
+                                },
+                              )}
+                            </ul>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "#92400e",
+                              marginTop: "4px",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            This could be: old vs new account, family member, or
+                            work vs personal
+                          </div>
                         </div>
-                      </div>
-                    )
-                    : null,
-              )}
+                      ))}
+                    </div>
+                  </div>
+                )
+                : null}
 
               {/* Memberships List - Hotel-specific UI */}
               <div>
                 <h3 style={{ margin: "0 0 12px 0", fontSize: "15px" }}>
                   Your Memberships
                 </h3>
-                {derive(groupedMemberships, (groups) => {
+                {computed(() => {
+                  const groups = groupedMemberships;
                   const brands = Object.keys(groups).sort();
                   if (brands.length === 0) {
                     return (
@@ -927,30 +899,23 @@ Report memberships as you find them. Don't wait until the end.`,
                 </summary>
                 <cf-vstack gap={2} style="padding: 12px; fontSize: 12px;">
                   <div style={{ fontFamily: "monospace" }}>
-                    Is Authenticated: {derive(
-                      searcher.isAuthenticated,
-                      (a) => a ? "Yes ✓" : "No",
-                    )}
+                    Is Authenticated:{" "}
+                    {searcher.isAuthenticated ? "Yes ✓" : "No"}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
                     Auth Source: {searcher.authSource}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
-                    Is Scanning:{" "}
-                    {derive(searcher.isScanning, (s) => (s ? "Yes ⏳" : "No"))}
+                    Is Scanning: {searcher.isScanning ? "Yes ⏳" : "No"}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
                     Scan Mode: {scanModeLabel}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
-                    Agent Pending: {derive(
-                      searcher.agentPending,
-                      (p) => p ? "Yes ⏳" : "No ✓",
-                    )}
+                    Agent Pending: {searcher.agentPending ? "Yes ⏳" : "No ✓"}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
-                    Agent Result:{" "}
-                    {derive(searcher.agentResult, (r) => r ? "Yes ✓" : "No")}
+                    Agent Result: {searcher.agentResult ? "Yes ✓" : "No"}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
                     Max Searches: {maxSearches}
@@ -960,13 +925,11 @@ Report memberships as you find them. Don't wait until the end.`,
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
                     Has Multiple Accounts:{" "}
-                    {derive(hasMultipleAccounts, (h) => h ? "Yes ⚠️" : "No")}
+                    {hasMultipleAccounts ? "Yes ⚠️" : "No"}
                   </div>
                   <div style={{ fontFamily: "monospace" }}>
-                    Pending Submissions: {derive(
-                      searcher.pendingSubmissions,
-                      (p) => (p || []).length,
-                    )}
+                    Pending Submissions:{" "}
+                    {(searcher.pendingSubmissions || []).length}
                   </div>
                 </cf-vstack>
               </details>

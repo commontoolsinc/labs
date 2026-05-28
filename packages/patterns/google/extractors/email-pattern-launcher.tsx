@@ -20,7 +20,6 @@
 import {
   //compileAndRun,
   computed,
-  derive,
   fetchData,
   //fetchProgram,
   NAME,
@@ -242,7 +241,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     */
 
     const compiled = {
-      result: derive(matchInfo.patternUri, (patternUri) => {
+      result: computed(() => {
+        const patternUri = matchInfo.patternUri;
         const pattern = PATTERNS[patternUri];
         if (!pattern) return null;
         return pattern({} as any).for(patternUri);
@@ -413,9 +413,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
             )}
 
             {/* No Matches Message */}
-            {computed(() =>
-              !registryLoading && emailCount > 0 && matchCount === 0
-            ) && (
+            {!registryLoading && emailCount > 0 && matchCount === 0 && (
               <div
                 style={{
                   display: "block",

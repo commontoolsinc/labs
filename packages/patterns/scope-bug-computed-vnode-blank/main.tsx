@@ -202,7 +202,7 @@ export default pattern<ReproInput, ReproOutput>(({ counter, name }) => {
           )}
       </div>
     ),
-    counter: derive(counter, (c) => c ?? 0),
+    counter: counter ?? 0,
     tick: boundTick,
   };
 });
