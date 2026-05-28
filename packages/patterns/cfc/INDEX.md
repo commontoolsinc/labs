@@ -16,6 +16,7 @@ From `admin/mod.ts`:
 - `AdminRegistryValue`
 - `adminManagerCredentialIsActive`
 - `adminRegistryEntries`
+- `adminRegistryEveryoneIsAdmin`
 - `activeAdminRoleForSubject`
 - `subjectHasAdminRole`
 

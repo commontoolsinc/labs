@@ -24,6 +24,7 @@ export type AdminManagerCredential<Integrity extends string> = AddIntegrity<
 
 export interface AdminRegistryStoredValue<Role> {
   readonly admins?: readonly Role[];
+  readonly everyoneIsAdmin?: boolean;
 }
 
 export type EmptyAdminRegistryValue = Record<PropertyKey, never>;
@@ -47,6 +48,19 @@ export const adminRegistryEntries = <Role>(
     (registry.get() as AdminRegistryStoredValue<Role> | undefined)
       ?.admins ?? [],
   );
+
+export const adminRegistryEveryoneIsAdmin = <Role>(
+  registry: {
+    get(): AdminRegistryValue<Role> | undefined;
+  },
+): boolean => {
+  const roles = adminRegistryEntries<Role>(registry);
+  if (roles.length === 0) {
+    return true;
+  }
+  return (registry.get() as AdminRegistryStoredValue<Role> | undefined)
+    ?.everyoneIsAdmin === true;
+};
 
 export const activeAdminRoleForSubject = <
   Subject extends AdminSubject,

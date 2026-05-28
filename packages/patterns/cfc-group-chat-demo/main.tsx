@@ -18,13 +18,12 @@ import {
   sortDisplayMessages,
 } from "./logic.ts";
 import {
-  type AdminManagerCredentialCell,
-  type AdminManagerDraftCell,
-  type ChatAdminManagerCredential,
+  chatAdminEveryoneIsAdmin,
   type ChatAdminRegistryCell,
   type ChatAdminRegistryValue,
   commitTrustedMessageSend,
   currentProfileCell,
+  currentUserCanManageAdmins,
   currentUserIsAdmin as currentProfileIsAdmin,
   messagesValue,
   type MyProfileCell,
@@ -56,12 +55,6 @@ const draftText = (draft: DraftCell): string =>
   (draft.get() as string | undefined) ?? "";
 
 const writeDraftText = handler<string, { value: DraftCell }>(
-  (nextValue, { value }) => {
-    value.set(nextValue);
-  },
-);
-
-const writeBooleanDraft = handler<boolean, { value: AdminManagerDraftCell }>(
   (nextValue, { value }) => {
     value.set(nextValue);
   },
@@ -218,7 +211,6 @@ export interface GroupChatDemoInput {
   rooms?: PerSpace<SharedRoomsCell>;
   adminRegistry?: PerSpace<ChatAdminRegistryCell>;
   profileDraft?: PerUser<DraftCell>;
-  adminDraft?: PerUser<AdminManagerDraftCell>;
   messageDraft?: PerUser<DraftCell>;
   hostMessageDraft?: PerSession<DraftCell>;
   roomDraft?: PerSession<RoomDraftCell>;
@@ -233,12 +225,10 @@ export interface GroupChatDemoOutput {
   rooms: PerSpace<SharedRoomsCell>;
   adminRegistry: PerSpace<ChatAdminRegistryCell>;
   profileDraft: PerUser<DraftCell>;
-  adminDraft: PerUser<AdminManagerDraftCell>;
   messageDraft: PerUser<DraftCell>;
   hostMessageDraft: PerSession<DraftCell>;
   roomDraft: PerSession<RoomDraftCell>;
   setProfileDraft: Stream<string>;
-  setAdminDraft: Stream<boolean>;
   setMessageDraft: Stream<string>;
   setHostMessageDraft: Stream<string>;
   setRoomDraft: Stream<string>;
@@ -246,7 +236,9 @@ export interface GroupChatDemoOutput {
   currentUserIsAdmin: boolean;
   currentUserCanManageAdmins: boolean;
   saveProfile: Stream<void>;
-  toggleCurrentUserAdmin: Stream<void>;
+  toggleCurrentUserAdmin: Stream<{ name?: string; everyoneIsAdmin?: boolean }>;
+  toggleParticipantAdmin: Stream<{ name?: string; everyoneIsAdmin?: boolean }>;
+  toggleEveryoneAdmin: Stream<{ name?: string; everyoneIsAdmin?: boolean }>;
   sendTrustedMessage: Stream<void>;
   addTrustedRoom: Stream<void>;
   hostLookalikeSend: Stream<void>;
@@ -261,40 +253,30 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     rooms,
     adminRegistry,
     profileDraft,
-    adminDraft,
     messageDraft,
     hostMessageDraft,
     roomDraft,
   }: GroupChatDemoInput,
 ): GroupChatDemoOutput => {
   const myProfileCell = myProfile as MyProfileCell;
-  const adminManagerCredentialCell = new Writable.perUser<
-    ChatAdminManagerCredential | null
-  >(null) as AdminManagerCredentialCell;
   const profilesCell = profiles as SharedProfilesCell;
   const messagesCell = messages as SharedMessagesCell;
   const roomsCell = rooms as SharedRoomsCell;
   const adminRegistryCell = adminRegistry as ChatAdminRegistryCell;
   const profileDraftCell = profileDraft as DraftCell;
-  const adminManagerDraftCell = adminDraft as AdminManagerDraftCell;
   const messageDraftCell = messageDraft as DraftCell;
   const hostMessageDraftCell = hostMessageDraft as DraftCell;
   const roomDraftCell = roomDraft as RoomDraftCell;
   const trustedProfileSave = TrustedProfileSaveSurface({
     myProfile: myProfileCell,
     profiles: profilesCell,
-    adminManagerCredential: adminManagerCredentialCell,
     nameDraft: profileDraftCell,
-    adminManagerDraft: adminManagerDraftCell,
   } as TrustedProfileSaveSurfaceInputArg);
-  const currentUserCanManageAdminsStatus =
-    trustedProfileSave.currentUserCanManageAdmins;
   const trustedAdminPanel = TrustedAdminPanel({
     profiles: profilesCell,
     myProfile: myProfileCell,
     messages: messagesCell,
     adminRegistry: adminRegistryCell,
-    adminManagerCredential: adminManagerCredentialCell,
   } as TrustedAdminPanelInputArg);
   const trustedSend = TrustedChatSendSurface({
     profiles: profilesCell,
@@ -314,7 +296,6 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     messages: messagesCell,
   } as TrustedMessageSendInputArg);
   const setProfileDraft = writeDraftText({ value: profileDraftCell });
-  const setAdminDraft = writeBooleanDraft({ value: adminManagerDraftCell });
   const setMessageDraft = writeDraftText({ value: messageDraftCell });
   const setHostMessageDraft = writeDraftText({ value: hostMessageDraftCell });
   const setRoomDraft = writeDraftText({ value: roomDraftCell });
@@ -387,9 +368,18 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
                   />
                   <cf-chip
                     id="group-chat-manager-chip"
-                    label={currentUserCanManageAdminsStatus
-                      ? "Can manage admins"
-                      : "Manager off"}
+                    label={computed(() =>
+                      currentProfileCell(myProfileCell) === undefined
+                        ? "No profile"
+                        : chatAdminEveryoneIsAdmin(adminRegistryCell)
+                        ? "Everyone is admin"
+                        : currentUserCanManageAdmins(
+                            myProfileCell,
+                            adminRegistryCell,
+                          )
+                        ? "Can manage admins"
+                        : "Manager off"
+                    )}
                   />
                 </cf-hstack>
               </cf-hstack>
@@ -467,12 +457,10 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     rooms: roomsCell as PerSpace<SharedRoomsCell>,
     adminRegistry: adminRegistryCell as PerSpace<ChatAdminRegistryCell>,
     profileDraft: profileDraftCell as PerUser<DraftCell>,
-    adminDraft: adminManagerDraftCell as PerUser<AdminManagerDraftCell>,
     messageDraft: messageDraftCell as PerUser<DraftCell>,
     hostMessageDraft: hostMessageDraftCell as PerSession<DraftCell>,
     roomDraft: roomDraftCell as PerSession<RoomDraftCell>,
     setProfileDraft,
-    setAdminDraft,
     setMessageDraft,
     setHostMessageDraft,
     setRoomDraft,
@@ -480,9 +468,13 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     currentUserIsAdmin: computed(() =>
       currentProfileIsAdmin(myProfileCell, adminRegistryCell)
     ),
-    currentUserCanManageAdmins: currentUserCanManageAdminsStatus,
+    currentUserCanManageAdmins: computed(() =>
+      currentUserCanManageAdmins(myProfileCell, adminRegistryCell)
+    ),
     saveProfile: trustedProfileSave.saveProfile,
     toggleCurrentUserAdmin: trustedAdminPanel.toggleCurrentUserAdmin,
+    toggleParticipantAdmin: trustedAdminPanel.toggleParticipantAdmin,
+    toggleEveryoneAdmin: trustedAdminPanel.toggleEveryoneAdmin,
     sendTrustedMessage: trustedSend.sendMessage,
     addTrustedRoom: trustedRoomAdd.addRoom,
     hostLookalikeSend,
