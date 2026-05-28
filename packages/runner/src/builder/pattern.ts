@@ -37,7 +37,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
-import { isCell } from "../cell.ts";
+import { isCell, setCellInSpaceAnnotation } from "../cell.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { Runtime } from "../runtime.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
@@ -395,6 +395,7 @@ function factoryFromPattern<T, R>(
 
   const makePatternFactory = (
     defaultScope?: CellScope,
+    defaultSpace?: string | unknown,
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
       (inputs: Opaque<T>): OpaqueRef<R> => {
@@ -408,6 +409,13 @@ function factoryFromPattern<T, R>(
         };
 
         const outputs = opaqueRef<R>();
+        if (defaultSpace !== undefined) {
+          setCellInSpaceAnnotation(outputs, defaultSpace);
+        }
+        const targetSpace = resolveSynchronousTargetSpace(defaultSpace);
+        if (targetSpace !== undefined) {
+          module.targetSpace = targetSpace;
+        }
         const node: NodeRef = {
           module,
           inputs,
@@ -427,7 +435,10 @@ function factoryFromPattern<T, R>(
       } as Pattern & toJSON,
     ) as PatternFactory<T, R>;
 
-    factory.asScope = (scope: CellScope) => makePatternFactory(scope);
+    factory.asScope = (scope: CellScope) =>
+      makePatternFactory(scope, defaultSpace);
+    factory.inSpace = (space?: string | unknown) =>
+      makePatternFactory(defaultScope, space ?? "");
     return factory;
   };
 
@@ -453,6 +464,18 @@ function getStableInternalPathSegment(cause: unknown): PropertyKey | undefined {
     return formatStableCauseSegment(cause);
   }
 
+  return undefined;
+}
+
+function resolveSynchronousTargetSpace(
+  space: unknown,
+): MemorySpace | undefined {
+  if (typeof space === "string" && /^did:[^:]+:.+/.test(space)) {
+    return space as MemorySpace;
+  }
+  if (isCell(space)) {
+    return space.getAsNormalizedFullLink().space;
+  }
   return undefined;
 }
 

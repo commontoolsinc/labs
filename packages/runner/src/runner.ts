@@ -2,6 +2,7 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { createSession, Identity } from "@commonfabric/identity";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
@@ -29,7 +30,13 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { type Cell, createCell, isCell } from "./cell.ts";
+import {
+  type Cell,
+  createCell,
+  getCellInSpaceAnnotation,
+  isCell,
+  setCellUnlinkedSpace,
+} from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import {
   findAllWriteRedirectCells,
@@ -1348,6 +1355,54 @@ export class Runner {
     });
   }
 
+  private runPatternAfterSuccessfulCommit<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    pattern: Pattern,
+    inputs: FabricValue,
+  ): void {
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) return;
+
+      const startTx = this.runtime.edit();
+      const committedResultCell = this.runtime.getCellFromLink<T>(
+        resultLink,
+        pattern.resultSchema,
+        startTx,
+      );
+      try {
+        this.run(startTx, pattern, inputs, committedResultCell);
+        this.runtime.prepareTxForCommit(startTx);
+        startTx.commit().then(({ error }) => {
+          if (error) {
+            this.stop(committedResultCell);
+            logger.error(
+              "tx-commit-error",
+              "Error committing deferred cross-space pattern transaction",
+              error,
+            );
+          }
+        }).catch((error) => {
+          this.stop(committedResultCell);
+          logger.error(
+            "tx-commit-error",
+            "Deferred cross-space pattern transaction rejected",
+            error,
+          );
+        });
+      } catch (error) {
+        startTx.abort(error);
+        logger.error(
+          "runner-start",
+          "Deferred cross-space pattern failed",
+          error,
+        );
+        throw error;
+      }
+    });
+  }
+
   /**
    * Run a pattern.
    *
@@ -2402,6 +2457,38 @@ export class Runner {
     return result;
   }
 
+  private async resolveFrameInSpaceAnnotations(frame: Frame): Promise<void> {
+    const refs = [...frame.opaqueRefs];
+    await Promise.all(refs.map(async (ref) => {
+      const annotation = getCellInSpaceAnnotation(ref);
+      if (annotation === undefined) return;
+      const space = await this.resolveInSpaceAnnotation(annotation);
+      setCellUnlinkedSpace(ref, space);
+    }));
+  }
+
+  private async resolveInSpaceAnnotation(
+    annotation: unknown,
+  ): Promise<MemorySpace> {
+    if (typeof annotation === "string") {
+      if (isMemorySpaceDID(annotation)) return annotation as MemorySpace;
+      if (annotation.length === 0) {
+        return (await Identity.generate()).did() as MemorySpace;
+      }
+      const session = await createSession({
+        identity: this.runtime.storageManager.as as unknown as Identity,
+        spaceName: annotation,
+      });
+      return session.space as MemorySpace;
+    }
+    if (isCell(annotation)) {
+      return annotation.getAsNormalizedFullLink().space;
+    }
+    throw new Error(
+      `Unsupported PatternFactory.inSpace annotation: ${typeof annotation}`,
+    );
+  }
+
   private handlerResultPatternMustStartAfterCommit(pattern: Pattern): boolean {
     return pattern.nodes.some(({ module }) =>
       module.type === "ref" && module.implementation === "navigateTo"
@@ -2648,6 +2735,7 @@ export class Runner {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
 
+      let popFrameAfterReturn = true;
       try {
         const inputsCell = this.runtime.getImmutableCell(
           processCell.space,
@@ -2721,9 +2809,10 @@ export class Runner {
             throw error;
           }
         }
-        const postRun = (result: any) => {
+        const postRun = async (result: any) => {
           logger.timeStart("stream", "postRun");
           try {
+            await this.resolveFrameInSpaceAnnotations(frame);
             return this.handleJavaScriptHandlerResult(
               tx,
               result,
@@ -2739,14 +2828,19 @@ export class Runner {
           }
         };
 
-        return result instanceof Promise
+        const postRunResult = result instanceof Promise
           ? result.then(postRun)
           : postRun(result);
+        if (postRunResult instanceof Promise) {
+          popFrameAfterReturn = false;
+          return postRunResult.finally(() => popFrame(frame));
+        }
+        return postRunResult;
       } catch (error) {
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
       } finally {
-        popFrame(frame);
+        if (popFrameAfterReturn) popFrame(frame);
       }
     };
 
@@ -2897,6 +2991,7 @@ export class Runner {
         throw error;
       };
 
+      let popFrameAfterReturn = true;
       try {
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
@@ -2965,9 +3060,10 @@ export class Runner {
             throw error;
           }
         }
-        const postRun = (result: any) => {
+        const postRun = async (result: any) => {
           logger.timeStart("action", "postRun");
           try {
+            await this.resolveFrameInSpaceAnnotations(frame);
             return this.writeJavaScriptActionResult(
               tx,
               module.resultSchema,
@@ -2986,13 +3082,18 @@ export class Runner {
           }
         };
 
-        return result instanceof Promise
+        const postRunResult = result instanceof Promise
           ? result.then(postRun).catch(handleErrorOutput)
           : postRun(result);
+        if (postRunResult instanceof Promise) {
+          popFrameAfterReturn = false;
+          return postRunResult.finally(() => popFrame(frame));
+        }
+        return postRunResult;
       } catch (error) {
         handleErrorOutput(error);
       } finally {
-        popFrame(frame);
+        if (popFrameAfterReturn) popFrame(frame);
       }
     };
 
@@ -3498,8 +3599,11 @@ export class Runner {
       );
       sendToBindings = false;
     } else {
+      const resultScope = patternDefaultScope(patternImpl) ??
+        module.defaultScope;
+      const targetSpace = module.targetSpace ?? resultCell.space;
       const baseResultCell = this.runtime.getCell(
-        resultCell.space,
+        targetSpace,
         {
           pattern: module.implementation,
           parent: resultCell.entityId,
@@ -3509,8 +3613,6 @@ export class Runner {
         patternImpl.resultSchema,
         tx,
       );
-      const resultScope = patternDefaultScope(patternImpl) ??
-        module.defaultScope;
       resultCell = baseResultCell;
       if (resultScope !== undefined && resultScope !== "space") {
         let resultCellLink = baseResultCell.getAsNormalizedFullLink();
@@ -3530,7 +3632,11 @@ export class Runner {
       `sendToBindings=${sendToBindings}`,
     ]);
 
-    this.run(tx, patternImpl, inputs, resultCell);
+    if (resultCell.space !== resultCellLink.space) {
+      this.runPatternAfterSuccessfulCommit(tx, resultCell, patternImpl, inputs);
+    } else {
+      this.run(tx, patternImpl, inputs, resultCell);
+    }
 
     if (sendToBindings) {
       sendValueToBinding(
@@ -3564,4 +3670,8 @@ function getTxDebugActionId(
  */
 function getPatternId(resultCell: Cell<unknown>): URI | undefined {
   return getMetaLink(resultCell, "pattern")?.id;
+}
+
+function isMemorySpaceDID(value: string): boolean {
+  return /^did:[^:]+:.+/.test(value);
 }

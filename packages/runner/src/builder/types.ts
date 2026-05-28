@@ -199,6 +199,8 @@ declare module "@commonfabric/api" {
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
     /** Input paths whose writable cells should become materializer envelopes */
     materializerWriteInputPaths?: readonly (readonly string[])[];
+    /** Run this module's result in a specific space. */
+    targetSpace?: MemorySpace;
   }
 }
 
