@@ -1379,7 +1379,8 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                               : extraction.error
                               ? (
                                 <span style="font-size: 0.875rem; color: #991b1b;">
-                                  Couldn't read it: {extraction.error}
+                                  Couldn't read the plate — enter it manually or
+                                  try another photo.
                                 </span>
                               )
                               : (
