@@ -1,5 +1,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
+import { toMemorySpaceAddress } from "../link-utils.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -17,13 +19,19 @@ import {
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
-import { txToReactivityLog } from "./reactivity.ts";
+import { buildSchedulerActionObservation } from "./persistent-observation.ts";
+import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
+import {
+  buildKnownSchedulingWrites,
+  pruneStructuralAncestorWrites,
+} from "./scheduling-writes.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type {
   Action,
   ActionRunTraceEntry,
   EventHandler,
   ReactivityLog,
+  TelemetryAnnotations,
 } from "./types.ts";
 import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
 
@@ -110,9 +118,12 @@ export function invokeReactiveAction(state: {
 export function startReactiveActionCommit(state: {
   readonly runtime: Runtime;
   readonly tx: IExtendedStorageTransaction;
-}): ReturnType<IExtendedStorageTransaction["commit"]> {
+}, options: {
+  readonly beforeCommit?: () => void;
+} = {}): ReturnType<IExtendedStorageTransaction["commit"]> {
   logger.timeStart("scheduler", "run", "commit");
   state.runtime.prepareTxForCommit(state.tx);
+  options.beforeCommit?.();
   const commitPromise = state.tx.commit();
   logger.timeEnd("scheduler", "run", "commit");
   return commitPromise;
@@ -220,6 +231,7 @@ export interface SchedulerActionRunState {
   readonly inFlightSourceState: InFlightSourceState;
   readonly actionTimingState: ActionTimingState;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly retries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
@@ -241,6 +253,18 @@ export interface SchedulerActionRunState {
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly getCurrentKnownSchedulingWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly getHistoricalMightWrite: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly getMaterializerWriteEnvelopes: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly getDebounce: (action: Action) => number | undefined;
+  readonly getNoDebounce: (action: Action) => boolean | undefined;
+  readonly getThrottle: (action: Action) => number | undefined;
   readonly maybeAutoDebounce: (action: Action) => void;
   readonly markActionHasRun: (action: Action) => void;
   readonly handleError: (error: Error, action: Action) => void;
@@ -349,6 +373,7 @@ function finalizeSchedulerAction(
   state.maybeAutoDebounce(args.action);
   state.markActionHasRun(args.action);
   state.pullDemandedFirstRunComputations.delete(args.action);
+  state.pullDemandedContinuationComputations.delete(args.action);
 
   try {
     if (args.error) {
@@ -386,15 +411,29 @@ function finalizeReactiveActionCommit(
   // reactive functions based on it will be retriggered. But also, the
   // retry logic below will have re-scheduled this action, so
   // topological sorting should move it before the dependencies.
+  let log: ReactivityLog | undefined;
   const commitPromise = startReactiveActionCommit({
     runtime: state.runtime,
     tx: args.tx,
+  }, {
+    beforeCommit: () => {
+      log = txToReactivityLog(args.tx);
+      attachSchedulerActionObservation(state, args, log);
+    },
   });
-  const log = txToReactivityLog(args.tx);
+  if (!log) {
+    throw new Error("scheduler action commit did not build a reactivity log");
+  }
+  const committedLog = log;
+  const changedComputationWrites = state.recordChangedComputationWrites(
+    args.action,
+    args.tx,
+    committedLog,
+  );
   watchReactiveActionCommit({
     action: args.action,
     tx: args.tx,
-    log,
+    log: committedLog,
     retries: state.retries,
     pending: state.pending,
     commitPromise,
@@ -408,24 +447,19 @@ function finalizeReactiveActionCommit(
         source,
       ),
   });
-  const changedComputationWrites = state.recordChangedComputationWrites(
-    args.action,
-    args.tx,
-    log,
-  );
 
   logger.debug("schedule-run-complete", () => [
     `[RUN] Action completed: ${args.actionId}`,
-    `Reads: ${log.reads.length}`,
-    `Writes: ${log.writes.length}`,
+    `Reads: ${committedLog.reads.length}`,
+    `Writes: ${committedLog.writes.length}`,
     `Elapsed: ${elapsed.toFixed(2)}ms`,
   ]);
 
-  recordOptionalActionRunDiagnostics(state, args, log, elapsed);
+  recordOptionalActionRunDiagnostics(state, args, committedLog, elapsed);
 
   logger.timeStart("scheduler", "run", "resubscribe");
   try {
-    state.resubscribe(args.action, log);
+    state.resubscribe(args.action, committedLog);
   } finally {
     logger.timeEnd("scheduler", "run", "resubscribe");
   }
@@ -434,6 +468,161 @@ function finalizeReactiveActionCommit(
     changedComputationWrites,
   );
   args.resolve(args.result);
+}
+
+function attachSchedulerActionObservation(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+    readonly tx: IExtendedStorageTransaction;
+    readonly error?: unknown;
+  },
+  log: ReactivityLog,
+): void {
+  if (!getPersistentSchedulerStateConfig()) {
+    return;
+  }
+
+  const observationTarget = args.tx.setSchedulerObservation
+    ? args.tx
+    : args.tx.tx;
+  if (!observationTarget.setSchedulerObservation) {
+    return;
+  }
+
+  const annotated = args.action as Partial<TelemetryAnnotations>;
+  const ignoredSchedulingWrites = annotated.ignoredSchedulingWrites ?? [];
+  const declaredWrites = sortAndCompactPaths(filterIgnoredAddresses(
+    (annotated.writes ?? []).map(toMemorySpaceAddress),
+    ignoredSchedulingWrites,
+  ));
+  const { newCurrentKnownWrites } = buildKnownSchedulingWrites({
+    writes: pruneStructuralAncestorWrites(
+      sortAndCompactPaths(
+        filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
+        false,
+      ),
+    ),
+    declaredWrites,
+    existingCurrentWrites: filterIgnoredAddresses(
+      state.getCurrentKnownSchedulingWrites(args.action) ?? [],
+      ignoredSchedulingWrites,
+    ),
+    existingHistoricalWrites: filterIgnoredAddresses(
+      state.getHistoricalMightWrite(args.action) ?? [],
+      ignoredSchedulingWrites,
+    ),
+  });
+  const telemetry = state.getActionTelemetryInfo(args.action);
+  const actionOptions = schedulerActionOptions(state, args.action);
+  const observationIdentity = annotated.schedulerObservationIdentity;
+  const observation = buildSchedulerActionObservation({
+    ...(observationIdentity?.ownerSpace !== undefined
+      ? { ownerSpace: observationIdentity.ownerSpace }
+      : {}),
+    branch: observationIdentity?.branch ?? "",
+    pieceId: observationIdentity?.pieceId ??
+      schedulerObservationPieceId(args.actionId, telemetry),
+    processGeneration: observationIdentity?.processGeneration ?? 0,
+    actionId: args.actionId,
+    actionKind: state.isEffectAction.get(args.action)
+      ? "effect"
+      : "computation",
+    implementationFingerprint: schedulerImplementationFingerprint(
+      args.action,
+      args.actionId,
+      telemetry,
+    ),
+    runtimeFingerprint: schedulerRuntimeFingerprint(state.modeLabel()),
+    // The memory engine overwrites this with the accepting head/commit seq.
+    observedAtSeq: 0,
+    transactionKind: "action-run",
+    transactionLog: log,
+    currentKnownWrites: newCurrentKnownWrites,
+    declaredWrites,
+    materializerWriteEnvelopes:
+      state.getMaterializerWriteEnvelopes(args.action) ?? [],
+    ignoredSchedulingWrites: filterIgnoredAddresses(
+      (annotated.ignoredSchedulingWrites ?? []).map(toMemorySpaceAddress),
+      [],
+    ),
+    ...(actionOptions ? { actionOptions } : {}),
+    status: args.error ? "failed" : "success",
+    ...(args.error
+      ? { errorFingerprint: schedulerErrorFingerprint(args.error) }
+      : {}),
+  });
+
+  try {
+    observationTarget.setSchedulerObservation(observation);
+  } catch (error) {
+    if (isInactiveObservationTargetError(error)) {
+      logger.debug("scheduler-observation-skipped", () => [
+        `Action observation skipped for inactive transaction: ${args.actionId}`,
+      ]);
+      return;
+    }
+    throw error;
+  }
+}
+
+function isInactiveObservationTargetError(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    "name" in error &&
+    (
+      error.name === "StorageTransactionAborted" ||
+      error.name === "StorageTransactionCompleteError"
+    );
+}
+
+function schedulerObservationPieceId(
+  actionId: string,
+  telemetry: SchedulerActionInfo | undefined,
+): string {
+  return [
+    telemetry?.patternName,
+    telemetry?.moduleName,
+  ].filter((part): part is string => !!part).join(":") || `action:${actionId}`;
+}
+
+export function schedulerImplementationFingerprint(
+  action: Action,
+  actionId: string,
+  telemetry: SchedulerActionInfo | undefined,
+): string {
+  const sourceId = (action as { src?: unknown }).src;
+  if (typeof sourceId === "string" && sourceId.length > 0) {
+    return `src:${sourceId}`;
+  }
+  const telemetryId = schedulerObservationPieceId(actionId, telemetry);
+  return `action:${telemetryId}:${actionId}`;
+}
+
+export function schedulerRuntimeFingerprint(mode: "pull" | "push"): string {
+  return `runner:scheduler:${mode}`;
+}
+
+function schedulerActionOptions(
+  state: SchedulerActionRunState,
+  action: Action,
+) {
+  const debounceMs = state.getDebounce(action);
+  const noDebounce = state.getNoDebounce(action);
+  const throttleMs = state.getThrottle(action);
+  const options = {
+    ...(debounceMs !== undefined ? { debounceMs } : {}),
+    ...(noDebounce !== undefined ? { noDebounce } : {}),
+    ...(throttleMs !== undefined ? { throttleMs } : {}),
+  };
+  return Object.keys(options).length > 0 ? options : undefined;
+}
+
+function schedulerErrorFingerprint(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}:${error.message}`;
+  }
+  return String(error);
 }
 
 function recordOptionalActionRunDiagnostics(

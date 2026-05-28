@@ -314,6 +314,84 @@ namespace Local {
         required: ["createdAt"],
       });
     });
+
+    // CT-1615 Berni review §4.2: lock in the new IndexSignatureDeclaration
+    // branch added to `analyzeTypeNodeStructure`'s TypeLiteral handler.
+    // Without it, synthetic `{ [k: string]: V }` / `Record<K, V>` shapes
+    // routed through node-based analysis silently drop their index signature
+    // (e.g. via the SchemaInjection lift-revisit that feeds `any` as the
+    // paired Type — see ts-transformers/src/transformers/schema-injection.ts).
+    it("emits additionalProperties for synthetic { [k: string]: V } index signature", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      // { [k: string]: number }
+      const indexSignature = ts.factory.createIndexSignature(
+        undefined,
+        [ts.factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          ts.factory.createIdentifier("k"),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        )],
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+      );
+      const typeNode = ts.factory.createTypeLiteralNode([indexSignature]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({});
+      expect(schema.additionalProperties).toEqual({ type: "number" });
+    });
+
+    it("emits additionalProperties for synthetic Record<string, V> shape via node-based analysis", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      // { name: string; [k: string]: number } — a mixed shape with a
+      // named property AND an index signature, to confirm both branches
+      // contribute correctly.
+      const namedProp = ts.factory.createPropertySignature(
+        undefined,
+        ts.factory.createIdentifier("name"),
+        undefined,
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+      );
+      const indexSignature = ts.factory.createIndexSignature(
+        undefined,
+        [ts.factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          ts.factory.createIdentifier("k"),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        )],
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+      );
+      const typeNode = ts.factory.createTypeLiteralNode([
+        namedProp,
+        indexSignature,
+      ]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({ name: { type: "string" } });
+      expect(schema.required).toEqual(["name"]);
+      expect(schema.additionalProperties).toEqual({ type: "number" });
+    });
   });
 
   describe("union members", () => {

@@ -138,7 +138,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     payload.metadata.user = user;
   }
 
-  // Enable caching for all requests including those with tools.
+  // Enable caching for deterministic requests including client-side tools.
   // With the sequential request architecture, each request includes complete context
   // (including tool results from previous rounds), making each response cacheable.
   //
@@ -148,11 +148,10 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   // - Tool results (in messages array for subsequent rounds)
   // - Full conversation history
   //
-  // Note: Non-deterministic tools will be cached. If tool results change for the
-  // same inputs, the different results will produce different cache keys, resulting
-  // in a cache miss (correct behavior). For intentional cache invalidation, use
-  // the cache eviction utilities or modify the request to produce a different hash.
-  const shouldCache = payload.cache === true;
+  // Provider-native tools such as Google Search are intentionally time-sensitive.
+  // Treat them as live requests until we have a freshness-aware cache policy.
+  const shouldCache = payload.cache === true &&
+    (payload.nativeModelToolIds?.length ?? 0) === 0;
 
   let cacheKey: string | undefined;
   if (shouldCache) {

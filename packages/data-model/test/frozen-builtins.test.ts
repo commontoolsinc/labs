@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+import { FrozenMap, FrozenSet } from "../src/frozen-builtins.ts";
 
 type MutableMapExtensions<K, V> = {
   getOrInsert(key: K, defaultValue: V): V;
@@ -20,10 +20,9 @@ describe("frozen-builtins", () => {
     it("is instanceof Map", () => {
       const fm = new FrozenMap([["a", 1]]);
       expect(fm).toBeInstanceOf(Map);
-      expect(fm instanceof Map).toBe(true);
     });
 
-    it("is Object.isFrozen", () => {
+    it("reports as frozen via `Object.isFrozen()`", () => {
       const fm = new FrozenMap([["a", 1]]);
       expect(Object.isFrozen(fm)).toBe(true);
     });
@@ -129,10 +128,9 @@ describe("frozen-builtins", () => {
     it("is instanceof Set", () => {
       const fs = new FrozenSet([1, 2, 3]);
       expect(fs).toBeInstanceOf(Set);
-      expect(fs instanceof Set).toBe(true);
     });
 
-    it("is Object.isFrozen", () => {
+    it("reports as frozen via `Object.isFrozen()`", () => {
       const fs = new FrozenSet([1, 2, 3]);
       expect(Object.isFrozen(fs)).toBe(true);
     });

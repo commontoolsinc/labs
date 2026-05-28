@@ -1258,6 +1258,37 @@ export class CommonFabricFormatter implements TypeFormatter {
         };
       case "WriteAuthorizedBy":
         return this.buildWriteAuthorizedByMetadata(context, aliasArgNodes);
+      case "TrustedActionWriteWithIntegrity":
+        return this.buildTrustedActionWriteMetadata({
+          context,
+          aliasArgNodes,
+          action: readValue(2),
+          trustedPattern: readValue(3),
+          requiredEventIntegrity: readValue(4),
+        });
+      case "TrustedActionWrite": {
+        const trustedPattern = readValue(3);
+        return this.buildTrustedActionWriteMetadata({
+          context,
+          aliasArgNodes,
+          action: readValue(2),
+          trustedPattern,
+          requiredEventIntegrity: [trustedPattern],
+        });
+      }
+      case "TrustedActionUiContract": {
+        const trustedPattern = readValue(2);
+        return {
+          uiContract: {
+            helper: "UiAction",
+            action: readValue(1),
+            trustedPattern,
+            requiredEventIntegrity: aliasArgs.length > 3
+              ? readValue(3)
+              : [trustedPattern],
+          },
+        };
+      }
       case "LengthPreservedFrom":
         return {
           collection: {
@@ -1360,8 +1391,45 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
     aliasArgNodes?: readonly ts.TypeNode[],
   ): Record<string, unknown> | undefined {
-    const bindingNode = aliasArgNodes?.[1] ??
-      this.getAliasTypeArgumentNode(context.typeNode, 1);
+    return this.buildWriteAuthorizedByMetadataForArg(
+      context,
+      aliasArgNodes,
+      1,
+    );
+  }
+
+  private buildTrustedActionWriteMetadata(
+    options: {
+      context: GenerationContext;
+      aliasArgNodes: readonly ts.TypeNode[] | undefined;
+      action: unknown;
+      trustedPattern: unknown;
+      requiredEventIntegrity: unknown;
+    },
+  ): Record<string, unknown> | undefined {
+    const writeMetadata = this.buildWriteAuthorizedByMetadataForArg(
+      options.context,
+      options.aliasArgNodes,
+      1,
+    );
+    return {
+      ...(writeMetadata ?? {}),
+      uiContract: {
+        helper: "UiAction",
+        action: options.action,
+        trustedPattern: options.trustedPattern,
+        requiredEventIntegrity: options.requiredEventIntegrity,
+      },
+    };
+  }
+
+  private buildWriteAuthorizedByMetadataForArg(
+    context: GenerationContext,
+    aliasArgNodes: readonly ts.TypeNode[] | undefined,
+    bindingIndex: number,
+  ): Record<string, unknown> | undefined {
+    const bindingNode = aliasArgNodes?.[bindingIndex] ??
+      this.getAliasTypeArgumentNode(context.typeNode, bindingIndex);
     if (!bindingNode || !ts.isTypeQueryNode(bindingNode)) {
       return undefined;
     }

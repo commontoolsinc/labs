@@ -7,6 +7,7 @@ import {
   CYCLE_DEBOUNCE_THRESHOLD_MS,
   MAX_ITERATIONS_PER_RUN,
 } from "./constants.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
 import type {
   Action,
   PopulateDependenciesEntry,
@@ -167,7 +168,7 @@ export function collectInitialExecuteDependencies(
   try {
     // Find computation actions whose writes are still unknown. We run them on
     // the first cycle to capture writes that cannot be inferred from declared
-    // outputs or populateDependencies() potential writes.
+    // outputs.
     //
     // TODO(seefeld): Once we more reliably capture what they can write via
     // WriteableCell or so, then we can treat this more deliberately via the
@@ -316,6 +317,7 @@ export interface SchedulerSettleLoopState {
   readonly getLoopCounter: () => WeakMap<Action, number>;
   readonly runsThisExecute: Map<Action, number>;
   readonly activePullDemandActions: WeakSet<Action>;
+  readonly materializerIndex: MaterializerIndexState;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
@@ -334,6 +336,11 @@ export interface SchedulerSettleLoopState {
   ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
   readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
   readonly collectDirtyDependencies: (
+    seed: Action,
+    targetWorkSet: Set<Action>,
+    memo: Map<Action, boolean>,
+  ) => boolean;
+  readonly collectDirtyDependenciesFromTraversalRoot: (
     seed: Action,
     targetWorkSet: Set<Action>,
     memo: Map<Action, boolean>,
@@ -603,6 +610,7 @@ export function planPullExecuteContinuation(state: {
   readonly pending: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
+  readonly materializerIndex: MaterializerIndexState;
   readonly shouldRerunAfterCurrentExecute: boolean;
   readonly hasQueuedEventReadyNow: boolean;
   readonly hasParkedHeadEvent: boolean;
@@ -618,6 +626,7 @@ export function planPullExecuteContinuation(state: {
   const now = state.now ?? performance.now();
   const hasPendingPullWork = [...state.pending].some((action) =>
     state.effects.has(action) ||
+    state.materializerIndex.isMaterializer(action) ||
     state.isDemandedPullComputation(action) ||
     state.shouldRunFirstPullComputationInDemandContext(action)
   );
@@ -627,7 +636,8 @@ export function planPullExecuteContinuation(state: {
   const hasDirtyPullWork = [...state.dirty].some((action) => {
     if (
       !state.effects.has(action) &&
-      !state.isDemandedPullComputation(action)
+      !state.isDemandedPullComputation(action) &&
+      !state.materializerIndex.isMaterializer(action)
     ) {
       return false;
     }
@@ -639,7 +649,8 @@ export function planPullExecuteContinuation(state: {
           nextDirtyPullRunAt,
           nextDebounceAt,
         );
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
+        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+          state.materializerIndex.isMaterializer(action);
       }
       return false;
     }
@@ -647,7 +658,8 @@ export function planPullExecuteContinuation(state: {
     const nextEligibleAt = state.getNextEligibleRunTime(action);
     if (nextEligibleAt !== undefined && nextEligibleAt > now) {
       nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
+      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+        state.materializerIndex.isMaterializer(action);
       return false;
     }
 

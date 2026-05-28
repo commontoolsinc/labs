@@ -3,7 +3,7 @@
   "tasks": {
     "run": "deno run -A src/main.ts",
     "help": "deno run -A src/main.ts --help",
-    "test": "ENV=test deno test --allow-read --allow-write --allow-run test",
+    "test": "ENV=test deno test --allow-read --allow-write --allow-run --allow-ffi --allow-net --allow-env test",
     "test:integration": "CF_HARNESS_INTEGRATION=1 deno test -A integration"
   },
   "exports": {
@@ -11,6 +11,10 @@
     "./config": "./src/config.ts",
     "./engine": "./src/engine.ts",
     "./prompt-loop": "./src/prompt-loop.ts",
+    "./interactive-chat-service": "./src/interactive-chat-service.ts",
+    "./interactive-chat-stdio": "./src/interactive-chat-stdio.ts",
+    "./session-store": "./src/session-store.ts",
+    "./sqlite-session-store": "./src/sqlite-session-store.ts",
     "./subagent-return": "./src/subagent-return.ts",
     "./artifacts": "./src/artifacts.ts",
     "./cli": "./src/cli.ts",
@@ -24,6 +28,7 @@
     "./contracts/run-report": "./src/contracts/run-report.ts",
     "./contracts/skill": "./src/contracts/skill.ts",
     "./contracts/subagent": "./src/contracts/subagent.ts",
+    "./contracts/interactive-chat": "./src/contracts/interactive-chat.ts",
     "./contracts/tool-result": "./src/contracts/tool-result.ts",
     "./contracts/tool-descriptor": "./src/contracts/tool-descriptor.ts",
     "./contracts/transcript": "./src/contracts/transcript.ts",
@@ -31,6 +36,10 @@
     "./sandbox": "./src/sandbox/docker-runsc.ts",
     "./tools": "./src/tools/registry.ts",
     "./tools/read-skill-resource": "./src/tools/read-skill-resource.ts",
+    "./tools/web-fetch": "./src/tools/web-fetch.ts",
     "./skills/registry": "./src/skills/registry.ts"
+  },
+  "imports": {
+    "@db/sqlite": "jsr:@db/sqlite@^0.12.0"
   }
 }

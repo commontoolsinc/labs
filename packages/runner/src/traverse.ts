@@ -12,10 +12,8 @@ import type {
   SchemaPathSelector,
   Unit,
 } from "@commonfabric/memory/interface";
-import {
-  type FabricValue,
-  isArrayIndexPropertyName,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
 // but rollup has issues
@@ -2862,21 +2860,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
         !this.traverseCells &&
         SchemaObjectTraverser.hasAsCell(curSelector.schema)
       ) {
-        if (curDoc.value === undefined) {
-          // If we hit a broken link following write redirects, I think we have
-          // to abort.
-          logger.info(
-            "traverse",
-            () => ["Encountered broken redirect", doc, curDoc],
-          );
-          return false;
-        }
         // For my cell link, curDoc currently points to the last
         // redirect target, but we want cell properties to be based on the
         // link value at that location, so we effectively follow one more
         // link if available.
         // If we have a value instead of a link, create a link to the element
         // We don't traverse and validate, since this is an asCell boundary.
+        // If the target is not written yet, still return a cell for it instead
+        // of invalidating the parent array; downstream consumers can subscribe
+        // to the child cell and observe it when the target materializes.
         const isLink = isPrimitiveCellLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink

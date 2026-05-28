@@ -437,12 +437,16 @@ export class PatternManager {
         "pattern source",
       ).toString();
       let compileResult = await cachedCompiler.get(programHash);
+      let loadedFromCache = true;
       if (!compileResult) {
+        loadedFromCache = false;
         compileResult = await this.runtime.harness.compile(program);
         // Fire-and-forget cache write
         cachedCompiler.set(programHash, compileResult).catch(() => {});
       }
-      return this.evaluateToPattern(compileResult, program);
+      return this.evaluateToPattern(compileResult, program, {
+        skipBundleValidation: loadedFromCache,
+      });
     }
 
     // No persistent cache — compile and evaluate directly
@@ -453,11 +457,13 @@ export class PatternManager {
   private async evaluateToPattern(
     { id, jsScript }: CompileResult,
     program: RuntimeProgram,
+    options?: { skipBundleValidation?: boolean },
   ): Promise<Pattern> {
     const { main, loadId } = await this.runtime.harness.evaluate(
       id,
       jsScript,
       program.files,
+      options,
     );
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");

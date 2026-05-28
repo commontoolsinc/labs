@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./arrays": "./src/arrays.ts",
     "./base64url": "./src/base64url.ts",
     "./bigint": "./src/bigint.ts",
     "./cache": "./src/cache.ts",
@@ -19,6 +20,7 @@
     "./equal-ignoring-symbols": "./src/equal-ignoring-symbols.ts",
     "./integration": "./src/integration.ts",
     "./logger": "./src/logger.ts",
+    "./path-key-map": "./src/path-key-map.ts",
     "./sandbox-contract": "./src/sandbox-contract.ts",
     "./sleep": "./src/sleep.ts",
     "./strip-undefined-props": "./src/strip-undefined-props.ts",

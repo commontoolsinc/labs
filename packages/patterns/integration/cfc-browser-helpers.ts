@@ -178,6 +178,10 @@ export async function fillCfInput(
               };
             }
 
+            input.scrollIntoView({ block: "center", inline: "center" });
+            await new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve))
+            );
             const rect = input.getBoundingClientRect();
             const style = globalThis.getComputedStyle(input);
             const visible = rect.width > 0 && rect.height > 0 &&
@@ -214,10 +218,6 @@ export async function fillCfInput(
               };
             }
 
-            input.scrollIntoView({ block: "center", inline: "center" });
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
             input.focus();
             const valueSetter = Object.getOwnPropertyDescriptor(
               HTMLInputElement.prototype,
@@ -296,6 +296,330 @@ export async function waitForRuntimeIdle(
     });
   }, { timeout, delay: 250 });
 }
+
+export async function waitForDisabled(
+  page: Page,
+  selector: string,
+  disabled: boolean,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  let probe: { disabled?: boolean; selector: string } | undefined;
+  try {
+    await waitFor(async () => {
+      try {
+        const node = await page.waitForSelector(selector, {
+          strategy: "pierce",
+          timeout: 1_000,
+        });
+        probe = await node.evaluate((element: Element) => {
+          const button = element instanceof HTMLButtonElement
+            ? element
+            : element.shadowRoot?.querySelector("button");
+          return {
+            selector: element.tagName.toLowerCase(),
+            disabled: button instanceof HTMLButtonElement
+              ? button.disabled
+              : undefined,
+          };
+        });
+        return probe.disabled === disabled;
+      } catch {
+        return false;
+      }
+    }, { timeout, delay: 250 });
+  } catch (cause) {
+    throw new Error(
+      `Timed out waiting for ${selector} disabled=${disabled}. Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
+  }
+}
+
+export async function clickCfButton(
+  page: Page,
+  selector: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  const token = `cf-button-${crypto.randomUUID()}`;
+  const mark = async () =>
+    await page.evaluate(async (targetSelector, targetToken, targetAttr) => {
+      function collect(
+        root: Document | ShadowRoot,
+        result: Element[],
+      ): void {
+        for (const element of root.querySelectorAll("*")) {
+          try {
+            if (element.matches(targetSelector)) {
+              result.push(element);
+            }
+          } catch {
+            // Invalid selectors are reported by returning false.
+          }
+          if (element.shadowRoot) {
+            collect(element.shadowRoot, result);
+          }
+        }
+      }
+
+      const matches: Element[] = [];
+      collect(document, matches);
+      const target = matches[0] as HTMLElement | undefined;
+      if (!target) {
+        return false;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      );
+      const clickTarget =
+        (target.shadowRoot?.querySelector("[data-cf-button]") as
+          | HTMLElement
+          | null) ?? target;
+      clickTarget.setAttribute(targetAttr, targetToken);
+      return true;
+    }, { args: [selector, token, CLICK_TARGET_ATTR] });
+  try {
+    await waitFor(mark, { timeout, delay: 250 });
+  } catch (cause) {
+    throw new Error(`Unable to mark ${selector} for click`, { cause });
+  }
+  try {
+    const clickTarget = await page.waitForSelector(
+      `[${CLICK_TARGET_ATTR}="${token}"]`,
+      {
+        strategy: "pierce",
+        timeout: 2_000,
+      },
+    );
+    await clickTarget.click();
+  } finally {
+    await page.evaluate((targetToken, targetAttr) => {
+      function collect(
+        root: Document | ShadowRoot,
+        result: Element[],
+      ): void {
+        for (const element of root.querySelectorAll("*")) {
+          if (element.getAttribute(targetAttr) === targetToken) {
+            result.push(element);
+          }
+          if (element.shadowRoot) {
+            collect(element.shadowRoot, result);
+          }
+        }
+      }
+
+      const matches: Element[] = [];
+      collect(document, matches);
+      for (const element of matches) {
+        element.removeAttribute(targetAttr);
+      }
+    }, { args: [token, CLICK_TARGET_ATTR] }).catch(() => {});
+  }
+}
+
+export async function waitForRuntimeSynced(
+  page: Page,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  await waitFor(async () => {
+    return await page.evaluate(async () => {
+      const rt = (globalThis as typeof globalThis & {
+        commonfabric?: { rt?: { synced?: () => Promise<void> } };
+      }).commonfabric?.rt;
+      if (!rt?.synced) return false;
+      await rt.synced();
+      return true;
+    });
+  }, { timeout, delay: 250 });
+}
+
+export type SchedulerLoadSummary = {
+  graph: {
+    nodes: number;
+    edges: number;
+    computations: number;
+    effects: number;
+    inputs: number;
+    inactive: number;
+    actionsWithStats: number;
+    actionRuns: number;
+    actionRunsThroughActionBody: number;
+    actionRunsFromStats: number;
+    actionTotalTimeFromStats: number;
+    computationRunsFromStats: number;
+    computationTotalTimeFromStats: number;
+    effectRunsFromStats: number;
+    effectTotalTimeFromStats: number;
+  };
+  topSchedulerTiming: Array<{
+    key: string;
+    count: number;
+    totalTime: number;
+    average: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }>;
+  topActions: Array<{
+    actionId: string;
+    actionType: "effect" | "computation";
+    runCount: number;
+    totalTime: number;
+    averageTime: number;
+  }>;
+};
+
+export async function collectSchedulerLoadSummary(
+  page: Page,
+): Promise<SchedulerLoadSummary | null> {
+  return await page.evaluate(async () => {
+    const rt = (globalThis as typeof globalThis & {
+      commonfabric?: {
+        rt?: {
+          getLoggerCounts?: () => Promise<{
+            timing: Record<string, Record<string, TimingRow>>;
+          }>;
+          getGraphSnapshot?: () => Promise<{
+            nodes: GraphNode[];
+            edges: unknown[];
+          }>;
+          idle?: () => Promise<void>;
+        };
+      };
+    }).commonfabric?.rt;
+    if (!rt?.getLoggerCounts || !rt?.getGraphSnapshot || !rt?.idle) {
+      return null;
+    }
+    await rt.idle();
+
+    const { timing } = await rt.getLoggerCounts();
+    const graph = await rt.getGraphSnapshot();
+    const schedulerTiming = timing["scheduler"] ?? {};
+    const schedulerRunCount = schedulerTiming["scheduler/run"]?.count ?? 0;
+    const schedulerRunActionCount =
+      schedulerTiming["scheduler/run/action"]?.count ?? 0;
+
+    const typedNodes = graph.nodes;
+    const actionNodes = typedNodes.filter((node) =>
+      (node.type === "effect" || node.type === "computation") && node.stats
+    );
+    const byActionId = new Map<string, {
+      actionId: string;
+      actionType: "effect" | "computation";
+      runCount: number;
+      totalTime: number;
+      averageTime: number;
+    }>();
+
+    for (const node of actionNodes) {
+      const stats = node.stats;
+      if (!stats) continue;
+      const actionType = node.type === "effect" ? "effect" : "computation";
+      const existing = byActionId.get(node.id);
+      if (!existing || stats.runCount > existing.runCount) {
+        byActionId.set(node.id, {
+          actionId: node.id,
+          actionType,
+          runCount: stats.runCount,
+          totalTime: stats.totalTime,
+          averageTime: stats.averageTime,
+        });
+      }
+    }
+
+    const actionRows = [...byActionId.values()];
+    const computationRows = actionRows.filter((row) =>
+      row.actionType === "computation"
+    );
+    const effectRows = actionRows.filter((row) => row.actionType === "effect");
+    const round = (value: number) => Number(value.toFixed(3));
+
+    return {
+      graph: {
+        nodes: graph.nodes.length,
+        edges: graph.edges.length,
+        computations: typedNodes.filter((node) =>
+          node.type === "computation"
+        ).length,
+        effects: typedNodes.filter((node) => node.type === "effect").length,
+        inputs: typedNodes.filter((node) => node.type === "input").length,
+        inactive: typedNodes.filter((node) => node.type === "inactive").length,
+        actionsWithStats: actionNodes.length,
+        actionRuns: schedulerRunCount,
+        actionRunsThroughActionBody: schedulerRunActionCount,
+        actionRunsFromStats: actionRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        actionTotalTimeFromStats: round(
+          actionRows.reduce((sum, row) => sum + row.totalTime, 0),
+        ),
+        computationRunsFromStats: computationRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        computationTotalTimeFromStats: round(
+          computationRows.reduce((sum, row) => sum + row.totalTime, 0),
+        ),
+        effectRunsFromStats: effectRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        effectTotalTimeFromStats: round(
+          effectRows.reduce((sum, row) => sum + row.totalTime, 0),
+        ),
+      },
+      topSchedulerTiming: Object.entries(schedulerTiming)
+        .sort((a, b) => (b[1].totalTime ?? 0) - (a[1].totalTime ?? 0))
+        .slice(0, 16)
+        .map(([key, value]) => ({
+          key,
+          count: value.count ?? 0,
+          totalTime: round(value.totalTime ?? 0),
+          average: round(value.average ?? 0),
+          p50: round(value.p50 ?? 0),
+          p95: round(value.p95 ?? 0),
+          max: round(value.max ?? 0),
+        })),
+      topActions: actionRows
+        .sort((a, b) =>
+          b.runCount - a.runCount ||
+          b.totalTime - a.totalTime ||
+          a.actionId.localeCompare(b.actionId)
+        )
+        .slice(0, 20)
+        .map((row) => ({
+          actionId: row.actionId,
+          actionType: row.actionType,
+          runCount: row.runCount,
+          totalTime: round(row.totalTime),
+          averageTime: round(row.averageTime),
+        })),
+    };
+  });
+}
+
+type TimingRow = {
+  count: number;
+  totalTime: number;
+  average: number;
+  p50: number;
+  p95: number;
+  max: number;
+};
+
+type GraphNode = {
+  id: string;
+  type: "effect" | "computation" | "input" | "inactive";
+  stats?: {
+    runCount: number;
+    totalTime: number;
+    averageTime: number;
+    lastRunTime: number;
+  };
+};
 
 async function textIsPresent(
   page: Page,

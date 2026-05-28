@@ -20,12 +20,12 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // No captures - should not be transformed
-    const result = derive({
+    const result = __cfHelpers.lift({
         type: "number",
         asCell: ["readonly"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, value, (v) => v.get() * 2).for("result", true);
+    } as const satisfies __cfHelpers.JSONSchema, (v) => v.get() * 2)(value).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

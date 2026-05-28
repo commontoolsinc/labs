@@ -1,4 +1,5 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   cloneIfNecessary,
   type FabricValue,
@@ -9,7 +10,7 @@ import { uniqueCfcAtoms } from "./observation.ts";
 import { resolveCfcSchemaRefs } from "./schema-refs.ts";
 
 export const INJECTION_SAFE_ATOM = {
-  type: "https://commonfabric.org/cfc/atom/InjectionSafe",
+  type: CFC_ATOM_TYPE.InjectionSafe,
 } as const satisfies ImmutableJSONValue;
 
 const PROMPT_INJECTION_RISK_KINDS = new Set([
@@ -53,7 +54,7 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
     return PROMPT_INJECTION_RISK_KINDS.has(atom);
   }
   return isRecord(atom) &&
-    atom.type === "https://commonfabric.org/cfc/atom/Caveat" &&
+    atom.type === CFC_ATOM_TYPE.Caveat &&
     typeof atom.kind === "string" &&
     PROMPT_INJECTION_RISK_KINDS.has(atom.kind);
 };

@@ -132,6 +132,106 @@ describe("runPattern", () => {
     expect(resultValue).toEqual({ output: 1 });
   });
 
+  it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        input: { type: "number" },
+      },
+      required: ["input"],
+    } as const;
+    const internalSchema = {
+      type: "object",
+      properties: {
+        output: { type: "number" },
+      },
+      required: ["output"],
+    } as const;
+    const resultSchema = {
+      type: "object",
+      scope: "user",
+      properties: {
+        output: { type: "number" },
+      },
+      required: ["output"],
+    } as const;
+    const pattern = {
+      argumentSchema,
+      internalSchema,
+      resultSchema,
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "passthrough",
+          },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "sets scoped write-redirect metadata links",
+      resultSchema,
+      undefined,
+      "user",
+    );
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      { input: 7 },
+      resultCell,
+    );
+
+    await resultCell.pull();
+
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
+    const argumentLink = getMetaLink(resultCell, "argument");
+    const internalLink = getMetaLink(resultCell, "internal");
+
+    expect(resultCellLink.scope).toBe("user");
+    expect(resultCell.getMetaRaw("schema")).toEqual(resultSchema);
+    expect(argumentLink).toBeDefined();
+    expect(internalLink).toBeDefined();
+    expect(argumentLink!.path).toEqual([]);
+    expect(argumentLink!.space).toBe(space);
+    expect(argumentLink!.scope).toBe("user");
+    expect(argumentLink!.schema).toEqual(argumentSchema);
+    expect(argumentLink!.overwrite).toBe("redirect");
+    expect(internalLink!.path).toEqual([]);
+    expect(internalLink!.space).toBe(space);
+    expect(internalLink!.scope).toBe("user");
+    expect(internalLink!.schema).toEqual(internalSchema);
+    expect(internalLink!.overwrite).toBe("redirect");
+
+    const argumentCell = runtime.getCellFromLink(argumentLink!);
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    expect(argumentCell.get()).toEqual({ input: 7 });
+    expect(internalCell.get()).toEqual({ output: 7 });
+    expect(getMetaLink(argumentCell, "result")).toEqual({
+      ...resultCellLink,
+      schema: resultSchema,
+      overwrite: "redirect",
+    });
+    expect(getMetaLink(internalCell, "result")).toEqual({
+      ...resultCellLink,
+      schema: resultSchema,
+      overwrite: "redirect",
+    });
+    expect(parseLink((result.getRaw() as { output: unknown }).output, result))
+      .toEqual({
+        ...internalLink!,
+        path: ["output"],
+        schema: { type: "number" },
+        overwrite: "redirect",
+      });
+  });
+
   it("should work with nested patterns", async () => {
     const innerPattern = {
       argumentSchema: {
@@ -1495,6 +1595,128 @@ describe("runner utils", () => {
       // Second call should return true immediately
       const result = await runtime.start(resultCell);
       expect(result).toBe(true);
+    });
+
+    it("does not register duplicate handlers while resumed dependencies sync", async () => {
+      const valueAlias = {
+        $alias: {
+          cell: "argument",
+          path: ["value"],
+          scope: "space",
+          schema: { type: "number", default: 0 },
+        },
+      };
+      const streamAlias = {
+        $alias: {
+          cell: "internal",
+          path: ["stream:increment"],
+          scope: "space",
+          schema: true,
+        },
+      };
+      const pattern: Pattern = {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: {
+              type: "number",
+              default: 0,
+              asCell: ["cell"],
+            },
+          },
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: "number" },
+            increment: { asCell: ["stream", "opaque"] },
+          },
+        },
+        internalSchema: {
+          type: "object",
+          properties: {
+            "stream:increment": true,
+          },
+        },
+        initial: {
+          internal: {
+            "stream:increment": { $stream: true },
+          },
+        },
+        result: {
+          value: valueAlias,
+          increment: streamAlias,
+        },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              wrapper: "handler",
+              argumentSchema: {
+                type: "object",
+                properties: {
+                  $event: false,
+                  $ctx: {
+                    type: "object",
+                    properties: {
+                      value: {
+                        type: "number",
+                        asCell: ["cell"],
+                      },
+                    },
+                    required: ["value"],
+                  },
+                },
+                required: ["$ctx"],
+              },
+              implementation: (_event: unknown, { value }: any) => {
+                value.set(value.get() + 1);
+              },
+            },
+            inputs: {
+              $ctx: { value: valueAlias },
+              $event: streamAlias,
+            },
+            outputs: {},
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell<any>(
+        space,
+        "concurrent start dedupe",
+      );
+      await setupTrusted(runtime, undefined, pattern, { value: 0 }, resultCell);
+
+      // Simulate a persisted piece being resumed. In that path start() syncs
+      // dependencies before registering handlers, which is where this race
+      // used to allow duplicate starts for the same result cell.
+      (runtime.runner as any).locallyPreparedResults.clear();
+      (resultCell as any).synced = true;
+
+      const runner = runtime.runner as any;
+      const originalSync = runner.syncCellsForRunningPattern.bind(runner);
+      runner.syncCellsForRunningPattern = async (...args: any[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return originalSync(...args);
+      };
+
+      try {
+        const [first, second] = await Promise.all([
+          runtime.start(resultCell),
+          runtime.start(resultCell),
+        ]);
+        expect(first).toBe(true);
+        expect(second).toBe(true);
+
+        resultCell.key("increment").send();
+        await runtime.idle();
+        await resultCell.pull();
+
+        expect(resultCell.key("value").get()).toBe(1);
+      } finally {
+        runner.syncCellsForRunningPattern = originalSync;
+      }
     });
 
     it("start() runs synchronously when data is available", async () => {

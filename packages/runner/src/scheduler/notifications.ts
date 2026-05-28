@@ -5,6 +5,7 @@ import type {
   IStorageTransaction,
 } from "../storage/interface.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
 import type {
   Action,
@@ -172,7 +173,11 @@ export function applyPullTriggeredActionPlan(
 
   if (plan.operation === "mark-dirty") {
     state.markDirty(action);
-    return state.scheduleAffectedEffects(action);
+    const scheduledEffects = state.scheduleAffectedEffects(action);
+    if (state.materializerIndex.isMaterializer(action)) {
+      state.queueExecution();
+    }
+    return scheduledEffects;
   }
 
   return [];
@@ -202,6 +207,8 @@ export interface StorageNotificationState {
   readonly recordTriggerTrace: (entry: TriggerTraceEntry) => void;
   readonly scheduleWithDebounce: (action: Action) => void;
   readonly markDirty: (action: Action) => void;
+  readonly materializerIndex: MaterializerIndexState;
+  readonly queueExecution: () => void;
   readonly scheduleAffectedEffects: (
     action: Action,
   ) => TriggerTraceScheduledEffect[];

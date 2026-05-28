@@ -95,9 +95,27 @@ export function bigintToMtcHex(value: bigint): Uint8Array {
 
     const hexString = hexStringFromPositiveValue(~value);
     const result = Uint8Array.fromHex(hexString);
+    const resultLength = result.length;
 
-    for (let i = 0; i < result.length; i++) {
-      result[i] = ~result[i];
+    if (resultLength < 128) {
+      for (let i = 0; i < resultLength; i++) {
+        result[i] = ~result[i];
+      }
+    } else {
+      // At around 128 bytes (measured in benchmarks), it becomes faster to
+      // construct a temporary `Uint32Array` just to complement four bytes at a
+      // time. But we might have a little bit extra to do if the length isn't a
+      // multiple of four.
+      const byteRemainder = resultLength & 0x03;
+      const resultUint32 = new Uint32Array(result.buffer, 0, resultLength >> 2);
+
+      for (let i = 0; i < resultUint32.length; i++) {
+        resultUint32[i] = ~resultUint32[i];
+      }
+
+      for (let i = resultLength - byteRemainder; i < resultLength; i++) {
+        result[i] = ~result[i];
+      }
     }
 
     return result;

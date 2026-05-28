@@ -30,6 +30,25 @@ export interface HarnessReadSkillResourceToolInputSummary {
   maxBytes?: number;
 }
 
+export interface HarnessRunSkillScriptToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "run_skill_script";
+  skill?: string;
+  path?: string;
+  argsCount?: number;
+  cwd?: string;
+  timeoutMs?: number;
+}
+
+export interface HarnessWebFetchToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "web_fetch";
+  url?: string;
+  maxBytes?: number;
+  maxTextChars?: number;
+  timeoutMs?: number;
+}
+
 export interface HarnessWriteFileToolInputSummary {
   type: "cf-harness.tool-input-summary";
   toolId: "write_file";
@@ -69,6 +88,8 @@ export type HarnessToolInputSummary =
   | HarnessBashToolInputSummary
   | HarnessReadFileToolInputSummary
   | HarnessReadSkillResourceToolInputSummary
+  | HarnessRunSkillScriptToolInputSummary
+  | HarnessWebFetchToolInputSummary
   | HarnessEditFileToolInputSummary
   | HarnessWriteFileToolInputSummary
   | HarnessDelegateTaskToolInputSummary

@@ -2,6 +2,8 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   toCompactDebugString,
   toIndentedDebugString,
@@ -36,6 +38,7 @@ import {
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
+  areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   getMetaCell,
   getMetaLink,
@@ -58,7 +61,7 @@ import type {
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import {
   ignoreReadForScheduling,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { FunctionCache } from "./function-cache.ts";
@@ -116,6 +119,47 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
   "navigateTo",
   "streamData",
 ]);
+
+function schedulerRawActionName(
+  rawTargetName: string,
+  inputCells: readonly NormalizedFullLink[],
+  outputCells: readonly NormalizedFullLink[],
+): string {
+  const identity = hashOf({
+    type: "raw-node",
+    name: rawTargetName,
+    inputs: inputCells.map(schedulerActionLinkIdentity),
+    outputs: outputCells.map(schedulerActionLinkIdentity),
+  }).toJSON()["/"].slice(0, 12);
+  return `raw:${rawTargetName}:${identity}`;
+}
+
+function schedulerJavaScriptActionName(
+  actionName: string,
+  processCell: Cell<unknown>,
+  reads: readonly NormalizedFullLink[],
+  writes: readonly NormalizedFullLink[],
+): string {
+  const identity = hashOf({
+    type: "javascript-node",
+    name: actionName,
+    process: schedulerActionLinkIdentity(
+      processCell.getAsNormalizedFullLink(),
+    ),
+    reads: reads.map(schedulerActionLinkIdentity),
+    writes: writes.map(schedulerActionLinkIdentity),
+  }).toJSON()["/"].slice(0, 12);
+  return `action:${actionName}:${identity}`;
+}
+
+function schedulerActionLinkIdentity(link: NormalizedFullLink) {
+  return {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+    path: link.path,
+  };
+}
 
 function schemaCellScope(
   schema: JSONSchema | undefined,
@@ -411,17 +455,44 @@ type JavaScriptNodeContext = BoundNodeIO & {
   fn: (...args: any[]) => any;
   name: string | undefined;
   verifiedLoadId: string | undefined;
+  schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
 };
 
 type JavaScriptActionResultCells = {
   byScope: Map<CellScope, Cell<any>>;
 };
 
+type SchedulerRehydrationSubscriptionOptions = {
+  rehydrateFromStorage?: {
+    space: MemorySpace;
+    pieceId: string;
+    processGeneration: number;
+  };
+};
+
+function dedupeNormalizedLinks(
+  links: readonly NormalizedFullLink[],
+): NormalizedFullLink[] {
+  const deduped: NormalizedFullLink[] = [];
+  for (const link of links) {
+    if (deduped.some((existing) => areNormalizedLinksSame(existing, link))) {
+      continue;
+    }
+    deduped.push(link);
+  }
+  return deduped;
+}
+
 export class Runner {
-  readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
+  readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
-  private locallyPreparedResults = new Set<`${MemorySpace}/${URI}`>();
+  private locallyPreparedResults = new Set<
+    `${MemorySpace}/${CellScope}/${URI}`
+  >();
+  private locallyStoppedResults = new Set<
+    `${MemorySpace}/${CellScope}/${URI}`
+  >();
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
   private resultPatternCache = new Map<
@@ -906,11 +977,12 @@ export class Runner {
       tx?: IExtendedStorageTransaction;
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
+      rehydrateSchedulerFromStorage?: boolean;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
     const key = this.getDocKey(resultCell);
-    this.locallyPreparedResults.delete(key);
+    this.locallyStoppedResults.delete(key);
 
     // Create cancel group early, before wiring pattern/node sinks.
     const [cancel, addCancel] = useCancelGroup();
@@ -942,6 +1014,10 @@ export class Runner {
       this.discoverAndCacheFunctions(pattern, new Set());
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
+      const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
+          false
+        ? {}
+        : this.schedulerRehydrationOptions(resultCell);
       try {
         for (const node of pattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
@@ -953,6 +1029,7 @@ export class Runner {
             baseCell,
             addNodeCancel,
             pattern,
+            schedulerRehydration,
           );
         }
       } finally {
@@ -1084,6 +1161,7 @@ export class Runner {
 
     const key = this.getDocKey(rootCell);
     const wasPreparedLocally = this.locallyPreparedResults.has(key);
+    const wasStoppedLocally = this.locallyStoppedResults.has(key);
 
     // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
@@ -1103,6 +1181,17 @@ export class Runner {
     // Step 4: Check whether the pattern is available, otherwise load it
     const patternId = getPatternId(rootCell);
     if (!patternId) {
+      // We may have a slug instead of a resultCell, so try the link.
+      const maybeLink = parseLink(rootCell.getRaw(), rootCell);
+      if (maybeLink) {
+        const nextCell = this.runtime.getCellFromLink(maybeLink);
+        if (seenCells.has(nextCell)) {
+          return Promise.reject(new Error("Circular link detected"));
+        }
+        seenCells.add(nextCell);
+        return this.doStart(nextCell, seenCells);
+      }
+
       return Promise.reject(
         new Error(`Cannot start: no pattern ID (pattern)`),
       );
@@ -1112,6 +1201,7 @@ export class Runner {
       patternId,
       wasSyncedAtEntry,
       wasPreparedLocally,
+      wasStoppedLocally,
       seenCells,
     );
   }
@@ -1121,6 +1211,7 @@ export class Runner {
     patternId: URI,
     wasSyncedAtEntry: boolean,
     wasPreparedLocally: boolean,
+    wasStoppedLocally: boolean,
     seenCells: Set<Cell>,
   ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
@@ -1142,15 +1233,17 @@ export class Runner {
 
     const resolvedPattern = this.resolveToPattern(pattern);
 
-    // Fast path for pieces prepared in the current runtime via setup()/run().
-    // Those writes are already present locally, so we should preserve the
-    // historical synchronous start() behavior even if an earlier read flipped
-    // the cell's generic `synced` flag. The dependency sync below is
-    // specifically for resumed pieces that came from storage.
-    if (!wasSyncedAtEntry || wasPreparedLocally) {
+    // Fast path for pieces prepared in the current runtime via setup()/run() or
+    // explicitly restarted after stop(). Those writes are already present
+    // locally, so we should preserve the historical synchronous start()
+    // behavior even if an earlier read flipped the cell's generic `synced`
+    // flag. The dependency sync below is specifically for resumed pieces that
+    // came from storage.
+    if (!wasSyncedAtEntry || wasPreparedLocally || wasStoppedLocally) {
       try {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
+          rehydrateSchedulerFromStorage: !wasStoppedLocally,
         });
       } catch (err) {
         return Promise.reject(err);
@@ -1164,6 +1257,11 @@ export class Runner {
     // observe the last persisted result but miss subsequent input updates.
     return this.syncCellsForRunningPattern(rootCell, resolvedPattern)
       .then(() => {
+        // we may already be in the midst of starting this, so don't start again
+        if (this.cancels.has(this.getDocKey(rootCell))) {
+          return true;
+        }
+
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
@@ -1427,6 +1525,26 @@ export class Runner {
     return `${space}/${scope}/${id}`;
   }
 
+  private schedulerRehydrationOptions(resultCell: Cell<any>): {
+    rehydrateFromStorage?: {
+      space: MemorySpace;
+      pieceId: string;
+      processGeneration: number;
+    };
+  } {
+    if (!getPersistentSchedulerStateConfig()) {
+      return {};
+    }
+    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    return {
+      rehydrateFromStorage: {
+        space,
+        pieceId: `${scope}:${id}`,
+        processGeneration: 0,
+      },
+    };
+  }
+
   private async syncCellsForRunningPattern(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
@@ -1509,7 +1627,7 @@ export class Runner {
     const key = this.getDocKey(resultCell);
     this.cancels.get(key)?.();
     this.cancels.delete(key);
-    this.locallyPreparedResults.delete(key);
+    this.locallyStoppedResults.add(key);
   }
 
   stopAll(): void {
@@ -1526,6 +1644,7 @@ export class Runner {
     // canceled
     this.resultPatternCache.clear();
     this.locallyPreparedResults.clear();
+    this.locallyStoppedResults.clear();
   }
 
   /**
@@ -1656,6 +1775,7 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
     moduleRefName?: string,
   ) {
     if (isModule(module)) {
@@ -1672,6 +1792,7 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
+            schedulerRehydration,
             refName,
           );
           break;
@@ -1686,6 +1807,7 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
+            schedulerRehydration,
           );
           break;
         case "raw":
@@ -1698,6 +1820,7 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
+            schedulerRehydration,
             moduleRefName,
           );
           break;
@@ -1762,6 +1885,260 @@ export class Runner {
       reads: findAllWriteRedirectCells(inputs, baseCell),
       writes: findAllWriteRedirectCells(outputs, baseCell),
     };
+  }
+
+  private collectStaticRedirectWriteTargets(
+    tx: IExtendedStorageTransaction,
+    outputCells: readonly NormalizedFullLink[],
+  ): NormalizedFullLink[] {
+    // Write redirects are the static writable-output form: resolving them here
+    // lets pull-mode indexing treat the resolved target like a normal declared
+    // write. Dynamic writable-input writes use materializer envelopes instead.
+    if (!outputCells.some((link) => link.overwrite === "redirect")) {
+      return [];
+    }
+
+    const targets: NormalizedFullLink[] = [];
+    for (const output of outputCells) {
+      if (output.overwrite !== "redirect") continue;
+      try {
+        const { overwrite: _overwrite, ...target } = resolveLink(
+          this.runtime,
+          tx,
+          output,
+          "writeRedirect",
+        );
+        targets.push(target);
+      } catch (error) {
+        // Some setup paths have not fully materialized process-cell redirects
+        // yet. Leave those to runtime dependency collection after the action
+        // has run, but keep debug context for unexpected resolution failures.
+        logger.debug("static-redirect-write-target", () => [
+          "Unable to resolve static redirect write target",
+          { output, error },
+        ]);
+      }
+    }
+    return dedupeNormalizedLinks(targets);
+  }
+
+  private populateDeclaredSchedulerReads(
+    reads: readonly NormalizedFullLink[],
+    depTx: IExtendedStorageTransaction,
+  ): void {
+    // For event preflight, writable-input links are narrower than traversing
+    // captured argument objects and avoid treating broad closures as demand.
+    for (const read of reads) {
+      let target = read;
+      if (read.overwrite === "redirect") {
+        try {
+          const { overwrite: _overwrite, ...resolved } = resolveLink(
+            this.runtime,
+            depTx,
+            read,
+            "writeRedirect",
+          );
+          target = {
+            ...resolved,
+            schema: resolved.schema ?? read.schema,
+          };
+        } catch (error) {
+          logger.debug("scheduler-read-redirect", () => [
+            "Unable to resolve scheduler read redirect",
+            { read, error },
+          ]);
+        }
+      }
+      this.runtime.getCellFromLink(target, target.schema, depTx)?.get();
+    }
+  }
+
+  private populateHandlerEventSchedulerReads(
+    argumentSchema: JSONSchema | undefined,
+    processCell: Cell<any>,
+    event: unknown,
+    depTx: IExtendedStorageTransaction,
+  ): void {
+    if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+      return;
+    }
+    const eventSchema = argumentSchema.properties.$event;
+    if (eventSchema === undefined) {
+      return;
+    }
+
+    const eventDependencySchema: JSONSchema = {
+      type: "object",
+      properties: { $event: eventSchema as JSONSchema },
+      ...(argumentSchema.$defs !== undefined &&
+        { $defs: argumentSchema.$defs }),
+      ...(argumentSchema.definitions !== undefined &&
+        { definitions: argumentSchema.definitions }),
+    };
+    const inputsCell = this.runtime.getImmutableCell(
+      processCell.space,
+      { $event: event },
+      undefined,
+      depTx,
+    );
+    inputsCell.asSchema(eventDependencySchema).get({
+      traverseCells: true,
+    });
+  }
+
+  private collectWritableCellArgumentLinks(
+    argumentSchema: JSONSchema | undefined,
+    value: unknown,
+    processCell: Cell<any>,
+    writeInputPaths?: readonly (readonly string[])[],
+  ): NormalizedFullLink[] {
+    const links: NormalizedFullLink[] = [];
+    const seen = new WeakMap<object, Set<string>>();
+
+    const pathsOverlap = (
+      left: readonly string[],
+      right: readonly string[],
+    ): boolean => {
+      const shorter = left.length <= right.length ? left : right;
+      const longer = left.length <= right.length ? right : left;
+      return shorter.every((segment, index) => longer[index] === segment);
+    };
+    const shouldCollectPath = (path: readonly string[]): boolean =>
+      !writeInputPaths || writeInputPaths.length === 0 ||
+      writeInputPaths.some((writePath) => pathsOverlap(path, writePath));
+
+    const visit = (
+      schema: unknown,
+      currentValue: unknown,
+      path: readonly string[],
+    ): void => {
+      if (!isRecord(schema)) return;
+      const pathKey = JSON.stringify(path);
+      const seenPaths = seen.get(schema);
+      if (seenPaths?.has(pathKey)) return;
+      if (seenPaths) {
+        seenPaths.add(pathKey);
+      } else {
+        seen.set(schema, new Set([pathKey]));
+      }
+
+      const asCell = schema.asCell;
+      if (
+        Array.isArray(asCell) &&
+        (asCell.includes("cell") || asCell.includes("writeonly"))
+      ) {
+        if (shouldCollectPath(path)) {
+          links.push(...findAllWriteRedirectCells(currentValue, processCell));
+        }
+        return;
+      }
+
+      if (isRecord(schema.properties) && isRecord(currentValue)) {
+        for (const [key, propertySchema] of Object.entries(schema.properties)) {
+          visit(propertySchema, currentValue[key], [...path, key]);
+        }
+      }
+
+      for (const key of ["items", "additionalProperties"] as const) {
+        if (schema[key] !== undefined) {
+          visit(schema[key], currentValue, path);
+        }
+      }
+      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+        const branches = schema[key];
+        if (Array.isArray(branches)) {
+          for (const branch of branches) visit(branch, currentValue, path);
+        }
+      }
+    };
+
+    visit(argumentSchema, value, []);
+    return dedupeNormalizedLinks(links);
+  }
+
+  private moduleHasOpaqueResult(module: Module): boolean {
+    const resultSchema = module.resultSchema;
+    return isRecord(resultSchema) &&
+      Array.isArray(resultSchema.asCell) &&
+      resultSchema.asCell.includes("opaque");
+  }
+
+  private collectArgumentSchedulerReadLinks(
+    argumentSchema: JSONSchema | undefined,
+    value: unknown,
+    processCell: Cell<any>,
+  ): NormalizedFullLink[] {
+    const links: NormalizedFullLink[] = [];
+    const seen = new WeakMap<object, Set<unknown>>();
+    const rootSchema = argumentSchema;
+
+    const schemaWithRootDefinitions = (
+      schema: JSONSchema | undefined,
+    ): JSONSchema | undefined => {
+      if (!isRecord(schema) || !isRecord(rootSchema)) {
+        return schema;
+      }
+      return {
+        ...schema,
+        ...(schema.$defs === undefined && rootSchema.$defs !== undefined &&
+          { $defs: rootSchema.$defs }),
+        ...(schema.definitions === undefined &&
+          rootSchema.definitions !== undefined &&
+          { definitions: rootSchema.definitions }),
+      };
+    };
+
+    const visit = (schema: unknown, currentValue: unknown): void => {
+      if (isWriteRedirectLink(currentValue)) {
+        const link = parseLink(currentValue, processCell);
+        links.push({
+          ...link,
+          schema: link.schema ?? schemaWithRootDefinitions(
+            schema as JSONSchema | undefined,
+          ),
+        });
+        return;
+      }
+      if (isCellLink(currentValue)) {
+        return;
+      }
+      if (!isRecord(schema)) return;
+      const seenValues = seen.get(schema) ?? new Set<unknown>();
+      if (seenValues.has(currentValue)) return;
+      seenValues.add(currentValue);
+      seen.set(schema, seenValues);
+
+      if (isRecord(schema.properties) && isRecord(currentValue)) {
+        for (const [key, propertySchema] of Object.entries(schema.properties)) {
+          visit(propertySchema, currentValue[key]);
+        }
+      }
+
+      if (Array.isArray(currentValue) && schema.items !== undefined) {
+        for (const item of currentValue) visit(schema.items, item);
+      }
+      if (
+        schema.additionalProperties !== undefined &&
+        isRecord(currentValue)
+      ) {
+        const declaredKeys = isRecord(schema.properties)
+          ? new Set(Object.keys(schema.properties))
+          : undefined;
+        for (const [key, propertyValue] of Object.entries(currentValue)) {
+          if (declaredKeys?.has(key)) continue;
+          visit(schema.additionalProperties, propertyValue);
+        }
+      }
+      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+        const branches = schema[key];
+        if (Array.isArray(branches)) {
+          for (const branch of branches) visit(branch, currentValue);
+        }
+      }
+    };
+
+    visit(argumentSchema, value);
+    return dedupeNormalizedLinks(links);
   }
 
   private resolveJavaScriptFunction(
@@ -1948,6 +2325,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     cause: Record<string, any>,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ): any {
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
@@ -1998,7 +2376,7 @@ export class Runner {
       const cancel = this.runtime.scheduler.subscribe(
         readResultAction,
         readResultAction,
-        { isEffect: true },
+        { isEffect: true, ...schedulerRehydration },
       );
       tx.addCommitCallback((_committedTx, result) => {
         if (result.error) {
@@ -2227,6 +2605,7 @@ export class Runner {
       reads,
       writes,
       verifiedLoadId,
+      schedulerRehydration,
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
@@ -2346,6 +2725,7 @@ export class Runner {
               processCell,
               addCancel,
               cause,
+              schedulerRehydration,
             );
           } finally {
             logger.timeEnd("stream", "postRun");
@@ -2374,7 +2754,25 @@ export class Runner {
       pattern,
     });
 
-    const populateDependencies = module.argumentSchema
+    const schedulerReads = this.collectArgumentSchedulerReadLinks(
+      module.argumentSchema,
+      inputs,
+      processCell,
+    );
+    const declaredSchedulerReads = schedulerReads.length > 0
+      ? schedulerReads
+      : reads;
+    const populateDependencies = reads.length > 0
+      ? (depTx: IExtendedStorageTransaction, event: any) => {
+        this.populateDeclaredSchedulerReads(declaredSchedulerReads, depTx);
+        this.populateHandlerEventSchedulerReads(
+          module.argumentSchema,
+          processCell,
+          event,
+          depTx,
+        );
+      }
+      : module.argumentSchema
       ? (depTx: IExtendedStorageTransaction, event: any) => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
@@ -2416,6 +2814,7 @@ export class Runner {
       reads,
       writes,
       verifiedLoadId,
+      schedulerRehydration,
     }: JavaScriptNodeContext,
   ): void {
     if (isRecord(inputs) && "$event" in inputs) {
@@ -2591,12 +2990,45 @@ export class Runner {
     };
 
     if (name) {
-      setRunnableName(action, `action:${name}`, { setSrc: true });
+      setRunnableName(
+        action,
+        schedulerJavaScriptActionName(name, processCell, reads, writes),
+        { setSrc: true },
+      );
     }
 
+    // Writable arguments alone do not make an output-producing action a
+    // materializer: pure UI computations frequently read Writable cells. The
+    // transformer marks callbacks that actually write through captured cells;
+    // the opaque-result fallback covers older generated side-write modules
+    // that do not carry that metadata.
+    const materializerWriteEnvelopes = module.materializerWriteEnvelopes ??
+      (module.materializerWriteInputPaths !== undefined
+        ? this.collectWritableCellArgumentLinks(
+          module.argumentSchema,
+          inputs,
+          processCell,
+          module.materializerWriteInputPaths,
+        )
+        : this.moduleHasOpaqueResult(module)
+        ? this.collectWritableCellArgumentLinks(
+          module.argumentSchema,
+          inputs,
+          processCell,
+        )
+        : []);
+    const hasMaterializerWriteEnvelopes = materializerWriteEnvelopes.length > 0;
+    const staticRedirectWriteTargets = hasMaterializerWriteEnvelopes
+      ? []
+      : this.collectStaticRedirectWriteTargets(tx, writes);
+    const schedulingWrites = dedupeNormalizedLinks([
+      ...writes,
+      ...staticRedirectWriteTargets,
+    ]);
     const wrappedAction = Object.assign(action, {
       reads,
-      writes,
+      writes: schedulingWrites,
+      ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
       module,
       pattern,
     });
@@ -2604,7 +3036,9 @@ export class Runner {
     const populateDependencies = (depTx: IExtendedStorageTransaction) => {
       logger.timeStart("action", "populateDependencies");
       try {
-        if (module.argumentSchema !== undefined) {
+        if (reads.length > 0) {
+          this.populateDeclaredSchedulerReads(reads, depTx);
+        } else if (module.argumentSchema !== undefined) {
           const inputsCell = this.runtime.getImmutableCell(
             processCell.space,
             inputs,
@@ -2614,15 +3048,11 @@ export class Runner {
           inputsCell.asSchema(module.argumentSchema!).get({
             traverseCells: true,
           });
-        } else {
-          for (const read of reads) {
-            this.runtime.getCellFromLink(read, undefined, depTx)?.get();
-          }
         }
 
         for (const output of writes) {
           this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
+            meta: markReadAsAttemptedWrite,
           });
         }
       } finally {
@@ -2631,7 +3061,9 @@ export class Runner {
     };
 
     addCancel(
-      this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
+      this.runtime.scheduler.subscribe(wrappedAction, populateDependencies, {
+        ...schedulerRehydration,
+      }),
     );
   }
 
@@ -2644,6 +3076,7 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
     const io = this.bindNodeIO(
       inputBindings,
@@ -2665,6 +3098,7 @@ export class Runner {
       fn,
       name,
       verifiedLoadId,
+      schedulerRehydration,
       ...io,
     };
 
@@ -2748,6 +3182,7 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
     moduleRefName?: string,
   ) {
     if (typeof module.implementation !== "function") {
@@ -2891,7 +3326,11 @@ export class Runner {
       sanitizeDebugLabel(impl.src) ??
       sanitizeDebugLabel(impl.name) ??
       "anonymous";
-    const rawName = `raw:${rawTargetName}`;
+    const rawName = schedulerRawActionName(
+      rawTargetName,
+      inputCells,
+      outputCells,
+    );
 
     const action: Action = (tx: IExtendedStorageTransaction) => {
       logger.timeStart("raw", "run", rawTargetName);
@@ -2913,9 +3352,19 @@ export class Runner {
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
+    const staticRedirectWriteTargets = module.materializerWriteEnvelopes
+      ? []
+      : this.collectStaticRedirectWriteTargets(tx, outputCells);
+    const schedulingWrites = dedupeNormalizedLinks([
+      ...outputCells,
+      ...staticRedirectWriteTargets,
+    ]);
     Object.assign(action, builtinAction, {
       reads: inputCells,
-      writes: outputCells,
+      writes: schedulingWrites,
+      ...(module.materializerWriteEnvelopes
+        ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
+        : {}),
       module,
       pattern,
     });
@@ -2943,11 +3392,11 @@ export class Runner {
             this.runtime.getCellFromLink(input, undefined, depTx)?.get();
           }
         }
-        // Always capture write dependencies by marking outputs as potential writes
+        // Always capture write dependencies by marking outputs as attempted writes
         for (const output of outputCells) {
-          // Reading with markReadAsPotentialWrite registers this as a write dependency
+          // Reading with markReadAsAttemptedWrite registers this as a write dependency
           this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
+            meta: markReadAsAttemptedWrite,
           });
         }
       } finally {
@@ -2967,6 +3416,7 @@ export class Runner {
         debounce,
         noDebounce,
         throttle,
+        ...schedulerRehydration,
       }),
     );
   }
@@ -3027,6 +3477,7 @@ export class Runner {
       argumentCellLink,
       internalCellLink,
       resultCellLink,
+      { targetSchema: patternImpl.argumentSchema },
     );
 
     // If output bindings is a link to a non-redirect cell,
@@ -3044,6 +3495,7 @@ export class Runner {
         resultCell.space,
         {
           pattern: module.implementation,
+          parent: resultCell.entityId,
           inputBindings,
           outputBindings,
         },

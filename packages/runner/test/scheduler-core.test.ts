@@ -23,6 +23,7 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
 
 describe("scheduler", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -341,6 +342,85 @@ describe("scheduler", () => {
       ),
       "captures writer action IDs outside diagnosis mode",
     ).toBe(true);
+  });
+
+  it("rechecks downstream readers after delayed computation commits", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const a = runtime.getCell<number>(
+      space,
+      "delayed computation commit source",
+      undefined,
+      tx,
+    );
+    a.set(0);
+    const b = runtime.getCell<number>(
+      space,
+      "delayed computation commit intermediate",
+      undefined,
+      tx,
+    );
+    b.set(0);
+    const c = runtime.getCell<number>(
+      space,
+      "delayed computation commit sink",
+      undefined,
+      tx,
+    );
+    c.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    function computeIntermediate(actionTx: IExtendedStorageTransaction) {
+      const nextValue = a.withTx(actionTx).get() ?? 0;
+      b.withTx(actionTx).send(nextValue);
+      if (nextValue === 1) {
+        const originalCommit = actionTx.commit.bind(actionTx);
+        actionTx.commit = () =>
+          new Promise((resolve, reject) => {
+            setTimeout(() => {
+              originalCommit().then(resolve, reject);
+            }, 25);
+          });
+      }
+    }
+
+    function effectSink(actionTx: IExtendedStorageTransaction) {
+      c.withTx(actionTx).send(b.withTx(actionTx).get() ?? 0);
+    }
+
+    runtime.scheduler.subscribe(
+      computeIntermediate,
+      {
+        reads: [toMemorySpaceAddress(a.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
+      },
+    );
+    runtime.scheduler.subscribe(
+      effectSink,
+      {
+        reads: [toMemorySpaceAddress(b.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(c.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await c.pull();
+    expect(c.get()).toBe(0);
+
+    a.withTx(tx).send(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const deadline = performance.now() + 1_000;
+    while (c.get() !== 1 && performance.now() < deadline) {
+      await runtime.scheduler.idle();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(c.get()).toBe(1);
   });
 
   it("captures exact action runs for one reactive update", async () => {
@@ -1072,11 +1152,11 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 2, version: 1 });
   });
 
-  it("should track potentialWrites via Cell.set on nested path", async () => {
+  it("should track attemptedWrites via Cell.set on nested path", async () => {
     // Create a cell with nested structure
     const testCell = runtime.getCell<{ nested: { a: number; b: string } }>(
       space,
-      "potential-writes-cell-set-test",
+      "attempted-writes-cell-set-test",
       undefined,
       tx,
     );
@@ -1088,26 +1168,34 @@ describe("scheduler", () => {
     const setTx = runtime.edit();
     testCell.withTx(setTx).key("nested").set({ a: 1, b: "world" });
 
-    const log = txToReactivityLog(setTx);
+    const storageLog = getDirectTransactionReactivityLog(setTx)!;
+    const schedulerLog = txToReactivityLog(setTx);
 
-    // key("nested").set() reads the nested object to compare
-    // The "nested" path should appear in potentialWrites
-    expect(log.potentialWrites).toBeDefined();
+    // key("nested").set() reads the nested object to compare.
+    // The "nested" path should appear in attemptedWrites for CFC/security,
+    // but scheduler-facing ReactivityLog should not expose attemptedWrites.
+    const schedulerLogWithAttemptedWrites = schedulerLog as
+      & typeof schedulerLog
+      & {
+        attemptedWrites?: typeof schedulerLog.writes;
+      };
+    expect(storageLog.attemptedWrites).toBeDefined();
+    expect(schedulerLogWithAttemptedWrites.attemptedWrites).toBeUndefined();
     expect(
-      log.potentialWrites!.some((addr) =>
+      storageLog.attemptedWrites!.some((addr) =>
         addr.path[0] === "value" && addr.path[1] === "nested"
       ),
     ).toBe(true);
 
     // Only `b` changed within nested, so nested.b should be in writes
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "b"
       ),
     ).toBe(true);
     // nested.a should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "a"
       ),
     ).toBe(false);
@@ -1115,13 +1203,13 @@ describe("scheduler", () => {
     await setTx.commit();
   });
 
-  it("should include nested path in potentialWrites when using key().set()", async () => {
+  it("should include nested path in attemptedWrites when using key().set()", async () => {
     // Create a cell with nested structure
     const testCell = runtime.getCell<{
       data: { unchanged: number; changed: number };
     }>(
       space,
-      "diff-update-potential-writes-cell",
+      "diff-update-attempted-writes-cell",
       undefined,
       tx,
     );
@@ -1133,27 +1221,34 @@ describe("scheduler", () => {
     const setTx = runtime.edit();
     testCell.withTx(setTx).key("data").set({ unchanged: 42, changed: 999 });
 
-    const log = txToReactivityLog(setTx);
+    const storageLog = getDirectTransactionReactivityLog(setTx)!;
+    const schedulerLog = txToReactivityLog(setTx);
 
-    // The "data" path should be in potentialWrites because diffAndUpdate
-    // reads the nested object to compare
-    expect(log.potentialWrites).toBeDefined();
+    // The "data" path should be in attemptedWrites because diffAndUpdate
+    // reads the nested object to compare.
+    const schedulerLogWithAttemptedWrites = schedulerLog as
+      & typeof schedulerLog
+      & {
+        attemptedWrites?: typeof schedulerLog.writes;
+      };
+    expect(storageLog.attemptedWrites).toBeDefined();
+    expect(schedulerLogWithAttemptedWrites.attemptedWrites).toBeUndefined();
     expect(
-      log.potentialWrites!.some((addr) =>
+      storageLog.attemptedWrites!.some((addr) =>
         addr.path[0] === "value" && addr.path[1] === "data"
       ),
     ).toBe(true);
 
     // Only changed property within data should be in writes
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "data" &&
         w.path[2] === "changed"
       ),
     ).toBe(true);
     // unchanged property should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "data" &&
         w.path[2] === "unchanged"
       ),
@@ -1162,10 +1257,10 @@ describe("scheduler", () => {
     await setTx.commit();
   });
 
-  it("should not have potentialWrites when using getRaw without metadata", async () => {
+  it("should not have attemptedWrites when using getRaw without metadata", async () => {
     const testCell = runtime.getCell<{ value: number }>(
       space,
-      "no-potential-writes-cell",
+      "no-attempted-writes-cell",
       undefined,
       tx,
     );
@@ -1173,15 +1268,22 @@ describe("scheduler", () => {
     tx.commit();
     tx = runtime.edit();
 
-    // getRaw without metadata should not create potentialWrites
+    // getRaw without metadata should not create attemptedWrites
     const readTx = runtime.edit();
     testCell.withTx(readTx).key("value").getRaw();
 
-    const log = txToReactivityLog(readTx);
+    const storageLog = getDirectTransactionReactivityLog(readTx)!;
+    const schedulerLog = txToReactivityLog(readTx);
 
-    // Should have reads but no potentialWrites
-    expect(log.reads.length).toBeGreaterThanOrEqual(1);
-    expect(log.potentialWrites).toBeUndefined();
+    // Should have reads but no attemptedWrites
+    const schedulerLogWithAttemptedWrites = schedulerLog as
+      & typeof schedulerLog
+      & {
+        attemptedWrites?: typeof schedulerLog.writes;
+      };
+    expect(schedulerLog.reads.length).toBeGreaterThanOrEqual(1);
+    expect(storageLog.attemptedWrites).toBeUndefined();
+    expect(schedulerLogWithAttemptedWrites.attemptedWrites).toBeUndefined();
 
     await readTx.commit();
   });
@@ -1204,6 +1306,39 @@ describe("scheduler", () => {
     expect(log.shallowReads.length).toBeGreaterThanOrEqual(1);
     expect(log.shallowReads.some((addr) => addr.path[0] === "value"))
       .toBe(true);
+
+    await readTx.commit();
+  });
+
+  it("should track getMetaRaw reads in the normal scheduler read log", async () => {
+    const testCell = runtime.getCell<{ value: number }>(
+      space,
+      "meta-read-log-cell",
+      undefined,
+      tx,
+    );
+    testCell.set({ value: 1 });
+    testCell.setMetaRaw("slug", "tracked-slug");
+    tx.commit();
+    tx = runtime.edit();
+
+    const readTx = runtime.edit();
+    expect(testCell.withTx(readTx).getMetaRaw("slug")).toBe("tracked-slug");
+
+    const log = txToReactivityLog(readTx);
+    expect(
+      log.reads.some((addr) =>
+        addr.id === testCell.getAsNormalizedFullLink().id &&
+        addr.path.length === 1 &&
+        addr.path[0] === "slug"
+      ),
+    ).toBe(true);
+    expect(
+      log.shallowReads.some((addr) =>
+        addr.id === testCell.getAsNormalizedFullLink().id &&
+        addr.path[0] === "slug"
+      ),
+    ).toBe(false);
 
     await readTx.commit();
   });

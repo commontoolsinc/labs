@@ -634,6 +634,73 @@ describe("link-utils", () => {
 
       expect(result["/"][LINK_V1_TAG].overwrite).toBe("redirect");
     });
+
+    it("should preserve stream cell schemas by default when including schema", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = createSigilLinkFromParsedLink({
+        id: "of:stream-schema",
+        path: [],
+        space,
+        schema,
+      }, { includeSchema: true });
+
+      expect(result["/"][LINK_V1_TAG].schema).toEqual(schema);
+    });
+
+    it("should strip stream cell schemas from links when requested", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = createSigilLinkFromParsedLink({
+        id: "of:stream-schema",
+        path: [],
+        space,
+        schema,
+      }, { includeSchema: true, keepStreams: false });
+
+      expect(result["/"][LINK_V1_TAG].schema).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+          },
+        },
+        required: ["title"],
+      });
+    });
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {
@@ -693,6 +760,40 @@ describe("link-utils", () => {
                 },
               },
             },
+          },
+        },
+      });
+    });
+
+    it("should preserve scope from stripped scoped asCell entries", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          rack: {
+            type: "array",
+            items: { type: "string" },
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+          message: {
+            type: "string",
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          rack: {
+            type: "array",
+            items: { type: "string" },
+            scope: "user",
+          },
+          message: {
+            type: "string",
+            scope: "session",
           },
         },
       });

@@ -39,7 +39,9 @@ export default pattern(() => {
     return {
         [UI]: (<div>
         {/* Case A: Top-level computed - always worked */}
-        <div style={__cfHelpers.derive({
+        <div style={__cfHelpers.lift<{
+                secondToggle: __cfHelpers.ReadonlyCell<boolean>;
+            }, { background: string; }>({
                 type: "object",
                 properties: {
                     secondToggle: {
@@ -56,10 +58,10 @@ export default pattern(() => {
                     }
                 },
                 required: ["background"]
-            } as const satisfies __cfHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
+            } as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
                 const val = secondToggle.get();
                 return { background: val ? "green" : "red" };
-            })}>Case A</div>
+            })({ secondToggle: secondToggle })}>Case A</div>
 
         {/* Case B: Computed inside ifElse - this was the bug */}
         {ifElse({
@@ -75,7 +77,9 @@ export default pattern(() => {
                         type: "object",
                         properties: {}
                     }]
-            } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, showOuter, <div style={__cfHelpers.derive({
+            } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, showOuter, <div style={__cfHelpers.lift<{
+                    secondToggle: __cfHelpers.ReadonlyCell<boolean>;
+                }, { background: string; }>({
                     type: "object",
                     properties: {
                         secondToggle: {
@@ -92,11 +96,11 @@ export default pattern(() => {
                         }
                     },
                     required: ["background"]
-                } as const satisfies __cfHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
+                } as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
                     // This .get() should NOT be wrapped in extra derive
                     const val = secondToggle.get();
                     return { background: val ? "green" : "red" };
-                })}>Case B</div>, <div>Hidden</div>)}
+                })({ secondToggle: secondToggle })}>Case B</div>, <div>Hidden</div>)}
       </div>),
     };
 }, {

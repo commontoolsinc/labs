@@ -16,7 +16,16 @@ export interface TelemetryAnnotations {
   module: Module;
   reads: NormalizedFullLink[];
   writes: NormalizedFullLink[];
+  materializerWriteEnvelopes?: NormalizedFullLink[];
   ignoredSchedulingWrites?: NormalizedFullLink[];
+  schedulerObservationIdentity?: SchedulerObservationIdentity;
+}
+
+export interface SchedulerObservationIdentity {
+  ownerSpace?: MemorySpace;
+  branch?: string;
+  pieceId: string;
+  processGeneration?: number;
 }
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
@@ -59,8 +68,6 @@ export type ReactivityLog = {
   /** Reads that should not invalidate on child writes unless they add a new key */
   shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
-  /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
-  potentialWrites?: IMemorySpaceAddress[];
 };
 
 export type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;

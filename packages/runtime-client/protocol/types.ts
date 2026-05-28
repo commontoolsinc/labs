@@ -15,6 +15,7 @@ import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
+import type { MetaField } from "@commonfabric/api";
 export type { JSONSchema, JSONValue, Program };
 
 export type { CfcLabelView };
@@ -74,6 +75,7 @@ export enum RequestType {
   RecreateSpaceRootPattern = "pattern:recreateSpaceRoot",
   PageCreate = "page:create",
   PageGet = "page:get",
+  PageGetSlug = "page:getSlug",
   PageRemove = "page:remove",
   PageStart = "page:start",
   PageStop = "page:stop",
@@ -130,6 +132,7 @@ export interface InitializationData {
   // Experimental space-model feature flags.
   experimental?: {
     modernDataModel?: boolean;
+    persistentSchedulerState?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -161,6 +164,7 @@ export interface DisposeRequest extends BaseRequest {
 export interface CellGetRequest extends BaseRequest {
   type: RequestType.CellGet;
   cell: CellRef;
+  meta?: MetaField;
 }
 
 export interface CellSetRequest extends BaseRequest {
@@ -440,6 +444,11 @@ export interface PageGetRequest extends BaseRequest {
   runIt?: boolean;
 }
 
+export interface PageGetSlugRequest extends BaseRequest {
+  type: RequestType.PageGetSlug;
+  pageId: string;
+}
+
 export interface PageRemoveRequest extends BaseRequest {
   type: RequestType.PageRemove;
   pageId: string;
@@ -583,6 +592,7 @@ export type IPCClientRequest =
   | PageGetSpaceDefault
   | RecreateSpaceRootPatternRequest
   | PageGetRequest
+  | PageGetSlugRequest
   | PageRemoveRequest
   | PageStartRequest
   | PageStopRequest
@@ -618,6 +628,10 @@ export interface CfcLabelViewResponse {
 
 export interface PageResponse {
   page: PageRef;
+}
+
+export interface SlugResponse {
+  slug: string | undefined;
 }
 
 export interface GraphSnapshotResponse {
@@ -721,6 +735,7 @@ export type RemoteResponse =
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PageResponse
+  | SlugResponse
   | VDomMountResponse
   | DetectNonIdempotentResponse
   | PatternSourcesResponse
@@ -864,6 +879,10 @@ export type Commands = {
   [RequestType.PageGet]: {
     request: PageGetRequest;
     response: PageResponse | NullResponse;
+  };
+  [RequestType.PageGetSlug]: {
+    request: PageGetSlugRequest;
+    response: SlugResponse;
   };
   [RequestType.PageRemove]: {
     request: PageRemoveRequest;

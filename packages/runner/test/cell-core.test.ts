@@ -22,7 +22,11 @@ import {
   JSONSchema,
   type Pattern,
 } from "../src/builder/types.ts";
-import { getMetaLink, isPrimitiveCellLink } from "../src/link-utils.ts";
+import {
+  getMetaLink,
+  isPrimitiveCellLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   type IExtendedStorageTransaction,
@@ -128,18 +132,19 @@ describe("Cell", () => {
 
     // Modern path: error is stored as a `FabricError`-shaped value rather
     // than the legacy `@Error` wrapper. `c.get()` returns a proxy view of
-    // the stored wrapper — its `error` slot exposes the wrapped Error's
-    // observable fields (`message`, `stack`), and its `typeTag` is
-    // `"Error"` (`FabricError`'s tag).
+    // the stored wrapper — its observable fields (`type`, `name`,
+    // `message`, `stack`, etc.) are exposed directly on the projection,
+    // and its `typeTag` is `"Error@1"` (`FabricError`'s tag).
     const result = c.get() as {
-      error: { message: string; stack: string };
+      message: string;
+      stack: string;
       typeTag: string;
       "@Error"?: unknown;
     };
     expect(result["@Error"]).toBeUndefined();
     expect(result.typeTag).toBe("Error@1");
-    expect(result.error.message).toBe("something went wrong");
-    expect(typeof result.error.stack).toBe("string");
+    expect(result.message).toBe("something went wrong");
+    expect(typeof result.stack).toBe("string");
     await localTx.commit();
     await rt.dispose();
     await sm.close();
@@ -197,17 +202,19 @@ describe("Cell", () => {
 
     // Modern path: outer error is a `FabricError`-shaped value; its cause
     // is also `FabricError`-shaped (recursively wrapped at conversion
-    // time), not a legacy `@Error` wrapper.
+    // time), not a legacy `@Error` wrapper. The proxy view exposes the
+    // wrapper's observable fields directly.
     const result = c.get() as {
-      error: { message: string; cause: { message: string; stack: string } };
+      message: string;
+      cause: { message: string; stack: string };
       typeTag: string;
       "@Error"?: unknown;
     };
     expect(result["@Error"]).toBeUndefined();
     expect(result.typeTag).toBe("Error@1");
-    expect(result.error.message).toBe("wrapper error");
-    expect(result.error.cause.message).toBe("root cause");
-    expect(typeof result.error.cause.stack).toBe("string");
+    expect(result.message).toBe("wrapper error");
+    expect(result.cause.message).toBe("root cause");
+    expect(typeof result.cause.stack).toBe("string");
     await localTx.commit();
     await rt.dispose();
     await sm.close();
@@ -253,11 +260,11 @@ describe("Cell", () => {
     parent.set({ slot: new TypeError("through nested redirect") });
 
     const targetResult = target.get() as {
-      error: { message: string };
+      message: string;
       typeTag: string;
     };
     expect(targetResult.typeTag).toBe("Error@1");
-    expect(targetResult.error.message).toBe("through nested redirect");
+    expect(targetResult.message).toBe("through nested redirect");
 
     await localTx.commit();
     await rt.dispose();
@@ -638,6 +645,49 @@ describe("Cell", () => {
     expect(cell.getRaw()).toEqual({ x: 1, y: 2 });
   });
 
+  it("should let getRaw control whether the final link is followed", () => {
+    const source = runtime.getCell<{ value: number }>(
+      space,
+      "getRaw lastNode source",
+      undefined,
+      tx,
+    );
+    source.set({ value: 42 });
+
+    const regularLink = runtime.getCell<unknown>(
+      space,
+      "getRaw lastNode regular link",
+      undefined,
+      tx,
+    );
+    regularLink.setRaw(source.key("value").getAsLink());
+
+    const writeRedirectLink = runtime.getCell<unknown>(
+      space,
+      "getRaw lastNode write redirect link",
+      undefined,
+      tx,
+    );
+    writeRedirectLink.setRaw(source.key("value").getAsWriteRedirectLink());
+
+    const regularRaw = regularLink.getRaw();
+    expect(parseLink(regularRaw, regularLink)?.id).toBe(
+      source.getAsNormalizedFullLink().id,
+    );
+    expect(regularLink.getRaw({ lastNode: "value" })).toBe(42);
+    expect(
+      parseLink(
+        regularLink.getRaw({ lastNode: "writeRedirect" }),
+        regularLink,
+      )?.id,
+    ).toBe(source.getAsNormalizedFullLink().id);
+
+    expect(parseLink(writeRedirectLink.getRaw(), writeRedirectLink)?.id).toBe(
+      source.getAsNormalizedFullLink().id,
+    );
+    expect(writeRedirectLink.getRaw({ lastNode: "writeRedirect" })).toBe(42);
+  });
+
   it("should set raw value using setRaw", () => {
     const cell = runtime.getCell<{ x: number; y: number }>(
       space,
@@ -741,6 +791,45 @@ describe("Cell", () => {
     expect(retrievedResult?.get()).toEqual({ foo: 456 });
   });
 
+  it("should sink metadata field changes", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "sink meta field changes",
+      undefined,
+      tx,
+    );
+    cell.set({ value: 1 });
+    cell.setMetaRaw("slug", "first");
+    await tx.commit();
+    tx = runtime.edit();
+
+    const seen: unknown[] = [];
+    const cleaned: unknown[] = [];
+    const cancel = cell.withTx(tx).sinkMeta("slug", (value) => {
+      seen.push(value);
+      return () => cleaned.push(value);
+    });
+    await runtime.idle();
+    expect(seen).toEqual(["first"]);
+
+    const metaTx = runtime.edit();
+    cell.withTx(metaTx).setMetaRaw("slug", "second");
+    await metaTx.commit();
+    await runtime.idle();
+
+    expect(seen).toEqual(["first", "second"]);
+    expect(cleaned).toEqual(["first"]);
+
+    const valueTx = runtime.edit();
+    cell.withTx(valueTx).set({ value: 2 });
+    await valueTx.commit();
+    await runtime.idle();
+
+    expect(seen).toEqual(["first", "second"]);
+    cancel();
+    expect(cleaned).toEqual(["first", "second"]);
+  });
+
   it("should update pattern output when argument is changed via getArgumentCell", async () => {
     // Create a simple doubling pattern
     const doublePattern = trustPattern(runtime, {
@@ -797,6 +886,54 @@ describe("Cell", () => {
     // Verify final output
     const final = await resultCell.pull();
     expect(final).toEqual({ output: 200 });
+  });
+
+  it("should resolve getArgumentCell from argument metadata after reload", async () => {
+    const argumentSchema = {
+      type: "object",
+      properties: { input: { type: "number" } },
+      required: ["input"],
+    } as const;
+    const doublePattern = trustPattern(runtime, {
+      argumentSchema,
+      resultSchema: {
+        type: "object",
+        properties: { output: { type: "number" } },
+      },
+      result: { output: { $alias: { cell: "internal", path: ["doubled"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number }) => args.input * 2,
+          },
+          inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+        },
+      ],
+    } as Pattern);
+    const resultCell = runtime.getCell(
+      space,
+      "getArgumentCell after reload",
+      undefined,
+      tx,
+    );
+    runtime.setup(tx, doublePattern, { input: 11 }, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const reloadedResultCell = resultCell.withTx(tx);
+    const argumentLink = getMetaLink(reloadedResultCell, "argument");
+    expect(argumentLink?.schema).toEqual(argumentSchema);
+
+    const argumentCell = reloadedResultCell.getArgumentCell<{ input: number }>(
+      argumentSchema,
+    );
+    expect(argumentCell?.get()).toEqual({ input: 11 });
+    expect(argumentCell?.getAsNormalizedFullLink().id).toBe(argumentLink?.id);
+    expect(argumentCell?.getAsNormalizedFullLink().scope).toBe(
+      argumentLink?.scope,
+    );
   });
 
   // Cycle-resolution tests live in a separate `describe` below so they can be

@@ -37,16 +37,16 @@ const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
 // Context: Destructured pattern parameter; combines array map transform with derive and handler schemas
 export default pattern((__cf_pattern_input) => {
     const values = __cf_pattern_input.key("values");
-    derive({
+    __cfHelpers.lift({
         type: "array",
         items: {
             type: "unknown"
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         asCell: ["opaque"]
-    } as const satisfies __cfHelpers.JSONSchema, values, (values) => {
+    } as const satisfies __cfHelpers.JSONSchema, (values) => {
         console.log("values#", values?.length);
-    });
+    })(values);
     return {
         [NAME]: str `Simple Value: ${values.key("length")}`,
         [UI]: (<div>

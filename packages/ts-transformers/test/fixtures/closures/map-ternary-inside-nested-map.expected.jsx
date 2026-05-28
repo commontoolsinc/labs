@@ -44,7 +44,9 @@ interface PatternInput {
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const showInactive = __cf_pattern_input.key("showInactive");
-    const hasItems = __cfHelpers.derive({
+    const hasItems = __cfHelpers.lift<{
+        items: __cfHelpers.ReadonlyCell<unknown[]>;
+    }, boolean>({
         type: "object",
         properties: {
             items: {
@@ -58,7 +60,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["items"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0).for("hasItems", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0)({ items: items }).for("hasItems", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({
@@ -92,7 +94,13 @@ export default pattern((__cf_pattern_input) => {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+            } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                item: {
+                    tags: {
+                        length: number;
+                    };
+                };
+            }, boolean>({
                 type: "object",
                 properties: {
                     item: {
@@ -114,11 +122,11 @@ export default pattern((__cf_pattern_input) => {
                 required: ["item"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, { item: {
+            } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.tags.length > 0)({ item: {
                     tags: {
                         length: item.key("tags", "length")
                     }
-                } }, ({ item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
+                } }), item.key("label"), "No tags")}</strong>
               <ul>
                 {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const tag = __cf_pattern_input.key("element");
@@ -153,7 +161,8 @@ export default pattern((__cf_pattern_input) => {
                             type: "object",
                             properties: {
                                 showInactive: {
-                                    type: "boolean"
+                                    type: "boolean",
+                                    "default": false
                                 }
                             },
                             required: ["showInactive"]
@@ -209,7 +218,8 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {
                         showInactive: {
-                            type: "boolean"
+                            type: "boolean",
+                            "default": false
                         }
                     },
                     required: ["showInactive"]

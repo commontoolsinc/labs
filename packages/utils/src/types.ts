@@ -85,6 +85,23 @@ export function isPlainObject(value: unknown): boolean {
 }
 
 /**
+ * Check whether a value is a plain container -- a plain object (per
+ * `isPlainObject`) or an `Array`. Useful when the relevant question is
+ * "can I do property-name / array-index member access on this?", since
+ * plain objects and arrays are the two value shapes that support that
+ * uniformly. Non-plain class instances (`Date`, `Map`, `Set`, `Error`,
+ * user-defined classes, ...) deliberately do not qualify.
+ *
+ * @param value - The value to check
+ * @returns True if the value is a plain object or an array
+ */
+export function isPlainContainer(
+  value: unknown,
+): value is Record<string, unknown> | unknown[] {
+  return Array.isArray(value) || isPlainObject(value);
+}
+
+/**
  * Predicate for narrowing a `string` type.
  * @param value - The value to check
  * @returns True if the value is a string

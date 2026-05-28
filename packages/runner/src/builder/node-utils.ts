@@ -7,14 +7,33 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
+import { resolveLocationFromFunctionSource } from "./module.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {
     if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
     if (isCell(value)) {
-      if (value.export().frame !== node.frame) {
+      const exported = value.export();
+      if (exported.frame !== node.frame) {
+        const implementation = isRecord(node.module)
+          ? node.module.implementation
+          : undefined;
+        const sourceLocation = typeof implementation === "function"
+          ? resolveLocationFromFunctionSource(
+            implementation as (...args: any[]) => unknown,
+            node.frame,
+          )
+          : null;
         throw new Error(
-          "Reactive reference from outer scope cannot be accessed via closure. Wrap the access in a derive that passes the variable through, or use computed() which handles this automatically.",
+          closureCaptureErrorMessage({
+            capturedCell: {
+              path: exported.path,
+              scope: exported.scope,
+              name: exported.name,
+            },
+            sourceLocation,
+          }),
         );
       }
       value.connect(node);

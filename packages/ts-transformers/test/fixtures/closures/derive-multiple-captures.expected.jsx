@@ -24,7 +24,11 @@ export default pattern(() => {
     const offset = new Writable(5, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("offset", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        multiplier: __cfHelpers.ReadonlyCell<number>;
+        offset: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -43,11 +47,11 @@ export default pattern(() => {
         required: ["value", "multiplier", "offset"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, multiplier, offset }) => (v.get() * multiplier.get()) + offset.get())({
+        value: value.for(["result", "value"], true),
         multiplier: multiplier,
         offset: offset
-    }, ({ value: v, multiplier, offset }) => (v.get() * multiplier.get()) + offset.get()).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

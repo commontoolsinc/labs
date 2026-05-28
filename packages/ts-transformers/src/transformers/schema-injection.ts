@@ -1,5 +1,10 @@
 import ts from "typescript";
-import { createRegisteredTypeLiteral } from "../ast/type-building.ts";
+import {
+  cloneTypeNode,
+  createRegisteredTypeLiteral,
+  getDeclaredTypeNodeForBindingElement,
+  shouldPreserveBindingDeclaredTypeNode,
+} from "../ast/type-building.ts";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 
 import {
@@ -7,6 +12,7 @@ import {
   detectCallKind,
   detectNewExpressionKind,
   ensureTypeNodeRegistered,
+  getLiftAppliedInnerCall,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
@@ -28,6 +34,7 @@ import {
   type CapabilitySummaryRegistry,
   HelpersOnlyTransformer,
   type SchemaHint,
+  type SchemaHints,
   TransformationContext,
   type TypeRegistry,
 } from "../core/mod.ts";
@@ -272,7 +279,7 @@ function applyCapabilitySummaryToArgument(
     baseType = getTypeFromTypeNodeWithFallback(
       baseTypeNode,
       checker,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     );
   }
 
@@ -333,7 +340,7 @@ function applyCapabilitySummaryToParameter(
     baseType = getTypeFromTypeNodeWithFallback(
       baseTypeNode,
       checker,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     );
   }
 
@@ -504,7 +511,7 @@ function collectFunctionSchemaTypeNodes(
   const unwrappedReturnExpr = returnExpr
     ? unwrapExpression(returnExpr)
     : undefined;
-  const uiContractHint = context?.options.schemaHints &&
+  const uiContractHint = context?.options.state?.schemaHints &&
       unwrappedReturnExpr &&
       ts.isObjectLiteralExpression(unwrappedReturnExpr)
     ? propagateUiContractHintsFromObjectLiteral(
@@ -534,7 +541,7 @@ function collectFunctionSchemaTypeNodes(
       preserveUiContractHint(
         previousResultNode,
         synthesizedResult,
-        context.options.schemaHints,
+        context,
       );
       resultNode = synthesizedResult;
       resultType = undefined;
@@ -560,7 +567,7 @@ function collectFunctionSchemaTypeNodes(
       preserveUiContractHint(
         resultNode,
         scopedResult,
-        context.options.schemaHints,
+        context,
       );
       resultNode = scopedResult;
       resultType = undefined;
@@ -595,7 +602,7 @@ function collectFunctionSchemaTypeNodes(
         preserveUiContractHint(
           resultNode,
           recoveredNode,
-          context.options.schemaHints,
+          context,
         );
         resultNode = recoveredNode;
         resultType = undefined;
@@ -612,11 +619,13 @@ function collectFunctionSchemaTypeNodes(
         typeRegistry,
       );
       if (projectedResult?.result) {
-        preserveUiContractHint(
-          resultNode,
-          projectedResult.result,
-          context?.options.schemaHints,
-        );
+        if (context) {
+          preserveUiContractHint(
+            resultNode,
+            projectedResult.result,
+            context,
+          );
+        }
         resultNode = projectedResult.result;
         resultType = projectedResult.resultType;
       }
@@ -624,7 +633,7 @@ function collectFunctionSchemaTypeNodes(
   }
 
   // 3. If we couldn't infer a type, we can't transform at all
-  // Both types are required for derive/lift to work
+  // Both types are required for lift-applied calls to work
   if (!argumentNode && !resultNode) {
     return {}; // No types could be determined
   }
@@ -977,7 +986,7 @@ function createSchemaCallWithRegistryTransfer(
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
   options?: SchemaCallOptions,
-  schemaHints?: TransformationContext["options"]["schemaHints"],
+  schemaHints?: SchemaHints,
 ): ts.CallExpression {
   const emittedTypeNode = normalizeSchemaInjectionTypeNode(
     typeNode,
@@ -986,7 +995,20 @@ function createSchemaCallWithRegistryTransfer(
     typeRegistry,
   );
   const schemaCall = createToSchemaCall(context, emittedTypeNode, options);
-  preserveUiContractHint(typeNode, schemaCall, schemaHints);
+  // This leaf utility takes a narrowed `context` (Pick) and the schemaHints map
+  // explicitly, so it can't use context.recordSchemaHint; preserve the
+  // cfcUiContract hint directly on the raw map (mirroring to the original node).
+  if (schemaHints) {
+    const hint = schemaHints.get(typeNode)?.cfcUiContract ??
+      schemaHints.get(ts.getOriginalNode(typeNode))?.cfcUiContract;
+    if (hint) {
+      schemaHints.set(schemaCall, { cfcUiContract: hint });
+      const originalSchemaCall = ts.getOriginalNode(schemaCall);
+      if (originalSchemaCall !== schemaCall) {
+        schemaHints.set(originalSchemaCall, { cfcUiContract: hint });
+      }
+    }
+  }
 
   // Transfer TypeRegistry entry from source typeNode to schema call
   // This preserves type information for closure-captured variables
@@ -1008,8 +1030,7 @@ function applyIdentityArrayItemSchemaHints(
   identityPaths: readonly (readonly string[])[],
   context: TransformationContext,
 ): void {
-  const schemaHints = context.options.schemaHints;
-  if (!schemaHints || identityPaths.length === 0) return;
+  if (!context.options.state?.schemaHints || identityPaths.length === 0) return;
 
   const grouped = new Map<string, boolean>();
   for (const path of identityPaths) {
@@ -1031,7 +1052,7 @@ function applyIdentityArrayItemSchemaHints(
           ? member.name.text
           : undefined;
         if (name && grouped.has(name)) {
-          schemaHints.set(member.type, { items: false });
+          context.recordSchemaHint(member.type, { items: false });
         }
       }
     }
@@ -1347,8 +1368,13 @@ function visitInjectedDualSchemaBuilderCall(
     checker,
     typeRegistry,
   );
-  // Visit children to catch any pattern calls created by ClosureTransformer
-  // inside builder callbacks (e.g., from map transformations)
+  // Mark BEFORE re-descending: the re-descent below re-enters `updated` to
+  // reach the callback body (catching pattern calls ClosureTransformer
+  // created inside builder callbacks, e.g. from map transformations). Marking
+  // first means that re-entry self-skips the builder/schema logic — including
+  // the re-narrowing of the synthetic schema arg that previously required
+  // narrowedWrapperTypeRegistry (CT-1621) — and only the callback is visited.
+  context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
 }
 
@@ -1399,6 +1425,7 @@ function visitPrependedWidenedSchemaCall(
     [...schemas, ...args],
   );
 
+  context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
 }
 
@@ -1595,7 +1622,7 @@ function recoverProjectedResultSchema(
   return undefined;
 }
 
-function inferDeriveResultTypeFromInitializer(
+function inferLiftAppliedResultTypeFromInitializer(
   node: ts.Expression,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
@@ -1610,19 +1637,19 @@ function inferDeriveResultTypeFromInitializer(
   }
 
   const callKind = detectCallKind(initializer, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
   }
 
-  const deriveArgs = resolveDeriveInputAndCallbackArgument(
+  const liftAppliedArgs = resolveLiftAppliedInputAndCallback(
     initializer,
     checker,
     sourceFile,
   );
-  if (!deriveArgs) {
+  if (!liftAppliedArgs) {
     return undefined;
   }
-  const { input: firstArg, callback } = deriveArgs;
+  const { input: firstArg, callback } = liftAppliedArgs;
 
   let argumentType =
     getTypeAtLocationWithFallback(firstArg, checker, typeRegistry) ??
@@ -1695,7 +1722,7 @@ function inferExpressionTypeWithInitializerFallback(
     return fromLift;
   }
 
-  const fromDerive = inferDeriveResultTypeFromInitializer(
+  const fromLiftApplied = inferLiftAppliedResultTypeFromInitializer(
     expr,
     checker,
     sourceFile,
@@ -1704,8 +1731,8 @@ function inferExpressionTypeWithInitializerFallback(
     capabilityRegistry,
     context,
   );
-  if (fromDerive && !isAnyOrUnknownType(fromDerive)) {
-    return fromDerive;
+  if (fromLiftApplied && !isAnyOrUnknownType(fromLiftApplied)) {
+    return fromLiftApplied;
   }
 
   return type;
@@ -1752,20 +1779,11 @@ function buildObjectLiteralReturnTypeNode(
       return undefined;
     }
     typeRegistry?.set(valueTypeNode, valueType);
-    const valueHint = getUiContractHintFromNode(
-      valueExpr,
-      context?.options.schemaHints,
-    );
-    if (valueHint && context?.options.schemaHints) {
-      context.options.schemaHints.set(valueTypeNode, {
-        cfcUiContract: valueHint,
-      });
-      const originalValueTypeNode = ts.getOriginalNode(valueTypeNode);
-      if (originalValueTypeNode !== valueTypeNode) {
-        context.options.schemaHints.set(originalValueTypeNode, {
-          cfcUiContract: valueHint,
-        });
-      }
+    const valueHint = context
+      ? getUiContractHintFromNode(valueExpr, context)
+      : undefined;
+    if (valueHint && context) {
+      context.recordSchemaHint(valueTypeNode, { cfcUiContract: valueHint });
     }
 
     members.push(
@@ -1802,6 +1820,15 @@ function getExplicitValueTypeNode(
   }
   if (declaration && ts.isVariableDeclaration(declaration)) {
     return declaration.type;
+  }
+  if (declaration && ts.isBindingElement(declaration)) {
+    const typeNode = getDeclaredTypeNodeForBindingElement(
+      declaration,
+      checker,
+    );
+    return typeNode && shouldPreserveBindingDeclaredTypeNode(typeNode)
+      ? cloneTypeNode(typeNode)
+      : undefined;
   }
   return undefined;
 }
@@ -1862,8 +1889,7 @@ function propagateUiContractHintsFromObjectLiteral(
 ):
   | UiContractHint
   | undefined {
-  const schemaHints = context.options.schemaHints;
-  if (!schemaHints || !resultNode) {
+  if (!context.options.state?.schemaHints || !resultNode) {
     return undefined;
   }
 
@@ -1882,7 +1908,7 @@ function propagateUiContractHintsFromObjectLiteral(
     const valueExpr = ts.isPropertyAssignment(property)
       ? property.initializer
       : property.name;
-    const hint = getUiContractHintFromNode(valueExpr, schemaHints);
+    const hint = getUiContractHintFromNode(valueExpr, context);
     if (!hint) {
       continue;
     }
@@ -1900,21 +1926,13 @@ function propagateUiContractHintsFromObjectLiteral(
           getObjectLiteralPropertyName(entry.name) === memberName,
       );
       if (member?.type) {
-        schemaHints.set(member.type, { cfcUiContract: hint });
-        const originalMemberType = ts.getOriginalNode(member.type);
-        if (originalMemberType !== member.type) {
-          schemaHints.set(originalMemberType, { cfcUiContract: hint });
-        }
+        context.recordSchemaHint(member.type, { cfcUiContract: hint });
       }
     }
   }
 
   if (resultHint) {
-    schemaHints.set(target, { cfcUiContract: resultHint });
-    const originalTarget = ts.getOriginalNode(target);
-    if (originalTarget !== target) {
-      schemaHints.set(originalTarget, { cfcUiContract: resultHint });
-    }
+    context.recordSchemaHint(target, { cfcUiContract: resultHint });
     return resultHint;
   }
 
@@ -1923,14 +1941,10 @@ function propagateUiContractHintsFromObjectLiteral(
 
 function getUiContractHintFromObjectLiteral(
   expr: ts.ObjectLiteralExpression,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ):
   | UiContractHint
   | undefined {
-  if (!schemaHints) {
-    return undefined;
-  }
-
   for (const property of expr.properties) {
     if (
       !ts.isPropertyAssignment(property) &&
@@ -1941,7 +1955,7 @@ function getUiContractHintFromObjectLiteral(
     const valueExpr = ts.isPropertyAssignment(property)
       ? property.initializer
       : property.name;
-    const hint = getUiContractHintFromNode(valueExpr, schemaHints);
+    const hint = getUiContractHintFromNode(valueExpr, context);
     if (hint) {
       return hint;
     }
@@ -1953,44 +1967,35 @@ function getUiContractHintFromObjectLiteral(
 function setUiContractHint(
   target: ts.Node | undefined,
   hint: UiContractHint | undefined,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ): void {
-  if (!schemaHints || !target || !hint) {
+  if (!target || !hint) {
     return;
   }
 
-  schemaHints.set(target, { cfcUiContract: hint });
-  const originalTarget = ts.getOriginalNode(target);
-  if (originalTarget !== target) {
-    schemaHints.set(originalTarget, { cfcUiContract: hint });
-  }
+  context.recordSchemaHint(target, { cfcUiContract: hint });
 }
 
 function preserveUiContractHint(
   fromNode: ts.Node | undefined,
   toNode: ts.Node | undefined,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ): void {
-  if (!schemaHints || !fromNode || !toNode) {
+  if (!fromNode || !toNode) {
     return;
   }
 
-  const hint = schemaHints.get(fromNode)?.cfcUiContract ??
-    schemaHints.get(ts.getOriginalNode(fromNode))?.cfcUiContract;
+  const hint = context.lookupSchemaHint(fromNode)?.cfcUiContract;
   if (!hint) {
     return;
   }
 
-  schemaHints.set(toNode, { cfcUiContract: hint });
-  const originalTarget = ts.getOriginalNode(toNode);
-  if (originalTarget !== toNode) {
-    schemaHints.set(originalTarget, { cfcUiContract: hint });
-  }
+  context.recordSchemaHint(toNode, { cfcUiContract: hint });
 }
 
 function getUiContractHintFromNode(
   node: ts.Node | undefined,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ):
   | UiContractHint
   | undefined {
@@ -1998,8 +2003,7 @@ function getUiContractHintFromNode(
     return undefined;
   }
 
-  const storedHint = schemaHints?.get(node)?.cfcUiContract ??
-    schemaHints?.get(ts.getOriginalNode(node))?.cfcUiContract;
+  const storedHint = context.lookupSchemaHint(node)?.cfcUiContract;
   if (storedHint) {
     return storedHint;
   }
@@ -2186,6 +2190,22 @@ function isIntentionallyUnusedSchemaParameter(
   return true;
 }
 
+/**
+ * True when the outer applied-call args are exactly a single empty object
+ * literal `{}` — the no-capture placeholder LiftLoweringTransformer emits for
+ * computed-origin lifts and which ClosureTransformer leaves untouched when the
+ * computation captures nothing. By schema-injection time this reliably means
+ * "zero input"; captured computeds carry a populated input object here.
+ */
+function isSingleEmptyObjectInput(
+  args: readonly ts.Expression[],
+): boolean {
+  if (args.length !== 1) return false;
+  const arg = args[0];
+  return !!arg && ts.isObjectLiteralExpression(arg) &&
+    arg.properties.length === 0;
+}
+
 function prependSchemaArguments(
   context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
   node: ts.CallExpression,
@@ -2223,6 +2243,44 @@ function prependSchemaArguments(
     }
   }
 
+  // For the lift-applied shape (__cfHelpers.lift(cb)(input)), schemas must
+  // be prepended to the INNER lift call's arguments, not the outer applied
+  // call's. The outer call's input stays at index 0; the inner call gains
+  // [argSchema, resSchema, ...originalInnerArgs].
+  const innerLiftCall = getLiftAppliedInnerCall(node);
+  if (innerLiftCall) {
+    // No-input case: a single empty object literal `{}` as the outer input
+    // means a genuinely zero-capture computation (computed-origin). By this
+    // stage ClosureTransformer has already reified any captures into the
+    // input, so an empty input here is final. Emit the canonical no-input
+    // form `lift(false, cb)()`: `false` argument schema (matching computed's
+    // runtime semantics — keeps the no-arg application valid) and no outer
+    // input. We deliberately omit the result schema, again matching computed.
+    if (isSingleEmptyObjectInput(node.arguments)) {
+      const rebuiltInner = context.factory.createCallExpression(
+        innerLiftCall.expression,
+        innerLiftCall.typeArguments,
+        [context.factory.createFalse(), ...innerLiftCall.arguments],
+      );
+      return context.factory.createCallExpression(
+        rebuiltInner,
+        undefined,
+        [],
+      );
+    }
+
+    const rebuiltInner = context.factory.createCallExpression(
+      innerLiftCall.expression,
+      innerLiftCall.typeArguments,
+      [argSchemaCall, resSchemaCall, ...innerLiftCall.arguments],
+    );
+    return context.factory.createCallExpression(
+      rebuiltInner,
+      undefined,
+      node.arguments,
+    );
+  }
+
   return context.factory.createCallExpression(
     node.expression,
     undefined,
@@ -2253,7 +2311,7 @@ function findFunctionArgument(
   return undefined;
 }
 
-function resolveDeriveInputAndCallbackArgument(
+function resolveLiftAppliedInputAndCallback(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
@@ -2262,8 +2320,29 @@ function resolveDeriveInputAndCallbackArgument(
   callback: ts.ArrowFunction | ts.FunctionExpression;
 } | undefined {
   const callKind = detectCallKind(call, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
+  }
+
+  // See getLiftAppliedInputAndCallback in src/ast/call-kind.ts for the
+  // two recognized shapes (legacy derive vs lift-applied).
+  const innerCall = getLiftAppliedInnerCall(call);
+  if (innerCall) {
+    // Lift-applied: callback is the last arg of the inner lift call; input
+    // is the first arg of the outer applied call.
+    const callbackIndex = innerCall.arguments.length - 1;
+    const callbackExpression = innerCall.arguments[callbackIndex];
+    const callback = callbackExpression
+      ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
+      : undefined;
+    if (!callback) {
+      return undefined;
+    }
+    const input = call.arguments[0];
+    if (!input) {
+      return undefined;
+    }
+    return { input, callback };
   }
 
   const callbackIndex = call.arguments.length - 1;
@@ -2495,7 +2574,7 @@ function handlePatternSchemaInjection(
 ): ts.Node | undefined {
   const { factory, checker, sourceFile, tsContext: transformation } = context;
   const typeArgs = node.typeArguments;
-  const capabilityRegistry = context.options.capabilitySummaryRegistry;
+  const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
@@ -2565,9 +2644,9 @@ function handlePatternSchemaInjection(
         resultTypeNode,
         getUiContractHintFromObjectLiteral(
           unwrappedPatternReturnExpr,
-          context.options.schemaHints,
+          context,
         ),
-        context.options.schemaHints,
+        context,
       );
     }
   } else if (typeArgs && typeArgs.length === 1) {
@@ -2659,12 +2738,12 @@ function handlePatternSchemaInjection(
       preserveUiContractHint(
         resultTypeNode,
         toSchemaResult,
-        context.options.schemaHints,
+        context,
       );
       preserveUiContractHint(
         getCallbackReturnExpression(builderFunction),
         toSchemaResult,
-        context.options.schemaHints,
+        context,
       );
       if (resultType && typeRegistry) {
         typeRegistry.set(toSchemaResult, resultType);
@@ -2678,10 +2757,10 @@ function handlePatternSchemaInjection(
           ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
           ? getUiContractHintFromObjectLiteral(
             unwrappedPatternReturnExpr,
-            context.options.schemaHints,
+            context,
           )
           : undefined,
-        context.options.schemaHints,
+        context,
       );
       return visited;
     } else {
@@ -2769,9 +2848,9 @@ function handlePatternSchemaInjection(
       resultSchemaCall,
       getUiContractHintFromObjectLiteral(
         unwrappedPatternReturnExpr,
-        context.options.schemaHints,
+        context,
       ),
-      context.options.schemaHints,
+      context,
     );
   }
   if (resultType && typeRegistry) {
@@ -2786,10 +2865,10 @@ function handlePatternSchemaInjection(
       ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
       ? getUiContractHintFromObjectLiteral(
         unwrappedPatternReturnExpr,
-        context.options.schemaHints,
+        context,
       )
       : undefined,
-    context.options.schemaHints,
+    context,
   );
   return visited;
 }
@@ -2797,10 +2876,25 @@ function handlePatternSchemaInjection(
 export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
-    const typeRegistry = context.options.typeRegistry;
-    const capabilityRegistry = context.options.capabilitySummaryRegistry;
+    const typeRegistry = context.options.state?.typeRegistry;
+    const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
+      // Single idempotency guard: if SchemaInjection already finalized this
+      // builder call/new node, do NOT re-process it — only descend into its
+      // children (to reach callback bodies). This replaces the per-builder
+      // arg-count guards (`args.length >= 5`, etc.) and the implicit
+      // "drop the type args so re-detection fails" tricks, and it plugs the
+      // gap in the lift `isToSchemaCall` branch whose re-narrowing of the
+      // synthetic schema arg was the sole reason narrowedWrapperTypeRegistry
+      // existed (CT-1621). Producers call `context.markSchemaInjected(...)`.
+      if (
+        (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
+        context.isSchemaInjected(node)
+      ) {
+        return ts.visitEachChild(node, visit, transformation);
+      }
+
       if (ts.isNewExpression(node)) {
         const callKind = detectNewExpressionKind(node, checker);
         if (callKind?.kind === "cell-factory") {
@@ -2809,7 +2903,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const args = node.arguments ?? [];
           const scope = cellConstructorCallScope(node, checker);
 
-          // If already has 2 arguments, assume schema is already present.
+          // If already has 2 arguments, the schema slot is filled — either we
+          // injected it (idempotency) or the user supplied one. Either way,
+          // leave it. (NOT replaced by the schema-injected marker: the marker
+          // only covers our own output; a user-supplied 2-arg cell must also
+          // be left alone, so this stays an argument-count check.)
           if (args.length >= 2) {
             return ts.visitEachChild(node, visit, transformation);
           }
@@ -2869,6 +2967,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               node.typeArguments,
               newArgs,
             );
+            context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
         }
@@ -2986,6 +3085,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             [toSchemaEvent, toSchemaState, ...node.arguments],
           );
 
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
 
@@ -3087,27 +3187,44 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               [toSchemaEvent, toSchemaState, handlerCandidate],
             );
 
+            context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
         }
       }
 
-      if (callKind?.kind === "derive") {
+      if (callKind?.kind === "lift-applied") {
         const factory = transformation.factory;
-        const deriveArgs = resolveDeriveInputAndCallbackArgument(
+        const liftAppliedArgs = resolveLiftAppliedInputAndCallback(
           node,
           checker,
           sourceFile,
         );
 
-        if (node.typeArguments && node.typeArguments.length >= 2) {
-          const [argumentType, resultType] = node.typeArguments;
+        // For lift-applied shape (callee is itself a call), the generic
+        // type arguments live on the *inner* lift call, not on the outer
+        // applied call. The legacy derive shape kept them on the call
+        // itself. Read from whichever holds them.
+        const innerLiftCall = getLiftAppliedInnerCall(node);
+        const sourceTypeArguments = innerLiftCall?.typeArguments ??
+          node.typeArguments;
+
+        if (sourceTypeArguments && sourceTypeArguments.length >= 2) {
+          const [argumentType, resultType] = sourceTypeArguments;
           if (!argumentType || !resultType) {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          // Always apply the capability-summary shrink to the explicit
+          // argument TypeNode. (Previously this was suppressed for calls
+          // marked by syntheticLiftAppliedCallRegistry, to avoid collapsing
+          // array element types to `unknown`. That marker was verified inert
+          // — a downstream array-shrink in type-shrinking re-collapses the
+          // items to `unknown[]` regardless, so the emitted schema is
+          // identical either way — and was removed in the registry-unification
+          // effort. See docs/scratch/12-registry-unification-design.md.)
           const resolved = resolveDualSchemaBuilderTypes(
-            deriveArgs?.callback,
+            liftAppliedArgs?.callback,
             checker,
             sourceFile,
             factory,
@@ -3119,6 +3236,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               explicitArgumentTypeValue: typeRegistry?.get(argumentType),
               explicitResultTypeNode: resultType,
               explicitResultTypeValue: typeRegistry?.get(resultType),
+              applyExplicitArgumentCapabilitySummary: true,
             },
           );
           if (!resolved) {
@@ -3139,8 +3257,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        if (deriveArgs) {
-          const { input: firstArg, callback } = deriveArgs;
+        if (liftAppliedArgs) {
+          const { input: firstArg, callback } = liftAppliedArgs;
 
           // Special case: detect empty object literal {} and generate specific schema
           let argNode: ts.TypeNode | undefined;
@@ -3235,11 +3353,23 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (argumentType && liftCallback) {
-            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
-              argumentType,
-              checker,
-              typeRegistry,
-            );
+            // Prefer the pre-shrink type from `narrowedWrapperTypeRegistry`
+            // when available — when the first toSchema argument is a synthetic
+            // wrapper TypeNode, `checker.getTypeFromTypeNode` resolves it to
+            // `any`, dropping the inner `type:`. The registry recovers the
+            // pre-shrink type. CT-1621: the only live consumer is `derive`'s
+            // value-as-input lowering (first pass); the redundant self-re-entry
+            // consumer was removed via the schemaInjectedRegistry marker, and
+            // `computed`/user-`lift` never produce this shape. Registry is
+            // derive-bound — see core/mod.ts and type-shrinking.ts
+            // `applyShrinkAndWrap`.
+            const argumentTypeValue =
+              context.lookupNarrowedWrapper(argumentType) ??
+                getTypeFromTypeNodeWithFallback(
+                  argumentType,
+                  checker,
+                  typeRegistry,
+                );
             const {
               argumentTypeNode: narrowedArgumentType,
               argumentTypeValue: narrowedArgumentTypeValue,
@@ -3268,6 +3398,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               node.typeArguments,
               [inputSchema, ...node.arguments.slice(1)],
             );
+            // Mark so the re-descent below does NOT re-enter this branch and
+            // re-narrow the synthetic `inputSchema` wrapper against `any`.
+            // That re-narrowing was the sole consumer of
+            // narrowedWrapperTypeRegistry (CT-1621).
+            context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
         }
@@ -3478,6 +3613,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.typeArguments,
             newArgs,
           );
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
       }
@@ -3566,6 +3702,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.typeArguments,
             [...args, schemaCall],
           );
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
       }
@@ -3642,6 +3779,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.typeArguments,
             [newOptions, ...args.slice(1)],
           );
+          context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);
         }
       }
@@ -3650,12 +3788,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "when") {
         const args = node.arguments;
 
-        // Skip if already has schemas (5+ args means schemas present)
-        if (args.length >= 5) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        // Must have exactly 2 arguments: condition, value
+        // Idempotency is owned by the top-of-visit schema-injected marker; no
+        // arg-count "already has schemas" guard needed. (The public
+        // WhenFunction type is exactly 2-arity, so the 5-arg withSchemas form
+        // can ONLY be our own injected output — never user source.)
+        // This stays a DISPATCH guard: only the 2-arg form is the injectable shape.
         if (args.length !== 2) {
           return ts.visitEachChild(node, visit, transformation);
         }
@@ -3663,8 +3800,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, valueExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,
@@ -3697,12 +3834,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "unless") {
         const args = node.arguments;
 
-        // Skip if already has schemas (5+ args means schemas present)
-        if (args.length >= 5) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        // Must have exactly 2 arguments: condition, fallback
+        // Idempotency owned by the schema-injected marker (see `when` above).
+        // UnlessFunction is exactly 2-arity, so the 5-arg form is only ever
+        // our injected output. DISPATCH guard: only the 2-arg form is injectable.
         if (args.length !== 2) {
           return ts.visitEachChild(node, visit, transformation);
         }
@@ -3710,8 +3844,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, fallbackExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,
@@ -3744,12 +3878,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "ifElse") {
         const args = node.arguments;
 
-        // Skip if already has schemas (7+ args means schemas present)
-        if (args.length >= 7) {
-          return ts.visitEachChild(node, visit, transformation);
-        }
-
-        // Must have exactly 3 arguments: condition, ifTrue, ifFalse
+        // Idempotency owned by the schema-injected marker (see `when` above).
+        // IfElseFunction is exactly 3-arity, so the 7-arg form is only ever
+        // our injected output. DISPATCH guard: only the 3-arg form is injectable.
         if (args.length !== 3) {
           return ts.visitEachChild(node, visit, transformation);
         }
@@ -3757,8 +3888,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, ifTrueExpr, ifFalseExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,

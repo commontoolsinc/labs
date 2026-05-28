@@ -36,7 +36,10 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            messageCount: number;
+            dismissedIndex: __cfHelpers.ReadonlyCell<number>;
+        }, boolean>({
             type: "object",
             properties: {
                 messageCount: {
@@ -50,11 +53,11 @@ export default pattern((__cf_pattern_input) => {
             required: ["messageCount", "dismissedIndex"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ showHistory, messageCount, dismissedIndex }) => showHistory && messageCount !== dismissedIndex.get())({
             showHistory: showHistory,
             messageCount: messageCount,
             dismissedIndex: dismissedIndex
-        }, ({ showHistory, messageCount, dismissedIndex }) => showHistory && messageCount !== dismissedIndex.get()), <div>Show notification</div>, <div>Hide notification</div>)}
+        }), <div>Show notification</div>, <div>Hide notification</div>)}
       </div>),
     };
 }, {

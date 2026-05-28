@@ -31,6 +31,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
 | Selection overwrites item data, `.set()` changes wrong value | Storing Cell reference directly | Box the reference: `{ item }` instead of `item` ([gotchas/cell-reference-overwrite](gotchas/cell-reference-overwrite.md)) |
+| Writable-input computed causes churn or stale fan-out | Computed writes through a `Writable<>` input while also participating in reactive scheduling | Treat it as effectful and check for cycles. Pull mode materializes stable side writes through idle materializers, so actual changed paths should drive downstream updates instead of broad fan-out. |
 
 ---
 

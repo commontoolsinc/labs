@@ -22,7 +22,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "recordMessage",
@@ -93,7 +93,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "search",
@@ -136,7 +136,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         pieceScope: "session",
         space: "home",
       },
@@ -183,7 +183,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "search",
@@ -209,7 +209,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -252,7 +252,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -300,7 +300,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -332,7 +332,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -376,7 +376,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -423,7 +423,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -467,7 +467,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -513,7 +513,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "search",
@@ -562,7 +562,7 @@ describe("executePieceCallable", () => {
         {
           apiUrl: "http://localhost:8000",
           identity: "/tmp/test-identity.pem",
-          piece: "of:piece-123",
+          piece: "fid1:piece-123",
           space: "home",
         },
         "recordMessage",

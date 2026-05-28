@@ -29,6 +29,7 @@ import {
   setHarnessSkillActivations,
   setHarnessSkillRegistry,
   setHarnessSkillResourceReads,
+  setHarnessSkillScriptExecutions,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
 import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
@@ -64,6 +65,7 @@ import type {
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
+  HarnessSkillScriptExecution,
 } from "./contracts/skill.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import {
@@ -112,9 +114,17 @@ import {
   type ViewImageToolOutput,
 } from "./tools/view-image.ts";
 import {
+  type WebFetchToolInput,
+  type WebFetchToolOutput,
+} from "./tools/web-fetch.ts";
+import {
   type ReadSkillResourceToolInput,
   type ReadSkillResourceToolOutput,
 } from "./tools/read-skill-resource.ts";
+import {
+  type RunSkillScriptToolInput,
+  type RunSkillScriptToolOutput,
+} from "./tools/run-skill-script.ts";
 import {
   type WriteFileToolInput,
   type WriteFileToolOutput,
@@ -126,7 +136,9 @@ export interface BuiltinToolInputMap {
   "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
   view_image: ViewImageToolInput;
+  web_fetch: WebFetchToolInput;
   read_skill_resource: ReadSkillResourceToolInput;
+  run_skill_script: RunSkillScriptToolInput;
   edit_file: EditFileToolInput;
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
@@ -137,7 +149,9 @@ export interface BuiltinToolOutputMap {
   "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
   view_image: ViewImageToolOutput;
+  web_fetch: WebFetchToolOutput;
   read_skill_resource: ReadSkillResourceToolOutput;
+  run_skill_script: RunSkillScriptToolOutput;
   edit_file: EditFileToolOutput;
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
@@ -511,6 +525,31 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return skillResourceReadsPath;
+  }
+
+  async recordSkillScriptExecution(
+    execution: HarnessSkillScriptExecution,
+  ): Promise<string | undefined> {
+    const generatedAt = this.#now();
+    const skillScriptExecutions = {
+      type: "cf-harness.skill-script-executions" as const,
+      version: 1 as const,
+      generatedAt,
+      executions: [
+        ...(this.#runState.skillScriptExecutions?.executions ?? []),
+        execution,
+      ],
+    };
+    const skillScriptExecutionsPath = await this.artifactStore
+      ?.persistSkillScriptExecutions?.(skillScriptExecutions);
+    this.#runState = setHarnessSkillScriptExecutions(
+      this.#runState,
+      skillScriptExecutions,
+      skillScriptExecutionsPath,
+      generatedAt,
+    );
+    await this.persistRunState();
+    return skillScriptExecutionsPath;
   }
 
   nextToolOutputId(toolId: string): ToolOutputId {
@@ -1052,6 +1091,8 @@ export class CfHarnessEngine {
       currentDir: this.#runState.currentDir,
       workspaceHostPath: this.workspaceHostPath,
       skillRegistry: this.#runState.skillRegistry,
+      skillActivations: this.#runState.skillActivations,
+      allowedSkillScripts: this.config.allowedSkillScripts,
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>
@@ -1088,6 +1129,11 @@ export class CfHarnessEngine {
       now: () => this.#now(),
       recordSkillResourceRead: async (read: HarnessSkillResourceRead) => {
         await this.recordSkillResourceRead(read);
+      },
+      recordSkillScriptExecution: async (
+        execution: HarnessSkillScriptExecution,
+      ) => {
+        await this.recordSkillScriptExecution(execution);
       },
       createCfcInvocationContext: (options: {
         toolId: string;

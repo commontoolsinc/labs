@@ -5,10 +5,10 @@
 import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 import { isDID } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/empty-reconstruction-context";
+import { JsonEncodingContext } from "@commonfabric/data-model/json-wire";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,

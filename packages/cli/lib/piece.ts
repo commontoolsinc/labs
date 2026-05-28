@@ -12,7 +12,15 @@ import {
 } from "@commonfabric/runner";
 import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
-import { pieceId, PieceManager } from "@commonfabric/piece";
+import {
+  assignSlug,
+  pieceId,
+  PieceManager,
+  resolvePieceAddress as resolveStoredPieceAddress,
+  resolveSlugTargetCell,
+  setSlugLink,
+  SlugResolutionError,
+} from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -80,7 +88,69 @@ export interface ExecutedPieceCallable {
   resolved: ResolvedPieceCallable;
 }
 
+export interface PieceResolutionDeps {
+  loadManager?: typeof loadManager;
+  resolvePieceAddress?: (
+    manager: PieceManager,
+    token: string,
+  ) => Promise<string>;
+}
+
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
+
+interface DisposableRuntime {
+  dispose(): Promise<unknown>;
+  storageManager?: unknown;
+}
+
+function storageManagerCloseNow(
+  storageManager: unknown,
+): (() => Promise<unknown>) | undefined {
+  if (
+    typeof storageManager === "object" && storageManager !== null &&
+    "closeNow" in storageManager
+  ) {
+    const closeNow = Reflect.get(storageManager, "closeNow");
+    if (typeof closeNow === "function") {
+      return () => Promise.resolve(closeNow.call(storageManager));
+    }
+  }
+  return undefined;
+}
+
+export async function withRuntimeCleanupOnFailure<T>(
+  runtime: DisposableRuntime,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    const closeNow = storageManagerCloseNow(runtime.storageManager);
+    if (closeNow) {
+      await closeNow().catch((disposeError) => {
+        console.warn(
+          `loadManager storage cleanup failed: ${
+            disposeError instanceof Error
+              ? disposeError.message
+              : String(disposeError)
+          }`,
+        );
+      });
+    }
+    await runtime.dispose().catch(
+      (disposeError) => {
+        console.warn(
+          `loadManager cleanup failed: ${
+            disposeError instanceof Error
+              ? disposeError.message
+              : String(disposeError)
+          }`,
+        );
+      },
+    );
+    throw error;
+  }
+}
 
 async function timeCliPhase<T>(
   label: string,
@@ -177,25 +247,27 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
     CF_RUNTIME_ERROR_LOG
   ] = runtimeErrors;
 
-  if (
-    !(await timeCliPhase(
-      "loadManager.healthCheck",
-      () => runtime.healthCheck(),
-    ))
-  ) {
-    throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
-  }
+  return await withRuntimeCleanupOnFailure(runtime, async () => {
+    if (
+      !(await timeCliPhase(
+        "loadManager.healthCheck",
+        () => runtime.healthCheck(),
+      ))
+    ) {
+      throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
+    }
 
-  const pieceManager = await timeCliPhase(
-    "loadManager.pieceManager",
-    () => new PieceManager(session, runtime),
-  );
-  pieceManagerRef.current = pieceManager;
-  await timeCliPhase(
-    "loadManager.synced",
-    () => awaitSyncWithTimeout(pieceManager.synced()),
-  );
-  return pieceManager;
+    const pieceManager = await timeCliPhase(
+      "loadManager.pieceManager",
+      () => new PieceManager(session, runtime),
+    );
+    pieceManagerRef.current = pieceManager;
+    await timeCliPhase(
+      "loadManager.synced",
+      () => awaitSyncWithTimeout(pieceManager.synced()),
+    );
+    return pieceManager;
+  });
 }
 
 async function getProgramFromFile(
@@ -243,11 +315,56 @@ export async function listPieces(
   );
 }
 
+async function resolvePieceConfigWithManager(
+  config: PieceConfig,
+  manager: PieceManager,
+  resolver: PieceResolutionDeps["resolvePieceAddress"] =
+    resolveStoredPieceAddress,
+): Promise<PieceConfig> {
+  return {
+    ...config,
+    piece: await resolver(manager, config.piece),
+  };
+}
+
+export async function resolvePieceConfig(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<PieceConfig> {
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  return await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+}
+
+export async function resolveLinkEndpointAddress(
+  manager: PieceManager,
+  token: string,
+  resolver: PieceResolutionDeps["resolvePieceAddress"] =
+    resolveStoredPieceAddress,
+  options?: { allowMissingSlugFallback?: boolean },
+): Promise<string> {
+  try {
+    return await resolver(manager, token);
+  } catch (error) {
+    if (
+      options?.allowMissingSlugFallback &&
+      error instanceof SlugResolutionError &&
+      error.code === "missing"
+    ) {
+      return token;
+    }
+    throw error;
+  }
+}
+
 // Creates a new piece from source code and optional input.
 export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
-  options?: { start?: boolean },
+  options?: { start?: boolean; slug?: string },
 ): Promise<string> {
   const manager = await timeCliPhase(
     "newPiece.loadManager",
@@ -279,7 +396,7 @@ export async function newPiece(
   );
   const PIECE_START_TIMEOUT_MS = 60_000;
   const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = pieces.create(program, options);
+    const createPromise = pieces.create(program, { start: options?.start });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -297,6 +414,13 @@ export async function newPiece(
     );
   });
 
+  if (options?.slug) {
+    await timeCliPhase(
+      "newPiece.assignSlug",
+      () => assignSlug(manager, piece.getCell(), options.slug!),
+    );
+  }
+
   // Explicitly add the piece to the space's allPieces list
   await timeCliPhase(
     "newPiece.addToDefaultPattern",
@@ -306,17 +430,68 @@ export async function newPiece(
   return piece.id;
 }
 
+export async function setPieceSlug(
+  config: SpaceConfig,
+  slug: string,
+  sourcePieceId: string,
+  sourcePath: (string | number)[],
+  options?: {
+    sourceScope?: PieceConfig["pieceScope"];
+    resolveBeforeLinking?: boolean;
+  },
+): Promise<void> {
+  const manager = await timeCliPhase(
+    "setPieceSlug.loadManager",
+    () => loadManager(config),
+  );
+  const resolvedSourcePieceId = await timeCliPhase(
+    "setPieceSlug.resolveSource",
+    () => resolveStoredPieceAddress(manager, sourcePieceId),
+  );
+  const source = sourcePath.length === 0
+    ? manager.runtime.getCellFromEntityId(
+      manager.getSpace(),
+      { "/": resolvedSourcePieceId },
+      [],
+      undefined,
+      undefined,
+      options?.sourceScope,
+    )
+    : (await timeCliPhase(
+      "setPieceSlug.getSourcePiece",
+      () => {
+        const pieces = new PiecesController(manager);
+        return pieces.get(
+          resolvedSourcePieceId,
+          false,
+          undefined,
+          options?.sourceScope,
+        );
+      },
+    )).getCell().key(...sourcePath);
+  await timeCliPhase("setPieceSlug.source.sync", () => source.sync());
+  await timeCliPhase(
+    "setPieceSlug.setSlugLink",
+    () =>
+      setSlugLink(manager, slug, source, {
+        resolveBeforeLinking: options?.resolveBeforeLinking,
+        writeTargetMetadata: sourcePath.length === 0,
+      }),
+  );
+}
+
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
-    config.piece,
+    resolvedConfig.piece,
     false,
     undefined,
-    config.pieceScope,
+    resolvedConfig.pieceScope,
   );
   await piece.setPattern(await getProgramFromFile(manager, entry));
 }
@@ -327,12 +502,13 @@ export async function savePiecePattern(
 ): Promise<void> {
   await ensureDir(outPath);
   const manager = await loadManager(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
-    config.piece,
+    resolvedConfig.piece,
     false,
     undefined,
-    config.pieceScope,
+    resolvedConfig.pieceScope,
   );
   const meta = await piece.getPatternMeta();
 
@@ -347,19 +523,20 @@ export async function savePiecePattern(
     }
   } else {
     throw new Error(
-      `Piece "${config.piece}" does not contain a pattern source.`,
+      `Piece "${resolvedConfig.piece}" does not contain a pattern source.`,
     );
   }
 }
 
 export async function applyPieceInput(config: PieceConfig, input: object) {
   const manager = await loadManager(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
-    config.piece,
+    resolvedConfig.piece,
     false,
     undefined,
-    config.pieceScope,
+    resolvedConfig.pieceScope,
   );
   await piece.setInput(input);
 }
@@ -483,6 +660,7 @@ async function resolvePieceCallable(
   deps: PieceCallableDependencies = {},
 ): Promise<ResolvedPieceCallable> {
   const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
 
   if (!deps.loadPiece) {
@@ -497,10 +675,18 @@ async function resolvePieceCallable(
     }
   }
 
-  const piece =
-    await (deps.loadPiece
-      ? deps.loadPiece(manager, config.piece, config.pieceScope)
-      : pieces.get(config.piece, true, undefined, config.pieceScope));
+  const piece = await (deps.loadPiece
+    ? deps.loadPiece(
+      manager,
+      resolvedConfig.piece,
+      resolvedConfig.pieceScope,
+    )
+    : pieces.get(
+      resolvedConfig.piece,
+      true,
+      undefined,
+      resolvedConfig.pieceScope,
+    ));
   const space = manager.getSpace?.() ?? config.space;
 
   const resolved = (await tryResolvePieceCallableAt(
@@ -530,7 +716,7 @@ async function resolvePieceCallable(
       manager,
       space,
       callableName,
-      config.pieceScope,
+      resolvedConfig.pieceScope,
     );
     if (liveCallableCell) {
       return {
@@ -586,6 +772,17 @@ export async function linkPieces(
     () => loadManager(config),
   );
   const pieces = new PiecesController(manager);
+  const resolvedSourcePieceId = await timeCliPhase(
+    "linkPieces.resolveSource",
+    () =>
+      resolveLinkEndpointAddress(manager, sourcePieceId, undefined, {
+        allowMissingSlugFallback: true,
+      }),
+  );
+  const resolvedTargetPieceId = await timeCliPhase(
+    "linkPieces.resolveTarget",
+    () => resolveLinkEndpointAddress(manager, targetPieceId),
+  );
 
   // Validate that source and target pieces/paths exist by reading them
   if (!options?.allowNonExisting) {
@@ -595,7 +792,13 @@ export async function linkPieces(
     // (i.e., was created via cf piece new, not just written to with cf piece set)
     const sourcePiece = await timeCliPhase(
       "linkPieces.getSourcePiece",
-      () => pieces.get(sourcePieceId, false, undefined, options?.sourceScope),
+      () =>
+        pieces.get(
+          resolvedSourcePieceId,
+          false,
+          undefined,
+          options?.sourceScope,
+        ),
     );
     const sourcePatternLink = getMetaLink(sourcePiece.getCell(), "pattern");
     if (sourcePatternLink === undefined) {
@@ -630,7 +833,13 @@ export async function linkPieces(
     // Check target piece exists by verifying it has a pattern cell
     const targetPiece = await timeCliPhase(
       "linkPieces.getTargetPiece",
-      () => pieces.get(targetPieceId, false, undefined, options?.targetScope),
+      () =>
+        pieces.get(
+          resolvedTargetPieceId,
+          false,
+          undefined,
+          options?.targetScope,
+        ),
     );
     const targetPatternLink = getMetaLink(targetPiece.getCell(), "pattern");
     if (targetPatternLink === undefined) {
@@ -673,9 +882,9 @@ export async function linkPieces(
     "linkPieces.manager.link",
     () =>
       manager.link(
-        sourcePieceId,
+        resolvedSourcePieceId,
         sourcePath,
-        targetPieceId,
+        resolvedTargetPieceId,
         targetPath,
         options,
       ),
@@ -852,18 +1061,30 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
   patternName?: string;
-  source: Readonly<unknown>;
+  source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
   const manager = await loadManager(config);
+  let resolvedConfig: PieceConfig;
+  try {
+    resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+  } catch (error) {
+    if (
+      error instanceof SlugResolutionError &&
+      error.code === "not-piece"
+    ) {
+      return await inspectSlugTargetCell(manager, config.piece);
+    }
+    throw error;
+  }
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
-    config.piece,
+    resolvedConfig.piece,
     false,
     undefined,
-    config.pieceScope,
+    resolvedConfig.pieceScope,
   );
 
   const id = piece.id;
@@ -888,6 +1109,35 @@ export async function inspectPiece(config: PieceConfig): Promise<{
     result,
     readingFrom,
     readBy,
+  };
+}
+
+async function inspectSlugTargetCell(
+  manager: PieceManager,
+  slug: string,
+): Promise<{
+  id: string;
+  name?: string;
+  patternName?: string;
+  source?: Readonly<unknown>;
+  result: Readonly<unknown>;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
+}> {
+  const target = await resolveSlugTargetCell(manager, slug);
+  await target.pull();
+  const result = target.get() as Readonly<unknown>;
+  const name = isRecord(result) && typeof result[NAME] === "string"
+    ? result[NAME]
+    : undefined;
+
+  return {
+    id: slug,
+    name,
+    patternName: "slug target cell",
+    result,
+    readingFrom: [],
+    readBy: [],
   };
 }
 
@@ -923,12 +1173,13 @@ export async function getCellValue(
   options?: { input?: boolean },
 ): Promise<unknown> {
   const manager = await loadManager(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
-    config.piece,
+    resolvedConfig.piece,
     false,
     undefined,
-    config.pieceScope,
+    resolvedConfig.pieceScope,
   );
   if (options?.input) {
     return await piece.input.get(path);
@@ -944,12 +1195,13 @@ export async function setCellValue(
   options?: { input?: boolean },
 ): Promise<void> {
   const manager = await loadManager(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
-    config.piece,
+    resolvedConfig.piece,
     false,
     undefined,
-    config.pieceScope,
+    resolvedConfig.pieceScope,
   );
   if (options?.input) {
     await piece.input.set(value, path);
@@ -984,14 +1236,21 @@ export async function stepPiece(config: PieceConfig): Promise<void> {
     "stepPiece.loadManager",
     () => loadManager(config),
   );
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
   const piece = await timeCliPhase(
     "stepPiece.getPiece",
-    () => pieces.get(config.piece, true, undefined, config.pieceScope),
+    () =>
+      pieces.get(
+        resolvedConfig.piece,
+        true,
+        undefined,
+        resolvedConfig.pieceScope,
+      ),
   );
   await timeCliPhase("stepPiece.pull", () => piece.getCell().pull());
   await timeCliPhase("stepPiece.manager.synced", () => manager.synced());
-  await timeCliPhase("stepPiece.stop", () => pieces.stop(config.piece));
+  await timeCliPhase("stepPiece.stop", () => pieces.stop(resolvedConfig.piece));
 }
 
 /**
@@ -999,8 +1258,9 @@ export async function stepPiece(config: PieceConfig): Promise<void> {
  */
 export async function removePiece(config: PieceConfig): Promise<void> {
   const manager = await loadManager(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
-  const removed = await pieces.remove(config.piece);
+  const removed = await pieces.remove(resolvedConfig.piece);
 
   if (!removed) {
     throw new Error(`Piece "${config.piece}" not found`);

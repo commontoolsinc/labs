@@ -27,7 +27,10 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Nested callback - inner array map should not capture outer multiplier
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        multiplier: __cfHelpers.ReadonlyCell<number>;
+        numbers: __cfHelpers.OpaqueCell<number[]>;
+    }, number[]>({
         type: "object",
         properties: {
             multiplier: {
@@ -48,10 +51,7 @@ export default pattern(() => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        numbers: numbers.for(["result", 2, "numbers"], true),
-        multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const n = __cf_pattern_input.key("element");
         const multiplier = __cf_pattern_input.key("params", "multiplier");
         return n * multiplier.get();
@@ -77,7 +77,10 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema), {
         multiplier: multiplier
-    })).for("result", true);
+    }))({
+        numbers: numbers.for(["result", "numbers"], true),
+        multiplier: multiplier
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",

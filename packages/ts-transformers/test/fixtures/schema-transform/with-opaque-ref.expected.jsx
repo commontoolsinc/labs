@@ -33,11 +33,11 @@ const model = __cfHelpers.__cf_data({
 //   toSchema<State>({default: ...}) → schema with "default" key preserved
 //   derive(cell.value, fn) → derive(inputSchema, outputSchema, cell.key("value"), fn)
 export default pattern((cell) => {
-    const doubled = derive({
+    const doubled = __cfHelpers.lift({
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, cell.key("value"), (v: number) => v * 2).for("doubled", true);
+    } as const satisfies __cfHelpers.JSONSchema, (v: number) => v * 2)(cell.key("value")).for("doubled", true);
     return {
         [UI]: (<div>
         <p>Value: {cell.key("value")}</p>

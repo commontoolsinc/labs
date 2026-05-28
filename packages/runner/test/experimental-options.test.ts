@@ -11,7 +11,11 @@ import {
   setDataModelConfig,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  getPersistentSchedulerStateConfig,
+  resetPersistentSchedulerStateConfig,
+} from "@commonfabric/memory/v2";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -24,6 +28,7 @@ const signer = await Identity.fromPassphrase("test experimental");
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetDataModelConfig();
+    resetPersistentSchedulerStateConfig();
   });
 
   describe("Runtime construction", () => {
@@ -38,6 +43,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
+        persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -55,6 +61,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
+        persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -72,6 +79,7 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
+        persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -128,7 +136,7 @@ describe("ExperimentalOptions", () => {
       const err = new Error("test error");
       const result = shallowFabricFromNativeValue(err);
       expect(result).toBeInstanceOf(FabricError);
-      expect((result as FabricError).error.message).toBe("test error");
+      expect((result as FabricError).message).toBe("test error");
     });
 
     it("preserves undefined in arrays when flag is ON", () => {
@@ -185,7 +193,7 @@ describe("ExperimentalOptions", () => {
         unknown
       >;
       expect(result.data).toBeInstanceOf(FabricError);
-      expect((result.data as FabricError).error.message).toBe("nested");
+      expect((result.data as FabricError).message).toBe("nested");
     });
 
     it("preserves undefined-valued object properties when flag is ON", () => {
@@ -200,7 +208,7 @@ describe("ExperimentalOptions", () => {
       const err = new Error("in array");
       const result = fabricFromNativeValue([1, err, 3]) as unknown[];
       expect(result[1]).toBeInstanceOf(FabricError);
-      expect((result[1] as FabricError).error.message).toBe("in array");
+      expect((result[1] as FabricError).message).toBe("in array");
     });
 
     it("preserves sparse array holes when flag is ON", () => {
@@ -304,6 +312,22 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
+    it("constructing Runtime with persistentSchedulerState sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          persistentSchedulerState: true,
+        },
+      });
+
+      expect(getPersistentSchedulerStateConfig()).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
     it("constructing Runtime with explicit false sets config to false", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
@@ -349,6 +373,7 @@ describe("ExperimentalOptions", () => {
       await sm.close();
 
       expect(getDataModelConfig()).toBe(initial);
+      expect(getPersistentSchedulerStateConfig()).toBe(false);
     });
   });
 });

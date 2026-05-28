@@ -23,7 +23,7 @@ import {
 } from "./expression-rewrite/rewrite-helpers.ts";
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
-import { createDeriveCall } from "./builtins/derive.ts";
+import { createLiftAppliedCall } from "./builtins/lift-applied.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 
 interface RewriteExpressionSiteParams {
@@ -32,20 +32,20 @@ interface RewriteExpressionSiteParams {
   readonly context: TransformationContext;
   readonly analyze: AnalyzeFn;
   readonly visit: ts.Visitor;
-  readonly preferDeriveWrappers?: boolean;
+  readonly preferInputBoundWrappers?: boolean;
 }
 
 function getReactiveHelperWrapperKind(
   expression: ts.Expression,
   context: TransformationContext,
-): "derive" | "ifElse" | "when" | "unless" | undefined {
+): "lift-applied" | "ifElse" | "when" | "unless" | undefined {
   if (!ts.isCallExpression(expression)) {
     return undefined;
   }
 
   const callKind = detectCallKind(expression, context.checker)?.kind;
   if (
-    callKind === "derive" ||
+    callKind === "lift-applied" ||
     callKind === "ifElse" ||
     callKind === "when" ||
     callKind === "unless"
@@ -56,11 +56,11 @@ function getReactiveHelperWrapperKind(
   return undefined;
 }
 
-function isDirectDeriveCall(
+function isDirectLiftAppliedCall(
   expression: ts.Expression,
   context: TransformationContext,
 ): expression is ts.CallExpression {
-  return getReactiveHelperWrapperKind(expression, context) === "derive";
+  return getReactiveHelperWrapperKind(expression, context) === "lift-applied";
 }
 
 function isReactiveHelperWrapperCall(
@@ -217,14 +217,14 @@ function rewriteDirectCellGetInitializer(
     context,
     {
       allowDirectExpressionWrap: true,
-      preferDeriveWrapper: true,
+      preferInputBoundWrapper: true,
     },
   );
   if (wrapped) {
     return wrapped;
   }
 
-  return createDeriveCall(expression, [receiver], {
+  return createLiftAppliedCall(expression, [receiver], {
     factory: context.factory,
     tsContext: context.tsContext,
     cfHelpers: context.cfHelpers,
@@ -266,7 +266,7 @@ export function rewriteExpressionSite(
     context,
     analyze,
     visit,
-    preferDeriveWrappers = false,
+    preferInputBoundWrappers = false,
   } = params;
 
   const handling = classifyExpressionSiteHandling(
@@ -313,14 +313,14 @@ export function rewriteExpressionSite(
     reactiveContextKind: contextInfo.kind,
     inSafeContext: contextInfo.kind === "compute",
     containerKind,
-    preferDeriveWrappers,
+    preferInputBoundWrappers,
   });
 
   if (!result) {
     return undefined;
   }
 
-  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+  if (preferInputBoundWrappers && isDirectLiftAppliedCall(result, context)) {
     return result;
   }
 
@@ -340,7 +340,7 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     context,
     analyze,
     visit,
-    preferDeriveWrappers = false,
+    preferInputBoundWrappers = false,
   } = params;
 
   const contextInfo = context.getReactiveContext(expression);
@@ -360,9 +360,10 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
   // element-member read (or passthrough container thereof). The late
   // `pattern-body-reactive-root-lowering` pass will rewrite `elem.foo` to
   // `elem.key("foo")` in place, producing `{elem.key("foo")}` directly in
-  // the JSX rather than `{derive({...}, ({elem}) => elem.foo)}`. The
-  // in-place form encodes the same reactive dependency more cheaply and
-  // doesn't pull the whole element binding into a derive's inputs.
+  // the JSX rather than a lift-applied wrapper like
+  // `{__cfHelpers.lift(({elem}) => elem.foo)({elem})}`. The in-place form
+  // encodes the same reactive dependency more cheaply and doesn't pull the
+  // whole element binding into a lift-applied call's inputs.
   const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(analysis);
   if (
     !hasLogicalOps &&
@@ -388,14 +389,14 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     reactiveContextKind: contextInfo.kind,
     inSafeContext,
     containerKind: "jsx-expression",
-    preferDeriveWrappers,
+    preferInputBoundWrappers,
   });
 
   if (!result) {
     return undefined;
   }
 
-  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+  if (preferInputBoundWrappers && isDirectLiftAppliedCall(result, context)) {
     return result;
   }
 
@@ -479,7 +480,7 @@ export function rewriteHelperOwnedExpressionSites<T extends ts.Node>(
           reactiveContextKind: "pattern",
           inSafeContext: false,
           containerKind,
-          preferDeriveWrappers: true,
+          preferInputBoundWrappers: true,
         });
         if (result) {
           return result;
@@ -521,6 +522,12 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
 
   const visit: ts.Visitor = (node) => {
     if (ts.isVariableDeclaration(node)) {
+      if (
+        node.initializer && isFunctionLikeExpression(node.initializer)
+      ) {
+        return node;
+      }
+
       const visited = visitEachChildWithJsx(node, visit, context.tsContext);
       if (ts.isVariableDeclaration(visited)) {
         markSyntheticReactiveCollectionDeclarationIfNeeded(
@@ -565,7 +572,7 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         context,
         analyze,
         visit,
-        preferDeriveWrappers: true,
+        preferInputBoundWrappers: true,
       });
       if (rewritten) {
         return context.factory.createJsxExpression(
@@ -596,9 +603,9 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         }
 
         // Array-method callback lowering may already have produced a synthetic
-        // helper wrapper (derive/ifElse/when/unless) for this subtree. When
-        // that happens, the later pattern-owned pass should not re-enter the
-        // wrapper root and compete for ownership again.
+        // helper wrapper (lift-applied/ifElse/when/unless) for this subtree.
+        // When that happens, the later pattern-owned pass should not re-enter
+        // the wrapper root and compete for ownership again.
         if (isSyntheticHelperWrapperInArrayMethodCallback(node, context)) {
           return node;
         }
@@ -609,7 +616,7 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
           context,
           analyze,
           visit,
-          preferDeriveWrappers: true,
+          preferInputBoundWrappers: true,
         });
         if (rewritten) {
           return rewritten;
@@ -671,11 +678,11 @@ function allDataFlowsAreElementBindingRoots(
  * expressions without computing a value of its own. Late
  * `pattern-body-reactive-root-lowering` will descend into it and rewrite
  * `elem.foo` reads to `elem.key("foo")` in-place. For these shapes the
- * early derive-wrap is unnecessary and produces broader output.
+ * early lift-applied wrap is unnecessary and produces broader output.
  *
  * In contrast, computations (BinaryExpression, ConditionalExpression,
- * CallExpression, etc.) produce a new value and *must* be wrapped in
- * `derive`/`computed` at the early stage; otherwise the resulting value
+ * CallExpression, etc.) produce a new value and *must* be wrapped in a
+ * lift-applied call at the early stage; otherwise the resulting value
  * would be a one-shot snapshot rather than a reactive cell.
  */
 function isPassthroughContainerExpression(
@@ -698,7 +705,7 @@ function isPassthroughContainerExpression(
 }
 
 /**
- * Combined gate: the early derive-wrap should defer to late in-place
+ * Combined gate: the early lift-applied wrap should defer to late in-place
  * lowering for an expression whose only reactive content is element-member
  * access AND whose shape doesn't produce a new value of its own. Both
  * conditions are required:
@@ -777,7 +784,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
       context,
       {
         allowDirectExpressionWrap: true,
-        preferDeriveWrapper: true,
+        preferInputBoundWrapper: true,
       },
     );
   };
@@ -808,7 +815,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
         context,
         {
           allowDirectExpressionWrap: options.allowDirectExpressionWrap,
-          preferDeriveWrapper: true,
+          preferInputBoundWrapper: true,
         },
       );
     }
@@ -829,6 +836,10 @@ export function rewriteArrayMethodCallbackExpressionSites(
   const rewriteSkippedArrayMethodCallbackInitializer = (
     expression: ts.Expression,
   ): ts.Expression | undefined => {
+    if (isFunctionLikeExpression(expression)) {
+      return undefined;
+    }
+
     if (isControlFlowRewriteExpression(expression)) {
       return undefined;
     }
@@ -892,7 +903,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
           context,
           analyze,
           visit,
-          preferDeriveWrappers: true,
+          preferInputBoundWrappers: true,
         });
         if (rewritten) {
           return context.factory.createJsxExpression(
@@ -948,7 +959,7 @@ export function rewriteArrayMethodCallbackExpressionSites(
           context,
           analyze,
           visit,
-          preferDeriveWrappers: true,
+          preferInputBoundWrappers: true,
         });
         if (rewritten) {
           return rewritten;

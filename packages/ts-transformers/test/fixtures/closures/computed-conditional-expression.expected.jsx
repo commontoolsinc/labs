@@ -28,7 +28,12 @@ export default pattern(() => {
     const b = new Writable(200, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("b", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        threshold: __cfHelpers.ReadonlyCell<number>;
+        a: __cfHelpers.ReadonlyCell<number>;
+        b: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -51,12 +56,12 @@ export default pattern(() => {
         required: ["value", "threshold", "a", "b"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get())({
         value: value,
         threshold: threshold,
         a: a,
         b: b
-    }, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get()).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

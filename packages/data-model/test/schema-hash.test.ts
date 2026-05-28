@@ -7,12 +7,12 @@ import {
   internSchema,
   internSchemaAsTaggedHashString,
   isInternedSchema,
-} from "../schema-hash.ts";
-import { SchemaAndHash } from "../schema-and-hash.ts";
-import { FabricHash } from "../fabric-hash.ts";
-import { hashStringOf } from "../value-hash.ts";
-import { isDeepFrozen } from "../deep-freeze.ts";
-import { toDeepFrozenSchema } from "../schema-utils.ts";
+} from "../src/schema-hash.ts";
+import { SchemaAndHash } from "../src/SchemaAndHash.ts";
+import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
+import { hashStringOf } from "../src/value-hash.ts";
+import { isDeepFrozen } from "../src/deep-freeze.ts";
+import { toDeepFrozenSchema } from "../src/schema-utils.ts";
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
 describe("schema-hash dispatch", () => {
@@ -54,7 +54,7 @@ describe("schema-hash dispatch", () => {
   describe("internSchema()", () => {
     it("defaults to `wantSchemaAndHash = false`", () => {
       const result = internSchema({});
-      assert(!(result instanceof SchemaAndHash));
+      expect(result).not.toBeInstanceOf(SchemaAndHash);
     });
 
     for (const wantSah of [false, true]) {
@@ -82,7 +82,7 @@ describe("schema-hash dispatch", () => {
             properties: { name: { type: "string" } },
           };
           const result = callIntern(schema);
-          assert(isDeepFrozen(result));
+          expect(isDeepFrozen(result)).toBe(true);
         });
 
         it("deep-freezes the caller's original if not already deep-frozen", () => {
@@ -91,7 +91,7 @@ describe("schema-hash dispatch", () => {
             properties: { x: { type: "number" } },
           };
           callIntern(schema);
-          assert(isDeepFrozen(schema));
+          expect(isDeepFrozen(schema)).toBe(true);
         });
 
         it("uses an already-deep-frozen schema by reference", () => {
@@ -101,7 +101,7 @@ describe("schema-hash dispatch", () => {
             type: "object",
             title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
           }) as JSONSchemaObj;
-          assert(isDeepFrozen(schema));
+          expect(isDeepFrozen(schema)).toBe(true);
           const result = callIntern(schema);
           expect(result).toBe(schema);
         });
@@ -337,7 +337,7 @@ describe("schema-hash dispatch", () => {
       expect(isInternedSchema(schema)).toBe(false);
       internSchemaAsTaggedHashString(schema);
       expect(isInternedSchema(schema)).toBe(true);
-      assert(isDeepFrozen(schema));
+      expect(isDeepFrozen(schema)).toBe(true);
     });
 
     it("is idempotent on already-interned schemas", () => {

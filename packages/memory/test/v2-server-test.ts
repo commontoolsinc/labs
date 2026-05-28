@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
-import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   getDataModelConfig,
   resetDataModelConfig,
@@ -536,7 +536,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
   }
 });
 
-Deno.test("memory v2 server rejects handshakes when flags disagree", async () => {
+Deno.test("memory v2 server rejects handshakes when data-model flags disagree", async () => {
   const server = createServer("memory://memory-v2-server-handshake-flags");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -567,6 +567,29 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
   }
 });
 
+Deno.test("memory v2 server accepts scheduler-state flag mismatch", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-handshake-scheduler-flag",
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary({
+      type: "hello",
+      protocol: MEMORY_PROTOCOL,
+      flags: {
+        ...HELLO_FLAGS,
+        persistentSchedulerState: !HELLO_FLAGS.persistentSchedulerState,
+      },
+    }));
+
+    assertEquals(shiftMessage(messages), HELLO_OK);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server accepts legacy richStorableValues flag name and echoes it", async () => {
   const server = createServer("memory://memory-v2-server-handshake-legacy");
   const messages: ServerMessage[] = [];
@@ -587,7 +610,10 @@ Deno.test("memory v2 server accepts legacy richStorableValues flag name and echo
     assertEquals(shiftMessage(messages), {
       type: "hello.ok",
       protocol: MEMORY_PROTOCOL,
-      flags: { richStorableValues: HELLO_FLAGS.modernDataModel },
+      flags: {
+        richStorableValues: HELLO_FLAGS.modernDataModel,
+        persistentSchedulerState: HELLO_FLAGS.persistentSchedulerState,
+      },
     });
   } finally {
     await server.close();

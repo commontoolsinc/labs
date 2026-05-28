@@ -30,7 +30,7 @@ const DEFAULT_PACKAGES_WITH_SERVER = [
 ];
 
 // Opt-in suites that mirror CI jobs but rely on more platform-specific setup.
-const OPTIONAL_PACKAGES_WITH_SERVER = ["cli-fuse"];
+const OPTIONAL_PACKAGES_WITH_SERVER = ["cli-fuse", "patterns-reload"];
 
 // Packages with integration tests that DON'T need a running server
 const PACKAGES_WITHOUT_SERVER = ["generated-patterns", "pattern-tests"];
@@ -50,7 +50,12 @@ const ALL_PACKAGES_WITH_SERVER = [
 const ALL_PACKAGES = [...DEFAULT_PACKAGES, ...OPTIONAL_PACKAGES_WITH_SERVER];
 
 // Packages that need HEADLESS=1 for browser tests
-const HEADLESS_PACKAGES = ["shell", "background-charm-service", "patterns"];
+const HEADLESS_PACKAGES = [
+  "shell",
+  "background-charm-service",
+  "patterns",
+  "patterns-reload",
+];
 
 async function runCommand(
   cmd: string[],
@@ -92,11 +97,12 @@ async function stopServers(portOffset: number, rootDir: string): Promise<void> {
 async function startServers(
   portOffset: number,
   rootDir: string,
+  env: Record<string, string> = {},
 ): Promise<boolean> {
   console.log(`Starting servers with PORT_OFFSET=${portOffset}...`);
   const result = await runCommand(
     ["bash", "scripts/start-local-dev.sh", `--port-offset=${portOffset}`],
-    { cwd: rootDir, inheritStdio: true },
+    { cwd: rootDir, env, inheritStdio: true },
   );
 
   if (!result.success) {
@@ -355,10 +361,15 @@ async function runPackageIntegration(
   filter?: string,
   junitDir?: string,
 ): Promise<boolean> {
+  const packageDirName = pkg === "cli-fuse"
+    ? "cli"
+    : pkg === "patterns-reload"
+    ? "patterns"
+    : pkg;
   const packageDir = path.join(
     rootDir,
     "packages",
-    pkg === "cli-fuse" ? "cli" : pkg,
+    packageDirName,
   );
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Running integration tests for: ${pkg}`);
@@ -383,6 +394,10 @@ async function runPackageIntegration(
   // Add API_URL for packages that need it
   if (ALL_PACKAGES_WITH_SERVER.includes(pkg)) {
     env.API_URL = apiUrl;
+  }
+
+  if (pkg === "patterns-reload") {
+    env.CF_EXPECT_PERSISTENT_SCHEDULER_STATE = "1";
   }
 
   // For browser test packages, pass through HEADLESS and PIPE_CONSOLE
@@ -418,6 +433,12 @@ async function runPackageIntegration(
       ["bash", "./integration/fuse-exec.sh"],
       { cwd: packageDir, env, inheritStdio: true },
     );
+  } else if (pkg === "patterns-reload") {
+    result = await runCommand(["deno", "task", "integration:reload"], {
+      cwd: packageDir,
+      env,
+      inheritStdio: true,
+    });
   } else if (filter) {
     // Run with filter - find matching test files
     const globPattern = `./integration/*${filter}*.test.ts`;
@@ -488,6 +509,7 @@ Examples:
   deno task integration cli                   # Run only cli tests
   deno task integration cli-fuse              # Run the opt-in CLI FUSE suite
   deno task integration patterns counter      # Filter by test name
+  deno task integration patterns-reload       # Run opt-in pattern reload tests
   deno task integration pattern-tests         # Run .test.tsx pattern unit tests
   deno task integration --port-offset=500     # Use specific port offset
   deno task integration --port-offset=500 cli # Combine options
@@ -599,7 +621,12 @@ async function main(): Promise<void> {
       }
 
       // Start servers
-      const started = await startServers(portOffset, rootDir);
+      const serverEnv: Record<string, string> = {};
+      if (packagesToRun.includes("patterns-reload")) {
+        serverEnv.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE = "true";
+      }
+
+      const started = await startServers(portOffset, rootDir, serverEnv);
       if (!started) {
         console.error("Failed to start servers, aborting.");
         Deno.exit(1);

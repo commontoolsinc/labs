@@ -25,7 +25,9 @@ export default pattern(() => {
         },
         required: ["count"]
     } as const satisfies __cfHelpers.JSONSchema).for("counter", true);
-    const doubled = __cfHelpers.derive({
+    const doubled = __cfHelpers.lift<{
+        counter: __cfHelpers.ReadonlyCell<{ count: number; }>;
+    }, number>({
         type: "object",
         properties: {
             counter: {
@@ -42,10 +44,10 @@ export default pattern(() => {
         required: ["counter"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { counter: counter }, ({ counter }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ counter }) => {
         const current = counter.get();
         return current.count * 2;
-    }).for("doubled", true);
+    })({ counter: counter }).for("doubled", true);
     return doubled;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

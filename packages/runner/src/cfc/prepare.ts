@@ -1,5 +1,11 @@
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
+import {
+  cloneForMutation,
+  type CloneForMutationResult,
+} from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
@@ -23,7 +29,7 @@ import {
   isWriteRedirectLink,
   parseLink,
 } from "../link-utils.ts";
-import { getValueAtPath } from "../path-utils.ts";
+import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
@@ -709,7 +715,7 @@ const valueWriteTargets = (
   >();
   const log = tx.getReactivityLog?.();
   const seenWriteSpaces = new Set<MemorySpace>(
-    [...(log?.writes ?? []), ...(log?.potentialWrites ?? [])].map((write) =>
+    [...(log?.writes ?? []), ...(log?.attemptedWrites ?? [])].map((write) =>
       write.space
     ),
   );
@@ -940,7 +946,9 @@ const currentPrincipalIntegrityReason = (
   return undefined;
 };
 
-const writeDetailValueForTarget = (
+// Exported for unit testing of write-detail reconstruction (the granularity
+// composition below). Not part of the public CFC surface.
+export const writeDetailValueForTarget = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -951,6 +959,7 @@ const writeDetailValueForTarget = (
   key: "value" | "previousValue",
 ): FabricValue => {
   const writeDetails = [...(tx.getWriteDetails?.(target.space) ?? [])];
+  const targetPath = target.path.map((entry) => String(entry));
   let matchingWrite:
     | {
       address: {
@@ -963,6 +972,12 @@ const writeDetailValueForTarget = (
     }
     | undefined;
   let matchingWritePath: string[] | undefined;
+  // Deeper ("descendant") writes under the target path are overlaid onto the
+  // base value below, so a value recorded granularly (an envelope plus
+  // per-field writes -- as happens when it is deep-frozen and so written
+  // field-by-field) reconstructs the same as one recorded coarsely (a single
+  // whole-object write). Reconstruction must not depend on write granularity.
+  const descendants: { rel: string[]; value: FabricValue | undefined }[] = [];
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
     if (normalizeCellScope(write.address.scope) !== target.scope) continue;
@@ -970,8 +985,15 @@ const writeDetailValueForTarget = (
       continue;
     }
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
-    const targetPath = target.path.map((entry) => String(entry));
     if (writePath.length > targetPath.length) {
+      // Descendant write: when `targetPath` is a prefix, keep it to overlay
+      // onto the base value (composing granular field-writes).
+      if (targetPath.every((segment, index) => segment === writePath[index])) {
+        descendants.push({
+          rel: writePath.slice(targetPath.length),
+          value: write[key],
+        });
+      }
       continue;
     }
     if (!writePath.every((segment, index) => segment === targetPath[index])) {
@@ -990,11 +1012,53 @@ const writeDetailValueForTarget = (
   if (value === undefined || matchingWritePath === undefined) {
     return undefined;
   }
-  const targetPath = target.path.map((entry) => String(entry));
-  if (matchingWritePath.length === targetPath.length) {
-    return value;
+  const baseValue = matchingWritePath.length === targetPath.length
+    ? value
+    : getValueAtPath(value, targetPath.slice(matchingWritePath.length));
+
+  // Only the effective `value` composes deeper field-writes; the
+  // `previousValue` of the longest ancestor write already captures the whole
+  // pre-write subtree.
+  if (key !== "value" || descendants.length === 0) {
+    return baseValue;
   }
-  return getValueAtPath(value, targetPath.slice(matchingWritePath.length));
+
+  if (!(isRecord(baseValue) || Array.isArray(baseValue))) {
+    // Base isn't a container yet deeper writes exist (rare/incoherent): build a
+    // fresh container and overlay onto it (it's freshly mutable -- no COW).
+    const result: Record<PropertyKey, unknown> | unknown[] =
+      descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0]))
+        ? []
+        : {};
+    for (const { rel, value: descendantValue } of descendants) {
+      setValueAtPath(result, rel, descendantValue);
+    }
+    return result as FabricValue;
+  }
+
+  // Overlay the deeper field-writes onto the base via copy-on-write
+  // spine-thawing: only the containers along each overlay path are shallow-
+  // copied; large off-spine subtrees are preserved by reference, never
+  // deep-copied. Process shallowest-first so an envelope write at a parent
+  // path lands before writes to its children. `cloneForMutation` defaults to
+  // `force: true`, so the shared (deep-frozen) base is never mutated.
+  const ordered = [...descendants].sort((a, b) => a.rel.length - b.rel.length);
+  let root: FabricValue = baseValue;
+  for (const { rel, value: descendantValue } of ordered) {
+    const leaf = rel[rel.length - 1]!;
+    const thawed: CloneForMutationResult<FabricValue> = cloneForMutation(
+      root,
+      rel.slice(0, -1),
+      { createMissing: true, nextKeyAfterPath: leaf },
+    );
+    setValueAtPath(
+      thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
+      [leaf],
+      descendantValue,
+    );
+    root = thawed.value;
+  }
+  return root;
 };
 
 const writeValueForTarget = (
@@ -1274,12 +1338,65 @@ const ifcEntryAppliesToAttemptedWrite = (
 ): boolean => {
   const wildcardIndex = path.indexOf("*");
   if (wildcardIndex === -1) {
-    return true;
+    const writes = [...(tx.getWriteDetails?.(target.space) ?? [])];
+    let touched = false;
+    for (const write of writes) {
+      if (write.address.id !== target.id) continue;
+      if (normalizeCellScope(write.address.scope) !== target.scope) continue;
+      if (write.address.path[0] !== "value") continue;
+      const writePath = write.address.path.slice(1).map((entry) =>
+        String(entry)
+      );
+      if (
+        concretePathHasPrefix(path, writePath) ||
+        concretePathHasPrefix(writePath, path)
+      ) {
+        touched = true;
+        break;
+      }
+    }
+    if (!touched) {
+      const reactiveWrites = [
+        ...(tx.getReactivityLog?.().writes ?? []),
+        ...(tx.getReactivityLog?.().attemptedWrites ?? []),
+      ];
+      touched = reactiveWrites.some((write) => {
+        if (write.space !== target.space) return false;
+        if (write.id !== target.id) return false;
+        if (normalizeCellScope(write.scope) !== target.scope) return false;
+        const writePath = canonicalizeLogicalPath(write.path);
+        return concretePathHasPrefix(path, writePath) ||
+          concretePathHasPrefix(writePath, path);
+      });
+    }
+    if (!touched) {
+      return false;
+    }
+    const pathTarget = { ...target, path };
+    const written = writeValueForTarget(tx, pathTarget);
+    const value = written !== undefined ? written : (() => {
+      try {
+        return tx.readValueOrThrow(pathTarget, {
+          meta: INTERNAL_VERIFIER_META,
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    if (path.length === 0) {
+      return value === undefined ||
+        wildcardPolicyMatchesValue(tx, target, schema, value);
+    }
+    if (value === undefined) {
+      return previousWriteValueForTarget(tx, pathTarget) !== undefined;
+    }
+    return value !== undefined &&
+      wildcardPolicyMatchesValue(tx, target, schema, value);
   }
 
   const exactAttemptedPaths = [
     ...(tx.getReactivityLog?.().writes ?? []),
-    ...(tx.getReactivityLog?.().potentialWrites ?? []),
+    ...(tx.getReactivityLog?.().attemptedWrites ?? []),
   ].map((write) => ({
     write,
     path: canonicalizeLogicalPath(write.path),
@@ -1581,7 +1698,7 @@ const mergeLabels = (
 });
 
 const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
-  type: "https://commonfabric.org/cfc/atom/LinkReference",
+  type: CFC_ATOM_TYPE.LinkReference,
   source: {
     space: input.source.space,
     id: input.source.id,

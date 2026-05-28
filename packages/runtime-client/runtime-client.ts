@@ -211,6 +211,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
+  async getPageSlug(pageId: string): Promise<string | undefined> {
+    const response = await this.#conn.request<RequestType.PageGetSlug>({
+      type: RequestType.PageGetSlug,
+      pageId,
+    });
+    return response.slug;
+  }
+
   async removePage(pageId: string): Promise<boolean> {
     const res = await this.#conn.request<RequestType.PageRemove>({
       type: RequestType.PageRemove,

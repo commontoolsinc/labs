@@ -151,6 +151,135 @@ Deno.test("memory v2 raw reads reuse frozen snapshots until the document changes
   }
 });
 
+Deno.test("memory v2 read cache: sibling-path snapshot survives write, ancestor and written-subtree snapshots get rebuilt", async () => {
+  setDataModelConfig(true);
+  const storage = StorageManager.emulate({ as: signer });
+
+  try {
+    const tx = storage.edit();
+    const id = "of:memory-v2-read-freeze-prefix";
+
+    assert(
+      tx.write({ space, id, type, path: [] }, {
+        value: {
+          profile: { name: "Ada", title: "Dr" },
+          stats: { visits: 1 },
+        },
+      }).ok,
+    );
+
+    // Prime the per-doc frozen-reads cache at three locations: a sibling of
+    // the upcoming write, the soon-to-be-written subtree itself, and an
+    // ancestor of the write.
+    const profileBefore = tx.read({
+      space,
+      id,
+      type,
+      path: ["value", "profile"],
+    }).ok?.value;
+    const statsBefore = tx.read({
+      space,
+      id,
+      type,
+      path: ["value", "stats"],
+    }).ok?.value;
+    const ancestorBefore = tx.read({
+      space,
+      id,
+      type,
+      path: ["value"],
+    }).ok?.value;
+    assert(profileBefore);
+    assert(statsBefore);
+    assert(ancestorBefore);
+
+    // Write into the stats subtree only. The profile subtree is a sibling of
+    // the write and must remain cached; the ancestor at ["value"] must be
+    // rebuilt because its container identity changed.
+    assert(
+      tx.write({
+        space,
+        id,
+        type,
+        path: ["value", "stats", "visits"],
+      }, 2).ok,
+    );
+
+    const profileAfter = tx.read({
+      space,
+      id,
+      type,
+      path: ["value", "profile"],
+    }).ok?.value;
+    const statsAfter = tx.read({
+      space,
+      id,
+      type,
+      path: ["value", "stats"],
+    }).ok?.value;
+    const ancestorAfter = tx.read({
+      space,
+      id,
+      type,
+      path: ["value"],
+    }).ok?.value;
+
+    // Sibling-path entry: same identity — the cache held.
+    assertStrictEquals(profileBefore, profileAfter);
+    // Written-subtree entry: identity changes, value reflects the write.
+    assertNotStrictEquals(statsBefore, statsAfter);
+    // Ancestor-of-write entry: identity changes too.
+    assertNotStrictEquals(ancestorBefore, ancestorAfter);
+  } finally {
+    await storage.close();
+    resetDataModelConfig();
+  }
+});
+
+Deno.test("memory v2 read cache: array `.length` reads invalidate when an index extends the array", async () => {
+  // Regression for the `<parent>/length` sibling case: writing to
+  // `/items/1` increases the array's length from 1 to 2. The synthetic
+  // `/items/length` pointer is not on the chain of `/items/1` by path-string
+  // overlap, but it IS semantically dependent on the index write -- so the
+  // cache invalidator must drop it.
+  setDataModelConfig(true);
+  const storage = StorageManager.emulate({ as: signer });
+
+  try {
+    const tx = storage.edit();
+    const id = "of:memory-v2-read-freeze-length";
+
+    assert(
+      tx.write({ space, id, type, path: [] }, { value: { items: ["A"] } }).ok,
+    );
+
+    // Prime the cache at `/value/items/length`.
+    const lenBefore = tx.read({
+      space,
+      id,
+      type,
+      path: ["value", "items", "length"],
+    }).ok?.value;
+    assertEquals(lenBefore, 1);
+
+    // Extend the array by writing index 1.
+    assert(
+      tx.write({ space, id, type, path: ["value", "items", "1"] }, "B").ok,
+    );
+
+    const lenAfter = tx.read({
+      space,
+      id,
+      type,
+      path: ["value", "items", "length"],
+    }).ok?.value;
+    assertEquals(lenAfter, 2);
+  } finally {
+    await storage.close();
+    resetDataModelConfig();
+  }
+});
+
 Deno.test("memory v2 raw reads keep prior frozen snapshots stable after sibling writes", async () => {
   setDataModelConfig(true);
   const storage = StorageManager.emulate({

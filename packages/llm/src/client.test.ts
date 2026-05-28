@@ -10,8 +10,10 @@ import {
   LLMClient,
   LLMStreamError,
   loadConversationFixture,
+  normalizeLLMResponse,
   resetMockMode,
 } from "./client.ts";
+import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "./types.ts";
 
 const GUARD_MESSAGE =
   "LLMClient: live LLM calls are blocked in test environments.";
@@ -80,6 +82,29 @@ describe("LLMClient test-environment guard", () => {
 
     expect(result.content).toBe("mocked!");
     resetMockMode();
+  });
+
+  it("normalizes JSON responses without dropping native model tool metadata", () => {
+    const nativeModelToolResults = [{
+      type: "cf-harness.native-model-tool-result" as const,
+      toolId: GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+      provider: "google",
+      providerMetadata: { query: "example" },
+      sources: [{ url: "https://example.com" }],
+    }];
+
+    const result = normalizeLLMResponse({
+      role: "assistant",
+      content: "searched",
+      nativeModelToolResults,
+    }, "trace-json");
+
+    expect(result).toEqual({
+      role: "assistant",
+      content: "searched",
+      id: "trace-json",
+      nativeModelToolResults,
+    });
   });
 
   it("generateObject with mock mode bypasses guard", async () => {
@@ -367,6 +392,31 @@ describe("LLMClient test-environment guard", () => {
 
       throw new Error("Expected LLMStreamError");
     }
+  });
+
+  it("preserves native model tool metadata from stream finish events", async () => {
+    const nativeModelToolResults = [{
+      type: "cf-harness.native-model-tool-result" as const,
+      toolId: GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+      provider: "google",
+      providerMetadata: { query: "example" },
+      sources: [{ url: "https://example.com" }],
+    }];
+
+    const result = await runClientStream(client, [
+      JSON.stringify({ type: "text-delta", textDelta: "searched" }) + "\n",
+      JSON.stringify({
+        type: "finish",
+        nativeModelToolResults,
+      }) + "\n",
+    ]);
+
+    expect(result).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "searched" }],
+      id: "trace-1",
+      nativeModelToolResults,
+    });
   });
 
   it("logs and ignores garbage lines mid-stream", async () => {

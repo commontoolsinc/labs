@@ -18,7 +18,7 @@ import {
   TrustedSavedDraftBodyUiContract,
   TrustedSavedDraftTitleUiContract,
   TrustedSaveDraftSurface,
-} from "../cfc-trusted-surfaces/main.tsx";
+} from "../cfc/trusted-surfaces/mod.ts";
 
 interface StagedPublishInput {
   draftTitle: Writable<Default<string, "">>;

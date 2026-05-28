@@ -32,7 +32,7 @@ const deriveInput = __cfHelpers.__cf_data({} as Writable<{
     foo: string;
     bar: string;
 }>);
-const deriveObserved = __cfHelpers.__cf_data(derive({
+const deriveObserved = __cfHelpers.__cf_data(__cfHelpers.lift({
     type: "object",
     properties: {
         foo: {
@@ -43,11 +43,14 @@ const deriveObserved = __cfHelpers.__cf_data(derive({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, deriveInput, (input: Writable<{
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
     foo: string;
     bar: string;
-}>) => input.key("foo").get()).for("deriveObserved", true));
-const deriveExplicit = __cfHelpers.__cf_data(derive({
+}>) => input.key("foo").get())(deriveInput).for("deriveObserved", true));
+const deriveExplicit = __cfHelpers.__cf_data(__cfHelpers.lift<Writable<{
+    foo: string;
+    bar: string;
+}>, string>({
     type: "object",
     properties: {
         foo: {
@@ -58,7 +61,7 @@ const deriveExplicit = __cfHelpers.__cf_data(derive({
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, deriveInput, (value) => value.key("foo").get()).for("deriveExplicit", true));
+} as const satisfies __cfHelpers.JSONSchema, (value) => value.key("foo").get())(deriveInput).for("deriveExplicit", true));
 const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

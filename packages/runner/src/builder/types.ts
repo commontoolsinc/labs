@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { PatternBuilder } from "./pattern.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 
 import type {
   ActionFunction,
@@ -194,6 +195,10 @@ declare module "@commonfabric/api" {
     noDebounce?: boolean;
     /** Optional scheduler throttle period in milliseconds */
     throttle?: number;
+    /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
+    materializerWriteEnvelopes?: readonly NormalizedFullLink[];
+    /** Input paths whose writable cells should become materializer envelopes */
+    materializerWriteInputPaths?: readonly (readonly string[])[];
   }
 }
 
@@ -351,10 +356,11 @@ export interface BuilderFunctionsAndConstants {
   FabricPrimitive:
     typeof import("@commonfabric/data-model/fabric-value").FabricPrimitive;
   FabricEpochNsec:
-    typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochNsec;
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochNsec;
   FabricEpochDays:
-    typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochDays;
-  FabricHash: typeof import("@commonfabric/data-model/fabric-hash").FabricHash;
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
+  FabricHash:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
 
   // Debug stringifiers
   toCompactDebugString:

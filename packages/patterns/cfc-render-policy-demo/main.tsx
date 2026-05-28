@@ -7,10 +7,10 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWrite,
   UI,
   Writable,
 } from "commonfabric";
-import type { TrustedActionWrite } from "../cfc-trusted-surfaces/main.tsx";
 
 const TRUSTED_HEALTH_DISCLOSURE_SURFACE = "TrustedHealthDisclosureSurface";
 const TRUSTED_REVEAL_HEALTH_DATA_ACTION = "TrustedRevealHealthData";
@@ -43,7 +43,7 @@ type LabelledContentArgument = {
 type TrustedHealthDisclosureOutput = {
   [NAME]: string;
   [UI]: unknown;
-  revealed: TrustedActionWrite<
+  revealSensitive: TrustedActionWrite<
     boolean,
     typeof setRevealSensitive,
     typeof TRUSTED_REVEAL_HEALTH_DATA_ACTION,
@@ -199,7 +199,7 @@ export const TrustedHealthDisclosureSurface = pattern<
         </cf-vstack>
       </cf-card>
     ),
-    revealed: revealSensitive,
+    revealSensitive,
     reveal,
     conceal,
   };
@@ -245,7 +245,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
         </cf-vstack>
       </cf-screen>
     ),
-    revealSensitive,
+    revealSensitive: trustedDisclosure.revealSensitive,
     reveal: trustedDisclosure.reveal,
     conceal: trustedDisclosure.conceal,
   };

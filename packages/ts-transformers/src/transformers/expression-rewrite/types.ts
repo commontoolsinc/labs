@@ -6,7 +6,7 @@ import { TransformationContext } from "../../core/mod.ts";
 import type { ExpressionContainerKind } from "../expression-site-types.ts";
 
 export type OpaqueRefHelperName =
-  | "derive"
+  | "lift"
   | "ifElse"
   | "when"
   | "unless"
@@ -26,15 +26,22 @@ export interface RewriteParams {
   /**
    * True when inside a safe callback wrapper (action, handler, computed, etc.)
    * where opaque reading is allowed. In safe contexts, we still need to apply
-   * semantic transformations (&&->when, ||->unless) but NOT derive() wrappers.
+   * semantic transformations (&&->when, ||->unless) but NOT lift-applied wrappers.
    */
   readonly inSafeContext?: boolean;
   /**
-   * When true, reactive compute wrappers introduced during rewriting should be
-   * emitted directly as derive() calls rather than computed() calls. This is
-   * needed for post-closure lowering passes that run after ComputedTransformer.
+   * When true, reactive compute wrappers introduced during rewriting should
+   * be emitted as a lift-applied form bound to its captured inputs
+   * (`__cfHelpers.lift(cb)(inputs)`) rather than a zero-input thunk
+   * (`__cfHelpers.lift(() => expr)({})`). Pre-CT-1615 this flag's name
+   * referred to "derive vs computed" emission shapes; post-Phase-1 both
+   * shapes are forms of lift-applied. The flag still controls whether
+   * captured refs flow through the input object or via lexical closure
+   * (with closures later lifted by ClosureTransformer when possible).
+   * Used by post-closure lowering passes that run after
+   * LiftLoweringTransformer.
    */
-  readonly preferDeriveWrappers?: boolean;
+  readonly preferInputBoundWrappers?: boolean;
 }
 
 export interface EmitterContext extends RewriteParams {
@@ -42,7 +49,7 @@ export interface EmitterContext extends RewriteParams {
   readonly inSafeContext: boolean;
   readonly reactiveContextKind: ReactiveContextKind;
   readonly containerKind?: ExpressionContainerKind;
-  readonly preferDeriveWrappers: boolean;
+  readonly preferInputBoundWrappers: boolean;
   rewriteChildren(node: ts.Expression): ts.Expression;
   rewriteSubexpression(node: ts.Expression): ts.Expression;
 }

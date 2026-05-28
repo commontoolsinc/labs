@@ -1,7 +1,7 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
+import { JsonEncodingContext } from "@commonfabric/data-model/json-wire";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -72,6 +72,7 @@ import {
   NotificationType,
   type PageCreateRequest,
   type PageGetRequest,
+  type PageGetSlugRequest,
   PageGetSpaceDefault as PatternGetSpaceRoot,
   type PageRemoveRequest,
   PageResponse,
@@ -91,6 +92,7 @@ import {
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
+  type SlugResponse,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -448,7 +450,16 @@ export class RuntimeProcessor {
   handleCellGet(
     request: CellGetRequest,
   ): JSONValueResponse {
-    const cell = getCell(this.runtime, request.cell);
+    let cell = getCell(this.runtime, request.cell);
+    if (request.meta !== undefined) {
+      const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
+      const link = getMetaLink(rootCell, request.meta);
+      if (link === undefined) return { value: undefined };
+      cell = this.runtime.getCellFromLink({
+        ...link,
+        path: [...link.path, ...request.cell.path],
+      });
+    }
     const value = cell.get();
     const converted = convertCellsToLinks(value, {
       includeSchema: true,
@@ -675,6 +686,43 @@ export class RuntimeProcessor {
   async handlePageGet(
     request: PageGetRequest,
   ): Promise<PageResponse> {
+    const requestedCell = this.runtime.getCellFromEntityId(
+      this.pieceManager.getSpace(),
+      { "/": request.pageId },
+    );
+    await requestedCell.sync();
+    const redirect = parseLink(
+      requestedCell.getRaw(),
+      requestedCell.getAsNormalizedFullLink(),
+    );
+    if (redirect?.overwrite === "redirect") {
+      const target = this.runtime.getCellFromLink({
+        ...redirect,
+        space: redirect.space ?? this.pieceManager.getSpace(),
+        scope: redirect.scope ?? "space",
+      });
+      await target.sync();
+      const targetLink = target.getAsNormalizedFullLink();
+      const hasPattern = target.getMetaRaw("pattern") !== undefined;
+      if (!hasPattern || targetLink.path.length > 0) {
+        const pageCell = hasPattern && targetLink.path.length > 0
+          ? target.asSchemaFromLinks()
+          : target;
+        await pageCell.pull();
+        return {
+          page: createPageRef(pageCell),
+        };
+      }
+
+      const cell = await this.cc.manager().get(
+        target,
+        request.runIt ?? false,
+      );
+      return {
+        page: createPageRef(cell),
+      };
+    }
+
     const cell = await this.cc.manager().get(
       request.pageId,
       request.runIt ?? false,
@@ -683,6 +731,18 @@ export class RuntimeProcessor {
     return {
       page: createPageRef(cell),
     };
+  }
+
+  async handlePageGetSlug(
+    request: PageGetSlugRequest,
+  ): Promise<SlugResponse> {
+    const cell = this.runtime.getCellFromEntityId(
+      this.pieceManager.getSpace(),
+      { "/": request.pageId },
+    );
+    await cell.sync();
+    const slug = cell.getMetaRaw("slug");
+    return { slug: typeof slug === "string" ? slug : undefined };
   }
 
   async handlePageRemove(
@@ -991,6 +1051,8 @@ export class RuntimeProcessor {
         );
       case RequestType.PageGet:
         return await this.handlePageGet(request);
+      case RequestType.PageGetSlug:
+        return await this.handlePageGetSlug(request);
       case RequestType.PageRemove:
         return await this.handlePageRemove(request);
       case RequestType.PageStart:

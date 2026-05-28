@@ -2,15 +2,14 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   fabricFromNativeValue,
-  isArrayIndexPropertyName,
   isFabricCompatible,
   isFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../fabric-value.ts";
-import { FabricError } from "../fabric-native-instances.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+} from "../src/fabric-value.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 
 describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the
@@ -22,94 +21,6 @@ describe("fabric-value", () => {
   });
   afterEach(() => {
     resetDataModelConfig();
-  });
-
-  describe("isArrayIndexPropertyName", () => {
-    describe("returns true for valid array indices", () => {
-      it("accepts '0'", () => {
-        expect(isArrayIndexPropertyName("0")).toBe(true);
-      });
-
-      it("accepts single-digit indices 1-9", () => {
-        for (let i = 1; i <= 9; i++) {
-          expect(isArrayIndexPropertyName(String(i))).toBe(true);
-        }
-      });
-
-      it("accepts multi-digit indices", () => {
-        expect(isArrayIndexPropertyName("10")).toBe(true);
-        expect(isArrayIndexPropertyName("99")).toBe(true);
-        expect(isArrayIndexPropertyName("123")).toBe(true);
-        expect(isArrayIndexPropertyName("999999999")).toBe(true);
-      });
-
-      it("accepts values in the upper range (2**31 and above, below 2**32 - 1)", () => {
-        expect(isArrayIndexPropertyName("2147483647")).toBe(true); // 2**31 - 1
-        expect(isArrayIndexPropertyName("2147483648")).toBe(true); // 2**31
-        expect(isArrayIndexPropertyName("4294967294")).toBe(true); // 2**32 - 2 (max valid)
-      });
-
-      it("accepts 10-digit numbers below 2**32 - 1", () => {
-        expect(isArrayIndexPropertyName("1000000000")).toBe(true);
-        expect(isArrayIndexPropertyName("2147483646")).toBe(true); // 2**31 - 2
-      });
-    });
-
-    describe("returns false for invalid indices", () => {
-      it("rejects empty string", () => {
-        expect(isArrayIndexPropertyName("")).toBe(false);
-      });
-
-      it("rejects leading zeros", () => {
-        expect(isArrayIndexPropertyName("00")).toBe(false);
-        expect(isArrayIndexPropertyName("01")).toBe(false);
-        expect(isArrayIndexPropertyName("007")).toBe(false);
-      });
-
-      it("rejects negative numbers", () => {
-        expect(isArrayIndexPropertyName("-1")).toBe(false);
-        expect(isArrayIndexPropertyName("-0")).toBe(false);
-        expect(isArrayIndexPropertyName("-100")).toBe(false);
-      });
-
-      it("rejects decimals", () => {
-        expect(isArrayIndexPropertyName("1.5")).toBe(false);
-        expect(isArrayIndexPropertyName("0.0")).toBe(false);
-        expect(isArrayIndexPropertyName("1.0")).toBe(false);
-      });
-
-      it("rejects scientific notation", () => {
-        expect(isArrayIndexPropertyName("1e5")).toBe(false);
-        expect(isArrayIndexPropertyName("1E5")).toBe(false);
-        expect(isArrayIndexPropertyName("1e+5")).toBe(false);
-      });
-
-      it("rejects whitespace", () => {
-        expect(isArrayIndexPropertyName(" 1")).toBe(false);
-        expect(isArrayIndexPropertyName("1 ")).toBe(false);
-        expect(isArrayIndexPropertyName(" 1 ")).toBe(false);
-      });
-
-      it("rejects non-numeric strings", () => {
-        expect(isArrayIndexPropertyName("NaN")).toBe(false);
-        expect(isArrayIndexPropertyName("Infinity")).toBe(false);
-        expect(isArrayIndexPropertyName("abc")).toBe(false);
-        expect(isArrayIndexPropertyName("1a")).toBe(false);
-        expect(isArrayIndexPropertyName("a1")).toBe(false);
-      });
-
-      it("rejects leading plus sign", () => {
-        expect(isArrayIndexPropertyName("+1")).toBe(false);
-        expect(isArrayIndexPropertyName("+0")).toBe(false);
-      });
-
-      it("rejects values >= 2**32 - 1", () => {
-        expect(isArrayIndexPropertyName("4294967295")).toBe(false); // 2**32 - 1 (not a valid index)
-        expect(isArrayIndexPropertyName("4294967296")).toBe(false); // 2**32
-        expect(isArrayIndexPropertyName("9999999999")).toBe(false); // way > 2**32
-        expect(isArrayIndexPropertyName("10000000000")).toBe(false); // 11 digits
-      });
-    });
   });
 
   describe("isFabricValue", () => {
@@ -1271,12 +1182,12 @@ describe("fabric-value", () => {
       // Top level should be a FabricError.
       expect(result).toBeInstanceOf(FabricError);
       const se = result as FabricError;
-      expect(se.error.message).toBe("outer");
+      expect(se.message).toBe("outer");
 
       // cause should also be a FabricError (not a raw Error).
-      expect(se.error.cause).toBeInstanceOf(FabricError);
-      const innerSe = se.error.cause as FabricError;
-      expect(innerSe.error.message).toBe("inner");
+      expect(se.cause).toBeInstanceOf(FabricError);
+      const innerSe = se.cause as FabricError;
+      expect(innerSe.message).toBe("inner");
     });
 
     it("converts deeply nested Error chain (3 levels)", () => {
@@ -1285,13 +1196,13 @@ describe("fabric-value", () => {
       const top = new Error("top", { cause: mid });
       const result = fabricFromNativeValue(top) as FabricError;
 
-      expect(result.error.message).toBe("top");
-      const midSe = result.error.cause as FabricError;
+      expect(result.message).toBe("top");
+      const midSe = result.cause as FabricError;
       expect(midSe).toBeInstanceOf(FabricError);
-      expect(midSe.error.message).toBe("mid");
-      const rootSe = midSe.error.cause as FabricError;
+      expect(midSe.message).toBe("mid");
+      const rootSe = midSe.cause as FabricError;
       expect(rootSe).toBeInstanceOf(FabricError);
-      expect(rootSe.error.message).toBe("root");
+      expect(rootSe.message).toBe("root");
     });
 
     it("converts custom enumerable properties on Error", () => {
@@ -1303,11 +1214,10 @@ describe("fabric-value", () => {
       error.details = { nested: "value" };
 
       const result = fabricFromNativeValue(error) as FabricError;
-      expect(result.error.message).toBe("with props");
+      expect(result.message).toBe("with props");
       // Custom properties should be preserved and converted.
-      const converted = result.error as unknown as Record<string, unknown>;
-      expect(converted.statusCode).toBe(404);
-      expect(converted.details).toEqual({ nested: "value" });
+      expect(result.getExtra("statusCode")).toBe(404);
+      expect(result.getExtra("details")).toEqual({ nested: "value" });
     });
 
     it("converts Error with non-Error cause (plain object)", () => {
@@ -1316,8 +1226,8 @@ describe("fabric-value", () => {
       const result = fabricFromNativeValue(error) as FabricError;
 
       // cause should be a plain object (already valid FabricValue).
-      expect(result.error.cause).toEqual({ code: "ENOENT", path: "/missing" });
-      expect(Object.isFrozen(result.error.cause)).toBe(true);
+      expect(result.cause).toEqual({ code: "ENOENT", path: "/missing" });
+      expect(Object.isFrozen(result.cause)).toBe(true);
     });
 
     it("preserves Error subclass through internals conversion", () => {
@@ -1325,11 +1235,11 @@ describe("fabric-value", () => {
       const outer = new TypeError("bad type", { cause: inner });
       const result = fabricFromNativeValue(outer) as FabricError;
 
-      expect(result.error).toBeInstanceOf(TypeError);
-      expect(result.error.name).toBe("TypeError");
-      const innerSe = result.error.cause as FabricError;
-      expect(innerSe.error).toBeInstanceOf(RangeError);
-      expect(innerSe.error.name).toBe("RangeError");
+      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("TypeError");
+      const innerSe = result.cause as FabricError;
+      expect(innerSe.toNativeValue(true)).toBeInstanceOf(RangeError);
+      expect(innerSe.name).toBe("RangeError");
     });
 
     it("does not mutate the original Error's cause", () => {
@@ -1345,7 +1255,7 @@ describe("fabric-value", () => {
     it("handles Error with undefined cause (no conversion needed)", () => {
       const error = new Error("simple");
       const result = fabricFromNativeValue(error) as FabricError;
-      expect(result.error.cause).toBeUndefined();
+      expect(result.cause).toBeUndefined();
     });
 
     it("freezes the FabricError wrapper when freeze=true", () => {
@@ -1361,7 +1271,7 @@ describe("fabric-value", () => {
       // But internals should still be converted.
       expect(result).toBeInstanceOf(FabricError);
       const se = result as FabricError;
-      expect(se.error.cause).toBeInstanceOf(FabricError);
+      expect(se.cause).toBeInstanceOf(FabricError);
     });
   });
 
@@ -1381,40 +1291,40 @@ describe("fabric-value", () => {
       resetDataModelConfig();
     });
 
-    it("isFabricValue accepts NaN", () => {
+    it("accepts NaN", () => {
       expect(isFabricValue(NaN)).toBe(true);
     });
 
-    it("isFabricValue accepts +/-Infinity", () => {
+    it("accepts +/-Infinity", () => {
       expect(isFabricValue(Infinity)).toBe(true);
       expect(isFabricValue(-Infinity)).toBe(true);
     });
 
-    it("isFabricValue accepts -0", () => {
+    it("accepts -0", () => {
       expect(isFabricValue(-0)).toBe(true);
     });
 
-    it("shallowFabricFromNativeValue passes NaN through", () => {
+    it("passes NaN through", () => {
       expect(Number.isNaN(shallowFabricFromNativeValue(NaN))).toBe(true);
     });
 
-    it("shallowFabricFromNativeValue passes +/-Infinity through", () => {
+    it("passes +/-Infinity through", () => {
       expect(shallowFabricFromNativeValue(Infinity)).toBe(Infinity);
       expect(shallowFabricFromNativeValue(-Infinity)).toBe(-Infinity);
     });
 
-    it("shallowFabricFromNativeValue preserves the sign of -0", () => {
+    it("preserves the sign of -0", () => {
       expect(Object.is(shallowFabricFromNativeValue(-0), -0)).toBe(true);
     });
 
-    it("fabricFromNativeValue passes special numbers through", () => {
+    it("passes special numbers through", () => {
       expect(Number.isNaN(fabricFromNativeValue(NaN))).toBe(true);
       expect(fabricFromNativeValue(Infinity)).toBe(Infinity);
       expect(fabricFromNativeValue(-Infinity)).toBe(-Infinity);
       expect(Object.is(fabricFromNativeValue(-0), -0)).toBe(true);
     });
 
-    it("fabricFromNativeValue preserves special numbers nested in objects", () => {
+    it("preserves special numbers nested in objects", () => {
       const result = fabricFromNativeValue({
         nz: -0,
         nan: NaN,
@@ -1427,7 +1337,7 @@ describe("fabric-value", () => {
       expect(result.ninf).toBe(-Infinity);
     });
 
-    it("fabricFromNativeValue preserves special numbers in arrays", () => {
+    it("preserves special numbers in arrays", () => {
       const result = fabricFromNativeValue(
         [1, -0, NaN, Infinity, -Infinity, 2],
       ) as number[];
@@ -1457,11 +1367,11 @@ describe("fabric-value", () => {
       resetDataModelConfig();
     });
 
-    it("isFabricValue accepts an interned symbol", () => {
+    it("accepts an interned symbol", () => {
       expect(isFabricValue(Symbol.for("k"))).toBe(true);
     });
 
-    it("isFabricValue rejects a unique symbol", () => {
+    it("rejects a unique symbol", () => {
       expect(isFabricValue(Symbol("k"))).toBe(false);
     });
 
@@ -1599,7 +1509,8 @@ describe("fabric-value", () => {
 
     // -- FabricInstance values --
     it("accepts FabricError wrappers", () => {
-      expect(isFabricCompatible(new FabricError(new Error("test")))).toBe(true);
+      expect(isFabricCompatible(FabricError.fromNativeError(new Error("test"))))
+        .toBe(true);
     });
 
     // -- Containers --

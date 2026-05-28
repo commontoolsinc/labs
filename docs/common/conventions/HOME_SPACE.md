@@ -93,6 +93,11 @@ The home space DID equals the user's identity DID. This means **the CLI identity
 must match the browser identity** for `set-home` to affect what the browser
 displays.
 
+For local development, prefer one shared PKCS8/PEM key imported into the browser
+and exported through `CF_IDENTITY` for CLI commands. The browser login screen has
+an `Import CLI Key` option for this workflow. See
+[`docs/development/SHARED_IDENTITY.md`](../../development/SHARED_IDENTITY.md).
+
 The browser shell derives identity from a mnemonic via
 `Identity.fromMnemonic()`, while `cf id derive` uses
 `Identity.fromPassphrase()`. These are different algorithms — the same input

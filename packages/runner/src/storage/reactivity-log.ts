@@ -10,8 +10,8 @@ const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
 );
 
-const markReadAsPotentialWriteMarker: unique symbol = Symbol(
-  "markReadAsPotentialWriteMarker",
+const markReadAsAttemptedWriteMarker: unique symbol = Symbol(
+  "markReadAsAttemptedWriteMarker",
 );
 
 const allowMutableTransactionReadMarker: unique symbol = Symbol(
@@ -26,8 +26,8 @@ export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
 
-export const markReadAsPotentialWrite: Metadata = {
-  [markReadAsPotentialWriteMarker]: true,
+export const markReadAsAttemptedWrite: Metadata = {
+  [markReadAsAttemptedWriteMarker]: true,
 };
 
 export const allowMutableTransactionRead: Metadata = {
@@ -42,8 +42,8 @@ export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
 }
 
-export function isReadMarkedAsPotentialWrite(meta?: Metadata): boolean {
-  return meta?.[markReadAsPotentialWriteMarker] === true;
+export function isReadMarkedAsAttemptedWrite(meta?: Metadata): boolean {
+  return meta?.[markReadAsAttemptedWriteMarker] === true;
 }
 
 export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {
@@ -78,9 +78,9 @@ export function reactivityLogFromActivities(
       } else {
         log.reads.push(address);
       }
-      if (isReadMarkedAsPotentialWrite(activity.read.meta)) {
-        log.potentialWrites ??= [];
-        log.potentialWrites.push(address);
+      if (isReadMarkedAsAttemptedWrite(activity.read.meta)) {
+        log.attemptedWrites ??= [];
+        log.attemptedWrites.push(address);
       }
       continue;
     }

@@ -3,6 +3,7 @@ import {
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,
 } from "../reactive-dependencies.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
@@ -50,6 +51,9 @@ export function topologicalSort(
   mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
   actionParent?: WeakMap<Action, Action>,
   dependents?: WeakMap<Action, Set<Action>>,
+  getAdditionalWrites?: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined,
 ): Action[] {
   const graph = new Map<Action, Set<Action>>();
   const inDegree = new Map<Action, number>();
@@ -88,14 +92,12 @@ export function topologicalSort(
             if (
               logB.reads.some(
                 (addr) =>
-                  addr.space === write.space &&
-                  addr.id === write.id &&
+                  addressesShareEntity(addr, write) &&
                   arraysOverlap(write.path, addr.path),
               ) ||
               logB.shallowReads.some(
                 (addr) =>
-                  addr.space === write.space &&
-                  addr.id === write.id &&
+                  addressesShareEntity(addr, write) &&
                   nonRecursiveReadMayOverlapWrite(addr.path, write.path),
               )
             ) {
@@ -106,6 +108,16 @@ export function topologicalSort(
         }
       }
     }
+  }
+
+  if (getAdditionalWrites) {
+    addAdditionalWriteEdges({
+      actions,
+      dependencies,
+      graph,
+      inDegree,
+      getAdditionalWrites,
+    });
   }
 
   // Add parent-child edges only when no opposing data dependency exists.
@@ -180,4 +192,54 @@ export function topologicalSort(
   }
 
   return result;
+}
+
+function addAdditionalWriteEdges(state: {
+  readonly actions: Set<Action>;
+  readonly dependencies: WeakMap<Action, ReactivityLog>;
+  readonly graph: Map<Action, Set<Action>>;
+  readonly inDegree: Map<Action, number>;
+  readonly getAdditionalWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+}): void {
+  for (const actionA of state.actions) {
+    const writes = state.getAdditionalWrites(actionA) ?? [];
+    if (writes.length === 0) continue;
+
+    const graphA = state.graph.get(actionA)!;
+    for (const actionB of state.actions) {
+      if (actionA === actionB || graphA.has(actionB)) continue;
+      const logB = state.dependencies.get(actionB);
+      if (!logB) continue;
+      if (
+        logB.reads.some(
+          (addr) =>
+            writes.some((write) =>
+              addressesShareEntity(addr, write) &&
+              arraysOverlap(write.path, addr.path)
+            ),
+        ) ||
+        logB.shallowReads.some(
+          (addr) =>
+            writes.some((write) =>
+              addressesShareEntity(addr, write) &&
+              nonRecursiveReadMayOverlapWrite(addr.path, write.path)
+            ),
+        )
+      ) {
+        graphA.add(actionB);
+        state.inDegree.set(actionB, (state.inDegree.get(actionB) || 0) + 1);
+      }
+    }
+  }
+}
+
+function addressesShareEntity(
+  a: IMemorySpaceAddress,
+  b: IMemorySpaceAddress,
+): boolean {
+  return a.space === b.space &&
+    a.id === b.id &&
+    normalizeCellScope(a.scope) === normalizeCellScope(b.scope);
 }

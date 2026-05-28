@@ -14,7 +14,7 @@ const SMALLS_SIZE = 256;
  * and (b) a small amount of extra byte copying wins over direct calls to the
  * underlying hasher's `update()`. This implementation modestly penalizes use
  * patterns where instances are used in a "one-shot" style (or a "couple-shots"
- * style), but probably not enough to matter, especially for larger payloads..
+ * style), but probably not enough to matter, especially for larger payloads.
  */
 export abstract class BaseSmallChunkUpdatingHasher
   extends BaseIncrementalHasher {
@@ -54,6 +54,10 @@ export abstract class BaseSmallChunkUpdatingHasher
     super.update(data);
   }
 
+  /**
+   * Helper for `digest()` and `update()`, which flushes any pending
+   * small-update bytes to the underlying `_rawUpdate()`.
+   */
   #updateFromSmalls() {
     const smallsOffset = this.#smallsOffset;
 

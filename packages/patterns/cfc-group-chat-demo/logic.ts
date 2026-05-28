@@ -1,5 +1,18 @@
 import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
+export type RandomSource = () => number;
+
+export const seededRandom = (seed: number): RandomSource => {
+  let current = seed >>> 0;
+  return () => {
+    current |= 0;
+    current = (current + 0x6d2b79f5) | 0;
+    let value = Math.imul(current ^ (current >>> 15), 1 | current);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
 export type MessageOrigin = "sent" | "imported";
 
 export interface ChatProfile {
@@ -15,7 +28,6 @@ export interface ParticipantClaim<ProfileRef = unknown> {
 
 export interface SentChatMessage<ProfileRef = unknown> {
   readonly origin: "sent";
-  readonly id: string;
   readonly authorName: string;
   readonly authorProfile: ProfileRef;
   readonly body: string;
@@ -24,7 +36,6 @@ export interface SentChatMessage<ProfileRef = unknown> {
 
 export interface ImportedClaimedChatMessage<ProfileRef = unknown> {
   readonly origin: "imported";
-  readonly id: string;
   readonly authorName: string;
   readonly authorProfile?: ProfileRef;
   readonly body: string;
@@ -34,6 +45,12 @@ export interface ImportedClaimedChatMessage<ProfileRef = unknown> {
 export type PlainChatMessage<ProfileRef = unknown> =
   | SentChatMessage<ProfileRef>
   | ImportedClaimedChatMessage<ProfileRef>;
+
+export interface ChatRoom<Message = PlainChatMessage> {
+  readonly name: string;
+  readonly messages: Message[];
+  readonly createdAt: number;
+}
 
 const PROFILE_COLORS = [
   "#2563eb",
@@ -69,20 +86,24 @@ export const makeProfileSnapshot = (
   accentColor: previous?.accentColor ?? accentColorForName(name),
 });
 
-const createId = (prefix: string): string =>
-  `${prefix}-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`;
-
 export const createSentMessageSnapshot = <ProfileRef>(
   authorProfile: ProfileRef,
   author: ChatProfile,
   body: string,
 ): SentChatMessage<ProfileRef> => ({
   origin: "sent",
-  id: createId("msg"),
   authorName: author.name,
   authorProfile,
   body,
   timestamp: safeDateNow(),
+});
+
+export const createRoomSnapshot = <Message>(
+  name: string,
+): ChatRoom<Message> => ({
+  name,
+  messages: [],
+  createdAt: safeDateNow(),
 });
 
 const createImportedClaimedMessage = <ProfileRef>(
@@ -91,7 +112,6 @@ const createImportedClaimedMessage = <ProfileRef>(
   timestamp: number,
 ): ImportedClaimedChatMessage<ProfileRef> => ({
   origin: "imported",
-  id: createId("imported"),
   authorName: author.name,
   ...(author.profile !== undefined ? { authorProfile: author.profile } : {}),
   body,
@@ -99,37 +119,58 @@ const createImportedClaimedMessage = <ProfileRef>(
 });
 
 const compareMessagesByThreadOrder = (
-  left: Pick<PlainChatMessage, "id" | "timestamp">,
-  right: Pick<PlainChatMessage, "id" | "timestamp">,
-): number =>
-  left.timestamp === right.timestamp
-    ? left.id.localeCompare(right.id)
-    : left.timestamp - right.timestamp;
+  left: Pick<PlainChatMessage, "authorName" | "body" | "origin" | "timestamp">,
+  right: Pick<PlainChatMessage, "authorName" | "body" | "origin" | "timestamp">,
+): number => {
+  const timestampOrder = left.timestamp - right.timestamp;
+  if (timestampOrder !== 0) {
+    return timestampOrder;
+  }
+
+  const authorOrder = left.authorName.localeCompare(right.authorName);
+  if (authorOrder !== 0) {
+    return authorOrder;
+  }
+
+  const bodyOrder = left.body.localeCompare(right.body);
+  if (bodyOrder !== 0) {
+    return bodyOrder;
+  }
+
+  return left.origin.localeCompare(right.origin);
+};
 
 export const sortDisplayMessages = <
-  Message extends Pick<PlainChatMessage, "id" | "timestamp">,
+  Message extends Pick<
+    PlainChatMessage,
+    "authorName" | "body" | "origin" | "timestamp"
+  >,
 >(
   messages: readonly Message[],
 ): Message[] => Array.from(messages).sort(compareMessagesByThreadOrder);
 
-const chooseRandom = <Value>(values: readonly Value[]): Value | undefined => {
+const chooseRandom = <Value>(
+  values: readonly Value[],
+  random: RandomSource,
+): Value | undefined => {
   if (values.length === 0) {
     return undefined;
   }
 
-  const index = Math.floor(nonPrivateRandom() * values.length);
+  const index = Math.floor(random() * values.length);
   return values[index] ?? values[0];
 };
 
 const randomInsertTimestamp = (
   messages: readonly PlainChatMessage[],
+  random: RandomSource,
 ): number => {
   const ordered = sortDisplayMessages(messages);
   if (ordered.length === 0) {
     return safeDateNow();
   }
 
-  const slot = nonPrivateRandom() * (ordered.length + 1);
+  const slot = random() * (ordered.length + 1);
   const rightIndex = Math.floor(slot);
   const fractional = slot - rightIndex;
   if (rightIndex <= 0) {
@@ -142,14 +183,17 @@ const randomInsertTimestamp = (
   const leftTimestamp = ordered[rightIndex - 1]!.timestamp;
   const rightTimestamp = ordered[rightIndex]!.timestamp;
   const gap = rightTimestamp - leftTimestamp;
-  return gap > 0.001
-    ? leftTimestamp + gap * (fractional === 0 ? 0.5 : fractional)
-    : leftTimestamp + nonPrivateRandom() * 0.001;
+  if (gap > 0.001) {
+    return leftTimestamp + gap * (fractional === 0 ? 0.5 : fractional);
+  }
+
+  return leftTimestamp + random() * 0.001;
 };
 
 export const createRandomImportedClaimedMessages = <ProfileRef>(
   existingMessages: readonly PlainChatMessage<ProfileRef>[],
   participants: readonly ParticipantClaim<ProfileRef>[],
+  random: RandomSource = nonPrivateRandom,
 ): ImportedClaimedChatMessage<ProfileRef>[] => {
   const authorPool = Array.from(participants);
   const workingMessages = sortDisplayMessages(existingMessages);
@@ -159,12 +203,12 @@ export const createRandomImportedClaimedMessages = <ProfileRef>(
   }
 
   return Array.from({ length: insertCount }, () => {
-    const author = chooseRandom(authorPool);
-    const body = chooseRandom(RANDOM_IMPORTED_BODIES);
+    const author = chooseRandom(authorPool, random);
+    const body = chooseRandom(RANDOM_IMPORTED_BODIES, random);
     if (!author || !body) {
       return undefined;
     }
-    const timestamp = randomInsertTimestamp(workingMessages);
+    const timestamp = randomInsertTimestamp(workingMessages, random);
     const message = createImportedClaimedMessage(author, body, timestamp);
     workingMessages.push(message);
     return message;

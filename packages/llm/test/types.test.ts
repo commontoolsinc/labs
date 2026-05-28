@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
-import { DEFAULT_MODEL_NAME, isLLMRequest } from "../src/types.ts";
+import {
+  DEFAULT_MODEL_NAME,
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+  isLLMRequest,
+} from "../src/types.ts";
 
 describe("types", () => {
   describe("isLLMRequest", () => {
@@ -40,6 +44,12 @@ describe("types", () => {
         },
         cache: true,
       }));
+      assert(isLLMRequest({
+        messages: [],
+        model: DEFAULT_MODEL_NAME,
+        nativeModelToolIds: [GOOGLE_SEARCH_NATIVE_MODEL_TOOL],
+        cache: true,
+      }));
     });
     it("fail cases", () => {
       const failRequest = (input: object) =>
@@ -74,6 +84,8 @@ describe("types", () => {
       failRequest({ stop: {} });
       failRequest({ mode: "html" });
       failRequest({ metadata: "via piece" });
+      failRequest({ nativeModelToolIds: ["unknown_search"] });
+      failRequest({ nativeModelToolIds: [GOOGLE_SEARCH_NATIVE_MODEL_TOOL, 1] });
     });
   });
 });

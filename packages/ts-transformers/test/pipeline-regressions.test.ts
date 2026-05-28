@@ -100,7 +100,7 @@ Deno.test(
       "OpaqueGetValidationTransformer",
       "PatternContextValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
-      "ComputedTransformer",
+      "LiftLoweringTransformer",
       "ClosureTransformer",
       "PatternOwnedExpressionSiteLoweringTransformer",
       "HelperOwnedExpressionSiteLoweringTransformer",
@@ -342,9 +342,15 @@ export default pattern<{
       output,
       "=> f.validationIssue !== undefined",
     );
+    // After CT-1615 Phase 1, the synthesized wrapper is lift-applied:
+    //   __cfHelpers.lift<...>(({ f }) => f.validationIssue !== undefined)(
+    //     { validationIssue: f.key("validationIssue") }
+    //   )
+    // The callback lives on the inner lift call; the input on the outer
+    // applied call.
     assertMatch(
       output,
-      /__cfHelpers\.derive\([\s\S]*validationIssue: f(?:\.validationIssue|\.key\("validationIssue"\))[\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)/,
+      /__cfHelpers\.lift\([\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)\(\{[\s\S]*validationIssue: f(?:\.validationIssue|\.key\("validationIssue"\))[\s\S]*\}\)/,
     );
   },
 );
@@ -749,9 +755,85 @@ export default pattern<{ values: string[] }>(({ values }) => {
     });
     const normalized = output.replace(/\s+/g, " ");
 
+    // After CT-1615 Phase 1, derive(values, cb) lowers to lift(cb)(values):
+    // const result = __cfHelpers.lift(argSchema, resSchema, cb)(values).for(...)
     assertMatch(
       normalized,
-      /const result = derive\([\s\S]*, values, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\.for\("result", true\);/,
+      /const result = __cfHelpers\.lift\([\s\S]*?, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\(values\)\.for\("result", true\);/,
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: local concise ternary event handlers stay function-valued",
+  async () => {
+    const source =
+      `import { derive, handler, pattern, UI, Writable } from "commonfabric";
+
+interface Item {
+  id: string;
+}
+
+interface Vote {
+  itemId: string;
+  vote: "yes" | "no";
+}
+
+const castVote = handler<{ itemId: string; vote: "yes" }, { votes: Writable<Vote[]> }>(
+  (event, { votes }) => {
+    votes.push(event);
+  },
+);
+
+const clearVote = handler<{ itemId: string }, {}>(() => {});
+
+export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
+  ({ items, votes }) => {
+    const boundCastVote = castVote({ votes });
+    const boundClearVote = clearVote({});
+
+    return {
+      [UI]: (
+        <div>
+          {items.map((item) => {
+            const iid = item.id;
+            const myVote = derive(
+              { votes, itemId: iid },
+              ({ votes, itemId }) =>
+                votes.get().find((vote) => vote.itemId === itemId)?.vote,
+            );
+
+            const onVoteYes = () =>
+              myVote === "yes"
+                ? boundClearVote.send({ itemId: iid })
+                : boundCastVote.send({ itemId: iid, vote: "yes" });
+
+            return <cf-button onClick={onVoteYes}>yes</cf-button>;
+          })}
+        </div>
+      ),
+    };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, 'const onVoteYes = () => myVote === "yes"');
+    assertStringIncludes(output, "boundClearVote.send({ itemId: iid })");
+    assertStringIncludes(
+      output,
+      'boundCastVote.send({ itemId: iid, vote: "yes" })',
+    );
+    assert(
+      !output.includes("const onVoteYes = __cfHelpers.derive("),
+      "local event handler variable must not become a derive cell containing a function",
+    );
+    assert(
+      !output.includes("=> () => __cfHelpers.ifElse("),
+      "local event handler body must keep imperative ternary semantics",
     );
   },
 );
@@ -814,12 +896,14 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    // After CT-1615 Phase 1, the user-authored `derive(options, ...)`
+    // lowers to `__cfHelpers.lift(...)(options)`.
     const minimalNullableStart = output.indexOf(
-      "const minimalNullable = derive(",
+      "const minimalNullable = __cfHelpers.lift(",
     );
     assert(
       minimalNullableStart >= 0,
-      "expected transformed minimalNullable derive",
+      "expected transformed minimalNullable lift-applied call",
     );
     const minimalNullableWindow = output.slice(
       minimalNullableStart,
@@ -837,6 +921,195 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     assert(
       !minimalNullableWindow.includes('required: ["length", "0"]'),
       "expected the derive input schema not to require object-style array members",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured PerUser defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, type PerSpace, type PerUser, UI, type VNode } from "commonfabric";
+
+const trimmedName = (name: string | undefined) => (name ?? "").trim();
+
+interface Input {
+  question?: PerSpace<string | Default<"Where should we eat?">>;
+  myName?: PerUser<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["myName"]: displayName }) => ({
+  [NAME]: "ct-1606",
+  [UI]: (
+    <cf-screen>
+      <div slot="header">
+        <h2>{question}</h2>
+        {computed(() => {
+          const value = trimmedName(displayName);
+          return <div>me is: "{value}"</div>;
+        })}
+      </div>
+      <div>body renders</div>
+    </cf-screen>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    // After CT-1615 Phase 1, computed() lowers to lift-applied:
+    //   __cfHelpers.lift<...>({argSchema}, {resSchema}, cb)({inputObj})
+    // The lift call (with generic type args) begins the wrapper; the
+    // captured displayName lives in the outer applied call's input object.
+    // Match the lift identifier with optional type arguments via regex.
+    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
+
+    // Capture-input properties appear in the outer applied call's argument.
+    assertStringIncludes(liftWindow, "displayName: {");
+    assertStringIncludes(liftWindow, 'type: "string"');
+    assertStringIncludes(liftWindow, '"default": ""');
+    assertStringIncludes(liftWindow, 'scope: "user"');
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured Writable defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  draftTitle: Writable<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) => ({
+  [NAME]: "writable-default-capture",
+  [UI]: <div>{computed(() => <span>{draftTitle}</span>)}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    // After CT-1615 Phase 1, computed() lowers to lift-applied.
+    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
+
+    assertStringIncludes(liftWindow, "draftTitle: {");
+    assertStringIncludes(liftWindow, 'type: "string"');
+    assertStringIncludes(liftWindow, '"default": ""');
+    assertStringIncludes(liftWindow, "asCell:");
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve Writable Record defaults without orphan refs",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  selections: Writable<Record<string, boolean> | Default<Record<string, never>>>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) => ({
+  [NAME]: "writable-record-default-capture",
+  [UI]: <div>{computed(() => selections.foo ? "yes" : "no")}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    // After CT-1615 Phase 1, computed() lowers to lift-applied.
+    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
+
+    assertStringIncludes(liftWindow, "selections:");
+    assert(
+      !liftWindow.includes("AnonymousType_"),
+      "expected Writable<Record<...Default...>> capture not to emit orphan anonymous refs",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: side-writing computed marks writable inputs for materialization",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+}
+
+export default pattern<Input>(({ departments }) => {
+  const init = computed(() => {
+    if (departments.get().length === 0) departments.set(["Bakery"]);
+    return true;
+  });
+  return { init };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const liftMatch = output.match(/const init = __cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift()",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
+
+    assertStringIncludes(liftWindow, "materializerWriteInputPaths");
+    assertStringIncludes(liftWindow, '["departments"]');
+  },
+);
+
+Deno.test(
+  "Pipeline regression: readonly computed does not mark writable-looking inputs for materialization",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+}
+
+export default pattern<Input>(({ departments }) => {
+  const count = computed(() => departments.get().length);
+  return { count };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const liftMatch = output.match(/const count = __cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift()",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
+
+    assert(
+      !liftWindow.includes("materializerWriteInputPaths"),
+      "readonly computed() should remain a normal pull computation",
     );
   },
 );

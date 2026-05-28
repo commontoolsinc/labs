@@ -184,7 +184,15 @@ export class PatternContextValidationTransformer
               `Use ifElse() or wrap in computed() for conditional access.`,
             node,
           });
-        } else if (unsupportedCallRoot === "restricted-get-call") {
+        } else if (
+          unsupportedCallRoot === "restricted-get-call" &&
+          !findLowerableExpressionSite(node, context, analyze)
+        ) {
+          // A bare terminal `.get()` (no enclosing lowerable expression site)
+          // can't be auto-wrapped, so it stays an error. But a `.get()` that
+          // feeds a computation at a lowerable site (variable initializer, JSX,
+          // return, …) is auto-wrapped into a lift by the rewriter — so don't
+          // reject it here.
           context.reportDiagnostic({
             severity: "error",
             type: "pattern-context:get-call",
@@ -797,8 +805,8 @@ export class PatternContextValidationTransformer
             return;
           }
 
-          // Check for derive() calls
-          if (callKind.kind === "derive") {
+          // Check for lift-applied calls (the lowered form of user-source derive())
+          if (callKind.kind === "lift-applied") {
             context.reportDiagnostic({
               severity: "error",
               type: "standalone-function:reactive-operation",

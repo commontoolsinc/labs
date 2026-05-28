@@ -199,7 +199,7 @@ export const canonicalizePreparedDigestInput = (
   consumedReads: [...input.consumedReads].map(canonicalizeConsumedRead).sort(
     compareAddress,
   ),
-  potentialWrites: [...input.potentialWrites].map(canonicalizeAttemptedWrite)
+  attemptedWrites: [...input.attemptedWrites].map(canonicalizeAttemptedWrite)
     .sort(compareAddress),
   writes: [...input.writes].map(canonicalizeAttemptedWrite).sort(
     compareAddress,

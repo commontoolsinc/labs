@@ -1,11 +1,12 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneIfNecessary,
   getDataModelConfig,
-  isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { unclaimed } from "@commonfabric/memory/fact";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
+import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -27,7 +28,6 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   ITransactionWriteRequest,
-  ITypeMismatchError,
   MediaType,
   MemorySpace,
   NativeStorageCommit,
@@ -52,8 +52,12 @@ import {
   NotFound,
   read as readAttestation,
   TypeMismatchError,
-  write as writeAttestation,
 } from "./transaction/attestation.ts";
+import {
+  applyMutablePathWrite,
+  getValueTypeName,
+  isContainerValue,
+} from "./transaction/mutable-path-write.ts";
 import { ReadOnlyAddressError } from "./transaction/chronicle.ts";
 import {
   TransactionAborted,
@@ -63,13 +67,9 @@ import {
 import {
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
-  isReadMarkedAsPotentialWrite,
+  isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
-import {
-  createPathContainer,
-  ensureParentContainers,
-  readValueAtPath,
-} from "./v2-path.ts";
+import { readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
@@ -83,7 +83,7 @@ type ReadDocumentEntry = {
   seq?: number;
   validated: boolean;
   current?: RootAttestation;
-  frozenReads?: Map<string, FabricValue | undefined>;
+  frozenReads?: PathKeyMap<FabricValue | undefined>;
   writeDetails?: Map<string, TransactionWriteDetail>;
   patchDetails?: Map<string, TransactionWriteDetail>;
 };
@@ -93,7 +93,7 @@ type WritableDocumentEntry = {
   current: RootAttestation;
   seq?: number;
   validated: boolean;
-  frozenReads: Map<string, FabricValue | undefined>;
+  frozenReads: PathKeyMap<FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
   patchDetails: Map<string, TransactionWriteDetail>;
 };
@@ -140,53 +140,6 @@ function withCommitTiming<T>(
   }
 }
 
-const isolateTransactionValue = <T>(
-  value: T,
-  seen: Map<object, unknown> = new Map(),
-): T => {
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-
-  if (seen.has(value)) {
-    return seen.get(value) as T;
-  }
-
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    seen.set(value, copy);
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        copy[i] = isolateTransactionValue(value[i], seen);
-      }
-    }
-    return copy as T;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    return value;
-  }
-
-  const copy = Object.create(prototype) as Record<PropertyKey, unknown>;
-  seen.set(value, copy);
-  for (const key of Reflect.ownKeys(value)) {
-    copy[key] = isolateTransactionValue(
-      (value as Record<PropertyKey, unknown>)[key],
-      seen,
-    );
-  }
-  return copy as T;
-};
-
-const sparseArrayCopy = <T>(array: T[]): T[] => {
-  const copy = new Array<T>(array.length);
-  array.forEach((value, index) => {
-    copy[index] = value;
-  });
-  return copy;
-};
-
 const currentDocument = (doc: DocumentEntry): RootAttestation =>
   doc.current ?? doc.initial;
 
@@ -205,10 +158,42 @@ const ensureWritableDocument = (
     return doc;
   }
   doc.current = doc.initial;
-  doc.frozenReads = new Map();
+  doc.frozenReads = new PathKeyMap();
   doc.writeDetails = new Map();
   doc.patchDetails = new Map();
   return doc as WritableDocumentEntry;
+};
+
+/**
+ * Drops `doc.frozenReads` entries on the chain of `writtenPath` -- both
+ * ancestors (whose containers were rebuilt by `applyMutablePathWrite()`)
+ * and descendants (the subtree at the write target is gone). Sibling
+ * subtrees off divergent ancestors are preserved: structural sharing
+ * leaves their values reference-identical to the consumer's cached
+ * snapshot.
+ *
+ * Additionally drops the synthetic `<parent>/length` sibling: writing to
+ * `array[N]` can change `array.length`, and that pointer is a true sibling
+ * of `array[N]` in the trie (not on its chain), so it needs its own
+ * targeted invalidation.
+ *
+ * Both operations are O(D) in `writtenPath.length` thanks to the
+ * `PathKeyMap` tree-walk -- no per-cache-entry sweep.
+ */
+const invalidateFrozenReadsOnChain = (
+  doc: WritableDocumentEntry,
+  writtenPath: readonly string[],
+): void => {
+  const map = doc.frozenReads;
+  map.invalidateChain(writtenPath);
+  // The chain walk already cleared every ancestor's value AND dropped the
+  // subtree at `writtenPath`. Now also drop the parent's `length` child for
+  // the JS-array-index case. For a root write this is a no-op; the chain
+  // walk already cleared everything.
+  if (writtenPath.length > 0) {
+    const parent = writtenPath.slice(0, -1);
+    map.invalidateChain([...parent, "length"]);
+  }
 };
 
 const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
@@ -218,7 +203,12 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   ) {
     return value;
   }
-  return deepFreeze(isolateTransactionValue(value)) as T;
+  // `cloneIfNecessary()` (frozen by default) returns an already-deep-frozen
+  // value by identity (O(1) via the deep-frozen cache) and otherwise
+  // deep-clones-and-freezes -- isolating the result from later source
+  // mutation. On the hot read path, repeated reads of the same stored
+  // (deep-frozen) value collapse to a single cache lookup.
+  return cloneIfNecessary(value as FabricValue) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -236,6 +226,14 @@ const collapseEmptyJsonDocumentEnvelope = (
 };
 
 const EMPTY_META = Object.freeze({});
+const SCHEDULER_OBSERVATION_ADDRESS_LISTS = [
+  "actualChangedWrites",
+  "currentKnownWrites",
+  "declaredWrites",
+  "materializerWriteEnvelopes",
+  "reads",
+  "shallowReads",
+] as const;
 
 type PathInspection =
   | {
@@ -305,219 +303,49 @@ const inspectPath = (
   };
 };
 
-const isContainerValue = (
-  value: FabricValue | undefined,
-): value is Record<string, FabricValue> | FabricValue[] =>
-  Array.isArray(value) || isRecord(value);
-
-const getValueTypeName = (value: FabricValue | undefined): string => {
-  if (value === null) {
-    return "null";
+const schedulerObservationCommitSpace = (
+  observation: unknown,
+): MemorySpace | undefined => {
+  if (!isRecord(observation)) {
+    return undefined;
   }
-  if (Array.isArray(value)) {
-    return "array";
-  }
-  return typeof value;
-};
-
-type MutableWriteResult = {
-  root: FabricValue | undefined;
-  previousValue: FabricValue | undefined;
-  changed: boolean;
-};
-
-const applyMutablePathWrite = (
-  currentRoot: FabricValue | undefined,
-  address: IMemoryAddress,
-  value: FabricValue | undefined,
-): Result<MutableWriteResult, ITypeMismatchError> => {
-  if (address.path.length === 0) {
-    return {
-      ok: {
-        root: value,
-        previousValue: currentRoot,
-        changed: !deepEqual(currentRoot, value),
-      },
-    };
+  if (typeof observation.ownerSpace === "string") {
+    return observation.ownerSpace as MemorySpace;
   }
 
-  if (currentRoot === undefined) {
-    if (value === undefined) {
-      return {
-        ok: {
-          root: currentRoot,
-          previousValue: undefined,
-          changed: false,
-        },
-      };
-    }
-    currentRoot = createPathContainer(address.path[0]!);
-  } else if (!isContainerValue(currentRoot)) {
-    return {
-      error: TypeMismatchError(
-        { ...address, path: address.path.slice(0, 1) },
-        getValueTypeName(currentRoot),
-        "write",
-      ),
-    };
-  }
-
-  const root = currentRoot;
-  let current = root as Record<string, FabricValue> | FabricValue[];
-  let parent: Record<string, FabricValue> | FabricValue[] | undefined;
-  let parentKey: string | number | undefined;
-
-  for (let index = 0; index < address.path.length; index += 1) {
-    const key = address.path[index]!;
-    const isLast = index === address.path.length - 1;
-
-    if (Array.isArray(current)) {
-      if (key === "length") {
-        if (!isLast) {
-          return {
-            error: TypeMismatchError(
-              { ...address, path: address.path.slice(0, index + 1) },
-              "number",
-              "write",
-            ),
-          };
-        }
-        const previousValue = current.length;
-        const changed = !deepEqual(previousValue, value);
-        if (changed) {
-          const nextLength = value as number;
-          const replacement = nextLength < current.length || nextLength < 0 ||
-              !Number.isFinite(nextLength)
-            ? current.slice(0, nextLength)
-            : (() => {
-              const copy = sparseArrayCopy(current);
-              copy.length = nextLength;
-              return copy;
-            })();
-          if (parent === undefined) {
-            return {
-              ok: {
-                root: replacement,
-                previousValue,
-                changed: true,
-              },
-            };
-          }
-          if (Array.isArray(parent)) {
-            parent[parentKey as number] = replacement;
-          } else {
-            parent[parentKey as string] = replacement;
-          }
-        }
-        return {
-          ok: {
-            root,
-            previousValue,
-            changed,
-          },
-        };
-      }
-
-      if (!isArrayIndexPropertyName(key)) {
-        return {
-          error: TypeMismatchError(
-            { ...address, path: address.path.slice(0, index + 1) },
-            "array",
-            "write",
-          ),
-        };
-      }
-
-      const slot = Number(key);
-      if (isLast) {
-        const previousValue = current[slot];
-        if (deepEqual(previousValue, value)) {
-          return { ok: { root, previousValue, changed: false } };
-        }
-        if (value === undefined) {
-          delete current[slot];
-        } else {
-          current[slot] = value;
-        }
-        return {
-          ok: {
-            root,
-            previousValue,
-            changed: true,
-          },
-        };
-      }
-
-      parent = current;
-      parentKey = slot;
-      let next = current[slot];
-      if (next === undefined) {
-        next = createPathContainer(address.path[index + 1]!);
-        current[slot] = next;
-      } else if (!isContainerValue(next)) {
-        return {
-          error: TypeMismatchError(
-            { ...address, path: address.path.slice(0, index + 1) },
-            getValueTypeName(next),
-            "write",
-          ),
-        };
-      }
-      current = next as Record<string, FabricValue> | FabricValue[];
+  for (const key of SCHEDULER_OBSERVATION_ADDRESS_LISTS) {
+    const addresses = observation[key];
+    if (!Array.isArray(addresses)) {
       continue;
     }
-
-    if (isLast) {
-      const previousValue = current[key];
-      if (deepEqual(previousValue, value)) {
-        return { ok: { root, previousValue, changed: false } };
+    for (const address of addresses) {
+      if (!isRecord(address) || typeof address.space !== "string") {
+        continue;
       }
-      if (value === undefined) {
-        delete current[key];
-      } else {
-        current[key] = value;
-      }
-      return {
-        ok: {
-          root,
-          previousValue,
-          changed: true,
-        },
-      };
+      return address.space as MemorySpace;
     }
-
-    parent = current;
-    parentKey = key;
-    let next = current[key];
-    if (next === undefined) {
-      next = createPathContainer(address.path[index + 1]!);
-      current[key] = next;
-    } else if (!isContainerValue(next)) {
-      return {
-        error: TypeMismatchError(
-          { ...address, path: address.path.slice(0, index + 1) },
-          getValueTypeName(next),
-          "write",
-        ),
-      };
-    }
-    current = next as Record<string, FabricValue> | FabricValue[];
   }
-
-  return { ok: { root, previousValue: undefined, changed: false } };
 };
-
 const findMaterializedParentPath = (
   currentRoot: FabricValue | undefined,
   path: readonly string[],
   value: FabricValue | undefined,
 ): readonly string[] | undefined => {
-  if (value === undefined || path.length <= 1) {
+  if (value === undefined) {
     return undefined;
   }
 
+  // A write into a not-yet-initialized doc value materializes the entire
+  // value at the root: that's the observable change, regardless of how
+  // deep the leaf write is. (`path.length === 0` is the "we ARE the
+  // root" case — there's no distinct materialization point, fall back
+  // to the leaf via the caller.)
   if (currentRoot === undefined) {
-    return [];
+    return path.length === 0 ? undefined : [];
+  }
+
+  if (path.length <= 1) {
+    return undefined;
   }
 
   if (!isContainerValue(currentRoot)) {
@@ -901,6 +729,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
+  #schedulerObservation?: unknown;
   #writeSpace?: MemorySpace;
   #readOnlySource?: string;
   #lastDocument?: {
@@ -955,14 +784,30 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#reactivityLogCache;
   }
 
+  setSchedulerObservation(observation: unknown): void {
+    this.assertWritable("setSchedulerObservation()");
+    const ready = this.editable();
+    if (ready.error) {
+      throw ready.error;
+    }
+    this.#schedulerObservation = observation;
+  }
+
+  getSchedulerObservation(): unknown {
+    return this.#schedulerObservation;
+  }
+
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
-    if (!branch) {
+    const schedulerObservation = this.schedulerObservationForNativeCommit(
+      space,
+    );
+    if (!branch && schedulerObservation === undefined) {
       return undefined;
     }
 
     const operations: NativeStorageCommitOperation[] = [];
-    for (const [key, doc] of branch.docs.entries()) {
+    for (const [key, doc] of branch?.docs.entries() ?? []) {
       if (!isWritableDocument(doc)) {
         continue;
       }
@@ -987,7 +832,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       );
     }
 
-    return { operations };
+    return {
+      operations,
+      ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+    };
   }
 
   *getWriteDetails(space: MemorySpace): Iterable<TransactionWriteDetail> {
@@ -1098,7 +946,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       };
     }
 
-    const cacheKey = encodePointer(memoryAddress.path);
     if (isMutableTransactionReadAllowed(readMeta)) {
       if (
         !address.id.startsWith("data:") &&
@@ -1116,11 +963,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       };
     }
     const frozenReads = doc.frozenReads;
-    if (frozenReads?.has(cacheKey)) {
+    if (frozenReads?.has(memoryAddress.path)) {
       return {
         ok: {
           address: memoryAddress,
-          value: frozenReads.get(cacheKey),
+          value: frozenReads.get(memoryAddress.path),
         },
       };
     }
@@ -1137,7 +984,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const frozenValue = freezeReadValue(result.ok.value);
-    (doc.frozenReads ??= new Map()).set(cacheKey, frozenValue);
+    (doc.frozenReads ??= new PathKeyMap()).set(memoryAddress.path, frozenValue);
     return {
       ok: {
         ...result.ok,
@@ -1205,6 +1052,21 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.writeWithinBranch(this.branch(space), space, address, value);
   }
 
+  /**
+   * Unified write entry. Handles simple writes, root writes, type-mismatch
+   * errors, and create-missing-intermediates in one path, all via
+   * `applyMutablePathWrite()`. `cloneForMutation()` inside that helper
+   * shallow-thaws only the containers on the write spine; off-spine
+   * subtrees stay deep-frozen and structurally shared with the prior
+   * `doc.current.value`.
+   *
+   * No-op short-circuits:
+   *   - If the leaf is already deep-equal to `value`, return the unchanged
+   *     attestation.
+   *   - If `value === undefined` and the leaf doesn't exist (path not
+   *     found), return the unchanged attestation -- don't allocate
+   *     intermediate containers just to delete a slot that wasn't there.
+   */
   private writeWithinBranch(
     branch: SpaceBranch,
     space: MemorySpace,
@@ -1222,158 +1084,72 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (previous.kind === "ok" && deepEqual(previous.value, value)) {
       return { ok: current };
     }
+    // Delete-of-nonexistent: don't create intermediate containers just to
+    // express "remove a slot that wasn't there." This preserves the
+    // previous `writeWithinSpaceCreatingParents` short-circuit.
+    if (previous.kind === "notFound" && value === undefined) {
+      return { ok: current };
+    }
+
     const isolatedValue = value === undefined
       ? undefined
-      : isolateTransactionValue(value) as FabricValue;
-    const result = writeAttestation(current, address, isolatedValue);
+      : cloneIfNecessary(value) as FabricValue;
+
+    // Compute the activity path and previous-value snapshots BEFORE the
+    // write -- `applyMutablePathWrite()` mutates `current.value` in place
+    // on the second-and-later write to this doc within a transaction
+    // (`cloneForMutation({ force: false })` short-circuits to identity on
+    // an already-mutable root). Reading `current.value` AFTER the mutation
+    // would observe the post-write state and silently mis-report the
+    // `previousActivityValue` to the reactivity log.
+    //
+    // For create-parents writes, the materialization point (deepest
+    // pre-existing parent on the write path) is where the observable
+    // change happens for subscribers watching a parent. For simple writes
+    // it falls back to `address.path`.
+    const activityPath = findMaterializedParentPath(
+      current.value,
+      address.path,
+      isolatedValue,
+    ) ?? address.path;
+    const previousActivityValue = cloneIfNecessary(
+      readValueAtPath(current.value, activityPath, {
+        allowArrayLength: true,
+      }) as FabricValue,
+    ) as FabricValue | undefined;
+
+    const result = applyMutablePathWrite(
+      current.value,
+      address,
+      isolatedValue,
+    );
     if (result.error) {
       return { error: result.error.from(space) };
     }
-
-    const next = result.ok as RootAttestation;
-    const collapsedNext = {
-      ...next,
-      value: collapseEmptyJsonDocumentEnvelope(
-        next.value,
-      ),
-    } as RootAttestation;
-    if (
-      collapsedNext.value === current.value &&
-      collapsedNext.address === current.address
-    ) {
-      return { ok: collapsedNext };
+    if (!result.ok.changed) {
+      return { ok: current };
     }
 
+    const collapsedNext: RootAttestation = {
+      ...current,
+      value: collapseEmptyJsonDocumentEnvelope(result.ok.root),
+    };
+
     doc.current = collapsedNext;
-    doc.frozenReads.clear();
+    invalidateFrozenReadsOnChain(doc, address.path);
     this.recordPatchIntent(
       space,
       address,
       readValueAtPath(collapsedNext.value, address.path, {
         allowArrayLength: true,
       }),
-      previous.kind === "ok"
-        ? isolateTransactionValue(previous.value) as FabricValue | undefined
-        : undefined,
+      cloneIfNecessary(result.ok.previousValue) as FabricValue | undefined,
       doc,
     );
     this.recordWriteActivity(
       space,
-      address,
-      isolatedValue,
-      previous.kind === "ok" ? previous.value : undefined,
-      doc,
-    );
-
-    return { ok: collapsedNext };
-  }
-
-  private writeWithinSpaceCreatingParents(
-    space: MemorySpace,
-    address: IMemoryAddress,
-    value?: FabricValue,
-  ): Result<IAttestation, WriteError> {
-    const direct = this.writeWithinSpace(space, address, value);
-    if (direct.ok || direct.error?.name !== "NotFoundError") {
-      return direct;
-    }
-
-    if (value === undefined) {
-      return {
-        ok: currentDocument(this.document(this.branch(space), address).doc),
-      };
-    }
-
-    const branch = this.branch(space);
-    const { doc: readDoc } = this.document(branch, address);
-    const doc = ensureWritableDocument(readDoc);
-    const errorPath = direct.error.path;
-    const lastExistingPath = errorPath.slice(0, -1);
-    const remainingPath = address.path.slice(lastExistingPath.length);
-    if (remainingPath.length === 0) {
-      return direct;
-    }
-
-    let parentValue: FabricValue;
-    if (lastExistingPath.length === 0) {
-      parentValue = {};
-    } else {
-      const parentRead = readAttestation(doc.current, {
-        ...address,
-        path: lastExistingPath,
-      });
-      if (parentRead.error) {
-        return { error: parentRead.error.from(space) };
-      }
-      const existingParent = parentRead.ok.value;
-      if (!isRecord(existingParent) && !Array.isArray(existingParent)) {
-        return direct;
-      }
-      parentValue = isolateTransactionValue(existingParent) as FabricValue;
-    }
-
-    const seededParent = ensureParentContainers(
-      parentValue,
-      remainingPath.slice(0, -1),
-      remainingPath[remainingPath.length - 1]!,
-    );
-    const isolatedValue = isolateTransactionValue(value) as FabricValue;
-    const parentWrite = writeAttestation(
-      {
-        address: {
-          id: address.id,
-          type: address.type ?? DOCUMENT_MIME,
-          path: lastExistingPath,
-        },
-        value: seededParent,
-      },
-      address,
-      isolatedValue,
-    );
-    if (parentWrite.error) {
-      return { error: parentWrite.error.from(space) };
-    }
-
-    const rootWrite = writeAttestation(doc.current, {
-      ...address,
-      path: lastExistingPath,
-    }, parentWrite.ok.value);
-    if (rootWrite.error) {
-      return { error: rootWrite.error.from(space) };
-    }
-
-    const next = rootWrite.ok as RootAttestation;
-    const collapsedNext = {
-      ...next,
-      value: collapseEmptyJsonDocumentEnvelope(
-        next.value,
-      ),
-    } as RootAttestation;
-    if (collapsedNext === doc.current) {
-      return { ok: collapsedNext };
-    }
-
-    const previousActivityValue = isolateTransactionValue(
-      readValueAtPath(doc.current.value, lastExistingPath, {
-        allowArrayLength: true,
-      }),
-    ) as FabricValue | undefined;
-
-    doc.current = collapsedNext;
-    doc.frozenReads.clear();
-    this.recordPatchIntent(
-      space,
-      address,
-      readValueAtPath(collapsedNext.value, address.path, {
-        allowArrayLength: true,
-      }),
-      undefined,
-      doc,
-    );
-    this.recordWriteActivity(
-      space,
-      { ...address, path: lastExistingPath },
-      readValueAtPath(collapsedNext.value, lastExistingPath, {
+      { ...address, path: activityPath },
+      readValueAtPath(collapsedNext.value, activityPath, {
         allowArrayLength: true,
       }),
       previousActivityValue,
@@ -1392,12 +1168,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       writes.length <= 1 ||
       writes.some(({ address }) => address.id.startsWith("data:"))
     ) {
+      // Singleton-batch / data:URI fallback: route each write through the
+      // unified single-write entry, which itself handles
+      // create-missing-intermediates.
       for (const { address, value } of writes) {
-        const result = this.writeWithinSpaceCreatingParents(
-          space,
-          address,
-          value,
-        );
+        const result = this.writeWithinSpace(space, address, value);
         if (result.error) {
           return { error: result.error };
         }
@@ -1409,13 +1184,28 @@ export class V2StorageTransaction implements IStorageTransaction {
     const doc = ensureWritableDocument(readDoc);
     const originalRoot = doc.current.value;
     let nextRoot = originalRoot;
-    let hasMutableRoot = false;
     let changed = false;
+    const writtenPaths: (readonly string[])[] = [];
 
+    // No explicit mutable-root prelude here: `applyMutablePathWrite()` calls
+    // `cloneForMutation()` with `force: false`, which shallow-thaws the
+    // root container on the first write (if it was frozen) and is an
+    // identity short-circuit on subsequent writes (since the root is
+    // mutable from then on). That gives us "mutate in place on the same
+    // freshly-thawed spine across the whole batch" without ever needing a
+    // deep clone of off-spine subtrees.
+    //
+    // Read-before-mutate ordering is load-bearing: `previousValue`,
+    // `activityPath`, and `previousActivityValue` are all computed from
+    // `nextRoot` BEFORE `applyMutablePathWrite()` is called. The helper
+    // mutates `nextRoot` in place from the second iteration onward, so
+    // reading it AFTER the call would observe the post-write state.
+    // (See `writeWithinBranch` for the same invariant and a regression
+    // test.)
     for (const { address, value } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : isolateTransactionValue(value) as FabricValue;
+        : cloneIfNecessary(value) as FabricValue;
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -1427,17 +1217,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         address.path,
         isolatedValue,
       ) ?? address.path;
-      const previousActivityValue = isolateTransactionValue(
+      const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
-        }),
+        }) as FabricValue,
       ) as FabricValue | undefined;
-      if (
-        !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
-      ) {
-        nextRoot = isolateTransactionValue(nextRoot) as FabricValue;
-        hasMutableRoot = true;
-      }
       const result = applyMutablePathWrite(nextRoot, address, isolatedValue);
       if (result.error) {
         if (changed) {
@@ -1447,7 +1231,9 @@ export class V2StorageTransaction implements IStorageTransaction {
               nextRoot,
             ),
           };
-          doc.frozenReads.clear();
+          for (const written of writtenPaths) {
+            invalidateFrozenReadsOnChain(doc, written);
+          }
         }
         return { error: result.error.from(space) };
       }
@@ -1456,13 +1242,14 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
       changed = true;
+      writtenPaths.push(address.path);
       this.recordPatchIntent(
         space,
         address,
         readValueAtPath(result.ok.root, address.path, {
           allowArrayLength: true,
         }),
-        isolateTransactionValue(previousValue) as FabricValue | undefined,
+        cloneIfNecessary(previousValue) as FabricValue | undefined,
         doc,
       );
       this.recordWriteActivity(
@@ -1474,9 +1261,6 @@ export class V2StorageTransaction implements IStorageTransaction {
         previousActivityValue,
         doc,
       );
-      if (address.path.length === 0 || !hasMutableRoot) {
-        hasMutableRoot = true;
-      }
     }
 
     if (!changed) {
@@ -1489,7 +1273,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         nextRoot,
       ),
     };
-    doc.frozenReads.clear();
+    for (const written of writtenPaths) {
+      invalidateFrozenReadsOnChain(doc, written);
+    }
     return { ok: {} };
   }
 
@@ -1589,7 +1375,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: ready.error };
     }
 
-    const writeSpace = this.#writeSpace;
+    const writeSpace = this.#writeSpace ??
+      schedulerObservationCommitSpace(this.#schedulerObservation);
     if (!writeSpace) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
@@ -1601,7 +1388,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       () => this.getNativeCommit(writeSpace),
     );
     const operations = native?.operations ?? [];
-    if (operations.length === 0) {
+    const hasSchedulerObservation = native?.schedulerObservation !== undefined;
+    if (operations.length === 0 && !hasSchedulerObservation) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
       return result;
@@ -1650,6 +1438,24 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
+  private schedulerObservationForNativeCommit(
+    space: MemorySpace,
+  ): unknown | undefined {
+    if (this.#schedulerObservation === undefined) {
+      return undefined;
+    }
+    if (this.#writeSpace === space) {
+      return this.#schedulerObservation;
+    }
+    if (
+      this.#writeSpace === undefined &&
+      schedulerObservationCommitSpace(this.#schedulerObservation) === space
+    ) {
+      return this.#schedulerObservation;
+    }
+    return undefined;
+  }
+
   private editable(): Result<Unit, InactiveTransactionError> {
     if (this.#state.status === "ready") {
       return { ok: {} };
@@ -1668,7 +1474,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private buildReactivityLog(): TransactionReactivityLog {
     const reads: IMemorySpaceAddress[] = [];
     const shallowReads: IMemorySpaceAddress[] = [];
-    let potentialWrites: IMemorySpaceAddress[] | undefined;
+    let attemptedWrites: IMemorySpaceAddress[] | undefined;
 
     for (const read of this.#readActivities) {
       const meta = read.meta ?? EMPTY_META;
@@ -1689,9 +1495,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         reads.push(address);
       }
 
-      if (isReadMarkedAsPotentialWrite(meta)) {
-        potentialWrites ??= [];
-        potentialWrites.push(address);
+      if (isReadMarkedAsAttemptedWrite(meta)) {
+        attemptedWrites ??= [];
+        attemptedWrites.push(address);
       }
     }
 
@@ -1733,8 +1539,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       reads,
       shallowReads,
       writes,
-      ...(potentialWrites && potentialWrites.length > 0
-        ? { potentialWrites }
+      ...(attemptedWrites && attemptedWrites.length > 0
+        ? { attemptedWrites }
         : {}),
     };
   }

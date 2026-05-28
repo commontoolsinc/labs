@@ -28,6 +28,7 @@
 experiments on both servers:
 ```bash
 EXPERIMENTAL_MODERN_DATA_MODEL=true \
+EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
 EXPERIMENTAL_EXAMPLE_EXPERIMENT=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
@@ -44,6 +45,11 @@ the passphrase `"implicit trust"`. To create a matching key for CLI operations:
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
 export CF_IDENTITY=./claude.key
 ```
+
+For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
+state, use one shared identity in both browser and CLI. The browser login screen
+can import a CLI PKCS8/PEM key via `Import CLI Key`. See
+[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
 
 **First-time browser login:**
 
@@ -148,7 +154,7 @@ cd packages/toolshed
 SHELL_URL=http://localhost:5173 API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
 ```
 
-**Environment setup:** Copy `.env.example` to `.env` in the toolshed directory. See `packages/toolshed/env.ts` for all available environment variables.
+**Environment setup:** Copy `.env.example` to `.env` in the toolshed directory. See [`CONFIGURATION.md`](./CONFIGURATION.md) for a categorized reference of all configuration (env vars, tasks, flags), or `packages/toolshed/env.ts` for the canonical Zod schema.
 
 ### Checking Logs
 

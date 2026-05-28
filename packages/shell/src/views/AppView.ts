@@ -1,15 +1,21 @@
-import { css, html } from "lit";
+import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { KeyStore } from "@commonfabric/identity";
+import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { Task, TaskStatus } from "@lit/task";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
-import { updatePageTitle } from "../../shared/mod.ts";
+import {
+  isEmbeddedView,
+  isViewingDefaultPatternView,
+  replaceNavigation,
+  updatePageTitle,
+} from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
-import { NAME, PageHandle } from "@commonfabric/runtime-client";
+import { type Cancel, NAME, PageHandle } from "@commonfabric/runtime-client";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -57,6 +63,15 @@ export class XAppView extends BaseView {
   @state()
   private accessor _patternError: Error | undefined = undefined;
 
+  @state()
+  private accessor _slugRevision = 0;
+
+  private slugCancel: Cancel | undefined = undefined;
+  private slugPollInterval: number | undefined = undefined;
+  private slugSubscriptionKey: string | undefined = undefined;
+  private slugSubscriptionToken = 0;
+  private slugTargetKey: string | undefined = undefined;
+
   private debuggerController = new DebuggerController(this);
   private _keyboard = new KeyboardController(this);
 
@@ -88,9 +103,26 @@ export class XAppView extends BaseView {
     > => {
       if (!rt) return;
       this._patternError = undefined;
+      if ("pieceSlug" in app.view && app.view.pieceSlug) {
+        try {
+          const pieceId = slugIdForSpace(rt.space(), app.view.pieceSlug);
+          const pattern = await rt.getPattern(pieceId);
+          // Track as recently visited (fire-and-forget)
+          rt.trackRecentPiece(pieceId);
+          return pattern;
+        } catch (e) {
+          if (!signal.aborted) {
+            this._patternError = e as any;
+          }
+        }
+      }
       if ("pieceId" in app.view && app.view.pieceId) {
         try {
           const pattern = await rt.getPattern(app.view.pieceId);
+          const slug = await rt.getSlug(app.view.pieceId);
+          if (!signal.aborted && slug) {
+            this.#replacePieceUrlWithSlug(app.view, slug);
+          }
           // Track as recently visited (fire-and-forget)
           rt.trackRecentPiece(app.view.pieceId);
           return pattern;
@@ -101,7 +133,7 @@ export class XAppView extends BaseView {
         }
       }
     },
-    args: () => [this.app, this.rt],
+    args: () => [this.app, this.rt, this._slugRevision],
   });
 
   // This derives a space root pattern as well as an "active" (main)
@@ -127,7 +159,9 @@ export class XAppView extends BaseView {
       // The "active" pattern is the main pattern to be rendered.
       // This may be the same as the space root pattern, unless we're
       // in a view that specifies a different pattern to use.
-      const useSpaceRootAsActive = !("pieceId" in app.view && app.view.pieceId);
+      const useSpaceRootAsActive =
+        !("pieceId" in app.view && app.view.pieceId) &&
+        !("pieceSlug" in app.view && app.view.pieceSlug);
       const activePattern = useSpaceRootAsActive
         ? spaceRootPattern
         : selectedPatternStatus === TaskStatus.COMPLETE
@@ -146,6 +180,110 @@ export class XAppView extends BaseView {
       this._selectedPattern.status,
     ],
   });
+
+  #syncSlugSubscription() {
+    const rt = this.rt;
+    const slug = "pieceSlug" in this.app.view
+      ? this.app.view.pieceSlug
+      : undefined;
+    const key = rt && slug ? `${rt.space()}:${slug}` : undefined;
+
+    if (key === this.slugSubscriptionKey) return;
+    this.#clearSlugSubscription();
+    if (!rt || !slug || !key) return;
+
+    this.slugSubscriptionKey = key;
+    const token = ++this.slugSubscriptionToken;
+    rt.getSlugCell(slug).then(async (cell) => {
+      if (
+        this.slugSubscriptionToken !== token ||
+        this.slugSubscriptionKey !== key
+      ) {
+        return;
+      }
+
+      await this.#refreshSlugTarget(rt, slug, token, key, false);
+      if (
+        this.slugSubscriptionToken !== token ||
+        this.slugSubscriptionKey !== key
+      ) {
+        return;
+      }
+
+      this.slugPollInterval = globalThis.setInterval(() => {
+        void this.#refreshSlugTarget(rt, slug, token, key, true);
+      }, 1000);
+
+      let sawInitialCallback = false;
+      this.slugCancel = cell.subscribe(() => {
+        if (!sawInitialCallback) {
+          sawInitialCallback = true;
+          return;
+        }
+        void this.#refreshSlugTarget(rt, slug, token, key, true);
+      });
+    }).catch((error) => {
+      if (this.slugSubscriptionToken === token) {
+        console.error("[AppView] Failed to watch slug cell:", error);
+      }
+    });
+  }
+
+  #clearSlugSubscription() {
+    this.slugSubscriptionToken++;
+    this.slugCancel?.();
+    if (this.slugPollInterval !== undefined) {
+      globalThis.clearInterval(this.slugPollInterval);
+    }
+    this.slugCancel = undefined;
+    this.slugPollInterval = undefined;
+    this.slugSubscriptionKey = undefined;
+    this.slugTargetKey = undefined;
+  }
+
+  async #refreshSlugTarget(
+    rt: RuntimeInternals,
+    slug: string,
+    token: number,
+    key: string,
+    notify: boolean,
+  ) {
+    if (
+      this.slugSubscriptionToken !== token ||
+      this.slugSubscriptionKey !== key
+    ) {
+      return;
+    }
+
+    let targetKey: string;
+    try {
+      const pattern = await rt.refreshPattern(slugIdForSpace(rt.space(), slug));
+      targetKey = pattern.id();
+    } catch (error) {
+      if (notify) {
+        console.error("[AppView] Failed to refresh slug target:", error);
+      }
+      return;
+    }
+    if (targetKey === this.slugTargetKey) return;
+    this.slugTargetKey = targetKey;
+    if (notify) {
+      this.#handleSlugCellUpdate(rt, slug);
+    }
+  }
+
+  #handleSlugCellUpdate(rt: RuntimeInternals, slug: string) {
+    if (
+      this.rt !== rt ||
+      !("pieceSlug" in this.app.view) ||
+      this.app.view.pieceSlug !== slug
+    ) {
+      return;
+    }
+
+    rt.invalidatePattern(slugIdForSpace(rt.space(), slug));
+    this._slugRevision++;
+  }
 
   #setTitleSubscription(activePiece?: PageHandle<NameSchema>) {
     if (!activePiece) {
@@ -178,6 +316,19 @@ export class XAppView extends BaseView {
     const event = e as CellUpdateEvent<string | undefined>;
     this.pieceTitle = event.detail ?? "";
   };
+
+  #replacePieceUrlWithSlug(view: typeof this.app.view, slug: string) {
+    try {
+      validateSlug(slug);
+    } catch {
+      return;
+    }
+    if ("spaceName" in view) {
+      replaceNavigation({ spaceName: view.spaceName, pieceSlug: slug });
+    } else if ("spaceDid" in view) {
+      replaceNavigation({ spaceDid: view.spaceDid, pieceSlug: slug });
+    }
+  }
 
   #isRecreatingSpaceRootPattern = false;
 
@@ -214,6 +365,7 @@ export class XAppView extends BaseView {
       "recreate-space-root-pattern",
       this.#handleRecreateSpaceRootPattern,
     );
+    this.#clearSlugSubscription();
   }
 
   override updated(changedProperties: Map<string, unknown>) {
@@ -247,6 +399,10 @@ export class XAppView extends BaseView {
         this.app.config.showDebuggerView ?? false,
       );
     }
+
+    if (changedProperties.has("app") || changedProperties.has("rt")) {
+      this.#syncSlugSubscription();
+    }
   }
 
   // Always defer to the loaded active pattern for the ID,
@@ -257,11 +413,17 @@ export class XAppView extends BaseView {
     if ("pieceId" in this.app.view && this.app.view.pieceId) {
       return this.app.view.pieceId;
     }
+    if ("pieceSlug" in this.app.view && this.app.view.pieceSlug) {
+      return this.rt
+        ? slugIdForSpace(this.rt.space(), this.app.view.pieceSlug)
+        : this.app.view.pieceSlug;
+    }
   }
 
   override render() {
     const config = this.app.config ?? {};
     const { activePattern, spaceRootPattern } = this._patterns.value ?? {};
+    const embedded = isEmbeddedView(this.app.view);
     this.#setTitleSubscription(activePattern);
 
     const authenticated = html`
@@ -272,6 +434,7 @@ export class XAppView extends BaseView {
         .patternError="${this._patternError}"
         .showShellPieceListView="${config.showShellPieceListView ?? false}"
         .showSidebar="${config.showSidebar ?? false}"
+        .embedded="${embedded}"
       ></x-body-view>
     `;
     const unauthenticated = html`
@@ -285,28 +448,28 @@ export class XAppView extends BaseView {
     const spaceDid = this.app && "spaceDid" in this.app.view
       ? this.app.view.spaceDid
       : undefined;
-    // We're viewing the default pattern if there's no pieceId in the current view
-    const isViewingDefaultPattern = !("pieceId" in this.app.view &&
-      this.app.view.pieceId);
+    const isViewingDefaultPattern = isViewingDefaultPatternView(this.app.view);
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">
-        <x-header-view
-          .isLoggedIn="${!!this.app.identity}"
-          .spaceName="${spaceName}"
-          .spaceDid="${spaceDid}"
-          .rt="${this.rt}"
-          .keyStore="${this.keyStore}"
-          .pieceTitle="${this.pieceTitle}"
-          .pieceId="${pieceId}"
-          .isViewingDefaultPattern="${isViewingDefaultPattern}"
-          .showDebuggerView="${config.showDebuggerView ?? false}"
-        ></x-header-view>
+        ${embedded ? nothing : html`
+          <x-header-view
+            .isLoggedIn="${!!this.app.identity}"
+            .spaceName="${spaceName}"
+            .spaceDid="${spaceDid}"
+            .rt="${this.rt}"
+            .keyStore="${this.keyStore}"
+            .pieceTitle="${this.pieceTitle}"
+            .pieceId="${pieceId}"
+            .isViewingDefaultPattern="${isViewingDefaultPattern}"
+            .showDebuggerView="${config.showDebuggerView ?? false}"
+          ></x-header-view>
+        `}
         <div class="content-area">
           ${content}
         </div>
       </div>
-      ${this.app.identity
+      ${this.app.identity && !embedded
         ? html`
           <x-debugger-view
             .visible="${this.debuggerController.isVisible()}"

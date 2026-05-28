@@ -47,6 +47,7 @@ export function subscribePushSchedulerAction(
     debounce,
     noDebounce,
     throttle,
+    deferInitialExecution = false,
   } = options;
 
   updateSchedulerActionChangeGroup(
@@ -72,7 +73,7 @@ export function subscribePushSchedulerAction(
     action,
     isEffect,
     {
-      queueExecution: true,
+      queueExecution: !deferInitialExecution,
     },
   );
 
@@ -112,14 +113,16 @@ export function subscribePushSchedulerAction(
       action,
       entities,
     );
-  } else {
+  } else if (!deferInitialExecution) {
     // Mark action for dependency collection before first run
     state.pendingDependencyCollection.add(action);
   }
 
-  state.markDirectDirty(action);
-  state.pending.add(action);
-  state.scheduledFirstTime.add(action);
+  if (!deferInitialExecution) {
+    state.markDirectDirty(action);
+    state.pending.add(action);
+    state.scheduledFirstTime.add(action);
+  }
 
   // Emit telemetry for new subscription
   const actionId = state.getActionId(action);

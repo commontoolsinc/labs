@@ -12,10 +12,13 @@ import {
   areLinksSame,
   areNormalizedLinksSame,
   getMetaCell,
+  isLegacyAlias,
   parseLink,
 } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -311,6 +314,93 @@ describe("pattern-binding", () => {
           argumentCell.key("b").key("c").getAsWriteRedirectLink(),
         ),
       ).toBe(true);
+    });
+
+    it("uses the argument link schema when converting aliases", () => {
+      const profileSchema = {
+        type: "object",
+        scope: "user",
+        default: { name: "Ada" },
+        ifc: { confidentiality: ["profile"] },
+        properties: {
+          name: { type: "string" },
+        },
+        required: ["name"],
+      } as const;
+      const argumentSchema = {
+        type: "object",
+        properties: {
+          profile: profileSchema,
+        },
+        required: ["profile"],
+      } as const;
+      const binding = {
+        profile: { $alias: { cell: "argument", path: ["profile"] } },
+      };
+      const resultCell = runtime.getCell(
+        space,
+        "schema fallback result cell",
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        "schema fallback argument cell",
+        argumentSchema,
+        tx,
+      );
+      const internalCell = runtime.getCell(
+        space,
+        "schema fallback internal cell",
+        undefined,
+        tx,
+      );
+
+      const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        argumentCell.getAsNormalizedFullLink(),
+        internalCell.getAsNormalizedFullLink(),
+        resultCell.getAsNormalizedFullLink(),
+      ) as { profile: unknown };
+
+      expect(parseLink(result.profile, resultCell)).toEqual({
+        ...argumentCell.getAsNormalizedFullLink(),
+        path: ["profile"],
+        scope: "user",
+        schema: profileSchema,
+        overwrite: "redirect",
+      });
+    });
+
+    it("serializes returned local pattern cells as aliases", () => {
+      const frame = pushFrame({
+        runtime,
+        tx,
+        space,
+        cause: { test: "returned local pattern cells are aliases" },
+      });
+      try {
+        const { pattern, Writable } = createTrustedBuilder(runtime)
+          .commonfabric;
+        const Root = pattern(() => {
+          const name = Writable.of("Ada").for("name", true);
+          return { name };
+        });
+
+        const nameBinding = (Root.result as { name: unknown }).name;
+        expect(isLegacyAlias(nameBinding)).toBe(true);
+        expect(nameBinding).toEqual({
+          $alias: {
+            cell: "internal",
+            path: ["name"],
+            scope: "space",
+            schema: { default: "Ada" },
+          },
+        });
+      } finally {
+        popFrame(frame);
+      }
     });
   });
 

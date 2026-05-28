@@ -1,3 +1,5 @@
+import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
+
 export interface OpenAICompatibleGatewayClientOptions {
   baseUrl: string;
   authMode?: "bearer" | "none";
@@ -19,6 +21,22 @@ export interface OpenAIChatCompletionFunctionTool {
 export interface OpenAIChatCompletionTool {
   type: "function";
   function: OpenAIChatCompletionFunctionTool;
+}
+
+export interface OpenAIChatCompletionNativeModelTool {
+  type: LLMNativeModelToolId;
+  google_search?: Record<string, never>;
+}
+
+export type OpenAIChatCompletionRequestTool =
+  | OpenAIChatCompletionTool
+  | OpenAIChatCompletionNativeModelTool;
+
+export interface OpenAIChatCompletionNativeModelToolResult {
+  type: LLMNativeModelToolId;
+  provider?: string;
+  providerMetadata?: unknown;
+  sources?: unknown;
 }
 
 export interface OpenAIChatCompletionToolCall {
@@ -47,12 +65,14 @@ export interface OpenAIChatCompletionMessage {
   content: OpenAIChatMessageContent;
   tool_calls?: readonly OpenAIChatCompletionToolCall[];
   tool_call_id?: string;
+  grounding_metadata?: unknown;
 }
 
 export interface OpenAIChatCompletionRequest {
   model: string;
   messages: readonly OpenAIChatCompletionMessage[];
-  tools?: readonly OpenAIChatCompletionTool[];
+  tools?: readonly OpenAIChatCompletionRequestTool[];
+  native_model_tools?: readonly OpenAIChatCompletionNativeModelTool[];
   tool_choice?: "auto" | "none" | Record<string, unknown>;
 }
 
@@ -60,6 +80,8 @@ export interface OpenAIChatCompletionRequestDiagnosticSummary {
   model: string;
   messageCount: number;
   toolCount: number;
+  nativeModelToolIds?: readonly LLMNativeModelToolId[];
+  nativeModelToolCount: number;
   serializedBytes: number;
 }
 
@@ -89,6 +111,7 @@ export interface OpenAIChatCompletionAttemptDiagnostic {
 }
 
 export interface OpenAIChatCompletionAttemptOptions {
+  signal?: AbortSignal;
   onChatCompletionAttempt?: (
     diagnostic: OpenAIChatCompletionAttemptDiagnostic,
   ) => void | Promise<void>;
@@ -103,6 +126,10 @@ export interface OpenAIChatCompletionChoice {
 export interface OpenAIChatCompletionResponse {
   id?: string;
   choices: readonly OpenAIChatCompletionChoice[];
+  native_model_tool_results?:
+    readonly OpenAIChatCompletionNativeModelToolResult[];
+  provider_metadata?: Record<string, unknown>;
+  sources?: readonly unknown[];
 }
 
 const DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES = 1;
@@ -132,10 +159,38 @@ const nonNegativeIntegerOrDefault = (
     ? input
     : fallback;
 
-const sleep = (ms: number): Promise<void> =>
-  ms <= 0
-    ? Promise.resolve()
-    : new Promise((resolve) => setTimeout(resolve, ms));
+const chatCompletionAbortReason = (signal: AbortSignal): unknown =>
+  signal.reason ?? new DOMException(
+    "chat completion request aborted",
+    "AbortError",
+  );
+
+const throwIfChatCompletionAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) {
+    throw chatCompletionAbortReason(signal);
+  }
+};
+
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> => {
+  throwIfChatCompletionAborted(signal);
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  if (signal === undefined) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(chatCompletionAbortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+};
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -146,12 +201,24 @@ const textByteLength = (input: string): number =>
 const summarizeChatCompletionRequest = (
   payload: OpenAIChatCompletionRequest,
   serializedPayload: string,
-): OpenAIChatCompletionRequestDiagnosticSummary => ({
-  model: payload.model,
-  messageCount: payload.messages.length,
-  toolCount: payload.tools?.length ?? 0,
-  serializedBytes: textByteLength(serializedPayload),
-});
+): OpenAIChatCompletionRequestDiagnosticSummary => {
+  const nativeModelToolIds = [
+    ...(payload.native_model_tools?.map((tool) => tool.type) ?? []),
+    ...(payload.tools?.flatMap((tool) =>
+      tool.type === "function" ? [] : [tool.type]
+    ) ?? []),
+  ];
+  return {
+    model: payload.model,
+    messageCount: payload.messages.length,
+    toolCount: payload.tools?.length ?? 0,
+    ...(nativeModelToolIds.length > 0
+      ? { nativeModelToolIds: [...nativeModelToolIds] }
+      : {}),
+    nativeModelToolCount: nativeModelToolIds.length,
+    serializedBytes: textByteLength(serializedPayload),
+  };
+};
 
 const selectResponseHeaders = (
   headers: Headers,
@@ -296,10 +363,12 @@ export class OpenAICompatibleGatewayClient {
       method: "POST",
       headers: this.headers(),
       body: serializedPayload,
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
     };
     const maxTransportAttempts = this.#chatCompletionTransportRetries + 1;
     let lastError: unknown;
     for (let attempt = 1; attempt <= maxTransportAttempts; attempt += 1) {
+      throwIfChatCompletionAborted(options.signal);
       const startedAt = new Date();
       const startedAtMs = performance.now();
       try {
@@ -345,10 +414,13 @@ export class OpenAICompatibleGatewayClient {
           outcome: "transport_error",
           errorDetail: errorMessage(error),
         });
+        if (options.signal?.aborted) {
+          throw chatCompletionAbortReason(options.signal);
+        }
         if (attempt >= maxTransportAttempts) {
           throw transportErrorAfterRetries(endpoint, attempt, error);
         }
-        await sleep(this.#chatCompletionRetryDelayMs * attempt);
+        await sleep(this.#chatCompletionRetryDelayMs * attempt, options.signal);
       }
     }
     throw transportErrorAfterRetries(endpoint, maxTransportAttempts, lastError);

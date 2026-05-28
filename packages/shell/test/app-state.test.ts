@@ -3,8 +3,14 @@ import {
   applyCommand,
   AppState,
   AppStateSerialized,
+  appViewToUrlPath,
   deserialize,
+  isAppView,
+  isEmbeddedView,
+  isViewingDefaultPatternView,
+  preserveAppViewMode,
   serialize,
+  urlToAppView,
 } from "@commonfabric/shell/shared";
 import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
 import { assert } from "@std/assert";
@@ -93,5 +99,136 @@ describe("AppState", () => {
     });
 
     assert(next.config.showShellPieceListView === false);
+  });
+
+  it("parses and serializes slug piece routes", () => {
+    assert(
+      JSON.stringify(urlToAppView(new URL("http://common.test/space/demo"))) ===
+        JSON.stringify({ spaceName: "space", pieceSlug: "demo" }),
+    );
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/space/fid1:abc")),
+      ) === JSON.stringify({ spaceName: "space", pieceId: "fid1:abc" }),
+    );
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/space/of:fid1:abc")),
+      ) === JSON.stringify({ spaceName: "space", pieceId: "of:fid1:abc" }),
+    );
+    assert(
+      appViewToUrlPath({ spaceName: "space", pieceSlug: "demo" }) ===
+        "/space/demo",
+    );
+  });
+
+  it("parses and serializes embedded routes", () => {
+    const spaceDid = "did:key:z6MkjosLwWEobyT9T6RqLTdaEhFrXAZUNkRZJuUae2ukgfEa";
+
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/.embed/space/demo")),
+      ) ===
+        JSON.stringify({
+          spaceName: "space",
+          pieceSlug: "demo",
+          mode: "embed",
+        }),
+    );
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/.embed/space/fid1:abc")),
+      ) ===
+        JSON.stringify({
+          spaceName: "space",
+          pieceId: "fid1:abc",
+          mode: "embed",
+        }),
+    );
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL(`http://common.test/.embed/${spaceDid}/demo`)),
+      ) ===
+        JSON.stringify({
+          spaceDid,
+          pieceSlug: "demo",
+          mode: "embed",
+        }),
+    );
+    assert(
+      appViewToUrlPath({
+        spaceName: "space",
+        pieceSlug: "demo",
+        mode: "embed",
+      }) === "/.embed/space/demo",
+    );
+    assert(
+      appViewToUrlPath({
+        spaceDid,
+        pieceId: "fid1:abc",
+        mode: "embed",
+      }) === `/.embed/${spaceDid}/fid1:abc`,
+    );
+    assert(
+      appViewToUrlPath({
+        spaceName: "space",
+        pieceSlug: undefined,
+        mode: "embed",
+      }) === "/.embed/space",
+    );
+  });
+
+  it("validates and preserves embedded view mode", () => {
+    const current = {
+      spaceName: "space",
+      pieceSlug: "demo",
+      mode: "embed",
+    } as const;
+
+    assert(isAppView(current));
+    assert(isEmbeddedView(current));
+    assert(
+      JSON.stringify(
+        preserveAppViewMode(current, {
+          spaceName: "space",
+          pieceId: "fid1:abc",
+        }),
+      ) ===
+        JSON.stringify({
+          spaceName: "space",
+          pieceId: "fid1:abc",
+          mode: "embed",
+        }),
+    );
+    assert(
+      JSON.stringify(
+        preserveAppViewMode(current, {
+          spaceName: "space",
+          pieceId: "fid1:abc",
+          mode: undefined,
+        }),
+      ) ===
+        JSON.stringify({
+          spaceName: "space",
+          pieceId: "fid1:abc",
+        }),
+    );
+    assert(!isAppView({ builtin: "home", mode: "embed" }));
+    assert(!isAppView({ spaceName: "space", mode: "fullscreen" }));
+  });
+
+  it("treats slug piece routes as non-default pattern views", () => {
+    assert(isViewingDefaultPatternView({ spaceName: "space" }) === true);
+    assert(
+      isViewingDefaultPatternView({
+        spaceName: "space",
+        pieceId: "fid1:abc",
+      }) ===
+        false,
+    );
+    assert(
+      isViewingDefaultPatternView({ spaceName: "space", pieceSlug: "demo" }) ===
+        false,
+    );
   });
 });

@@ -33,7 +33,12 @@ export default pattern((state) => {
                 const y = __cf_pattern_input.key("element", "y");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<div>
-            Point: ({__cfHelpers.derive({
+            Point: ({__cfHelpers.lift<{
+                    x: number;
+                    state: {
+                        scale: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         x: {
@@ -52,12 +57,17 @@ export default pattern((state) => {
                     required: ["x", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ x, state }) => x * state.scale)({
                     x: x,
                     state: {
                         scale: state.key("scale")
                     }
-                }, ({ x, state }) => x * state.scale)}, {__cfHelpers.derive({
+                })}, {__cfHelpers.lift<{
+                    y: number;
+                    state: {
+                        scale: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         y: {
@@ -76,12 +86,12 @@ export default pattern((state) => {
                     required: ["y", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ y, state }) => y * state.scale)({
                     y: y,
                     state: {
                         scale: state.key("scale")
                     }
-                }, ({ y, state }) => y * state.scale)})
+                })})
           </div>);
             }, {
                 type: "object",

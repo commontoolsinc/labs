@@ -5,15 +5,17 @@
  * Workspace code should import these types via `@commonfabric/builder`.
  */
 
+import type { Cfc, WriteAuthorizedBy } from "./cfc.ts";
+
 // ============================================================================
 // Fabric Value Types
 // ============================================================================
 //
 // Pattern-visible declarations for the fabric value type system. Canonical
 // implementations live in data-model submodule files (interface.ts,
-// fabric-hash.ts, fabric-epoch.ts, etc.) — these inline declarations mirror
-// the public surface so the pattern compiler can resolve them without relative
-// imports.
+// fabric-primitives/FabricHash.ts, fabric-primitives/FabricEpochNsec.ts, etc.)
+// — these inline declarations mirror the public surface so the pattern compiler
+// can resolve them without relative imports.
 //
 // SYNC NOTE: These declarations must stay in sync with the canonical
 // definitions in the submodule files. If they drift, pattern type-checking
@@ -297,6 +299,7 @@ export type MetaField =
   | "internal"
   | "schema"
   | "result" // this lets us get from internal/argument back to result
+  | "slug"
   | "cfc";
 
 export interface IMetaCell {
@@ -1458,9 +1461,6 @@ export type AsCellType = AsCellEntry;
 // See https://json-schema.org/draft/2020-12/json-schema-validation
 // There is a lot of potential validation that is not handled, but this object
 // is defined to support them, so that generated schemas will still be usable.
-// TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
-// This is particularly useful for specifying the schema of a property.
-// That will require reworking some things, so for now, I'm not doing it
 export type JSONSchema = JSONSchemaObj | boolean;
 
 export type JSONSchemaObj = {
@@ -1595,6 +1595,48 @@ export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
 
 export type * from "./cfc.ts";
 export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
+
+export type TrustedActionWriteWithIntegrity<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]],
+> = Cfc<
+  WriteAuthorizedBy<T, Binding>,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
+
+export type TrustedActionWrite<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+> = TrustedActionWriteWithIntegrity<T, Binding, Action, Pattern, [Pattern]>;
+
+export type TrustedActionUiContract<
+  T,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]] = [Pattern],
+> = Cfc<
+  T,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema
@@ -1909,6 +1951,17 @@ export interface LiftFunction {
   <T extends (...args: any[]) => any>(
     implementation: T,
   ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
+
+  // Two-arg form: lift(argumentSchema, fn). Listed before the all-optional
+  // catch-all so `lift(false, fn)` resolves here (fn in slot 2) instead of
+  // matching the catch-all and rejecting fn as a resultSchema. The transformer
+  // emits no-input (computed-origin) lifts as `lift(false, fn)()`:
+  // argumentSchema:false keeps the no-input application valid (the runner's
+  // isValidArgument check passes on `argumentSchema === false`).
+  <T, R>(
+    argumentSchema: JSONSchema,
+    implementation: (input: T) => R,
+  ): ModuleFactory<StripCell<T>, StripCell<R>>;
 
   <T, R>(
     argumentSchema?: JSONSchema,

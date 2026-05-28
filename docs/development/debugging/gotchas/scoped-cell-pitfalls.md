@@ -1,0 +1,122 @@
+# Scoped Cell Pitfalls
+
+Practical gotchas encountered when building patterns with the scoped cell
+instances feature (`PerSpace`, `PerUser`, `PerSession`, `PerAny`). See
+`docs/specs/scoped-cell-instances.md` for the underlying model.
+
+## 1. `.length` on a top-level scoped array doesn't lift reactively
+
+**Symptom:** Output values derived as `users.length` (where `users` is a
+top-level `PerSpace<T[]>` input) read as a stale snapshot or as `undefined`
+from outside the pattern.
+
+```typescript
+// WRONG - snapshots once, does not track reactively
+const userCount = users.length;
+```
+
+```typescript
+// CORRECT - wrap in derive
+const userCount = derive(users, (u) => u.length);
+```
+
+Nested property access through an object cell (e.g. `conversation.rooms.length`
+where `conversation: PerSpace<{rooms: Room[]}>`) works fine — the problem is
+specific to `.length` access directly on a scope-wrapped array cell.
+
+## 2. Expose scoped outputs as plain types via `computed(() => cell.get())`
+
+**Symptom:** Test assertions like `subject.users[0]?.name === "Alex"` return
+`undefined` even after the underlying cell has the right value.
+
+Returning a `PerSpace<User[]>` input directly as a pattern output leaves
+consumers fighting the reactive traversal layer. Wrap arrays/strings in
+`computed(() => cell.get())` so the output type is plain.
+
+```typescript
+export interface MyOutput {
+  users: readonly User[];     // plain type, not PerSpace<User[]>
+  myName: string;
+}
+
+return {
+  users: computed(() => users.get()),
+  myName: computed(() => myName.get()),
+  // ...
+};
+```
+
+This mirrors what `packages/patterns/scrabble/scrabble.tsx` does for its
+`players`, `board`, `bag` etc.
+
+## 3. Don't `.get()` a per-scope cell from JSX `onClick`
+
+**Symptom:** Type error `Property 'get' does not exist on type 'string & {
+readonly [SCOPE_BRAND]?: "session" | undefined; }'`.
+
+In the pattern body, scoped inputs (e.g. `joinName: PerSession<string>`) are
+typed as the scope-branded value, not as a `Writable<string>` cell — so
+`joinName.get()` does not compile.
+
+```typescript
+// WRONG
+<cf-button onClick={() => boundJoin.send({ name: joinName.get() })}>
+  Join
+</cf-button>
+```
+
+The idiom (used by `scoped-group-chat` and the new game patterns): make the
+event payload optional, have the handler fall back to reading the draft cell
+from its bound closure, and dispatch the bound stream directly.
+
+```typescript
+// In handler
+const joinAs = handler<{ name?: string }, { joinName: NameCell; ... }>(
+  ({ name }, { joinName, ... }) => {
+    const trimmed = (name ?? joinName.get()).trim();
+    // ...
+  },
+);
+
+// In JSX
+<cf-button onClick={boundJoin}>Join</cf-button>
+```
+
+## 4. Initial-state assertions before any action can read `undefined`
+
+**Symptom:** A pattern test asserts initial empty state and the framework
+reports `Expected true, got undefined`.
+
+Reactive output reads can resolve to `undefined` before defaults hydrate.
+Scrabble's tests (`packages/patterns/scrabble/scrabble.test.tsx`) sidestep this
+by always running an action before the first assertion. Follow the same
+pattern: structure the test as a sequence of `{ action }, { assertion }` pairs
+and skip the pre-action sanity check.
+
+## 5. `Math.random()` throws under SES
+
+**Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
+handler runs.
+
+The pattern sandbox runs under SES, which removes ambient access to
+`Math.random()`. Use `nonPrivateRandom()` from `commonfabric` for
+non-cryptographic randomness inside patterns. This is not scope-specific but
+showed up while wiring up an option-id generator in a scoped poll.
+
+```typescript
+import { nonPrivateRandom, safeDateNow } from "commonfabric";
+
+const newId = () =>
+  `o_${safeDateNow().toString(36)}_${
+    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  }`;
+```
+
+## See Also
+
+- `docs/specs/scoped-cell-instances.md` — the underlying scope model
+- `packages/patterns/scoped-group-chat/` — canonical scope-aware pattern
+- `packages/patterns/scrabble/scrabble.tsx` — name-as-identity idiom
+- `packages/patterns/cozy-poll-scoped/` — applies all of the above
+- `packages/patterns/scoped-user-directory/` — verification of the link-pointer
+  technique (per-user pointer into a per-space array)

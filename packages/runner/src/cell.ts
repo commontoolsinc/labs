@@ -10,9 +10,9 @@ import {
   FabricInstance,
   type FabricValue,
   getDataModelConfig,
-  isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
@@ -2246,10 +2246,10 @@ export function recursivelyAddIDIfNeeded<T>(
 
   // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
   // `FabricRegExp`) are immutable wrappers with class-defined identity.
-  // Their own-enumerable properties are implementation details (e.g.,
-  // `FabricError.error` is the wrapped native `Error`), not user-visible
-  // structure; iterating them would re-wrap the embedded native value on
-  // each pass and recurse forever. Instead, walk the observable internal
+  // Their own-enumerable properties are implementation details, not
+  // user-visible structure; iterating them via the generic walker would
+  // descend into wrapper internals meaninglessly. Instead, walk the
+  // observable internal
   // structure via `[DECONSTRUCT]()` (the same mechanism the serialization
   // system uses) for side effects only — tracking shared references in
   // `seen` and populating `frame.generatedIdCounter` for any

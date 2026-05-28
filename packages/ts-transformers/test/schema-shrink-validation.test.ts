@@ -2063,6 +2063,46 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    // Regression guard for the lowerDeriveCall typeRegistry override
+    // (lift/transformer.ts). When a cell-like input flows into an UNANNOTATED
+    // callback param AND the callback uses no independent cell signal (no
+    // equals()/.equals()/.get() that would re-establish cell-ness on its own),
+    // the override is the only thing preserving the asCell wrapper: it pins the
+    // param's type to the input's widened type so schema injection sees the
+    // Writable, not the unwrapped value. The "equals-only" test above passes
+    // even without the override because equals() independently forces
+    // asCell: ["comparable"]; this case has no such signal, so it actually
+    // exercises the override. Removing the override drops asCell here.
+    "derive preserves cell wrapper for unannotated param with no independent cell signal",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, type Writable } from "commonfabric";',
+        "const state = {} as (Writable<number> | undefined);",
+        "const same = derive(state, (state) => state === state);",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, '"undefined"');
+      // The override is the only thing carrying asCell here: drop it and this
+      // line fails while the type union survives.
+      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
+    },
+  );
+
+  await t.step(
     "derive keeps root cell opaque when derivation and equality are both used",
     async () => {
       const source = [

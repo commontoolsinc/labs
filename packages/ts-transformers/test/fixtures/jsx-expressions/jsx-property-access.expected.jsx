@@ -82,7 +82,13 @@ export default pattern((state) => {
         </p>
 
         <h3>Property Access with Operations</h3>
-        <p>Age + 1: {__cfHelpers.derive({
+        <p>Age + 1: {__cfHelpers.lift<{
+            state: {
+                user: {
+                    age: number;
+                };
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -104,13 +110,19 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age + 1)({ state: {
                 user: {
                     age: state.key("user", "age")
                 }
-            } }, ({ state }) => state.user.age + 1)}</p>
+            } })}</p>
         <p>Name length: {state.key("user", "name", "length")}</p>
-        <p>Uppercase name: {__cfHelpers.derive({
+        <p>Uppercase name: {__cfHelpers.lift<{
+            state: {
+                user: {
+                    name: string;
+                };
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -132,11 +144,11 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name.toUpperCase())({ state: {
                 user: {
                     name: state.key("user", "name")
                 }
-            } }, ({ state }) => state.user.name.toUpperCase())}</p>
+            } })}</p>
         <p>
           Location includes city:{" "}
           {__cfHelpers.ifElse({
@@ -147,7 +159,15 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                user: {
+                    profile: {
+                        location: string;
+                    };
+                };
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -175,17 +195,22 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.profile.location.includes("City"))({ state: {
                 user: {
                     profile: {
                         location: state.key("user", "profile", "location")
                     }
                 }
-            } }, ({ state }) => state.user.profile.location.includes("City")), "Yes", "No")}
+            } }), "Yes", "No")}
         </p>
 
         <h3>Array Element Access</h3>
-        <p>Item at index: {__cfHelpers.derive({
+        <p>Item at index: {__cfHelpers.lift<{
+            state: {
+                items: string[];
+                index: number;
+            };
+        }, string | undefined>({
             type: "object",
             properties: {
                 state: {
@@ -207,12 +232,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.index])({ state: {
                 items: state.key("items"),
                 index: state.key("index")
-            } }, ({ state }) => state.items[state.index])}</p>
+            } })}</p>
         <p>First item: {state.key("items", "0")}</p>
-        <p>Last item: {__cfHelpers.derive({
+        <p>Last item: {__cfHelpers.lift<{
+            state: {
+                items: string[];
+            };
+        }, string | undefined>({
             type: "object",
             properties: {
                 state: {
@@ -231,10 +260,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.items.length - 1])({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items[state.items.length - 1])}</p>
-        <p>Number at index: {__cfHelpers.derive({
+            } })}</p>
+        <p>Number at index: {__cfHelpers.lift<{
+            state: {
+                numbers: number[];
+                index: number;
+            };
+        }, number | undefined>({
             type: "object",
             properties: {
                 state: {
@@ -256,15 +290,23 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.numbers[state.index])({ state: {
                 numbers: state.key("numbers"),
                 index: state.key("index")
-            } }, ({ state }) => state.numbers[state.index])}</p>
+            } })}</p>
 
         <h3>Config Access with Styles</h3>
         <p style={{
             color: state.key("config", "theme", "primaryColor"),
-            fontSize: __cfHelpers.derive({
+            fontSize: __cfHelpers.lift<{
+                state: {
+                    config: {
+                        theme: {
+                            fontSize: number;
+                        };
+                    };
+                };
+            }, string>({
                 type: "object",
                 properties: {
                     state: {
@@ -292,13 +334,13 @@ export default pattern((state) => {
                 required: ["state"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { state: {
+            } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.fontSize + "px")({ state: {
                     config: {
                         theme: {
                             fontSize: state.key("config", "theme", "fontSize")
                         }
                     }
-                } }, ({ state }) => state.config.theme.fontSize + "px"),
+                } }),
         }}>
           Styled text
         </p>
@@ -318,7 +360,16 @@ export default pattern((state) => {
         </div>
 
         <h3>Complex Property Chains</h3>
-        <p>{__cfHelpers.derive({
+        <p>{__cfHelpers.lift<{
+            state: {
+                user: {
+                    name: string;
+                    profile: {
+                        location: string;
+                    };
+                };
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -349,15 +400,23 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " from " + state.user.profile.location)({ state: {
                 user: {
                     name: state.key("user", "name"),
                     profile: {
                         location: state.key("user", "profile", "location")
                     }
                 }
-            } }, ({ state }) => state.user.name + " from " + state.user.profile.location)}</p>
-        <p>Font size + 2: {__cfHelpers.derive({
+            } })}</p>
+        <p>Font size + 2: {__cfHelpers.lift<{
+            state: {
+                config: {
+                    theme: {
+                        fontSize: number;
+                    };
+                };
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -385,13 +444,13 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.fontSize + 2)({ state: {
                 config: {
                     theme: {
                         fontSize: state.key("config", "theme", "fontSize")
                     }
                 }
-            } }, ({ state }) => state.config.theme.fontSize + 2)}px</p>
+            } })}px</p>
         <p>
           Has beta and dark mode:{" "}
           {__cfHelpers.ifElse({

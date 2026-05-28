@@ -231,6 +231,22 @@ cf exec /tmp/cf/home/pieces/todo-app/result/search.tool --help
 
 Environment variables `CF_API_URL` and `CF_IDENTITY` are also supported.
 
+`cf fuse status` reports background mounts with separate supervisor and FUSE
+child process IDs:
+
+```text
+MOUNTPOINT  SUPERVISOR_PID  CHILD_PID  STATUS   STARTED  LOG
+/tmp/cf     12345           12346      mounted  ...      /tmp/cf-fuse-cf.log
+```
+
+For background mounts, `cf fuse mount --background` starts a small supervisor
+process that does not load libfuse. The supervisor starts the FFI-owning FUSE
+child, records the child PID in mount state, and waits for the child to publish
+a readiness sidecar before the mount command reports success. The child writes
+`starting`, `mounted`, `failed`, `exiting`, and `exited` states plus a mounted
+heartbeat; startup succeeds only when the status matches the current mount
+attempt and recorded child PID.
+
 ### Linux: Docker / other-user access
 
 If you need Docker or another user to traverse a Linux FUSE mount, mount with:
@@ -288,7 +304,12 @@ sandbox-visible enforcement.
 
 ## Architecture
 
-Single Deno process using FFI to libfuse. FUSE callbacks are registered via
+Foreground `cf fuse mount` starts one FFI-owning FUSE child process and waits
+for it without adding a supervisor; direct `deno run packages/fuse/mod.ts` is a
+single-process invocation of the same child entrypoint. Background mounts split
+lifecycle management into a non-FFI supervisor process and an FFI-owning FUSE
+child process so supervisor cleanup and startup readiness can be observed
+independently from libfuse. FUSE callbacks are registered via
 `Deno.UnsafeCallback` with `nonblocking: true` on the session loop, so WebSocket
 subscriptions and FUSE requests run concurrently on Deno's event loop.
 
@@ -299,6 +320,11 @@ affected subtrees on cell changes and invalidate the kernel cache via
 Writes are fire-and-forget: the FUSE reply is sent before the cell write
 completes, so subscription rebuilds don't block the callback chain (required to
 avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
+
+See [RELIABILITY_DESIGN.md](./RELIABILITY_DESIGN.md) for the package-local plan
+to move default mutating operations toward commit-confirmed replies, bounded
+deadlines, explicit backpressure, and watchdog/degraded-mode behavior while
+preserving normal filesystem semantics.
 
 ## Troubleshooting
 

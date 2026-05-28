@@ -1,6 +1,9 @@
 import type { FabricValue } from "../interface.ts";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  shallowMutableClone,
+} from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
@@ -22,22 +25,13 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  *
  * `cloneIfNecessary()` deep-clones via the fabric value machinery
  * (`FabricInstance.deepClone()` for wrappers), preserving the class.
- *
- * `{ frozen: false }` (which implies `force: true`) is required, NOT the
- * `{ frozen: true }` default: with the default, `cloneIfNecessary`'s
- * identity check calls `isDeepFrozenFabricValue()`, whose `checkValue()`
- * currently THROWS on a `FabricInstance` ("Cannot yet handle instance of
- * class ..."). That path is hit whenever the engine replays a stored
- * patch sequence over an already-deep-frozen tree (e.g. a `move`/`add`
- * that re-clones a frozen subtree holding a `FabricError`). `force`
- * short-circuits the identity check before that throw. The result is
- * still deep-frozen: `applyPatch` deep-freezes the assembled tree at its
- * boundary regardless. (TODO(@danfuzz): once `checkValue()`/`isDeepFrozenFabricValue`
- * handle `FabricInstance`, the default could be used and would also reuse
- * already-frozen inputs identity-preservingly.)
+ * Its default options (`{ frozen: true, deep: true }`) return an
+ * already-deep-frozen input by identity, so replayed engine passes over a
+ * previously-frozen subtree reuse it in place; otherwise the value is
+ * deep-cloned to a deep-frozen result. The assembled tree is deep-frozen
+ * at the `applyPatch` boundary regardless.
  */
-const cloneValue = (value: FabricValue): FabricValue =>
-  cloneIfNecessary(value, { frozen: false });
+const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
 
 /**
  * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
@@ -51,7 +45,7 @@ const cloneValue = (value: FabricValue): FabricValue =>
  * The function is therefore on the hot path for any read that reconstructs
  * a document from its stored patch list.
  *
- * Mutation discipline: each `applyOp` call uses `shallowCloneContainer` to
+ * Mutation discipline: each `applyOp` call uses `shallowMutableClone()` to
  * produce a new top-level copy of the container being modified, then
  * recurses into the path; containers off the modified path remain
  * frozen-by-reference. The returned tree is then fully deep-frozen at the
@@ -104,7 +98,7 @@ const replaceAtPath = (
 
   if (Array.isArray(root)) {
     const index = requireExistingArrayIndex(root, path[0]!, fullPath);
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = shallowMutableClone(root) as FabricValue[];
     if (path.length === 1) {
       next[index] = cloneValue(value);
       return next;
@@ -122,7 +116,7 @@ const replaceAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = shallowMutableClone(root) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
     next[key] = cloneValue(value);
@@ -152,7 +146,7 @@ const addAtPath = (
   }
 
   if (Array.isArray(root)) {
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = shallowMutableClone(root) as FabricValue[];
     const segment = path[0]!;
     if (path.length === 1) {
       if (segment === "-") {
@@ -177,7 +171,7 @@ const addAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = shallowMutableClone(root) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
     next[key] = cloneValue(value);
@@ -206,7 +200,7 @@ const removeAtPath = (
 
   if (Array.isArray(root)) {
     const index = requireExistingArrayIndex(root, path[0]!, fullPath);
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = shallowMutableClone(root) as FabricValue[];
     if (path.length === 1) {
       next.splice(index, 1);
       return next;
@@ -224,7 +218,7 @@ const removeAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = shallowMutableClone(root) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
     if (!Object.hasOwn(root, key)) {
@@ -279,13 +273,13 @@ const spliceAtPath = (
     if (index < 0 || remove < 0 || index > root.length) {
       throw new Error(`invalid splice at ${encodePointer(fullPath)}`);
     }
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = shallowMutableClone(root) as FabricValue[];
     next.splice(index, remove, ...add.map((value) => cloneValue(value)));
     return next;
   }
 
   if (Array.isArray(root)) {
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = shallowMutableClone(root) as FabricValue[];
     const pathIndex = requireExistingArrayIndex(root, path[0]!, fullPath);
     const child = root[pathIndex];
     if (!isContainer(child)) {
@@ -316,7 +310,7 @@ const spliceAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = shallowMutableClone(root) as PatchObject;
   next[key] = spliceAtPath(child, path.slice(1), index, remove, add, fullPath);
   return next;
 };
@@ -337,18 +331,6 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
 
 const createContainer = (nextSegment: string): PatchContainer => {
   return isArraySegment(nextSegment) || nextSegment === "-" ? [] : {};
-};
-
-const shallowCloneContainer = (value: PatchContainer): PatchContainer => {
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    Object.assign(copy, value);
-    return copy as FabricValue[];
-  }
-
-  const copy = Object.create(Object.getPrototypeOf(value)) as PatchObject;
-  Object.assign(copy, value);
-  return copy;
 };
 
 const parseArrayIndex = (segment: string): number => {

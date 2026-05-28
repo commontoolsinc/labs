@@ -4,7 +4,7 @@ import { transformCfDirective } from "../src/mod.ts";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
-import { SchemaInjectionTransformer } from "../src/mod.ts";
+import { CrossStageState, SchemaInjectionTransformer } from "../src/mod.ts";
 
 function normalizePrintedNode(
   node: ts.Node,
@@ -159,7 +159,7 @@ function transformWithSchemaInjection(source: string): string {
   const program = ts.createProgram(rootFiles, compilerOptions, host);
   const transformer = new SchemaInjectionTransformer({
     mode: "transform",
-    typeRegistry: new WeakMap(),
+    state: new CrossStageState(),
   });
   const sourceFile = program.getSourceFile(fileName);
   if (!sourceFile) {
@@ -188,6 +188,9 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "MaxConfidentiality",
     "OpaqueInput",
     "WriteAuthorizedBy",
+    "TrustedActionWriteWithIntegrity",
+    "TrustedActionWrite",
+    "TrustedActionUiContract",
     "ExactCopy",
     "ProjectionPath",
     "ProjectionOf",
@@ -284,6 +287,62 @@ Deno.test(
     );
     assertEquals(
       output.includes("__cfBindVerifiedBinding(saveTitle, {"),
+      true,
+    );
+  },
+);
+
+Deno.test(
+  "TrustedActionWrite lowers trusted top-level builder bindings",
+  async () => {
+    const source = `/// <cts-enable />
+      import { handler, pattern, TrustedActionWrite } from "commonfabric";
+
+      const TRUSTED_SAVE_ACTION = "TrustedSaveTitle";
+      const TRUSTED_SAVE_SURFACE = "TrustedSaveSurface";
+
+      const saveTitle = handler<void, { title: { get(): string; set(value: string): void }; savedTitle: { set(value: string): void } }>(
+        (_event, { title, savedTitle }) => {
+          savedTitle.set(title.get());
+        },
+      );
+
+      interface Input {
+        title: string;
+      }
+
+      interface Output {
+        savedTitle: TrustedActionWrite<
+          string,
+          typeof saveTitle,
+          typeof TRUSTED_SAVE_ACTION,
+          typeof TRUSTED_SAVE_SURFACE
+        >;
+      }
+
+      export default pattern<Input, Output>(({ title }) => ({
+        savedTitle: title,
+      }));
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertEquals(
+      output.includes("__cfBindVerifiedBinding(saveTitle, {"),
+      true,
+    );
+    assertEquals(
+      output.includes('action: "TrustedSaveTitle"'),
+      true,
+    );
+    assertEquals(
+      output.includes('trustedPattern: "TrustedSaveSurface"'),
+      true,
+    );
+    assertEquals(
+      output.includes('requiredEventIntegrity: ["TrustedSaveSurface"]'),
       true,
     );
   },

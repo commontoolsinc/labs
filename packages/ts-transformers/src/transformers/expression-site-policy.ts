@@ -231,7 +231,7 @@ function classifyCallExpressionRoot(
     case "unless":
       return "conditional-helper";
     case "builder":
-    case "derive":
+    case "lift-applied":
     case "cell-factory":
     case "cell-for":
     case "wish":
@@ -401,7 +401,7 @@ function hasEnclosingComputeLikeCallback(
         parent.arguments.includes(current)
       ) {
         const callKind = detectCallKind(parent, context.checker);
-        if (callKind?.kind === "derive") {
+        if (callKind?.kind === "lift-applied") {
           return true;
         }
         if (

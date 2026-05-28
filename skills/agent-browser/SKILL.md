@@ -100,6 +100,32 @@ agent-browser state load auth.json
 agent-browser open https://app.example.com/dashboard
 ```
 
+### Common Fabric identity checks
+
+For Common Fabric tests that touch `PerUser`, `PerSession`, favorites, drafts,
+or home-space state, import the same CLI key used by `deno task cf` into the
+browser session via `Import CLI Key`.
+
+```bash
+agent-browser --session cf-shared open http://localhost:8000/<space>/<piece>
+agent-browser --session cf-shared snapshot -i
+# Click Login, then Import CLI Key.
+agent-browser --session cf-shared upload @<choose-file-ref> "$CF_IDENTITY"
+agent-browser --session cf-shared click @<import-key-ref>
+agent-browser --session cf-shared console
+```
+
+The browser console should include `[Identity] User DID: ...`; compare it with:
+
+```bash
+deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
+```
+
+Use distinct `--session` names when comparing identities. A different identity
+should still see unscoped/`PerSpace` data in the same space, but `PerUser` and
+`PerSession` fields resolve to separate instances and may look empty/default.
+See `docs/development/SHARED_IDENTITY.md` for the full workflow.
+
 ### Data extraction
 
 ```bash
@@ -206,16 +232,33 @@ documented pierce selectors such as `[data-cf-button]` or `[data-cf-input]`.
 | [references/video-recording.md](references/video-recording.md)       | Recording workflows for debugging and documentation       |
 | [references/proxy-support.md](references/proxy-support.md)           | Proxy configuration, geo-testing, rotating proxies        |
 
-## Ready-to-Use Templates
+## Ready-to-Run Scripts
 
-| Template                                                                 | Description                         |
-| ------------------------------------------------------------------------ | ----------------------------------- |
-| [templates/form-automation.sh](templates/form-automation.sh)             | Form filling with validation        |
-| [templates/authenticated-session.sh](templates/authenticated-session.sh) | Login once, reuse state             |
-| [templates/capture-workflow.sh](templates/capture-workflow.sh)           | Content extraction with screenshots |
+When `run_skill_script` is available and exactly allowlisted, prefer these
+bundled scripts over constructing equivalent shell commands. Invoke them with
+`skill="agent-browser"` and the listed `scripts/...` path. These scripts expect
+the `agent-browser` CLI to be available on `PATH` in the script execution
+environment.
+
+For cf-harness runs, pass a local CDP origin with `--cdp` or set
+`AGENT_BROWSER_CDP`. The scripts intentionally avoid browser state, screenshots,
+PDFs, uploads, downloads, and local file output; they print snapshots and
+extracted content to stdout for harness capture.
+
+| Script                                                               | Description                                      |
+| -------------------------------------------------------------------- | ------------------------------------------------ |
+| [scripts/form-automation.sh](scripts/form-automation.sh)             | Discover form refs or run ordered form actions   |
+| [scripts/authenticated-session.sh](scripts/authenticated-session.sh) | Discover login refs or submit provided refs      |
+| [scripts/capture-workflow.sh](scripts/capture-workflow.sh)           | Capture page metadata, snapshot, and text output |
 
 ```bash
-./templates/form-automation.sh https://example.com/form
-./templates/authenticated-session.sh https://app.example.com/login
-./templates/capture-workflow.sh https://example.com ./output
+./scripts/form-automation.sh --cdp http://host.docker.internal:9222 https://example.com/form
+./scripts/form-automation.sh --cdp http://host.docker.internal:9222 https://example.com/form \
+  --type @e1="Ada" --click @e3 --wait-url "**/success"
+
+APP_USERNAME="user@example.com" APP_PASSWORD="..." \
+  ./scripts/authenticated-session.sh --cdp http://host.docker.internal:9222 \
+  https://app.example.com/login --username-ref @e1 --password-ref @e2 --submit-ref @e3
+
+./scripts/capture-workflow.sh --cdp http://host.docker.internal:9222 https://example.com
 ```

@@ -57,9 +57,15 @@ handlers are queued separately and run through the event path.
 In pull mode, when a cell changes:
 - Effects → added to `pending`
 - Computations → marked `dirty`/`stale`, and downstream effects are scheduled
+  through the ordinary dependency/output graph
+- Materializer computations → also queued for idle side-write materialization,
+  but their broad write envelopes are not used for downstream fanout
 
 A computation stays dirty until an effect, event preflight, or explicit
 `cell.pull()` needs it. If nothing ever observes it, it never runs.
+Materializers are the exception: broad or dynamic writable-input computations
+are dirty-coalesced and run from the idle pull loop so their actual changed
+writes can drive precise downstream propagation.
 
 In push mode, triggered effects and computations are both scheduled in
 `pending`.
@@ -67,7 +73,7 @@ In push mode, triggered effects and computations are both scheduled in
 ### Current-Known Writes
 
 Each action tracks its current known write set from the latest run plus
-declared/potential writes. This keeps the dependency graph precise while still
+declared writes. This keeps the dependency graph precise while still
 handling no-op runs and declared outputs:
 
 ```typescript
@@ -78,8 +84,48 @@ else cellB.set(x);
 
 By default the scheduler uses the latest known writes rather than cumulative
 history, so stale branches can disappear when an action changes what it writes.
-The old cumulative `mightWrite` behavior is retained behind the experimental
+The public diagnostic API still uses the older name `getMightWrite()`, but it
+returns this active scheduling write set by default. The old cumulative
+write-history behavior is retained behind the experimental
 `schedulerHistoricalMightWrite` flag.
+
+### Materializer Write Envelopes
+
+Computations that write through writable inputs are not indexed from transaction
+`attemptedWrites`. If the write target is statically simple and safely
+resolvable, it is represented as a normal declared write. Broad or dynamic
+writable-input targets are represented as `materializerWriteEnvelopes`, a
+separate pull-mode index.
+
+Materializer membership normally comes from explicit module/action metadata.
+For generated `computed()`/`derive()` callbacks, the transformer emits
+`materializerWriteInputPaths` only when capability analysis observes actual
+writes through captured cell inputs. A Writable input in an output-producing
+generated action schema is not enough evidence: pure computations commonly
+accept Writable cells so they can read their current values. When an
+output-producing action also has materializer metadata, materializer membership
+is treated as an additional side-write facet and must not suppress normal dirty
+fanout for its declared or current-known outputs. The current runtime fallback
+is limited to opaque-result generated computations that do not carry write-path
+metadata, where the computation has no normal output surface and its observable
+work is side-writing through captured Writable inputs.
+
+The materializer index is owned by `SchedulerMaterializers` and exposed to
+scheduler helper modules through the `MaterializerIndexState` interface. That
+index owns both membership checks and write-envelope lookup; consumers do not
+thread separate `isMaterializer` callbacks through scheduler state.
+
+When a materializer's inputs change, broad dirtying through the materializer
+envelope stops at the materializer. It is queued for the idle pull loop,
+coalescing repeated source changes and honoring manual debounce/throttle
+settings. If the same action also has normal declared or current-known outputs,
+those outputs still participate in the ordinary dependency graph, so demand for
+them can pull the action before idle. That run satisfies the coalesced
+materializer work rather than causing a duplicate idle run. If an effect, event
+preflight, or explicit demand reads a path overlapping a dirty materializer
+envelope before idle runs, that materializer is promoted into the same settle
+pass and ordered before the reader. After it runs, only actual changed writes
+are propagated to downstream readers.
 
 ## Execution Flow
 
@@ -95,6 +141,8 @@ Find actions that read X (via trigger index)
 For each triggered action:
     Effect → add to pending, queue execution
     Computation → mark dirty, propagate to dependents, schedule affected effects
+    Materializer computation → mark dirty, keep ordinary dependent propagation,
+        and queue idle pull work for broad side-write materialization
 ```
 
 The trigger index groups actions by the cells they read, so finding affected
@@ -134,16 +182,35 @@ for (const effect of workSet) {
 }
 ```
 
-The `collectDirtyDependencies` function finds dirty computations that write to cells the action reads.
+The `collectDirtyDependencies` function finds dirty computations that write to
+cells the action reads. It also consults the materializer envelope index even
+when the demand root is merely pending rather than stale, because a pending
+effect or event can read a materialized target before normal stale propagation
+has an exact edge.
+
+Initial demand roots are runnable only on the first settle iteration. On later
+iterations they remain traversal seeds so newly created or newly dirtied
+dependencies can be pulled through the same demand path before `pull()` returns,
+without rerunning the demand root unless normal scheduling also marks it
+pending.
 
 ### 4. Topological Sort
 
 Actions are sorted so dependencies run before dependents:
 
 ```typescript
-function topologicalSort(actions, dependencies, mightWrite, actionParent, dependents) {
+function topologicalSort(
+  actions,
+  dependencies,
+  schedulingWrites,
+  actionParent,
+  dependents,
+  getAdditionalWrites, // materializer-index envelopes in pull mode
+) {
   // Build graph: action A → action B if A writes something B reads
   // In pull mode, prefer the incrementally maintained dependents graph.
+  // Add materializer-envelope edges for this work set without mutating the
+  // normal writer/dependent indexes.
   // Add parent → child edges only when they do not oppose data dependencies.
   // Kahn's algorithm with cycle handling
 }
@@ -380,9 +447,13 @@ dependency transaction for reactive actions, and installs:
 - Shallow reads, which only invalidate on same-path, ancestor-path, or direct
   child writes.
 - Actual writes from the transaction.
-- Potential writes, for APIs that read and may later write the same location.
 - Declared writes from action telemetry annotations.
+- Materializer write envelopes from action telemetry annotations.
 - Ignored scheduling writes from telemetry annotations.
+
+Transaction `attemptedWrites` remain a storage/CFC concept for APIs that read a
+path while deciding whether to write it. They are included in CFC target-side
+prepare/digest inputs, but are explicitly not scheduler dependency evidence.
 
 `setSchedulerDependencies()` sorts and compacts reads and writes, filters
 ignored scheduling writes, and prunes structural ancestor writes so unrelated
@@ -393,11 +464,10 @@ The active scheduling write set is current-known by default:
 - Use actual writes from the latest run when they exist.
 - Otherwise keep the existing current-known writes if present.
 - Otherwise seed from declared writes.
-- Add potential writes.
 - Add parent writes for dynamic collection items when an actual child write
   falls under a declared collection write.
 
-The legacy cumulative `mightWrite` behavior is still kept in
+The legacy cumulative write-history behavior is still kept in
 `historicalMightWrite` and selected only when the
 `schedulerHistoricalMightWrite` experimental option is enabled.
 
@@ -409,6 +479,16 @@ The writer index maintains:
 
 When an action gains writes, existing readers are backfilled into the dependents
 graph. When it loses writes, stale dependents edges are pruned.
+
+The materializer index is separate from the writer index. It maintains:
+
+- `materializersByEntity`: entity -> materializer computations whose envelopes
+  may write it.
+- Action-local compacted materializer write envelopes.
+
+Materializer envelopes are used for pull-mode dirty dependency discovery and
+work-set ordering. They are not inserted into the normal writer index and do
+not create broad dependents edges by themselves.
 
 ### Trigger Index and Storage Notifications
 
@@ -432,6 +512,9 @@ Push mode schedules every remaining triggered action with debounce. Pull mode:
 - Marks triggered computations dirty/stale.
 - Schedules downstream effects that transitively depend on the dirty
   computation.
+- For materializer computations, also queues idle execution, but only the
+  ordinary dependency graph is used for downstream scheduling; broad
+  materializer envelopes are not used as fanout evidence.
 
 When trigger tracing is enabled, each matched change records a bounded
 `TriggerTraceEntry` with the notification type, change index, before/after value
@@ -461,6 +544,12 @@ Runnable pull seeds include:
 - Computations whose debounce trailing flush has become ready.
 - Computations demanded through a live effect, a demanded parent context, or
   `pullDemandedFirstRunComputations`.
+- Computations marked as pull-demand continuations after a child computation
+  writes data that a scheduler-parent ancestor read earlier in the same pull.
+  This is deliberately based on `actionParent`, not arbitrary dependency edges:
+  normal reader/writer edges already schedule downstream readers, while
+  continuations let an already-run parent converge when its dynamically created
+  child produces data the parent sampled.
 
 A computation is demanded when it has a transitive live-effect dependent or is
 inside a demanded parent context. An effect with no scheduling writes is a pull
@@ -482,10 +571,17 @@ Pull mode:
 - Collects dependency logs for newly subscribed actions before each iteration.
 - Builds an iteration seed set, then recursively pulls dirty computations needed
   by those seeds.
+- Keeps initial demand roots as traversal-only seeds after the first iteration
+  so dynamic child computations can trigger ancestor continuations before the
+  original pull resolves.
 - Topologically sorts the work set using dependencies, current scheduling
-  writes, parent-child edges, and the dependents graph.
+  writes, parent-child edges, the dependents graph, and pull-only materializer
+  envelope edges for the current work set.
 - Clears dirty flags for effects up front; if an effect is re-dirtied before it
   runs, it is treated as part of a cycle and skipped until a future tick.
+- Before an effect runs, rechecks for dirty materializer dependencies that may
+  have appeared after the work set was built. If any overlap the effect reads,
+  the effect remains pending and the materializer is run first.
 - Skips unsubscribed actions, non-runnable pull actions, debounced computations,
   throttled actions, and conditionally scheduled effects whose inputs did not
   actually change.
@@ -560,7 +656,10 @@ When computations write changed data, the scheduler records the changed write
 addresses in `changedWritesHistory`. After the run, the scheduler finds readers
 of those changed writes through the trigger index. Reader effects are scheduled
 directly. Reader computations are marked dirty and their affected downstream
-effects are scheduled.
+effects are scheduled. If a reader computation is itself a materializer, it is
+also queued/coalesced for idle materialization, but downstream effects that
+depend on its ordinary outputs are still scheduled. The materializer envelope
+itself is not used as downstream fanout evidence.
 
 Pull-mode storage notification handling can also conditionally schedule
 downstream effects and remember the history index at which the effect was
@@ -614,7 +713,11 @@ Dispatching a queued event:
 - Runs the handler in an immediate runtime transaction.
 - Records trusted event policy inputs from annotated writes and from actual
   transaction write candidates.
-- Calls `runtime.prepareTxForCommit(tx)` and commits.
+- Calls `runtime.prepareTxForCommit(tx)` and starts the commit without awaiting
+  server confirmation. The transaction is applied locally before the commit
+  promise resolves, so the scheduler can continue against speculative local
+  state; if the server rejects the commit, dependent speculative transactions are
+  rejected and the normal retry path reruns the event.
 - On commit error, retries by unshifting the event back to the head of the queue
   while retries remain.
 - Runs the internal `onCommit` callback after the final commit result, including
@@ -705,6 +808,7 @@ The scheduler emits these telemetry markers directly:
 - `scheduler.dependencies.update`
 - `scheduler.run`
 - `scheduler.invocation`
+- `scheduler.event.commit`, with counts and a capped sample of written paths
 - `scheduler.event.preflight` when event preflight telemetry is enabled
 - `scheduler.non-settling`
 
@@ -805,6 +909,7 @@ class Scheduler {
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   private triggerIndex = new SchedulerTriggerIndex();
   private writeIndex = new SchedulerWriteIndex(...);
+  private materializers = new SchedulerMaterializers(...);
 
   // Parent-child relationships for nested patterns
   private actionParent = new WeakMap<Action, Action>();
@@ -820,7 +925,10 @@ interface ReactivityLog {
   reads: Address[];
   shallowReads: Address[];
   writes: Address[];
-  potentialWrites?: Address[];  // For diffAndUpdate pattern
+}
+
+interface TransactionReactivityLog extends ReactivityLog {
+  attemptedWrites?: Address[];  // CFC/security target evidence, not scheduling evidence
 }
 
 interface ActionStats {
@@ -838,6 +946,8 @@ modules under `packages/runner/src/scheduler/`, including:
 - `pull-execution.ts` and `push-execution.ts` for mode-specific settle loops
 - `pull-scheduling.ts` for demand-root and affected-effect scheduling
 - `events.ts`, `pull-events.ts`, and `push-events.ts` for queued handlers
+- `materializers.ts` for the pull-mode materializer index and write-envelope
+  lookup
 - `scheduling-writes.ts`, `trigger-index.ts`, and `dependency-graph.ts` for
   dependency indexes
 - `delays.ts` and `delay-control.ts` for debounce/throttle state
@@ -1031,7 +1141,7 @@ scheduler.isEffect(action)
 scheduler.isComputation(action)
 scheduler.isDirty(action)
 scheduler.getDependents(action)
-scheduler.getMightWrite(action)
+scheduler.getMightWrite(action)    // Active scheduling writes despite legacy name
 scheduler.getActionStats(actionOrId)
 scheduler.getFilterStats()
 scheduler.resetFilterStats()
@@ -1094,7 +1204,7 @@ The scheduler module also re-exports:
 txToReactivityLog
 allowMutableTransactionRead
 ignoreReadForScheduling
-markReadAsPotentialWrite
+markReadAsAttemptedWrite
 ```
 
 ## Tests

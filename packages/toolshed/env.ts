@@ -69,7 +69,9 @@ const EnvSchema = z.object({
   CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
   CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
   CFTS_AI_LLM_XAI_API_KEY: z.string().default(""),
-  CFTS_AI_GATEWAY_URL: z.string().default(""),
+  // The gateway is reachable only on Tailscale; toolshed falls back cleanly
+  // when the URL is unreachable (see `loadGatewayModels` in routes/ai/llm/models.ts).
+  CFTS_AI_GATEWAY_URL: z.string().default("https://llm.stage.commontools.dev"),
 
   // LLM Observability Tool
   CFTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
@@ -204,6 +206,7 @@ const EnvSchema = z.object({
   // env vars in this file have the same latent bug.
   // ===========================================================================
   EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
+  EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
 
   // ===========================================================================
   // Compilation cache flags (see docs/specs/compilation-cache.md)

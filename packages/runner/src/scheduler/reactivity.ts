@@ -8,6 +8,7 @@ import { normalizeCellScope } from "../scope.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  TransactionReactivityLog,
 } from "../storage/interface.ts";
 import { reactivityLogFromActivities } from "../storage/reactivity-log.ts";
 import {
@@ -74,8 +75,13 @@ export function trustedEventWriteCandidatesFromTransaction(
     }
   }
 
-  const log = txToReactivityLog(tx);
-  for (const write of [...log.writes, ...(log.potentialWrites ?? [])]) {
+  const transactionLog = txToTransactionReactivityLog(tx);
+  for (
+    const write of [
+      ...transactionLog.writes,
+      ...(transactionLog.attemptedWrites ?? []),
+    ]
+  ) {
     addCandidate(write);
     detailSpaces.add(write.space);
   }
@@ -128,9 +134,25 @@ export function filterIgnoredAddresses(
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
+  return toSchedulerReactivityLog(txToTransactionReactivityLog(tx));
+}
+
+function txToTransactionReactivityLog(
+  tx: IExtendedStorageTransaction,
+): TransactionReactivityLog {
   const direct = getDirectTransactionReactivityLog(tx);
   if (direct) {
     return direct;
   }
   return reactivityLogFromActivities(tx.journal.activity());
+}
+
+function toSchedulerReactivityLog(
+  log: TransactionReactivityLog,
+): ReactivityLog {
+  return {
+    reads: log.reads,
+    shallowReads: log.shallowReads,
+    writes: log.writes,
+  };
 }

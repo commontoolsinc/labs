@@ -20,7 +20,10 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const factors = [2, 3, 4];
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        factors: number[];
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -37,10 +40,10 @@ export default pattern(() => {
         required: ["value", "factors"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, factors }) => v.get() * factors[1]!)({
+        value: value.for(["result", "value"], true),
         factors: factors
-    }, ({ value: v, factors }) => v.get() * factors[1]!).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

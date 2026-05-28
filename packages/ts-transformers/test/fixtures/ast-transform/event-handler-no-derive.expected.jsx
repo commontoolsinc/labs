@@ -33,28 +33,34 @@ const handleClick = handler({
     count.set(count.get() + 1);
 });
 // FIXTURE: event-handler-no-derive
-// Verifies: handler invocations in JSX are NOT wrapped in derive(), while expressions are
-//   count + 1 (in JSX <span>)                → __cfHelpers.derive(...schemas, { count }, ({ count }) => count + 1)
-//   handleClick({ count }) (onClick attr)     → left as-is (not wrapped in derive)
-//   handleClick({ count }) (inside .map())    → left as-is (not wrapped in derive)
-//   pattern<{ count: Default<number, 0> }>    → pattern(fn, inputSchema, outputSchema)
-// Context: Negative test ensuring handler calls in event attributes and inside .map() are not derive-wrapped
+// Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
+// wrapper (formerly derive, now lift-applied post-CT-1615), while
+// expressions are.
+//   count + 1 (in JSX <span>)                → __cfHelpers.lift<...>(({ count }) => count + 1)({ count })
+//   handleClick({ count }) (onClick attr)    → left as-is (not wrapped)
+//   handleClick({ count }) (inside .map())   → left as-is (not wrapped)
+//   pattern<{ count: Default<number, 0> }>   → pattern(fn, inputSchema, outputSchema)
+// Context: Negative test ensuring handler calls in event attributes and
+// inside .map() are not wrapped as reactive compute.
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
-          <span>Count: {__cfHelpers.derive({
+          <span>Count: {__cfHelpers.lift<{
+            count: Default<number, 0>;
+        }, number>({
             type: "object",
             properties: {
                 count: {
-                    type: "number"
+                    type: "number",
+                    "default": 0
                 }
             },
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + 1)}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1)({ count: count })}</span>
 
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
           <cf-button onClick={handleClick({ count })}>

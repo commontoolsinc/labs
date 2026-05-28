@@ -34,17 +34,20 @@ function assertUsable() {
 class DenoHasher extends BaseIncrementalHasher {
   #hasher = crypto!.createHash("sha256");
 
-  _rawUpdate(data: Uint8Array) {
+  /** @inheritDoc */
+  protected _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
-  _rawDigest(encoding: string | undefined): Uint8Array | string {
+  /** @inheritDoc */
+  protected _rawDigest(encoding: string | undefined): Uint8Array | string {
     switch (encoding) {
       case "base64url": {
         return this.#hasher.digest(encoding);
       }
       case undefined: {
-        // `node:crypto`'s `digest()` returns `Buffer`; normalize to plain `Uint8Array`.
+        // `node:crypto`'s `digest()` returns `Buffer`; normalize to plain
+        // `Uint8Array`.
         const buf = this.#hasher.digest();
         return new Uint8Array(
           buf.buffer,
