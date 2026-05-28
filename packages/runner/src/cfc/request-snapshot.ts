@@ -12,6 +12,10 @@ import type { FabricValue } from "@commonfabric/memory/interface";
  * identity (which a `structuredClone()` would silently strip). Cyclic values
  * are not yet supported (see `cloneIfNecessary`).
  */
-export function createFrozenRequestSnapshot<T>(value: T): T {
-  return cloneIfNecessary(value as FabricValue) as T;
+export function createFrozenRequestSnapshot<T extends FabricValue>(
+  value: T,
+): T {
+  // `cloneIfNecessary`'s frozen default is typed `Immutable<T>`; callers
+  // consume the snapshot as a (read-only-in-practice) `T`.
+  return cloneIfNecessary(value) as T;
 }
