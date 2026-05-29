@@ -1,26 +1,29 @@
-// Poker sanitization demo — idiomatic CFC.
+// Poker sanitization demo — idiomatic CFC, reducer + relabel-policy model.
 //
 // Companion to docs/proposals/cfc-game-sanitization-memo.md.
 //
-// This version splits cleanly into what CFC ENFORCES today vs what the memo PROPOSES:
+// CFC access is BINARY per (value, principal); "graded reveal" is NOT a new label dimension.
+// "Bob sees the COUNT of Alice's hand, not the cards" is a REDUCER (a trusted transform,
+// count = hand.length) whose output is its own Confidential cell, RELABELLED to a lower audience
+// by a policy keyed to the reducer's identity. This demo shows three things, each labelled:
 //
 //   ENFORCED (real, idiomatic CFC):
-//     - Each hand is a Confidential<Card[], [PokerHoleCards]> cell (real ifc.confidentiality).
-//     - A cf-cfc-render-boundary with maxConfidentiality={[]} genuinely blocks every hand from
-//       rendering — this is the one CFC mechanism the runtime actually enforces.
-//     - The Showdown is a real integrity-gated declassification: a trusted-action surface
-//       (data-ui-* + TrustedActionWrite) flips a cell that drives declassifyConfidentiality, so
-//       ONLY that trusted gesture can reveal hands. Folded hands are never declassified.
-//     - cf-cfc-label shows each hand's live label.
+//     - Each hand is a Confidential<Card[], [PokerHoleCards]> cell; a cf-cfc-render-boundary with
+//       maxConfidentiality={[]} genuinely blocks it (the one mechanism the runtime enforces).
+//     - The Showdown is a trusted-action declassification (the "identity reducer" relabel):
+//       data-ui-* + TrustedActionWrite; folded hands are never declassified.
+//     - The COUNT is its own Confidential cell behind its OWN boundary, released to the table by
+//       its own trusted action — demonstrating "the reduced value is its own binary-access cell".
+//     - cf-cfc-label shows the live labels.
 //
-//   PROPOSED (memo §4 — NOT enforced today, shown as a clearly-labelled illustration):
-//     - The graded reveal lattice (existence / cardinality / order) and per-reader projection.
-//       CFC today is binary: a label is either blocked or declassified. "Bob sees the count but
-//       not the cards" is the extension this memo argues for.
+//   SIMULATED (no runtime primitive exists; labelled as such in-UI):
+//     - The reducer MINTING a `ReducedBy{count}` integrity atom and the relabel being GATED on it
+//       (we drive the relabel from a trusted action instead).
+//     - Per-recipient MATERIALIZATION: routing Alice the cards but Bob the count. This demo runs
+//       in one trusted host and shows both on one screen; it does not route per reader.
 //
-// Honest limitation (stated in-UI): the render boundary hides labelled content in a TRUSTED
-// HOST; it does not encrypt the cell. A malicious runtime could still read the bytes. Real
-// secrecy between mutually-distrusting players needs the per-reader materialization of §4.4.
+//   OUT OF SCOPE: recombination (multiple reducers on one secret, §14.3.2) and unlinkability
+//   (shuffles). Stated in-UI.
 
 import {
   Cell,
@@ -37,7 +40,7 @@ import {
 } from "commonfabric";
 
 // ===========================================================================
-// Domain types
+// Domain types + confidential cells
 // ===========================================================================
 
 type Suit = "♠" | "♥" | "♦" | "♣";
@@ -46,30 +49,34 @@ type Rank =
   | "J" | "Q" | "K" | "A";
 type Card = { suit: Suit; rank: Rank };
 
-// The CFC confidentiality atom carried by every hole-card hand. One shared Resource atom is
-// enough: each hand has its own render boundary, so we declassify per-hand by toggling each
-// boundary's declassify list — not by minting per-player atoms.
+// The atom on a hole-card hand. One shared atom is fine: each hand has its own render boundary,
+// so we declassify per-hand by toggling each boundary's declassify list.
 const POKER_HAND = {
   type: "https://commonfabric.org/cfc/atom/Resource",
   class: "PokerHoleCards",
   subject: "poker:hole-cards",
 } as const;
 
+// A SEPARATE atom for the DERIVED count value. This is the point: the reducer's output is its own
+// labelled, binary-access cell — not a "lower level" of the hand's label.
+const POKER_HAND_COUNT = {
+  type: "https://commonfabric.org/cfc/atom/Resource",
+  class: "PokerHandCount",
+  subject: "poker:hand-count",
+} as const;
+
 type ConfHand = Confidential<Card[], readonly [typeof POKER_HAND]>;
-type HandArg = { id: string; cards: Card[] };
+type ConfCount = Confidential<number, readonly [typeof POKER_HAND_COUNT]>;
 
 // Idiomatic confidential-cell creation (mirrors cfc-render-policy-demo): a lift whose RETURN type
-// is the Confidential cell, built with Cell.for(id).set(...). This is what attaches the
-// ifc.confidentiality label the render boundary reads.
-const makeHand = lift<HandArg, Writable<ConfHand>>((input) =>
+// is the Confidential cell, built with Cell.for(id).set(...). This attaches the ifc.confidentiality
+// label the render boundary reads.
+const makeHand = lift<{ id: string; cards: Card[] }, Writable<ConfHand>>((input) =>
   Cell.for<ConfHand>(input.id).set(input.cards as ConfHand)
 );
-
-// ===========================================================================
-// Proposed reveal lattice (memo §4.1) — used only by the SIMULATED illustration below.
-// ===========================================================================
-
-type RevealLevel = "hidden" | "existence" | "cardinality" | "order" | "values";
+const makeCount = lift<{ id: string; n: number }, Writable<ConfCount>>((input) =>
+  Cell.for<ConfCount>(input.id).set(input.n as ConfCount)
+);
 
 // ===========================================================================
 // Module-scope helpers
@@ -77,9 +84,8 @@ type RevealLevel = "hidden" | "existence" | "cardinality" | "order" | "values";
 
 const PHASES = ["predeal", "preflop", "flop", "turn", "river", "showdown"];
 
-// Two preset deals so "New game" visibly changes the table. The hands' SECRECY comes from the
-// CFC render boundary, not from how cards are chosen, so fixed presets are fine (and avoid the
-// "deterministic shuffle from public state" leak the previous version had).
+// Two preset deals so "New game" visibly changes the table. The hands' SECRECY comes from the CFC
+// render boundary, not from how cards are chosen, so fixed presets are fine.
 const DEALS: { hands: Card[][]; community: Card[] }[] = [
   {
     hands: [
@@ -127,14 +133,6 @@ const CARD_BASE = {
   boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
 };
 const FACE_UP = { ...CARD_BASE, background: "#ffffff", border: "1px solid #cbd5e1" };
-const FACE_DOWN = {
-  ...CARD_BASE,
-  background:
-    "repeating-linear-gradient(45deg,#3b82f6,#3b82f6 5px,#2563eb 5px,#2563eb 10px)",
-  color: "#dbeafe",
-  border: "1px solid #1e3a8a",
-  fontSize: "22px",
-};
 const LOCK_BOX = {
   display: "inline-flex",
   alignItems: "center",
@@ -147,7 +145,13 @@ const LOCK_BOX = {
   fontSize: "13px",
   fontWeight: "600",
 };
-const FOLDED_BOX = { ...LOCK_BOX, background: "#f1f5f9", color: "#64748b", border: "1px dashed #94a3b8", fontStyle: "italic" };
+const FOLDED_BOX = {
+  ...LOCK_BOX,
+  background: "#f1f5f9",
+  color: "#64748b",
+  border: "1px dashed #94a3b8",
+  fontStyle: "italic",
+};
 const ROW = { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "10px" };
 const HAND_ROW = {
   display: "flex",
@@ -161,16 +165,16 @@ const HAND_ROW = {
 };
 const NAME_COL = { minWidth: "90px", fontWeight: "700", fontSize: "15px" };
 
-const LEVEL_STYLE: Record<RevealLevel, { bg: string; fg: string; text: string }> = {
-  values: { bg: "#dcfce7", fg: "#166534", text: "VALUES · full cards" },
-  order: { bg: "#dbeafe", fg: "#1e40af", text: "ORDER · positions only" },
-  cardinality: { bg: "#fef3c7", fg: "#92400e", text: "COUNT · how many" },
-  existence: { bg: "#e5e7eb", fg: "#374151", text: "EXISTS · one bit" },
-  hidden: { bg: "#1f2937", fg: "#cbd5e1", text: "HIDDEN" },
+// ENFORCED / SIMULATED / OUT OF SCOPE badge — replaces the retired reveal-level "pill".
+type Badge = "ENFORCED" | "SIMULATED" | "OUT OF SCOPE";
+const BADGE_STYLE: Record<Badge, { bg: string; fg: string }> = {
+  "ENFORCED": { bg: "#dcfce7", fg: "#166534" },
+  "SIMULATED": { bg: "#fef3c7", fg: "#92400e" },
+  "OUT OF SCOPE": { bg: "#e5e7eb", fg: "#374151" },
 };
 
-function pill(level: RevealLevel) {
-  const s = LEVEL_STYLE[level];
+function badge(kind: Badge) {
+  const s = BADGE_STYLE[kind];
   return (
     <span
       style={{
@@ -178,14 +182,14 @@ function pill(level: RevealLevel) {
         background: s.bg,
         color: s.fg,
         borderRadius: "999px",
-        padding: "3px 10px",
-        fontSize: "11px",
+        padding: "2px 8px",
+        fontSize: "10px",
         fontWeight: "700",
         letterSpacing: "0.3px",
         whiteSpace: "nowrap",
       }}
     >
-      {s.text}
+      {kind}
     </span>
   );
 }
@@ -198,14 +202,9 @@ function cardChip(c: Card) {
   );
 }
 
-function backChip() {
-  return <span style={FACE_DOWN}>🂠</span>;
-}
-
-// The ENFORCED hand: the actual cards rendered INSIDE a render boundary. When `declassified` is
-// false the boundary blocks the whole subtree (the runtime refuses to render a labelled cell), so
-// nothing shows; when true the boundary permits it. `$value` is the confidential cell whose live
-// label the boundary checks.
+// The ENFORCED hand: cards rendered INSIDE a render boundary. When `declassified` is false the
+// boundary blocks the subtree (the runtime refuses to render a labelled cell); when true it
+// permits it. `$value` is the confidential cell whose live label the boundary checks.
 function handBoundary(
   confCell: Writable<ConfHand>,
   cardsCell: Writable<Card[]>,
@@ -220,6 +219,70 @@ function handBoundary(
       <div style={ROW}>{cardsCell.get().map(cardChip)}</div>
     </cf-cfc-render-boundary>
   );
+}
+
+// The DERIVED count value behind its OWN boundary, with its OWN atom. Blocked until the relabel
+// (trusted "Release count" action) fires.
+function countBoundary(
+  confCell: Writable<ConfCount>,
+  countVal: number,
+  released: boolean,
+) {
+  return (
+    <cf-cfc-render-boundary
+      maxConfidentiality={[]}
+      declassifyConfidentiality={released ? [POKER_HAND_COUNT] : []}
+      $value={confCell}
+    >
+      <span style={{ fontWeight: "700", fontSize: "16px" }}>{countVal} cards</span>
+    </cf-cfc-render-boundary>
+  );
+}
+
+// A labelled stage box in the reducer pipeline.
+function stageBox(title: string, body: unknown, kind: Badge) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e2e8f0",
+        borderRadius: "10px",
+        padding: "10px",
+        minWidth: "150px",
+        background: "#ffffff",
+      }}
+    >
+      <div style={{ fontSize: "12px", fontWeight: "700", marginBottom: "6px" }}>{title}</div>
+      <div style={{ marginBottom: "6px", minHeight: "30px" }}>{body}</div>
+      {badge(kind)}
+    </div>
+  );
+}
+
+function pipelineArrow(label: string) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        color: "#64748b",
+        fontSize: "10px",
+        padding: "0 2px",
+        maxWidth: "90px",
+        textAlign: "center",
+      }}
+    >
+      <div style={{ fontSize: "22px", lineHeight: "1" }}>→</div>
+      <div>{label}</div>
+    </div>
+  );
+}
+
+function noteFor(folded: boolean, shown: boolean) {
+  if (folded) {
+    return <div style={FOLDED_BOX}>folded — stays confidential at showdown</div>;
+  }
+  return shown ? "" : <div style={LOCK_BOX}>🔒 blocked by render boundary</div>;
 }
 
 function phaseStepper(current: string) {
@@ -249,6 +312,8 @@ function phaseStepper(current: string) {
 
 const SHOWDOWN_SURFACE = "TrustedShowdownSurface";
 const SHOWDOWN_ACTION = "TrustedShowdownReveal";
+const COUNT_SURFACE = "TrustedCountReducerSurface";
+const COUNT_ACTION = "TrustedReleaseCount";
 
 type GameState = {
   dealIndex: Writable<number>;
@@ -261,6 +326,7 @@ type GameState = {
   bobFolded: Writable<boolean>;
   charlieFolded: Writable<boolean>;
   revealed: Writable<boolean>;
+  countReleased: Writable<boolean>;
   phase: Writable<string>;
 };
 
@@ -277,6 +343,7 @@ const newGame = handler<unknown, GameState>((_, s) => {
   s.bobFolded.set(false);
   s.charlieFolded.set(false);
   s.revealed.set(false); // re-conceal: hands go back behind the render boundary
+  s.countReleased.set(false);
   s.phase.set("preflop");
 });
 
@@ -297,12 +364,11 @@ const foldPlayer = handler<unknown, { folded: Writable<boolean> }>((_, s) => {
   s.folded.set(true);
 });
 
-// The trusted declassification. Its OUTPUT is typed TrustedActionWrite, and the button that
-// triggers it lives in a surface carrying data-ui-event-integrity — so the write that reveals
-// the hands is the one integrity-gated action in the whole pattern.
-const setRevealed = handler<unknown, { revealed: Writable<boolean>; next: boolean }>(
+// Generic trusted relabel: flips the boolean that drives a render boundary's declassify list.
+// Used for BOTH the showdown (hands) and the count release — each from its own trusted surface.
+const setBool = handler<unknown, { cell: Writable<boolean>; next: boolean }>(
   (_, s) => {
-    s.revealed.set(s.next);
+    s.cell.set(s.next);
   },
 );
 
@@ -315,12 +381,18 @@ type PokerOutput = {
   [UI]: unknown;
   revealed: TrustedActionWrite<
     boolean,
-    typeof setRevealed,
+    typeof setBool,
     typeof SHOWDOWN_ACTION,
     typeof SHOWDOWN_SURFACE
   >;
+  countReleased: TrustedActionWrite<
+    boolean,
+    typeof setBool,
+    typeof COUNT_ACTION,
+    typeof COUNT_SURFACE
+  >;
   reveal: Stream<unknown>;
-  conceal: Stream<unknown>;
+  releaseCount: Stream<unknown>;
 };
 
 export default pattern<unknown, PokerOutput>(() => {
@@ -334,6 +406,7 @@ export default pattern<unknown, PokerOutput>(() => {
   const bobFolded = new Writable<boolean>(false);
   const charlieFolded = new Writable<boolean>(false);
   const revealed = new Writable<boolean>(false);
+  const countReleased = new Writable<boolean>(false);
   const phase = new Writable<string>("predeal");
 
   // Confidential views of the three hands (real ifc.confidentiality labels).
@@ -341,9 +414,16 @@ export default pattern<unknown, PokerOutput>(() => {
   const bobConf: Writable<ConfHand> = makeHand({ id: "poker-hand-bob", cards: bob }) as never;
   const charlieConf: Writable<ConfHand> = makeHand({ id: "poker-hand-charlie", cards: charlie }) as never;
 
+  // THE REDUCER: count = hand.length. A plain transform. In the CFC model its output inherits the
+  // hand's confidentiality and mints a resolution-reduction integrity atom (ReducedBy{count});
+  // here we model the count as its own Confidential cell with its own atom. The integrity-minting
+  // and integrity-GATING are simulated; the second confidential cell + its boundary are real.
+  const aliceCount = computed(() => alice.get().length);
+  const aliceCountConf: Writable<ConfCount> = makeCount({ id: "poker-count-alice", n: aliceCount }) as never;
+
   const game: GameState = {
     dealIndex, alice, bob, charlie, community, board,
-    aliceFolded, bobFolded, charlieFolded, revealed, phase,
+    aliceFolded, bobFolded, charlieFolded, revealed, countReleased, phase,
   };
 
   const start = newGame(game);
@@ -353,8 +433,10 @@ export default pattern<unknown, PokerOutput>(() => {
   const foldAlice = foldPlayer({ folded: aliceFolded });
   const foldBob = foldPlayer({ folded: bobFolded });
   const foldCharlie = foldPlayer({ folded: charlieFolded });
-  const reveal = setRevealed({ revealed, next: true });
-  const conceal = setRevealed({ revealed, next: false });
+  const reveal = setBool({ cell: revealed, next: true });
+  const conceal = setBool({ cell: revealed, next: false });
+  const releaseCount = setBool({ cell: countReleased, next: true });
+  const hideCount = setBool({ cell: countReleased, next: false });
 
   // Each hand's render boundary, rebuilt when the deal changes or the showdown flips. Folded
   // hands are never declassified — they stay behind the boundary even at showdown.
@@ -371,20 +453,22 @@ export default pattern<unknown, PokerOutput>(() => {
     return handBoundary(charlieConf, charlie, revealed.get() && !charlieFolded.get());
   });
 
-  const aliceNote = computed(() =>
-    aliceFolded.get()
-      ? <div style={FOLDED_BOX}>folded — stays confidential at showdown</div>
-      : (revealed.get() ? "" : <div style={LOCK_BOX}>🔒 blocked by render boundary</div>)
+  const aliceNote = computed(() => noteFor(aliceFolded.get(), revealed.get()));
+  const bobNote = computed(() => noteFor(bobFolded.get(), revealed.get()));
+  const charlieNote = computed(() => noteFor(charlieFolded.get(), revealed.get()));
+
+  // The reducer pipeline's stage 3 (the count cell) + its blocked/released note.
+  const countCell = computed(() => {
+    dealIndex.get();
+    return countBoundary(aliceCountConf, alice.get().length, countReleased.get());
+  });
+  const countNote = computed(() =>
+    countReleased.get() ? "" : <span style={{ fontSize: "11px", color: "#9a3412" }}>🔒 blocked</span>
   );
-  const bobNote = computed(() =>
-    bobFolded.get()
-      ? <div style={FOLDED_BOX}>folded — stays confidential at showdown</div>
-      : (revealed.get() ? "" : <div style={LOCK_BOX}>🔒 blocked by render boundary</div>)
-  );
-  const charlieNote = computed(() =>
-    charlieFolded.get()
-      ? <div style={FOLDED_BOX}>folded — stays confidential at showdown</div>
-      : (revealed.get() ? "" : <div style={LOCK_BOX}>🔒 blocked by render boundary</div>)
+  const countStatus = computed(() =>
+    countReleased.get()
+      ? "Released: the table now sees the count (a separate labelled value)."
+      : "The count cell is confidential until the trusted relabel fires."
   );
 
   const stepper = computed(() => phaseStepper(phase.get()));
@@ -402,16 +486,17 @@ export default pattern<unknown, PokerOutput>(() => {
     [NAME]: "Poker sanitization demo (idiomatic CFC)",
     [UI]: (
       <cf-screen title="Poker sanitization demo">
-        <cf-vstack gap="3" style={{ padding: "1rem", maxWidth: "900px" }}>
+        <cf-vstack gap="3" style={{ padding: "1rem", maxWidth: "920px" }}>
           {/* Intro */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={2}>🃏 Confidential hands, revealed only at a trusted showdown</cf-heading>
+              <cf-heading level={2}>🃏 Confidential hands + a reducer that releases the count</cf-heading>
               <cf-label>
-                Each hand below is a <b>Confidential</b> cell. A <b>cf-cfc-render-boundary</b> with{" "}
-                <code>maxConfidentiality=[]</code> blocks every hand from rendering — this is real,
-                runtime-enforced CFC. Only the <b>trusted Showdown action</b> can declassify them,
-                and folded hands never reveal. The chip under each hand is its live CFC label.
+                CFC access is <b>binary</b> per value. Each hand is a <b>Confidential</b> cell that a{" "}
+                <b>cf-cfc-render-boundary</b> genuinely blocks. To let the table learn the{" "}
+                <i>count</i> without the cards, we don't add a "reveal level" — we run a{" "}
+                <b>reducer</b> (count = hand.length) into its <b>own</b> Confidential cell and{" "}
+                <b>relabel</b> that to the table. Each section is tagged by what CFC enforces.
               </cf-label>
               <cf-label>{statusLine}</cf-label>
             </cf-vstack>
@@ -420,8 +505,10 @@ export default pattern<unknown, PokerOutput>(() => {
           {/* ENFORCED: confidential hands behind render boundaries */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>🔒 Hands (enforced by CFC render boundary)</cf-heading>
-
+              <cf-hstack gap="2" style={{ alignItems: "center" }}>
+                <cf-heading level={3}>🔒 Hands (CFC render boundary)</cf-heading>
+                {badge("ENFORCED")}
+              </cf-hstack>
               <div style={HAND_ROW}>
                 <div style={NAME_COL}>Alice</div>
                 {aliceCell}
@@ -440,18 +527,72 @@ export default pattern<unknown, PokerOutput>(() => {
             </cf-vstack>
           </cf-card>
 
-          {/* The real live label the render boundary checks (one compact instance) */}
+          {/* REDUCER + RELABEL pipeline (a trusted surface) */}
+          <cf-card
+            id="trusted-count-surface"
+            data-ui-surface={COUNT_SURFACE}
+            data-ui-pattern={COUNT_SURFACE}
+            data-ui-event-integrity={COUNT_SURFACE}
+          >
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={3}>🔢 Reducer + relabel: release the count to the table</cf-heading>
+              <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
+                "Bob sees the count, not the cards" is a reducer whose output is its own
+                binary-access cell, relabelled to the table by a trusted action — not a new label
+                level. Read left → right:
+              </cf-label>
+              <div style={{ display: "flex", alignItems: "stretch", flexWrap: "wrap", gap: "4px" }}>
+                {stageBox("Alice's secret hand", handBoundary(aliceConf, alice, false), "ENFORCED")}
+                {pipelineArrow("reducer count = hand.length")}
+                {stageBox(
+                  "Reducer output",
+                  <span style={{ fontSize: "12px", color: "#64748b" }}>
+                    mints <code>ReducedBy&#123;count&#125;</code>; inherits the hand's label
+                  </span>,
+                  "SIMULATED",
+                )}
+                {pipelineArrow("relabel [Alice] → [table]")}
+                {stageBox(
+                  "Count cell (own atom)",
+                  <span style={{ ...ROW, gap: "6px" }}>{countCell}{countNote}</span>,
+                  "ENFORCED",
+                )}
+              </div>
+              <cf-label style={{ fontSize: "12px", color: "#64748b" }}>{countStatus}</cf-label>
+              <cf-hstack gap="2">
+                <cf-button data-ui-action={COUNT_ACTION} onClick={releaseCount}>
+                  Release count to table (trusted relabel)
+                </cf-button>
+                <cf-button onClick={hideCount}>Re-conceal count</cf-button>
+              </cf-hstack>
+              <div
+                style={{
+                  fontSize: "11px",
+                  maxHeight: "90px",
+                  overflow: "auto",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  padding: "8px",
+                }}
+              >
+                <cf-cfc-label data-cfc-label-surface="alice-count" $value={aliceCountConf} />
+              </div>
+            </cf-vstack>
+          </cf-card>
+
+          {/* Live label on a hand */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
               <cf-heading level={3}>🏷️ Live CFC label on a hand</cf-heading>
               <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
                 The actual <code>ifc.confidentiality</code> the runtime attached to Alice's hand —
-                exactly what the render boundary above reads to decide whether to show it.
+                what the render boundary reads to decide whether to show it.
               </cf-label>
               <div
                 style={{
                   fontSize: "11px",
-                  maxHeight: "110px",
+                  maxHeight: "100px",
                   overflow: "auto",
                   background: "#f8fafc",
                   border: "1px solid #e2e8f0",
@@ -497,7 +638,7 @@ export default pattern<unknown, PokerOutput>(() => {
             </cf-vstack>
           </cf-card>
 
-          {/* Trusted showdown surface — the one integrity-gated declassification */}
+          {/* Trusted showdown surface — the identity-reducer relabel */}
           <cf-card
             id="trusted-showdown-surface"
             data-ui-surface={SHOWDOWN_SURFACE}
@@ -505,11 +646,14 @@ export default pattern<unknown, PokerOutput>(() => {
             data-ui-event-integrity={SHOWDOWN_SURFACE}
           >
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>🏆 Trusted Showdown</cf-heading>
+              <cf-hstack gap="2" style={{ alignItems: "center" }}>
+                <cf-heading level={3}>🏆 Trusted Showdown</cf-heading>
+                {badge("ENFORCED")}
+              </cf-hstack>
               <cf-label>
-                This button is a <b>trusted action</b> (data-ui-action + TrustedActionWrite). Its
-                write is the only thing that declassifies the hands — untrusted code cannot flip
-                it (memo §4.2/§6).
+                The "identity reducer" relabel: a <b>trusted action</b> (data-ui-action +
+                TrustedActionWrite) is the only thing that declassifies the full hands. Folded
+                hands stay confidential.
               </cf-label>
               <cf-hstack gap="2">
                 <cf-button data-ui-action={SHOWDOWN_ACTION} onClick={reveal}>
@@ -520,33 +664,48 @@ export default pattern<unknown, PokerOutput>(() => {
             </cf-vstack>
           </cf-card>
 
-          {/* PROPOSED: the graded lattice (clearly simulated) */}
+          {/* The materialization gap */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>🧪 Proposed extension (simulated — not enforced)</cf-heading>
-              <cf-label style={{ color: "#64748b" }}>
-                CFC today is binary: a hand is either blocked or fully declassified (above). The
-                memo (§4) argues for a <b>graded, per-reader</b> lattice so an opponent could learn
-                e.g. the <i>count</i> of your hand without the cards. CFC cannot express these
-                middle levels today — shown here only as an illustration of the target shapes.
+              <cf-hstack gap="2" style={{ alignItems: "center" }}>
+                <cf-heading level={3}>🧭 The materialization gap</cf-heading>
+                {badge("SIMULATED")}
+              </cf-hstack>
+              <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
+                Reducers + relabels give the right labels. The piece CFC does <b>not</b> have is a
+                per-recipient <b>materialization</b> layer that runs the right reducer for each
+                reader and routes them only their projection:
               </cf-label>
-              <div style={{ ...ROW, gap: "8px" }}>{pill("values")}<span style={ROW}>{DEALS[0].hands[0].map(cardChip)}</span></div>
-              <div style={{ ...ROW, gap: "8px" }}>{pill("order")}<span style={ROW}>{backChip()}{backChip()}</span><span style={{ color: "#64748b" }}>positions, faces hidden</span></div>
-              <div style={{ ...ROW, gap: "8px" }}>{pill("cardinality")}<span style={ROW}>{backChip()}{backChip()}</span><span style={{ color: "#64748b" }}>×2 — count only</span></div>
-              <div style={{ ...ROW, gap: "8px" }}>{pill("existence")}<span style={{ color: "#64748b" }}>a hand exists (e.g. folded)</span></div>
-              <div style={{ ...ROW, gap: "8px" }}>{pill("hidden")}<span style={{ color: "#64748b" }}>nothing</span></div>
+              <div
+                style={{
+                  border: "1px dashed #fdba74",
+                  borderRadius: "10px",
+                  padding: "10px",
+                  background: "#fffbeb",
+                  fontSize: "13px",
+                }}
+              >
+                <div>reader <b>Alice</b> &nbsp;→&nbsp; her cards (satisfies <code>HoleCards(Alice)</code>)</div>
+                <div>reader <b>Bob</b> &nbsp;&nbsp;&nbsp;→&nbsp; the count (satisfies <code>[table]</code>)</div>
+                <div style={{ marginTop: "6px", color: "#9a3412" }}>
+                  This routing is simulated: the demo runs in one trusted host and shows both
+                  projections on one screen; it does not serve different bytes to different readers.
+                </div>
+              </div>
             </cf-vstack>
           </cf-card>
 
-          {/* Honest limitation */}
+          {/* Honest limitation + out of scope */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>⚠️ Honest limitation</cf-heading>
+              <cf-heading level={3}>⚠️ Scope & honest limitations</cf-heading>
               <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
                 The render boundary hides labelled content in a <b>trusted host</b>; it does not
-                encrypt the cell. A malicious runtime could still read the bytes. Real secrecy
-                between mutually-distrusting players needs the per-reader materialization the memo
-                proposes in §4.4. This demo shows the policy surface, not a hardened deployment.
+                encrypt the cell, so real secrecy between mutually-distrusting players needs the
+                per-recipient materialization above. Two properties are <b>out of scope</b> for CFC
+                today: {badge("OUT OF SCOPE")} <b>recombination</b> (publishing several reducers of
+                one secret can leak more than any one — §14.3.2) and <b>unlinkability</b> (a shuffle
+                where you can't trace a card — a relational property CFC's lattice doesn't model).
               </cf-label>
             </cf-vstack>
           </cf-card>
@@ -554,7 +713,8 @@ export default pattern<unknown, PokerOutput>(() => {
       </cf-screen>
     ),
     revealed,
+    countReleased,
     reveal,
-    conceal,
+    releaseCount,
   };
 });
