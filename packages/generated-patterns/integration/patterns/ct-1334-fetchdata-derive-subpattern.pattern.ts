@@ -16,13 +16,20 @@ import { computed, fetchData, pattern } from "commonfabric";
 // (runner traverse.ts returns it as `undefined`), so the body would read
 // `pageResult === undefined` and `pending` would stay `true` forever.
 //
-// TODO(CT-1334 follow-up): The old `derive` form used the same untyped call and
-// the test asserted the same materialized names — but whether it actually
-// *passed* on main (and if so, whether the derive path carried a non-`unknown`
-// result schema, i.e. a dropped type-threading registry, vs. derive's
-// value-in-input-slot bypassing schema-materialization entirely) is NOT yet
-// verified. Pending an old-vs-new transformed-output comparison; file a Linear
-// ticket with the outcome and link it here.
+// Why the old `derive` form worked untyped (investigated 2026-05): the derive
+// lowering emitted a permissive `true` schema for captured fields (materializes
+// anything), whereas the computed lowering emits each field's *inferred* type —
+// so an `unknown`-inferred field becomes `{type:"unknown"}`, which does not
+// materialize. The old `true` was a legacy hack from before the framework handled
+// unknown types properly; `{type:"unknown"}` is the CORRECT behavior (confirmed
+// w/ Berni), so typing the call is the right fix, not restoring `true`.
+//
+// The remaining systemic gap — that an `unknown`-inferred capture fails SILENTLY
+// (undefined at runtime) instead of at compile time — is a separate follow-up:
+// add a transform-time diagnostic for unknown-typed captures + audit existing
+// untyped fetchData/streamData capture sites. See
+// session_outputs/2026-05-27_remove-derive/18-IAN-ONBOARDING-unknown-capture-diagnostic.md
+// (slated as a starter project; a Linear ticket will supersede this pointer).
 //
 // Typing the call supplies the schema the assertion semantically requires.
 
