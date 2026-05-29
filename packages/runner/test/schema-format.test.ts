@@ -50,7 +50,7 @@ Deno.test("schemaToTypeString marks required fields without ?", () => {
 Deno.test("schemaToTypeString converts Stream to function syntax", () => {
   const schema: any = {
     type: "object",
-    asStream: true,
+    asCell: ["stream"],
     properties: {
       value: { type: "string" },
     },
@@ -64,7 +64,7 @@ Deno.test("schemaToTypeString converts Stream to function syntax", () => {
 Deno.test("schemaToTypeString converts Cell to Cell<T> syntax", () => {
   const schema: any = {
     type: "object",
-    asCell: true,
+    asCell: ["cell"],
     properties: {
       count: { type: "number" },
     },
@@ -212,14 +212,14 @@ Deno.test("schemaToTypeString produces compact output for complex schema", () =>
       },
       doAnAction: {
         type: "object",
-        asStream: true,
+        asCell: ["stream"],
         properties: {
           parameter: { type: "number" },
         },
       },
       aCell: {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         properties: {
           subfield: { type: "string" },
         },
@@ -342,7 +342,7 @@ Deno.test("schemaToTypeString formats fixture-style PatternToolResult without le
               },
               nodes: { type: "array", items: { type: "object" } },
             },
-            asCell: true,
+            asCell: ["cell"],
           },
           extraParams: {
             type: "object",

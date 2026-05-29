@@ -188,7 +188,7 @@ describe("Schema-to-TS Type Conversion", () => {
       properties: {
         value: { type: "number" };
       };
-      asCell: true;
+      asCell: ["cell"];
     }>;
 
     // Expected type: Cell<{ value?: number }>
@@ -251,7 +251,7 @@ describe("Schema-to-TS Type Conversion", () => {
               properties: {
                 theme: { type: "string" };
               };
-              asCell: true;
+              asCell: ["cell"];
             };
           };
         };
@@ -478,7 +478,7 @@ describe("Schema-to-TS Type Conversion", () => {
         properties: {
           settings: {
             $ref: "#/$defs/Config";
-            asCell: true;
+            asCell: ["cell"];
           };
         };
       }>;
@@ -727,7 +727,7 @@ describe("Schema-to-TS Type Conversion", () => {
           properties: {
             notifyOnChange: { type: "boolean" },
           },
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["count", "preferences"],
@@ -884,7 +884,7 @@ describe("Schema-to-TS Type Conversion", () => {
             theme: { type: "string" },
             notifications: { type: "boolean" },
           },
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["name", "settings"],

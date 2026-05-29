@@ -72,7 +72,7 @@ const ResultSchema = {
     requestor_id: {
       type: "string",
     },
-    discordUpdater: { asStream: true, type: "object", properties: {} },
+    discordUpdater: { asCell: ["stream"], type: "object", properties: {} },
   },
 } as const satisfies JSONSchema;
 
@@ -86,7 +86,7 @@ const discordUpdater = handler(
         type: "array",
         items: MessageSchema,
         default: [],
-        asCell: true,
+        asCell: ["cell"],
       },
       requestor_id: {
         type: "string",

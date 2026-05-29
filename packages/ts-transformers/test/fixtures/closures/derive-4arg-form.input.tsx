@@ -11,7 +11,7 @@ export default pattern(() => {
 
   // Explicit 4-arg form with schemas - should still transform captures
   const result = derive(
-    { type: "number", asCell: true } as const satisfies JSONSchema,
+    { type: "number", asCell: ["cell"] } as const satisfies JSONSchema,
     { type: "number" } as const satisfies JSONSchema,
     value,
     (v) => v.get() * multiplier.get()

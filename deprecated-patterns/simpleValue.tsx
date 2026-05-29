@@ -59,7 +59,7 @@ const outputSchema = {
   properties: {
     values: { type: "array", items: { type: "string" } },
     updater: {
-      asStream: true,
+      asCell: ["stream"],
       ...updaterSchema,
     },
   },

@@ -83,7 +83,7 @@ because TypeScript's type system can enforce the same boundaries more efficientl
   `Stream<T>`.
 - All types extend a shared `CellLike<T>` base with branded capability flags.
 - Extend our JSON Schema annotations so authors can declare capabilities at any
-  depth. When `asCell: true` is present, allow an `opaque`, `readonly`, or
+  depth. When `asCell` is present, allow an `opaque`, `readonly`, or
   `writeonly` flag (or the closest JSON Schema standard equivalent if one
   exists).
 - Provide conditional helper types to map schema metadata to helper surfaces

@@ -122,7 +122,7 @@ describe("Pattern Runner - Schemas", () => {
                 properties: {
                   value: { type: "number" },
                 },
-                asCell: true,
+                asCell: ["cell"],
               },
             },
           },
@@ -184,7 +184,7 @@ describe("Pattern Runner - Schemas", () => {
           type: "object",
           additionalProperties: {
             type: "number",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       },

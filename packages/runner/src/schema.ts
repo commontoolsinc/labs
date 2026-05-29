@@ -511,7 +511,7 @@ function filterAsCell(schema: JSONSchema | undefined): JSONSchema | undefined {
   }
 
   const makeRawResult = () => {
-    const { asCell: _asCell, asStream: _asStream, ...restSchema } = schema;
+    const { asCell: _asCell, ...restSchema } = schema;
     return isNontrivialSchema(restSchema) ? restSchema : undefined;
   };
 
@@ -567,7 +567,7 @@ export function processDefaultValue(
   const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
   if (asCellValues.length > 0) {
     // Remove the asCell flags from the schema
-    const { asCell: _c, asStream: _s, ...restSchema } = resolvedSchema;
+    const { asCell: _c, ...restSchema } = resolvedSchema;
     resolvedSchema = restSchema;
 
     if (
@@ -1161,7 +1161,7 @@ class TransformObjectCreator
     } else if (isRecord(link.schema)) {
       const schema = asCellCompoundSchemaForValue(link.schema, value) ??
         link.schema;
-      const { asCell: _c, asStream: _s, ...restSchema } = schema;
+      const { asCell: _c, ...restSchema } = schema;
       const asCellValues = ContextualFlowControl.getAsCellValues(schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest
@@ -1306,7 +1306,7 @@ export function generateHandlerSchema(
 }
 
 function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
-  const { asCell: _c, asStream: _s, ...restSchema } = schema;
+  const { asCell: _c, ...restSchema } = schema;
   const asCellValues = ContextualFlowControl.getAsCellValues(schema);
   return {
     ...restSchema,
@@ -1316,7 +1316,7 @@ function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
 
 function removeAsCellFromSchema(schema: JSONSchema): JSONSchema {
   if (isRecord(schema)) {
-    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    const { asCell: _c, ...restSchema } = schema;
     return restSchema;
   }
   return schema;

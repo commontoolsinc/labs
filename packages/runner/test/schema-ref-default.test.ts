@@ -191,7 +191,11 @@ describe("$ref with default support", () => {
           StringCell: { type: "string" },
         },
         anyOf: [
-          { $ref: "#/$defs/StringCell", default: "cell-default", asCell: true },
+          {
+            $ref: "#/$defs/StringCell",
+            default: "cell-default",
+            asCell: ["cell"],
+          },
           { type: "null" },
         ],
       };
@@ -206,7 +210,7 @@ describe("$ref with default support", () => {
         $defs: schema.$defs,
         type: "string",
         default: "cell-default",
-        asCell: true,
+        asCell: ["cell"],
       });
     });
   });
@@ -291,15 +295,14 @@ describe("$ref with default support", () => {
       });
     });
 
-    it("should handle ref with both asCell, asStream, and default", () => {
+    it("should handle ref with both asCell and default", () => {
       const schema: JSONSchema = {
         $defs: {
           StreamCell: { type: "string" },
         },
         $ref: "#/$defs/StreamCell",
         default: "ref-default",
-        asCell: true,
-        asStream: true,
+        asCell: ["cell"],
       };
 
       const resolved = resolveSchema(schema);
@@ -308,8 +311,7 @@ describe("$ref with default support", () => {
         $defs: schema.$defs,
         type: "string",
         default: "ref-default",
-        asCell: true,
-        asStream: true,
+        asCell: ["cell"],
       });
     });
   });

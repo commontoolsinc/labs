@@ -10,13 +10,13 @@ This guide explains how to programmatically invoke a handler stream from `Runtim
 const pieceCell = someCell.resolveAsCell();
 ```
 
-### 2. Apply schema with `{ asStream: true }` on the handler property
+### 2. Apply schema with `{ asCell: ["stream"] }` on the handler property
 
 ```typescript
 const cell = pieceCell.asSchema({
   type: "object",
   properties: {
-    handlerName: { asStream: true },  // <-- THIS IS THE KEY
+    handlerName: { asCell: ["stream"] },  // <-- THIS IS THE KEY
   },
   required: ["handlerName"],
 });

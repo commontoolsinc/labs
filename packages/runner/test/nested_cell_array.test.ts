@@ -44,7 +44,7 @@ describe("Nested Cell Array", () => {
           value: { type: "number" },
         },
         required: ["name", "value"],
-        // Note: NO asCell: true here
+        // Note: NO asCell: ["cell"] here
       },
       default: [],
     } as const satisfies JSONSchema;
@@ -59,7 +59,7 @@ describe("Nested Cell Array", () => {
           value: { type: "number" },
         },
         required: ["name", "value"],
-        asCell: true, // This wraps each item in a Cell
+        asCell: ["cell"], // This wraps each item in a Cell
       },
       default: [],
     } as const satisfies JSONSchema;
@@ -108,7 +108,7 @@ describe("Nested Cell Array", () => {
           value: { type: "number" },
         },
         required: ["name", "value"],
-        asCell: true,
+        asCell: ["cell"],
       },
       default: [],
     } as const satisfies JSONSchema;
