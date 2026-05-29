@@ -23,12 +23,12 @@ import { internSchema, isInternedSchema } from "../src/schema-hash.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
-    it("boolean `true` is returned as-is", () => {
+    it("returns boolean `true` as-is", () => {
       const result = toDeepFrozenSchema(true, false);
       expect(result).toBe(true);
     });
 
-    it("boolean `false` is returned as-is", () => {
+    it("returns boolean `false` as-is", () => {
       const result = toDeepFrozenSchema(false, true);
       expect(result).toBe(false);
     });
@@ -56,7 +56,7 @@ describe("toDeepFrozenSchema", () => {
       expect(Object.isFrozen(schema.properties!.name)).toBe(true);
     });
 
-    it("unfrozen schema is frozen in place (same reference)", () => {
+    it("freezes an unfrozen schema in place (same reference)", () => {
       const schema: JSONSchemaObj = {
         type: "object",
         properties: { x: { type: "string" } },
@@ -128,7 +128,7 @@ describe("toDeepFrozenSchema", () => {
   });
 
   describe("deeply nested schemas", () => {
-    it("deeply nested schemas are frozen", () => {
+    it("freezes deeply nested schemas", () => {
       const schema: JSONSchemaObj = {
         type: "object",
         properties: {
@@ -155,7 +155,7 @@ describe("toDeepFrozenSchema", () => {
       expect(Object.isFrozen(address.properties!.street)).toBe(true);
     });
 
-    it("schema with arrays is frozen", () => {
+    it("freezes a schema with arrays", () => {
       const schema: JSONSchemaObj = {
         type: "object",
         properties: {
@@ -177,7 +177,7 @@ describe("toDeepFrozenSchema", () => {
       expect(Object.isFrozen(tags.items)).toBe(true);
     });
 
-    it("anyOf schemas are frozen", () => {
+    it("freezes anyOf schemas", () => {
       const schema: JSONSchemaObj = {
         anyOf: [
           { type: "string" },
@@ -193,7 +193,7 @@ describe("toDeepFrozenSchema", () => {
       expect(Object.isFrozen(result.anyOf![1])).toBe(true);
     });
 
-    it("enum values are frozen", () => {
+    it("freezes enum values", () => {
       const schema: JSONSchemaObj = {
         type: "string",
         enum: ["a", "b", "c"],
@@ -205,7 +205,7 @@ describe("toDeepFrozenSchema", () => {
   });
 
   describe("immutability enforcement", () => {
-    it("frozen schema rejects mutation", () => {
+    it("rejects mutation of a frozen schema", () => {
       const schema: JSONSchemaObj = { type: "string" };
       toDeepFrozenSchema(schema, true);
 
@@ -233,14 +233,14 @@ describe("toDeepFrozenSchema", () => {
   });
 
   describe("already-frozen input handling", () => {
-    it("already-frozen schema is handled", () => {
+    it("handles an already-frozen schema", () => {
       const schema: JSONSchemaObj = Object.freeze({ type: "string" as const });
       const result = toDeepFrozenSchema(schema, true);
       expect(result).toBe(schema);
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("already-deep-frozen returns same reference (`canShare=true`)", () => {
+    it("returns the same reference when already deep-frozen (`canShare=true`)", () => {
       const schema: JSONSchemaObj = deepFreeze({
         type: "object",
         properties: { name: { type: "string" } },
@@ -250,7 +250,7 @@ describe("toDeepFrozenSchema", () => {
       expect(result).toBe(schema);
     });
 
-    it("already-deep-frozen returns same reference (`canShare=false`)", () => {
+    it("returns the same reference when already deep-frozen (`canShare=false`)", () => {
       const schema: JSONSchemaObj = deepFreeze({
         type: "object",
         properties: { age: { type: "number" } },
@@ -260,7 +260,7 @@ describe("toDeepFrozenSchema", () => {
       expect(result).toBe(schema);
     });
 
-    it("frozen but not deep-frozen schema is shallow-cloned even with `canShare=true`", () => {
+    it("shallow-clones a frozen but not deep-frozen schema even with `canShare=true`", () => {
       const inner = { type: "string" } as JSONSchemaObj;
       const schema: JSONSchemaObj = Object.freeze({
         type: "object",
@@ -282,7 +282,7 @@ describe("toDeepFrozenSchema", () => {
   });
 
   describe("per-property optimization", () => {
-    it("already-deep-frozen top-level values are reused", () => {
+    it("reuses already-deep-frozen top-level values", () => {
       // The per-property optimization works on the schema's own top-level
       // fields (e.g., "type", "properties", "required"). An already-deep-frozen
       // field value is kept as-is; an unfrozen one is structuredClone'd.
@@ -441,7 +441,7 @@ describe("cloneSchemaMutable", () => {
     expect(result.properties).not.toBe(schema.properties);
   });
 
-  it("result is deeply mutable when `deep=true`", () => {
+  it("produces a deeply mutable result when `deep=true`", () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { x: { type: "number" } },
@@ -474,7 +474,7 @@ describe("cloneSchemaMutable", () => {
     expect(schema.type).toBe("object");
   });
 
-  it("deep clone of a frozen schema is fully mutable", () => {
+  it("produces a fully mutable deep clone of a frozen schema", () => {
     const schema = toDeepFrozenSchema({
       type: "object",
       properties: { y: { type: "number" } },
@@ -667,7 +667,7 @@ describe("schemaWithProperties", () => {
   });
 
   describe("intern contagion of `object`s", () => {
-    it("result is interned when base schema is interned", () => {
+    it("interns the result when the base schema is interned", () => {
       const base = internSchema({ type: "object" });
       const result = schemaWithProperties(base, {
         properties: { x: { type: "string" } },
@@ -675,7 +675,7 @@ describe("schemaWithProperties", () => {
       expect(isInternedSchema(result)).toBe(true);
     });
 
-    it("result is not interned when base schema is not interned", () => {
+    it("leaves the result uninterned when the base schema is not interned", () => {
       const base: JSONSchemaObj = { type: "object" };
       const result = schemaWithProperties(base, {
         properties: { x: { type: "string" } },
@@ -759,13 +759,13 @@ describe("schemaWithoutProperties", () => {
   });
 
   describe("intern contagion", () => {
-    it("result is interned when input schema is interned", () => {
+    it("interns the result when the input schema is interned", () => {
       const schema = internSchema({ type: "object", asCell: true });
       const result = schemaWithoutProperties(schema, "asCell");
       expect(isInternedSchema(result)).toBe(true);
     });
 
-    it("result is not interned when input schema is not interned", () => {
+    it("leaves the result uninterned when the input schema is not interned", () => {
       const schema: JSONSchemaObj = { type: "object", asCell: true };
       const result = schemaWithoutProperties(schema, "asCell");
       expect(isInternedSchema(result)).toBe(false);
@@ -773,7 +773,7 @@ describe("schemaWithoutProperties", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("no-op on interned schema preserves interned identity", () => {
+    it("preserves interned identity on a no-op over an interned schema", () => {
       const schema = internSchema({ type: "string" });
       const result = schemaWithoutProperties(schema, "nonexistent");
       expect(result).toBe(schema);
