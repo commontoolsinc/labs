@@ -735,8 +735,11 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
+      // Convert-and-freeze (default): a deep-frozen value lets the storage
+      // write boundary's `cloneIfNecessary` identity-pass instead of
+      // deep-cloning-to-freeze.
       writableResultCell.setRawUntyped(
-        fabricFromNativeValue(result, false),
+        fabricFromNativeValue(result),
       );
     }
   }
@@ -779,7 +782,10 @@ export class Runner {
         : {},
       isRecord(previousInternal) ? previousInternal : {},
     ) as FabricValue;
-    internalCell.setRawUntyped(fabricFromNativeValue(internal, false));
+    // Convert-and-freeze (default): a deep-frozen value lets the storage write
+    // boundary's `cloneIfNecessary` identity-pass instead of
+    // deep-cloning-to-freeze.
+    internalCell.setRawUntyped(fabricFromNativeValue(internal));
     if (internalLink === undefined) {
       setResultCell(internalCell, resultCell.asSchema(pattern.resultSchema));
       const newInternalCellLink = internalCell.getAsWriteRedirectLink({
