@@ -387,27 +387,35 @@ idiomatically rather than faking the extension.
   hands; **folded hands are never declassified.**
 - `cf-cfc-label` shows a hand's live label (the real `ifc.confidentiality`).
 
-**Proposed (clearly labelled "simulated — not enforced"):** the graded reveal lattice
-(`existence`/`cardinality`/`order`) and per-reader projection — shown only as an illustration of the
-target shapes, with an explicit note that CFC today is binary (blocked or fully declassified).
+**The reducer + relabel story (the corrected model, made concrete):** a `🔢 Reducer + relabel`
+pipeline shows `count = hand.length` as a **second `Confidential` cell** (its own `PokerHandCount`
+atom) behind its **own** render boundary, released to the table by its **own** trusted action — so
+"the table sees the count, not the cards" is demonstrably *a separate binary-access cell relabelled
+by policy*, not a graded level. Each stage is badged **ENFORCED** (the two real confidential cells +
+their boundaries + the trusted relabels) or **SIMULATED** (the reducer minting `ReducedBy{count}`
+and the relabel being *gated* on it — no such runtime primitive exists).
 
-The pattern also carries an **honest-limitation panel**: the render boundary hides labelled content
-in a *trusted host*; it does not encrypt the cell, so real secrecy between mutually-distrusting
-players still needs the per-reader materialization of §4.4.
+**Honest panels:** a `🧭 materialization gap` panel (per-reader routing *Alice→cards / Bob→count* is
+the missing layer, simulated here) and a `⚠️ scope & limitations` panel (trusted-host UI gate ≠
+encryption; **recombination** and **unlinkability** out of scope).
 
 It **type-checks, deploys, and runs** (`deno task cf check … --no-run`, exit 0; deployed to a local
 toolshed and driven in-browser, 0 console errors).
 
 ### Live demo (screenshots)
 
-The same hands, before and after the trusted showdown (`docs/proposals/images/`):
+The reducer pipeline, before and after the trusted relabel (`docs/proposals/images/`):
 
-- **Blocked** (`poker-v3-01-blocked.png`): every hand shows *"Content hidden by policy"* — the
-  render boundary refusing to render the labelled cell — plus a `🔒 blocked by render boundary`
-  note. Status: *"Hands are confidential — the render boundary is blocking them."*
-- **Revealed** (`poker-v3-02-revealed.png`): after the **trusted Showdown** action declassifies the
-  `PokerHoleCards` atom, the same boundaries now permit the cards (`Alice A♠A♥`, `Bob K♦K♣`,
-  `Charlie 7♥2♦`). Nothing else in the pattern can flip that cell.
+- **Blocked** (`poker-v4-01-reducer-blocked.png`): *Alice's secret hand* (ENFORCED) → reducer →
+  *Reducer output* (SIMULATED: mints `ReducedBy{count}`) → relabel `[Alice]→[table]` → *Count cell
+  (own atom)* showing *"Content hidden by policy"* (ENFORCED) — the count's own boundary blocking it.
+- **Released** (`poker-v4-02-reducer-released.png`): after the **trusted "Release count to table"**
+  action, the count cell's own boundary permits it and shows **"2 cards"** — a *separate* labelled
+  value the table can read, while the full hand stays blocked. Its live `PokerHandCount` label is
+  shown below.
 
-![Hands blocked by the CFC render boundary](./images/poker-v3-01-blocked.png)
-![Hands revealed after the trusted showdown declassification](./images/poker-v3-02-revealed.png)
+![Reducer pipeline — count cell blocked by its own render boundary](./images/poker-v4-01-reducer-blocked.png)
+![Reducer pipeline — count released to the table as a separate labelled value](./images/poker-v4-02-reducer-released.png)
+
+(The hands' own block → trusted-showdown reveal still works the same way:
+`poker-v3-01-blocked.png` / `poker-v3-02-revealed.png`.)
