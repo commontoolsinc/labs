@@ -176,7 +176,13 @@ export function extractDefaultValues(
       }
     }
 
-    return Object.entries(obj).length > 0 ? obj : undefined;
+    // Freeze the assembled defaults. Safe (consumers only read the result) and
+    // nearly free, and it feeds the system's deep-freeze discipline: this
+    // function is recursive, so the per-level freeze composes into a
+    // deep-frozen result wherever the schema's own defaults are already frozen
+    // -- which a downstream `cloneIfNecessary(_, { frozen: true })` can then
+    // reuse by identity instead of re-cloning.
+    return Object.keys(obj).length > 0 ? Object.freeze(obj) : undefined;
   }
 
   return schema.default;
