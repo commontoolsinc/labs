@@ -15,19 +15,11 @@ function roundTrip(value: FabricValue): FabricValue {
   return nativeFromFabricValue(fabricFromNativeValue(value));
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 describe("fabric-value-dispatch", () => {
   // Always reset after each test to avoid leaking flag state.
   afterEach(() => {
     resetDataModelConfig();
   });
-
-  // --------------------------------------------------------------------------
-  // Flag OFF: legacy fabric value conversion
-  // --------------------------------------------------------------------------
 
   describe("flag OFF: legacy fabric value conversion", () => {
     it("performs legacy deep conversion via `fabricFromNativeValue`", () => {
@@ -66,12 +58,8 @@ describe("fabric-value-dispatch", () => {
     });
   });
 
-  // --------------------------------------------------------------------------
-  // Flag ON: modern fabric value conversion
-  // --------------------------------------------------------------------------
-
   describe("flag ON: modern fabric value conversion", () => {
-    it("round-trip preserves primitives", () => {
+    it("round-trips primitives", () => {
       setDataModelConfig(true);
       expect(roundTrip(42 as FabricValue)).toBe(42);
       expect(roundTrip("hello" as FabricValue)).toBe("hello");
@@ -79,23 +67,23 @@ describe("fabric-value-dispatch", () => {
       expect(roundTrip(true as FabricValue)).toBe(true);
     });
 
-    it("round-trip preserves `undefined`", () => {
+    it("round-trips `undefined`", () => {
       setDataModelConfig(true);
       expect(roundTrip(undefined)).toBe(undefined);
     });
 
-    it("round-trip preserves `bigint`", () => {
+    it("round-trips `bigint`", () => {
       setDataModelConfig(true);
       expect(roundTrip(42n as FabricValue)).toBe(42n);
     });
 
-    it("round-trip preserves plain objects", () => {
+    it("round-trips plain objects", () => {
       setDataModelConfig(true);
       const value = { a: 1, b: "two" } as FabricValue;
       expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
     });
 
-    it("round-trip preserves arrays", () => {
+    it("round-trips arrays", () => {
       setDataModelConfig(true);
       const value = [1, "two", null] as FabricValue;
       expect(roundTrip(value)).toEqual([1, "two", null]);
@@ -124,7 +112,7 @@ describe("fabric-value-dispatch", () => {
       expect(Object.isFrozen(stored)).toBe(true);
     });
 
-    it("round-trip preserves nested structure", () => {
+    it("round-trips nested structure", () => {
       setDataModelConfig(true);
       const value = {
         name: "test",
@@ -138,19 +126,15 @@ describe("fabric-value-dispatch", () => {
     });
   });
 
-  // --------------------------------------------------------------------------
-  // Config lifecycle
-  // --------------------------------------------------------------------------
-
   describe("config lifecycle", () => {
-    it("`setDataModelConfig(true)` enables conversion", () => {
+    it("enables conversion after `setDataModelConfig(true)`", () => {
       setDataModelConfig(true);
       const error = new Error("test");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).toBeInstanceOf(FabricError);
     });
 
-    it("`resetDataModelConfig()` restores the default state", () => {
+    it("restores the default state on `resetDataModelConfig()`", () => {
       const defaultState = getDataModelConfig();
       setDataModelConfig(!defaultState);
       expect(getDataModelConfig()).toBe(!defaultState);
@@ -158,7 +142,7 @@ describe("fabric-value-dispatch", () => {
       expect(getDataModelConfig()).toBe(defaultState);
     });
 
-    it("multiple set/reset cycles work correctly", () => {
+    it("works correctly across multiple set/reset cycles", () => {
       const defaultState = getDataModelConfig();
       for (let i = 0; i < 3; i++) {
         setDataModelConfig(true);
@@ -170,7 +154,7 @@ describe("fabric-value-dispatch", () => {
       }
     });
 
-    it("`setDataModelConfig(false)` after `true` restores legacy conversion", () => {
+    it("restores legacy conversion on `setDataModelConfig(false)` after `true`", () => {
       setDataModelConfig(true);
       setDataModelConfig(false);
       const error = new Error("toggle test");
