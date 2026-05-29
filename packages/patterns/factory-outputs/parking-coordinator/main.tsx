@@ -3,6 +3,7 @@ import {
   type AddIntegrity,
   computed,
   Default,
+  handler,
   NAME,
   nonPrivateRandom,
   pattern,
@@ -21,6 +22,18 @@ import {
   adminRegistryEntries,
   type EmptyAdminRegistryValue,
 } from "../../cfc/admin/mod.ts";
+import {
+  formatVehicle,
+  modelsForMake,
+  normalizeVehicle,
+  normalizeVehicles,
+  US_STATES,
+  type Vehicle,
+  VEHICLE_COLORS,
+  VEHICLE_MAKES,
+} from "../../vehicles.ts";
+
+export type { Vehicle };
 
 // ============================================================
 // Domain Types
@@ -42,6 +55,7 @@ export interface Person {
   spotPreferences: string[];
   defaultSpot: string;
   priorityRank: number;
+  vehicles?: Vehicle[];
 }
 
 export type RequestStatus = "pending" | "allocated" | "denied" | "cancelled";
@@ -150,6 +164,7 @@ export interface ParkingCoordinatorOutput {
     priorityRank: number;
     defaultSpot: string;
     preferences: string;
+    vehicles?: Vehicle[];
   }>;
   editPerson: Stream<{
     originalName: string;
@@ -159,6 +174,7 @@ export interface ParkingCoordinatorOutput {
     priorityRank: number;
     defaultSpot: string;
     preferences: string;
+    vehicles?: Vehicle[];
   }>;
   removePerson: Stream<{ name: string }>;
   movePersonUp: Stream<{ name: string }>;
@@ -238,6 +254,17 @@ const genId = (): string =>
 const parsePreferences = (s: string | null | undefined): string[] =>
   (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
+// Make→model cascade: when a make select changes, clear the dependent model so a
+// stale value (e.g. make=Honda, model=Camry) can't linger. `$value` keeps the
+// make cell in sync; this handler only resets the model. cf-select event props
+// bind to a handler() object, which must be defined at module scope.
+const resetModelOnMakeChange = handler<
+  { detail?: { value?: string } },
+  { model: Writable<string> }
+>((_event, { model }) => {
+  model.set("");
+});
+
 const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
   personName,
 });
@@ -268,7 +295,7 @@ const personIsParkingAdmin = (
 const currentActorName = (
   selectedPersonName: Writable<string>,
   people: PeopleCell,
-): string => selectedPersonName.get() || people.get()[0]?.name || "";
+): string => selectedPersonName.get() || (people.get() ?? [])[0]?.name || "";
 
 const currentParkingAdminRole = (
   registry: ParkingAdminRegistryCell,
@@ -457,6 +484,26 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const editSpotNotes = new Writable.perSession("");
     const editSpotActive = new Writable.perSession(true);
 
+    // Add person — vehicle draft state
+    const pendingVehicles = new Writable.perSession<Vehicle[]>([]);
+    const draftPlateId = new Writable.perSession("");
+    const draftPlateState = new Writable.perSession("CA");
+    const draftColor = new Writable.perSession("");
+    const draftMake = new Writable.perSession("");
+    const draftModel = new Writable.perSession("");
+
+    // Edit person — vehicle draft state
+    const editVehicles = new Writable.perSession<Vehicle[]>([]);
+    const editDraftPlateId = new Writable.perSession("");
+    const editDraftPlateState = new Writable.perSession("CA");
+    const editDraftColor = new Writable.perSession("");
+    const editDraftMake = new Writable.perSession("");
+    const editDraftModel = new Writable.perSession("");
+
+    // Vehicle draft error cells
+    const draftVehicleError = new Writable.perSession("");
+    const editDraftVehicleError = new Writable.perSession("");
+
     // Override state
     const gridOverrideSpot = new Writable.perSession("");
     const gridOverrideDate = new Writable.perSession("");
@@ -586,6 +633,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         priorityRank: number;
         defaultSpot: string;
         preferences: string;
+        vehicles?: Vehicle[];
       }
     >((event) => {
       const {
@@ -595,6 +643,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         priorityRank = parseInt(newPersonPriority.get() ?? "") || 1,
         defaultSpot = newPersonDefaultSpot.get() ?? "",
         preferences = newPersonPreferences.get() ?? "",
+        vehicles: vehiclesArg,
       } = event ?? {};
       const trimName = name.trim();
       const trimEmail = email.trim();
@@ -607,6 +656,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       }
       addPersonError.set("");
 
+      // The staged vehicles array does not survive the intra-pattern
+      // action→action stream send (it arrives `undefined` at the handler),
+      // so fall back to reading the staged perSession cell directly — the
+      // same way the other fields default to their form cells above.
+      const normalizedVehicles = normalizeVehicles(
+        vehiclesArg ?? pendingVehicles.get(),
+      );
+
       const newPerson: Person = {
         name: trimName,
         email: trimEmail,
@@ -614,6 +671,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         priorityRank: priorityRank || 1,
         defaultSpot: defaultSpot || "",
         spotPreferences: parsePreferences(preferences),
+        vehicles: normalizedVehicles,
       };
       people.set([...current, newPerson]);
 
@@ -627,6 +685,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       newPersonPriority.set("1");
       newPersonDefaultSpot.set("");
       newPersonPreferences.set("");
+      pendingVehicles.set([]);
       addPersonFormOpen.set(false);
     });
 
@@ -639,6 +698,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         priorityRank: number;
         defaultSpot: string;
         preferences: string;
+        vehicles?: Vehicle[];
       }
     >((event) => {
       const {
@@ -651,6 +711,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           parseInt(editPriorityRank.get() ?? "") || 1,
         defaultSpot: editPersonDefaultSpotArg = editDefaultSpot.get() ?? "",
         preferences: editPersonPreferencesArg = editPreferences.get() ?? "",
+        vehicles: vehiclesArg,
       } = event ?? {};
       const trimName = editPersonNameArg.trim();
       const trimEmail = editPersonEmailArg.trim();
@@ -661,19 +722,25 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         trimName !== originalName && current.some((p) => p.name === trimName)
       ) return;
 
-      people.set(current.map((p) =>
-        p.name === originalName
-          ? {
-            ...p,
-            name: trimName,
-            email: trimEmail,
-            commuteMode: editPersonCommuteModeArg,
-            priorityRank: editPersonPriorityArg || p.priorityRank,
-            defaultSpot: editPersonDefaultSpotArg || "",
-            spotPreferences: parsePreferences(editPersonPreferencesArg),
-          }
-          : p
-      ));
+      people.set(current.map((p) => {
+        if (p.name !== originalName) return p;
+
+        // When vehicles omitted, preserve existing; when provided, normalize
+        const nextVehicles: Vehicle[] = vehiclesArg === undefined
+          ? (p.vehicles ?? [])
+          : normalizeVehicles(vehiclesArg);
+
+        return {
+          ...p,
+          name: trimName,
+          email: trimEmail,
+          commuteMode: editPersonCommuteModeArg,
+          priorityRank: editPersonPriorityArg || p.priorityRank,
+          defaultSpot: editPersonDefaultSpotArg || "",
+          spotPreferences: parsePreferences(editPersonPreferencesArg),
+          vehicles: nextVehicles,
+        };
+      }));
 
       if (selectedPersonName.get() === originalName) {
         selectedPersonName.set(trimName);
@@ -719,7 +786,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const movePersonUp = action<{ name: string }>(({ name }) => {
-      const sorted = [...people.get()].sort((a, b) =>
+      const sorted = [...(people.get() ?? [])].sort((a, b) =>
         a.priorityRank - b.priorityRank
       );
       const idx = sorted.findIndex((p) => p.name === name);
@@ -738,7 +805,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const movePersonDown = action<{ name: string }>(({ name }) => {
-      const sorted = [...people.get()].sort((a, b) =>
+      const sorted = [...(people.get() ?? [])].sort((a, b) =>
         a.priorityRank - b.priorityRank
       );
       const idx = sorted.findIndex((p) => p.name === name);
@@ -940,6 +1007,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       editPriorityRank.set(String(p.priorityRank));
       editDefaultSpot.set(p.defaultSpot);
       editPreferences.set(p.spotPreferences.join(", "));
+      editVehicles.set([...(p.vehicles ?? [])]);
+      editDraftPlateId.set("");
+      editDraftPlateState.set("CA");
+      editDraftColor.set("");
+      editDraftMake.set("");
+      editDraftModel.set("");
+      editDraftVehicleError.set("");
     });
 
     const cancelEditPerson = action(() => editingPersonName.set(null));
@@ -954,6 +1028,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           priorityRank: parseInt(editPriorityRank.get()) || 1,
           defaultSpot: editDefaultSpot.get(),
           preferences: editPreferences.get(),
+          // Materialize plain objects: spreading the cell's array yields
+          // query-result proxies whose fields read empty across the send()
+          // boundary, so vehicles would silently drop. Rebuild them here.
+          vehicles: editVehicles.get().map((v) => ({
+            plateId: v.plateId,
+            plateState: v.plateState,
+            color: v.color,
+            make: v.make,
+            model: v.model,
+          })),
         });
       },
     );
@@ -1004,7 +1088,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       ({ spotNumber, date }) => {
         gridOverrideSpot.set(spotNumber);
         gridOverrideDate.set(date);
-        overridePersonName.set(people.get()[0]?.name ?? "");
+        overridePersonName.set((people.get() ?? [])[0]?.name ?? "");
       },
     );
 
@@ -1021,6 +1105,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         priorityRank: parseInt(newPersonPriority.get()) || 1,
         defaultSpot: newPersonDefaultSpot.get(),
         preferences: newPersonPreferences.get(),
+        // Materialize plain objects: spreading the cell's array yields
+        // query-result proxies whose fields read empty across the send()
+        // boundary, so vehicles would silently drop. Rebuild them here.
+        vehicles: pendingVehicles.get().map((v) => ({
+          plateId: v.plateId,
+          plateState: v.plateState,
+          color: v.color,
+          make: v.make,
+          model: v.model,
+        })),
       });
     });
 
@@ -1032,9 +1126,78 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       });
     });
 
-    const toggleAddPersonForm = action(() =>
-      addPersonFormOpen.set(!addPersonFormOpen.get())
-    );
+    // Vehicle actions — add/remove for pending (add-person form)
+    const addPendingVehicle = action(() => {
+      const candidate = normalizeVehicle({
+        plateId: draftPlateId.get(),
+        plateState: draftPlateState.get(),
+        color: draftColor.get(),
+        make: draftMake.get(),
+        model: draftModel.get(),
+      });
+      if (!candidate.plateId) {
+        draftVehicleError.set("Plate ID is required.");
+        return;
+      }
+      const existing = pendingVehicles.get();
+      const key = `${candidate.plateId}|${candidate.plateState}`;
+      if (existing.some((v) => `${v.plateId}|${v.plateState}` === key)) {
+        draftVehicleError.set("That plate is already listed.");
+        return;
+      }
+      draftVehicleError.set("");
+      pendingVehicles.set([...existing, candidate]);
+      draftPlateId.set("");
+      draftPlateState.set("CA");
+      draftColor.set("");
+      draftMake.set("");
+      draftModel.set("");
+    });
+
+    const removePendingVehicle = action<{ index: number }>(({ index }) => {
+      const current = [...pendingVehicles.get()];
+      current.splice(index, 1);
+      pendingVehicles.set(current);
+    });
+
+    // Vehicle actions — add/remove for editVehicles (edit-person form)
+    const addEditVehicle = action(() => {
+      const candidate = normalizeVehicle({
+        plateId: editDraftPlateId.get(),
+        plateState: editDraftPlateState.get(),
+        color: editDraftColor.get(),
+        make: editDraftMake.get(),
+        model: editDraftModel.get(),
+      });
+      if (!candidate.plateId) {
+        editDraftVehicleError.set("Plate ID is required.");
+        return;
+      }
+      const existing = editVehicles.get();
+      const key = `${candidate.plateId}|${candidate.plateState}`;
+      if (existing.some((v) => `${v.plateId}|${v.plateState}` === key)) {
+        editDraftVehicleError.set("That plate is already listed.");
+        return;
+      }
+      editDraftVehicleError.set("");
+      editVehicles.set([...existing, candidate]);
+      editDraftPlateId.set("");
+      editDraftPlateState.set("CA");
+      editDraftColor.set("");
+      editDraftMake.set("");
+      editDraftModel.set("");
+    });
+
+    const removeEditVehicle = action<{ index: number }>(({ index }) => {
+      const current = [...editVehicles.get()];
+      current.splice(index, 1);
+      editVehicles.set(current);
+    });
+
+    const toggleAddPersonForm = action(() => {
+      addPersonFormOpen.set(!addPersonFormOpen.get());
+      draftVehicleError.set("");
+    });
     const toggleAddSpotForm = action(() =>
       addSpotFormOpen.set(!addSpotFormOpen.get())
     );
@@ -1048,22 +1211,22 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const spotDeactivateWarning = computed(() => {
       const editNum = editingSpotNumber.get();
       if (!editNum || (editSpotActive.get() ?? true)) return false;
-      return requests.get().some(
+      return (requests.get() ?? []).some(
         (r) =>
           r.assignedSpot === editNum && r.status === "allocated" &&
           r.date >= todayStr,
       );
     });
 
-    const noPeople = computed(() => people.get().length === 0);
+    const noPeople = computed(() => (people.get() ?? []).length === 0);
 
     const personSelectItems = computed(() =>
-      people.get().map((p) => ({ label: p.name, value: p.name }))
+      (people.get() ?? []).map((p) => ({ label: p.name, value: p.name }))
     );
 
     const requestDisabled = computed(() =>
       !selectedPersonName.get() ||
-      activeRequestDate < todayStr || people.get().length === 0
+      activeRequestDate < todayStr || (people.get() ?? []).length === 0
     );
 
     const currentPersonIsAdmin = computed(() =>
@@ -1079,7 +1242,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       currentUserCanManageParkingAdmins(adminManagerCredential)
     );
     const canBootstrapPeople = computed(() =>
-      people.get().length === 0 &&
+      (people.get() ?? []).length === 0 &&
       currentUserCanManageParkingAdmins(adminManagerCredential)
     );
     const showAdminPeopleSection = computed(() =>
@@ -1087,7 +1250,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     );
 
     const adminAccessRows = computed(() =>
-      people.get().map((person) => ({
+      (people.get() ?? []).map((person) => ({
         name: person.name,
         email: person.email,
         isAdmin: personIsParkingAdmin(adminRegistry, person.name),
@@ -1120,8 +1283,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // Accessing OpaqueCell values (spot.number, req.id etc.) inside this
     // single computed() is safe — the closure is at top-level, not nested.
     const weekGridData = computed(() => {
-      const allSpots = spots.get().filter((s) => s != null && s.active);
-      const allRequests = requests.get();
+      const allSpots = (spots.get() ?? []).filter((s) => s != null && s.active);
+      const allRequests = requests.get() ?? [];
       const currentPerson = selectedPersonName.get();
       const overrideSpot = gridOverrideSpot.get();
       const overrideDate = gridOverrideDate.get();
@@ -1169,8 +1332,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Pre-compute today strip cell data for each active spot
     const todayStripData = computed(() => {
-      const allSpots = spots.get().filter((s) => s != null && s.active);
-      const allRequests = requests.get();
+      const allSpots = (spots.get() ?? []).filter((s) => s != null && s.active);
+      const allRequests = requests.get() ?? [];
       const currentPerson = selectedPersonName.get();
       const todayStripShowAdmin = adminModeEnabled === true;
 
@@ -1193,7 +1356,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Pre-compute sorted people list for admin panel
     const adminPeopleData = computed(() => {
-      const sorted = [...people.get()].sort((a, b) =>
+      // Read the perSession edit/remove-confirm targets HERE, at the top of
+      // this computed, and emit `isEditing`/`isRemoveConfirm` per person.
+      // Reading these perSession cells from a `computed()` nested inside the
+      // `.map()` render below silently returns nothing (a narrower perSession
+      // cell can't be followed from that space-scoped render context), so the
+      // inline edit form / remove-confirm prompt never opened.
+      const editingName = editingPersonName.get();
+      const removeConfirmName = removePersonConfirmTarget.get();
+      const sorted = [...(people.get() ?? [])].sort((a, b) =>
         a.priorityRank - b.priorityRank
       );
       return sorted.map((p, idx) => ({
@@ -1203,20 +1374,84 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         priorityRank: p.priorityRank,
         defaultSpot: p.defaultSpot,
         spotPreferences: [...p.spotPreferences],
+        vehicles: [...(p.vehicles ?? [])].map((v) => ({
+          formatted: formatVehicle(v),
+        })),
         isFirst: idx === 0,
         isLast: idx === sorted.length - 1,
+        isEditing: editingName === p.name,
+        isRemoveConfirm: removeConfirmName === p.name,
       }));
     });
 
+    // Pre-compute vehicle select options for draft forms (cascade make→model)
+    const draftModelItems = computed(() => {
+      const make = draftMake.get();
+      const models = modelsForMake(make);
+      return [
+        { label: "—", value: "" },
+        ...models.map((m) => ({ label: m, value: m })),
+      ];
+    });
+
+    const editDraftModelItems = computed(() => {
+      const make = editDraftMake.get();
+      const models = modelsForMake(make);
+      return [
+        { label: "—", value: "" },
+        ...models.map((m) => ({ label: m, value: m })),
+      ];
+    });
+
+    const colorSelectItems = [
+      { label: "—", value: "" },
+      ...VEHICLE_COLORS.map((c) => ({ label: c, value: c })),
+    ];
+
+    const makeSelectItems = [
+      { label: "—", value: "" },
+      ...VEHICLE_MAKES.map((m) => ({ label: m, value: m })),
+    ];
+
+    const stateSelectItems = US_STATES.map((s) => ({ label: s, value: s }));
+
+    // Pre-compute vehicle row display data to avoid OpaqueCell closure issues.
+    // Accessing Vehicle fields inside these single top-level computeds is safe.
+    const pendingVehicleRows = computed(() =>
+      (pendingVehicles.get() ?? []).map((v, idx) => ({
+        idx,
+        formatted: formatVehicle(v),
+      }))
+    );
+
+    const editVehicleRows = computed(() =>
+      (editVehicles.get() ?? []).map((v, idx) => ({
+        idx,
+        formatted: formatVehicle(v),
+      }))
+    );
+
+    // Pre-compute disabled flags for model selects (avoids .get() in JSX prop)
+    const draftMakeSelected = computed(() => !!draftMake.get());
+    const editDraftMakeSelected = computed(() => !!editDraftMake.get());
+
     // Pre-compute sorted spots list for admin panel
-    const adminSpotsData = computed(() =>
-      [...spots.get()].map((s) => ({
+    const adminSpotsData = computed(() => {
+      // Read the perSession edit/remove-confirm targets HERE (see the matching
+      // note on `adminPeopleData`): a `computed()` nested in the `.map()` render
+      // can't follow these narrower perSession cells from its space-scoped
+      // context, so the inline spot edit/remove prompts never opened.
+      const editingNum = editingSpotNumber.get();
+      const removeConfirmNum = removeSpotConfirmTarget.get();
+      return [...(spots.get() ?? [])].map((s) => ({
         spotNumber: s.spotNumber,
         label: s.label,
         notes: s.notes,
         active: s.active,
-      }))
-    );
+        isEditingSpot: editingNum === s.spotNumber,
+        isRemoveSpotConfirm: removeConfirmNum === s.spotNumber,
+      }));
+    });
 
     // --------------------------------------------------------
     // UI
@@ -1598,7 +1833,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-select
                                     $value={overridePersonName}
                                     items={computed(() =>
-                                      people.get().map((p) => ({
+                                      (people.get() ?? []).map((p) => ({
                                         label: p.name,
                                         value: p.name,
                                       }))
@@ -1731,7 +1966,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         </cf-button>
                       </cf-hstack>
 
-                      {people.get().length === 0
+                      {(people.get() ?? []).length === 0
                         ? (
                           <cf-card style="text-align: center; padding: 1.5rem;">
                             <cf-vstack gap="2" align="center">
@@ -1752,17 +1987,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           priorityRank,
                           defaultSpot,
                           spotPreferences,
+                          vehicles: personVehicles,
                           isFirst,
                           isLast,
                         } = person;
-                        const isEditing = computed(() =>
-                          editingPersonName.get() === personName
-                        );
-                        const isRemoveConfirm = computed(() =>
-                          removePersonConfirmTarget.get() === personName
-                        );
+                        // Derived in `adminPeopleData` (see note there) — a
+                        // `computed()` nested here that reads the perSession
+                        // target cells does not re-render.
+                        const isEditing = person.isEditing;
+                        const isRemoveConfirm = person.isRemoveConfirm;
                         const activeSpotOpts = computed(() =>
-                          spots.get()
+                          (spots.get() ?? [])
                             .filter((s) => s.active)
                             .map((s) => ({
                               label: `#${s.spotNumber}${
@@ -1865,6 +2100,119 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       style="width: 100%;"
                                     />
                                   </cf-vstack>
+
+                                  {/* Edit form — Vehicles subsection */}
+                                  <cf-vstack gap="1">
+                                    <span style="font-size: 0.75rem; font-weight: 500;">
+                                      Vehicles
+                                    </span>
+                                    {editVehicleRows.map((evRow) => (
+                                      <cf-hstack gap="1" align="center">
+                                        <span style="font-size: 0.75rem; flex: 1;">
+                                          {evRow.formatted}
+                                        </span>
+                                        <cf-button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() =>
+                                            removeEditVehicle.send({
+                                              index: evRow.idx,
+                                            })}
+                                        >
+                                          ×
+                                        </cf-button>
+                                      </cf-hstack>
+                                    ))}
+                                    <cf-hstack gap="1" wrap align="end">
+                                      <cf-vstack
+                                        gap="0"
+                                        style="min-width: 80px;"
+                                      >
+                                        <span style="font-size: 0.6875rem;">
+                                          Plate *
+                                        </span>
+                                        <cf-input
+                                          $value={editDraftPlateId}
+                                          placeholder="e.g. 7ABC123"
+                                          timingStrategy="immediate"
+                                          style="width: 100%;"
+                                        />
+                                      </cf-vstack>
+                                      <cf-vstack
+                                        gap="0"
+                                        style="min-width: 60px;"
+                                      >
+                                        <span style="font-size: 0.6875rem;">
+                                          State
+                                        </span>
+                                        <cf-select
+                                          $value={editDraftPlateState}
+                                          items={stateSelectItems}
+                                          style="width: 100%;"
+                                        />
+                                      </cf-vstack>
+                                      <cf-vstack
+                                        gap="0"
+                                        style="min-width: 80px;"
+                                      >
+                                        <span style="font-size: 0.6875rem;">
+                                          Color
+                                        </span>
+                                        <cf-select
+                                          $value={editDraftColor}
+                                          items={colorSelectItems}
+                                          style="width: 100%;"
+                                        />
+                                      </cf-vstack>
+                                      <cf-vstack
+                                        gap="0"
+                                        style="min-width: 100px;"
+                                      >
+                                        <span style="font-size: 0.6875rem;">
+                                          Make
+                                        </span>
+                                        <cf-select
+                                          $value={editDraftMake}
+                                          items={makeSelectItems}
+                                          oncf-change={resetModelOnMakeChange({
+                                            model: editDraftModel,
+                                          })}
+                                          style="width: 100%;"
+                                        />
+                                      </cf-vstack>
+                                      <cf-vstack
+                                        gap="0"
+                                        style="min-width: 100px;"
+                                      >
+                                        <span style="font-size: 0.6875rem;">
+                                          Model
+                                        </span>
+                                        <cf-select
+                                          $value={editDraftModel}
+                                          items={editDraftModelItems}
+                                          disabled={!editDraftMakeSelected}
+                                          style="width: 100%;"
+                                        />
+                                      </cf-vstack>
+                                      <cf-button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => addEditVehicle.send()}
+                                      >
+                                        + Add vehicle
+                                      </cf-button>
+                                    </cf-hstack>
+                                    {computed(() => {
+                                      const err = editDraftVehicleError.get();
+                                      if (!err) return null;
+                                      return (
+                                        <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                          {err}
+                                        </span>
+                                      );
+                                    })}
+                                  </cf-vstack>
+
                                   <cf-hstack gap="2">
                                     <cf-button
                                       variant="primary"
@@ -1969,8 +2317,21 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
                                         Prefers: {spotPreferences.map((n) =>
                                           "#" + n
-                                        ).join(", ")}
+                                        )
+                                          .join(", ")}
                                       </span>
+                                    )
+                                    : null}
+
+                                  {personVehicles.length > 0
+                                    ? (
+                                      <cf-hstack gap="1" wrap>
+                                        {personVehicles.map((pv) => (
+                                          <span style="font-size: 0.6875rem; background-color: #f0fdf4; color: #166534; padding: 1px 8px; border-radius: 9999px; border: 1px solid #bbf7d0;">
+                                            {pv.formatted}
+                                          </span>
+                                        ))}
+                                      </cf-hstack>
                                     )
                                     : null}
 
@@ -2079,7 +2440,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     $value={newPersonDefaultSpot}
                                     items={computed(() => [
                                       { label: "None", value: "" },
-                                      ...spots.get()
+                                      ...(spots.get() ?? [])
                                         .filter((s) => s.active)
                                         .map((s) => ({
                                           label: `#${s.spotNumber}`,
@@ -2101,6 +2462,104 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   style="width: 100%;"
                                 />
                               </cf-vstack>
+
+                              {/* Add form — Vehicles subsection */}
+                              <cf-vstack gap="1">
+                                <span style="font-size: 0.75rem; font-weight: 500;">
+                                  Vehicles
+                                </span>
+                                {pendingVehicleRows.map((pvRow) => (
+                                  <cf-hstack gap="1" align="center">
+                                    <span style="font-size: 0.75rem; flex: 1;">
+                                      {pvRow.formatted}
+                                    </span>
+                                    <cf-button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() =>
+                                        removePendingVehicle.send({
+                                          index: pvRow.idx,
+                                        })}
+                                    >
+                                      ×
+                                    </cf-button>
+                                  </cf-hstack>
+                                ))}
+                                <cf-hstack gap="1" wrap align="end">
+                                  <cf-vstack gap="0" style="min-width: 80px;">
+                                    <span style="font-size: 0.6875rem;">
+                                      Plate *
+                                    </span>
+                                    <cf-input
+                                      $value={draftPlateId}
+                                      placeholder="e.g. 7ABC123"
+                                      timingStrategy="immediate"
+                                      style="width: 100%;"
+                                    />
+                                  </cf-vstack>
+                                  <cf-vstack gap="0" style="min-width: 60px;">
+                                    <span style="font-size: 0.6875rem;">
+                                      State
+                                    </span>
+                                    <cf-select
+                                      $value={draftPlateState}
+                                      items={stateSelectItems}
+                                      style="width: 100%;"
+                                    />
+                                  </cf-vstack>
+                                  <cf-vstack gap="0" style="min-width: 80px;">
+                                    <span style="font-size: 0.6875rem;">
+                                      Color
+                                    </span>
+                                    <cf-select
+                                      $value={draftColor}
+                                      items={colorSelectItems}
+                                      style="width: 100%;"
+                                    />
+                                  </cf-vstack>
+                                  <cf-vstack gap="0" style="min-width: 100px;">
+                                    <span style="font-size: 0.6875rem;">
+                                      Make
+                                    </span>
+                                    <cf-select
+                                      $value={draftMake}
+                                      items={makeSelectItems}
+                                      oncf-change={resetModelOnMakeChange({
+                                        model: draftModel,
+                                      })}
+                                      style="width: 100%;"
+                                    />
+                                  </cf-vstack>
+                                  <cf-vstack gap="0" style="min-width: 100px;">
+                                    <span style="font-size: 0.6875rem;">
+                                      Model
+                                    </span>
+                                    <cf-select
+                                      $value={draftModel}
+                                      items={draftModelItems}
+                                      disabled={!draftMakeSelected}
+                                      style="width: 100%;"
+                                    />
+                                  </cf-vstack>
+                                  <cf-button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => addPendingVehicle.send()}
+                                  >
+                                    + Add vehicle
+                                  </cf-button>
+                                </cf-hstack>
+                                {computed(() => {
+                                  const err = draftVehicleError.get();
+                                  if (!err) return null;
+                                  return (
+                                    <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                      {err}
+                                    </span>
+                                  );
+                                })}
+                              </cf-vstack>
+
                               {computed(() => {
                                 const err = addPersonError.get();
                                 if (!err) return null;
@@ -2152,12 +2611,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             const spotLabel2 = spot.label;
                             const spotNotes2 = spot.notes;
                             const spotActive2 = spot.active;
-                            const isEditingSpot = computed(() =>
-                              editingSpotNumber.get() === spotNum2
-                            );
-                            const isRemoveSpotConfirm = computed(() =>
-                              removeSpotConfirmTarget.get() === spotNum2
-                            );
+                            // Derived in `adminSpotsData` (see note there) — a
+                            // `computed()` nested here reading the perSession
+                            // target cells does not re-render.
+                            const isEditingSpot = spot.isEditingSpot;
+                            const isRemoveSpotConfirm =
+                              spot.isRemoveSpotConfirm;
 
                             return (
                               <cf-card
