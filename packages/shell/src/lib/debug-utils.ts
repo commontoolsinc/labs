@@ -206,7 +206,7 @@ export function summarizeDebugValue(value: unknown): DebugValueSummary {
     "argument" in value || "internal" in value || "resultRef" in value ||
     "spell" in value
   ) {
-    looksLike.push("runtime-process-cell");
+    looksLike.push("runtime-metadata-doc");
   }
   if (
     internalKeys?.includes("allPieces") ||

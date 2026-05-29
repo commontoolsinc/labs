@@ -254,8 +254,8 @@
   it queries storage for a persisted action snapshot. Clean snapshots now
   restore dependency/write/materializer indexes without executing the action;
   missing or failed snapshots fall back to the existing first-run behavior.
-- Decision: runner-provided persistent identity uses the process cell's
-  normalized scope/id plus process generation 0. This is still conservative, but
+- Decision: runner-provided persistent identity uses the result cell's normalized
+  scope/id plus graph generation 0. This is still conservative, but
   it distinguishes colocated pieces of the same pattern better than the earlier
   pattern/module-name fallback.
 - Added runner-level restart coverage that creates a piece, persists a clean
@@ -342,7 +342,7 @@
   keyed too broadly for persistence. Multiple `raw:map` actions in one notebook
   piece could share the same persisted action id and overwrite each other's
   latest scheduler snapshot.
-- Decision: keep the version-1 process-cell identity, but make raw action ids
+- Decision: keep the version-1 result-cell identity, but make raw action ids
   node-local by adding a short stable hash of the bound input and output cells to
   the raw action name before it becomes the scheduler action id.
 - Test adjustment: the rapid notebook test now verifies that the burst created
@@ -371,10 +371,10 @@
   one source-location action id. A newly-created mapped row could therefore see
   another row's persisted scheduler snapshot during subscription-time
   rehydration in the same live process.
-- Decision: JavaScript action ids now include a stable hash of the process cell
-  plus bound read/write cells, matching the raw-builtin binding-hash approach.
-  This keeps source-location diagnostics readable while making repeated pattern
-  instances distinct for persistent scheduler snapshots.
+- Decision: JavaScript action ids now include a stable hash of the result-cell
+  anchor plus bound read/write cells, matching the raw-builtin binding-hash
+  approach. This keeps source-location diagnostics readable while making
+  repeated pattern instances distinct for persistent scheduler snapshots.
 
 ## 2026-05-20 - CI Follow-up: Review Hardening
 

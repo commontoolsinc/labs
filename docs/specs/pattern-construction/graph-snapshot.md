@@ -1,15 +1,14 @@
-# Process Snapshot Schema
+# Graph Snapshot Schema
 
 > **Status:** This work is **deferred to Phase 2** (see `rollout-plan.md` and
 > `overview.md`). The snapshot format described here will be implemented as part
-> of the `process` metadata work mentioned in the rollout plan (lines 54-61).
+> of the graph metadata work mentioned in the rollout plan (lines 54-61).
 
 ## Motivation
 
-- `Runner.setupInternal` currently stores pattern metadata inside the process
-  cell (`TYPE`, `argument`, `internal`, `resultRef`). We plan to deprecate
-  `TYPE` while still persisting the originating program reference. The runtime
-  still lacks a persisted view of the concrete nodes it instantiated.
+- `Runner.setupInternal` currently stores pattern, argument, internal, and schema
+  metadata on the result cell. The runtime still lacks a persisted view of the
+  concrete nodes it instantiated.
 - `instantiateNode` performs alias gymnastics through
   `unwrapOneLevelAndBindtoDoc` so nested patterns and closures work. A snapshot
   that records the resolved nodes makes this machinery obsolete: future runs can
@@ -23,9 +22,10 @@
 This spec describes the implementation for tasks in `rollout-plan.md` lines
 54-61:
 
-- Write metadata into result cell including `source` (from context) and
-  `process` metadata
-- The `process` field contains the graph snapshot described in this document,
+- Write graph metadata into the result cell alongside the existing execution
+  metadata links.
+- The graph metadata field contains the graph snapshot described in this
+  document,
   including:
   - The `Module` (which includes the `Program` as link using `cid:hash`)
   - Created cells with links to module and/or schema
@@ -33,17 +33,17 @@ This spec describes the implementation for tasks in `rollout-plan.md` lines
 
 ## Snapshot Envelope
 
-Store an additional `process` payload on the result cell alongside the existing
-`value`, `source`, and renamed `pattern` metadata. The payload is versioned to
-allow future format changes.
+Store an additional graph payload on the result cell alongside the existing
+value and execution metadata. The payload is versioned to allow future format
+changes.
 
 ```ts
-interface ProcessSnapshotV1 {
+interface GraphSnapshotV1 {
   version: 1;
   program?: RuntimeProgram;
   generation?: number; // Incremented each time it changes
   cells: Array<GeneratedCell>;
-  predecessor?: ProcessSnapshotV1;
+  predecessor?: GraphSnapshotV1;
 }
 
 interface ReactiveNodeNarrowedSchema = {

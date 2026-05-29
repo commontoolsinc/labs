@@ -53,6 +53,8 @@ What works today:
   retention in tool-output artifacts; `web_fetch` is intentionally not part of
   the default parent tool surface
 - bounded OpenAI-compatible prompt/tool loop
+- interactive chat NDJSON stdio transport with opt-in SQLite session, turn, and
+  event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser/web_fetch/web_search child profiles, retained child run
   references, and a sanitized summary/state return channel
@@ -117,6 +119,10 @@ What is not done yet:
   - bounded prompt/tool loop
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
+- [src/interactive-chat-stdio.ts](src/interactive-chat-stdio.ts)
+  - NDJSON stdio transport for the interactive chat protocol
+- [src/sqlite-session-store.ts](src/sqlite-session-store.ts)
+  - SQLite-backed interactive chat session, turn, and event persistence
 - [src/artifacts.ts](src/artifacts.ts)
   - persisted run state, run manifest, transcript, run report, capability
     snapshot, and tool output storage
@@ -161,6 +167,19 @@ deno task run -- \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
 ```
+
+Interactive chat stdio transport:
+
+```bash
+cd packages/cf-harness
+deno run -A src/interactive-chat-stdio.ts \
+  --chat-session-db /tmp/cf-harness-chat.sqlite
+```
+
+The stdio transport reads one interactive chat request envelope per line from
+stdin and writes response/event envelopes as newline-delimited JSON. Pass
+`--chat-session-db` or set `CF_HARNESS_CHAT_SESSION_DB` to persist sessions,
+turn records, and replayable events across process restarts.
 
 Initial prompt image attachments:
 

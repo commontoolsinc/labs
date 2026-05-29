@@ -48,20 +48,40 @@ Key properties:
 Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
+interface SourceLink {
+  "/": string; // Short source id; runtime resolves to of:<short-id>
+}
+
+interface SigilLink {
+  "/": {
+    "link@1": {
+      id?: `of:${string}` | `cid:${string}`;
+      path?: string[];
+      space?: string;
+    };
+  };
+}
+
+type EntityDocumentField = FabricValue | SourceLink | SigilLink | undefined;
+
 interface EntityDocument {
   value?: FabricValue; // The cell's data when present.
   source?: SourceLink; // {"/":"<short-id>"} -> resolves to of:<short-id> in same space.
-  // Future: labels, schema, etc.
-}
-
-interface SourceLink {
-  "/": string; // Short source id; runtime resolves to of:<short-id>
+  pattern?: SigilLink; // Well-known metadata link to a pattern cell.
+  argument?: SigilLink; // Well-known metadata link to an argument cell.
+  internal?: SigilLink; // Well-known metadata link to internal state.
+  result?: SigilLink; // Well-known metadata link back to a result cell.
+  schema?: FabricValue; // Optional schema metadata.
+  slug?: string; // Optional URL/address metadata.
+  [key: string]: EntityDocumentField;
 }
 ```
 
 The `value` property holds the cell's actual data. Storing it under a key
 (rather than as the top-level value) lets the envelope carry sibling metadata
-like `source` that travel with the value but are not part of it.
+like `result`, `schema`, or `slug` that travel with the value but are not part
+of it. The named metadata fields above are the current well-known fields; the
+document envelope may also contain other sibling metadata fields.
 
 Below the query layer, the storage engine, replica, and transaction APIs treat
 this as an ordinary plain document root. They do not attach special operational
@@ -87,21 +107,23 @@ Canonical examples:
 | Case | Stored representation | Meaning |
 | ---- | --------------------- | ------- |
 | Empty object payload | `{ value: {} }` | Live cell whose payload is the empty object |
-| Source-only / metadata-only document | `{ source: { "/": "abc123" } }` | Live document with no payload, but with metadata |
+| Metadata-only document | `{ result: { "/": { "link@1": { "id": "of:abc123", "path": [] } } } }` | Live document with no payload, but with metadata |
 | Empty document envelope | `{}` | Live document with no payload and no metadata set yet |
 | Explicit deletion | `Delete { type: "delete", id, parent }` | Tombstone; the entity is removed from the visible head |
 
-**Source links**: The `source` property uses the short-link form
-`{"/":"<short-id>"}`. The runtime resolves this to `of:<short-id>` in the same
-space (see `traverse.ts` `loadSource()`). This is intentionally different from
-graph/entity links, which use the sigil form `{"/":{"link@1":{...}}}`. When the
-server executes a subscription with graph traversal, it MUST follow `source`
-links transitively (and any `source` links on those entities, etc.) to include
-the full provenance chain.
+**Metadata links and short links**: The runtime metadata fields `pattern`,
+`argument`, `internal`, and `result` use the same sigil form as graph/entity
+links: `{"/":{"link@1":{...}}}`. The older `source` property, when present, uses
+the separate short-link form `{"/":"<short-id>"}` and resolves to
+`of:<short-id>` in the same space. CFC metadata also uses its own compact stored
+shape and is converted to a CID sigil link during traversal. When the server
+executes a subscription with graph traversal, it MUST follow metadata links such
+as `pattern`, `argument`, `internal`, and `result` transitively to include the
+full provenance chain.
 
 **Document paths**: Transaction/storage reads and writes operate on full
-document paths. For example, the source link lives at `["source"]`, while the
-cell payload root lives at `["value"]`.
+document paths. For example, metadata links live at top-level paths like
+`["argument"]` or `["result"]`, while the cell payload root lives at `["value"]`.
 
 **Value-relative paths**: `readValueOrThrow()` and `writeValueOrThrow()` are
 thin convenience helpers that call the full-document APIs after prepending

@@ -225,7 +225,7 @@ await commonfabric.explainTriggerTrace({ rootOnly: true, limit: 8 })
 That helper groups exact `space/entity/path` changes, counts direct schedules,
 counts downstream scheduled effects, reads the changed cells back through
 `CellHandle`, and adds shape hints such as `ui-result`,
-`runtime-process-cell`, `default-app-or-home-state`, and `index-state`.
+`runtime-metadata-doc`, `default-app-or-home-state`, and `index-state`.
 
 To group repeated actions quickly:
 
@@ -365,7 +365,7 @@ What to look for:
 - repeated `_CellImpl.setMetaRaw` result metadata writes point to result-cell
   linkage rather than reactive recompute logic
 - `Runner.setupInternal -> _CellImpl.setRawUntyped` usually means initial
-  process-cell or result-cell setup, not a later settle-wave recompute
+  result or metadata-linked cell setup, not a later settle-wave recompute
 - `raw:async -> _CellImpl.setRawUntyped` means a raw builtin or raw helper is
   directly rewriting a result cell; this is the more interesting repeated write
   to chase after setup noise is removed
@@ -1038,7 +1038,7 @@ Interpretation:
 
 - many broad root writes are still piece setup/materialization writes, not just
   repeated reactive recomputes
-- each new cell commonly produces a pair of writes: one source-cell marker and
+- each new cell commonly produces a pair of writes: one metadata marker and
   one value write
 - the smaller `diffAndUpdate` cluster is a better candidate for true
   post-setup churn than the raw setup pairs

@@ -1,10 +1,8 @@
 import {
   computed,
   Default,
-  derive,
   getPatternEnvironment,
   handler,
-  ifElse,
   NAME,
   pattern,
   patternTool,
@@ -582,8 +580,8 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     });
 
     // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
-    const hasLinkedAuth = computed(() => !!(overrideAuth?.token));
-    const overrideAuthEmail = computed(() => overrideAuth?.user?.email || "");
+    const hasLinkedAuth = !!(overrideAuth?.token);
+    const overrideAuthEmail = overrideAuth?.user?.email || "";
 
     // Use overrideAuth if provided, otherwise use wished auth
     // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)
@@ -596,18 +594,16 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     });
 
     // Choose auth source based on overrideAuth availability
-    const auth = ifElse(hasLinkedAuth, overrideAuthCell, wishedAuth) as any;
-    const isReady = ifElse(hasLinkedAuth, hasLinkedAuth, wishedIsReady);
-    const currentEmail = ifElse(
-      hasLinkedAuth,
-      overrideAuthEmail,
-      wishedCurrentEmail,
-    );
+    // Keep the bare ternary so the chosen branch stays a live cell reference
+    // (preserves token writability for refresh); avoid projecting auth.
+    const auth = (hasLinkedAuth ? overrideAuthCell : wishedAuth) as any;
+    const isReady = hasLinkedAuth ? hasLinkedAuth : wishedIsReady;
+    const currentEmail = hasLinkedAuth ? overrideAuthEmail : wishedCurrentEmail;
 
     // Computed values for pagination
-    const upcomingEvents = derive(events, (evts: CalendarEvent[]) => {
+    const upcomingEvents = computed(() => {
       const now = new Date();
-      return [...evts]
+      return [...events.get()]
         .filter((e) => new Date(e.startDateTime || e.start) >= now)
         .sort((a, b) =>
           new Date(a.startDateTime || a.start).getTime() -
@@ -615,22 +611,14 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
         );
     });
 
-    const summary = derive(events, (eventList: CalendarEvent[]) => {
-      return eventList
-        .slice(0, 20)
-        .map((e) => `${e.summary || ""} ${e.start || ""}`.trim())
-        .filter((s) => s.length > 0)
-        .join(" | ");
-    });
+    const summary = events.get()
+      .slice(0, 20)
+      .map((e) => `${e.summary || ""} ${e.start || ""}`.trim())
+      .filter((s) => s.length > 0)
+      .join(" | ");
 
-    const totalUpcoming = derive(
-      upcomingEvents,
-      (evts: CalendarEvent[]) => evts.length,
-    );
-    const _maxPageNum = derive(
-      totalUpcoming,
-      (total: number) => Math.max(0, Math.ceil(total / PAGE_SIZE) - 1),
-    );
+    const totalUpcoming = upcomingEvents.length;
+    const _maxPageNum = Math.max(0, Math.ceil(totalUpcoming / PAGE_SIZE) - 1);
 
     // Paginated events for display - use computed with events Cell directly
     const _paginatedEvents = computed(() => {
@@ -666,11 +654,11 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
               {fullUI}
 
               <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-                Imported event count: {computed(() => events.get().length)}
+                Imported event count: {events.get().length}
               </h3>
 
               <div style={{ fontSize: "14px", color: "#666" }}>
-                Calendars found: {computed(() => calendars.get().length)}
+                Calendars found: {calendars.get().length}
               </div>
 
               <cf-vstack gap="4">
@@ -742,37 +730,37 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                     Debug Mode (verbose console logging)
                   </label>
                 </div>
-                {ifElse(
-                  isReady,
-                  <cf-button
-                    type="button"
-                    onClick={calendarUpdater({
-                      events,
-                      calendars,
-                      auth,
-                      settings,
-                      fetching,
-                      selectedCalendarIds,
-                    })}
-                    disabled={fetching}
-                  >
-                    {ifElse(
-                      fetching,
-                      <span
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        <cf-loader size="sm" show-elapsed></cf-loader>
-                        Fetching...
-                      </span>,
-                      "Fetch Calendar Events",
-                    )}
-                  </cf-button>,
-                  null,
-                )}
+                {isReady
+                  ? (
+                    <cf-button
+                      type="button"
+                      onClick={calendarUpdater({
+                        events,
+                        calendars,
+                        auth,
+                        settings,
+                        fetching,
+                        selectedCalendarIds,
+                      })}
+                      disabled={fetching}
+                    >
+                      {fetching
+                        ? (
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <cf-loader size="sm" show-elapsed></cf-loader>
+                            Fetching...
+                          </span>
+                        )
+                        : "Fetch Calendar Events"}
+                    </cf-button>
+                  )
+                  : null}
               </cf-vstack>
 
               {/* Calendar list with selection */}
@@ -786,7 +774,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   }}
                 >
                   <h4 style={{ fontSize: "16px", margin: 0 }}>
-                    Your Calendars ({computed(() => calendars.get().length)})
+                    Your Calendars ({calendars.get().length})
                   </h4>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <button
@@ -866,11 +854,9 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           fetching,
                         })}
                       >
-                        {ifElse(
-                          calendarSelectionMap[cal.id],
-                          <span>✓</span>,
-                          <span />,
-                        )}
+                        {calendarSelectionMap[cal.id]
+                          ? <span>✓</span>
+                          : <span />}
                         {cal.primary ? <span>★</span> : null}
                         {cal.summary}
                       </div>
@@ -904,88 +890,86 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                     {showEvents ? "▼" : "▶"}
                   </span>
                   <h4 style={{ fontSize: "16px", margin: 0 }}>
-                    {derive(
-                      events,
-                      (evts: CalendarEvent[]) =>
-                        `${evts.length} events imported`,
-                    )}
+                    {`${events.get().length} events imported`}
                   </h4>
                 </div>
-                {ifElse(
-                  showEvents,
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      maxHeight: "400px",
-                      overflowY: "auto",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "8px",
-                    }}
-                  >
-                    {events.map((event) => {
-                      // Use pre-computed colors map - direct indexing works with Cell values
-                      return (
-                        <div
-                          style={{
-                            padding: "8px 12px",
-                            borderBottom: "1px solid #f3f4f6",
-                            fontSize: "13px",
-                          }}
-                        >
+                {showEvents
+                  ? (
+                    <div
+                      style={{
+                        marginTop: "12px",
+                        maxHeight: "400px",
+                        overflowY: "auto",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      {events.map((event) => {
+                        // Use pre-computed colors map - direct indexing works with Cell values
+                        return (
                           <div
                             style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #f3f4f6",
+                              fontSize: "13px",
                             }}
                           >
-                            <span
+                            <div
                               style={{
-                                padding: "2px 8px",
-                                borderRadius: "12px",
-                                backgroundColor:
-                                  calendarColorsMap[event.calendarId]?.bg ??
-                                    "#4285f4",
-                                color:
-                                  calendarColorsMap[event.calendarId]?.fg ??
-                                    "#ffffff",
-                                fontSize: "11px",
-                                whiteSpace: "nowrap",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
                               }}
                             >
-                              {event.calendarName}
-                            </span>
-                            <span style={{ fontWeight: "500" }}>
-                              {event.summary}
-                            </span>
+                              <span
+                                style={{
+                                  padding: "2px 8px",
+                                  borderRadius: "12px",
+                                  backgroundColor:
+                                    calendarColorsMap[event.calendarId]?.bg ??
+                                      "#4285f4",
+                                  color:
+                                    calendarColorsMap[event.calendarId]?.fg ??
+                                      "#ffffff",
+                                  fontSize: "11px",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {event.calendarName}
+                              </span>
+                              <span style={{ fontWeight: "500" }}>
+                                {event.summary}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                color: "#6b7280",
+                                fontSize: "12px",
+                                marginTop: "4px",
+                              }}
+                            >
+                              {formatEventDate(
+                                event.startDateTime,
+                                event.endDateTime,
+                                event.isAllDay,
+                              )}
+                            </div>
                           </div>
-                          <div
-                            style={{
-                              color: "#6b7280",
-                              fontSize: "12px",
-                              marginTop: "4px",
-                            }}
-                          >
-                            {formatEventDate(
-                              event.startDateTime,
-                              event.endDateTime,
-                              event.isAllDay,
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>,
-                  <p
-                    style={{
-                      fontSize: "12px",
-                      color: "#666",
-                      marginTop: "8px",
-                    }}
-                  >
-                    Click to expand event list.
-                  </p>,
-                )}
+                        );
+                      })}
+                    </div>
+                  )
+                  : (
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        color: "#666",
+                        marginTop: "8px",
+                      }}
+                    >
+                      Click to expand event list.
+                    </p>
+                  )}
               </div>
             </cf-vstack>
           </cf-vscroll>
@@ -993,7 +977,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       events,
       calendars,
-      eventCount: derive(events, (list: CalendarEvent[]) => list?.length || 0),
+      eventCount: events.get()?.length || 0,
       summary,
       bgUpdater: calendarUpdater({
         events,
@@ -1005,7 +989,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       // Pattern tools for omnibot
       searchEvents: patternTool(
         ({ query, events }: { query: string; events: CalendarEvent[] }) => {
-          return derive({ query, events }, ({ query, events }) => {
+          return computed(() => {
             if (!query || !events) return [];
             const lowerQuery = query.toLowerCase();
             return events.filter((event) =>
@@ -1019,13 +1003,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       getEventCount: patternTool(
         ({ events }: { events: CalendarEvent[] }) => {
-          return derive(events, (list) => list?.length || 0);
+          return computed(() => events?.length || 0);
         },
         { events },
       ),
       getUpcomingEvents: patternTool(
         ({ count, events }: { count: number; events: CalendarEvent[] }) => {
-          return derive({ count, events }, ({ count, events }) => {
+          return computed(() => {
             if (!events || events.length === 0) return "No events";
             const now = new Date();
             const upcoming = events
@@ -1048,7 +1032,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       getTodaysEvents: patternTool(
         ({ events }: { events: CalendarEvent[] }) => {
-          return derive(events, (events) => {
+          return computed(() => {
             if (!events || events.length === 0) return "No events";
             const today = new Date().toISOString().split("T")[0];
             const todayEvents = events.filter((e) =>

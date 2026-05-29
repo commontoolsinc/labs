@@ -243,12 +243,12 @@ id) is useful for diagnostics, but it is not sufficient as the durable key.
 
 Until durable process graph snapshots are available, the implemented version-1
 identity is intentionally conservative. Runner startup annotates actions with
-the process cell's normalized space/scope/id, branch, and process generation
-`0`. This is stronger than a pattern/module-name fallback because colocated
-pieces of the same pattern get distinct identities, but it is not a full graph
-generation. JavaScript action ids and raw builtin action ids must also include
-stable node-local binding information, such as a hash of the process cell plus
-their bound input and output cells, because a single piece can contain many
+the result cell's normalized space/scope/id, branch, and graph generation `0`.
+This is stronger than a pattern/module-name fallback because colocated pieces of
+the same pattern get distinct identities, but it is not a full graph generation.
+JavaScript action ids and raw builtin action ids must also include stable
+node-local binding information, such as a hash of the result cell plus their
+bound input and output cells, because a single piece can contain many
 actions from the same source location or many `raw:map` / `raw:when` instances
 with the same implementation name. Future durable graph generations, stronger
 implementation fingerprints, or schema/process migrations should invalidate or
@@ -674,16 +674,16 @@ suite-owned page lifetimes for tests that intentionally run ordered steps
 against one page.
 
 Runner startup passes this subscription option for pattern result, JavaScript,
-and raw actions using the process cell's stable space/scope/id identity. The
-version-1 process generation is currently `0`. JavaScript actions add a stable
-hash of their process cell and bound input/output cells to the diagnostic action
-name before that name becomes the persisted scheduler action id. Raw builtin
-actions similarly add a stable hash of their bound input/output cells to the
-diagnostic raw action name. This prevents repeated source locations and
+and raw actions using the result cell's stable space/scope/id identity. The
+version-1 graph generation is currently `0`. JavaScript actions add a stable
+hash of their result-cell anchor and bound input/output cells to the diagnostic
+action name before that name becomes the persisted scheduler action id. Raw
+builtin actions similarly add a stable hash of their bound input/output cells to
+the diagnostic raw action name. This prevents repeated source locations and
 multiple raw instances in one piece from sharing one snapshot row. Any future
-durable process graph generation or stronger implementation fingerprinting
+durable graph generation or stronger implementation fingerprinting
 should invalidate or migrate these observations rather than treating them as
-fully versioned process snapshots.
+fully versioned graph snapshots.
 
 `unknown` is stricter than dirty. Dirty means the scheduler has a valid previous
 dependency view and knows what can make the action fresh again. Unknown means
@@ -882,7 +882,7 @@ Current branch status:
 | Snapshot query surface | Implemented. |
 | Runner rehydration primitive and storage-backed lookup | Implemented. |
 | Subscription-time clean startup skip | Implemented for recreated actions with valid snapshots. |
-| Durable process graph generations | Future work; version 1 uses process cell identity plus generation `0`. |
+| Durable process graph generations | Future work; version 1 uses result cell identity plus graph generation `0`. |
 | Demand-targeted dirty recovery beyond subscription startup | Future work. |
 | Replication, retention, and mirror repair | Future work. |
 

@@ -985,7 +985,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
         readOrThrow: (address: { id: string }) =>
           address.id === sourceRef.id
             ? {
-              value: "process cell",
+              value: "metadata cell",
               cfc: {
                 version: 1,
                 schemaHash: "test-schema",
