@@ -153,13 +153,13 @@ describe("schema-hash dispatch", () => {
           expect(result1).toBe(result2);
         });
 
-        it("different schemas produce different instances", () => {
+        it("produces different instances for different schemas", () => {
           const result1 = callIntern({ type: "number" }, true);
           const result2 = callIntern({ type: "string" }, true);
           expect(result1).not.toBe(result2);
         });
 
-        it("property order does not affect interning", () => {
+        it("ignores property order when interning", () => {
           const result1 = callIntern(
             { type: "object", title: "foo" },
             true,
@@ -171,7 +171,7 @@ describe("schema-hash dispatch", () => {
           expect(result1).toBe(result2);
         });
 
-        it("structurally-equal but identity-different schemas return same instance", () => {
+        it("returns the same instance for structurally-equal but identity-different schemas", () => {
           const a: JSONSchemaObj = {
             type: "object",
             properties: { x: { type: "number" } },
@@ -348,7 +348,7 @@ describe("schema-hash dispatch", () => {
     });
   });
 
-  it("`hashSchema()` returns base64url strings (no algorithm prefix)", () => {
+  it("returns base64url strings from `hashSchema()` (no algorithm prefix)", () => {
     const result = hashSchema({ type: "number" });
     expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
   });

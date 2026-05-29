@@ -39,7 +39,7 @@ const wishFlowLogger = getLogger("runner.wish-flow", {
   logCountEvery: 0,
 });
 
-// Schema for mentionable array - items are cell references (asCell: true)
+// Schema for mentionable array - items are cell references (asCell: ["cell"])
 // Don't restrict properties so .get() returns full cell data
 const mentionableListSchema = internSchema(
   {
@@ -996,7 +996,7 @@ const TARGET_SCHEMA = internSchema(
       query: { type: "string" },
       path: { type: "array", items: { type: "string" } },
       schema: true,
-      context: { type: "object", additionalProperties: { asCell: true } },
+      context: { type: "object", additionalProperties: { asCell: ["cell"] } },
       scope: { type: "array", items: { type: "string" } },
       headless: { type: "boolean" },
     },

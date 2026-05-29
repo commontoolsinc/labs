@@ -174,7 +174,7 @@ describe("Schema - Default Values", () => {
               avatar: { type: "string" },
             },
             default: { bio: "Default bio", avatar: "default.png" },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["name", "profile"],
@@ -221,7 +221,7 @@ describe("Schema - Default Values", () => {
             type: "array",
             items: { type: "string" },
             default: ["default", "tags"],
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["name", "tags"],
@@ -264,7 +264,7 @@ describe("Schema - Default Values", () => {
                       color: { type: "string" },
                     },
                     default: { mode: "dark", color: "blue" },
-                    asCell: true,
+                    asCell: ["cell"],
                   },
                   notifications: { type: "boolean", default: true },
                 },
@@ -272,7 +272,7 @@ describe("Schema - Default Values", () => {
                   theme: { mode: "light", color: "red" },
                   notifications: true,
                 },
-                asCell: true,
+                asCell: ["cell"],
               },
             },
             required: ["name", "settings"],
@@ -365,7 +365,7 @@ describe("Schema - Default Values", () => {
                   properties: {
                     createdAt: { type: "string" },
                   },
-                  asCell: true,
+                  asCell: ["cell"],
                 },
               },
             },
@@ -454,7 +454,7 @@ describe("Schema - Default Values", () => {
                 value: { type: "string" },
               },
               default: { enabled: true, value: "default" },
-              asCell: true,
+              asCell: ["cell"],
             },
             default: {
               knownProp: "default",
@@ -546,7 +546,7 @@ describe("Schema - Default Values", () => {
                   enabled: { type: "boolean" },
                   value: { type: "string" },
                 },
-                asCell: true,
+                asCell: ["cell"],
               },
               required: ["knownProp"],
             },
@@ -599,7 +599,7 @@ describe("Schema - Default Values", () => {
           name: "Default User",
           settings: { theme: "light" },
         },
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema;
 
       const c = runtime.getCell<any>(
@@ -638,7 +638,7 @@ describe("Schema - Default Values", () => {
       const schema = {
         type: "object",
         properties: {
-          name: { type: "string", default: "Default Name", asCell: true },
+          name: { type: "string", default: "Default Name", asCell: ["cell"] },
         },
         default: {},
       } as const satisfies JSONSchema;
@@ -667,7 +667,7 @@ describe("Schema - Default Values", () => {
       const schema = {
         type: "object",
         properties: {
-          name: { type: "string", default: "Default Name", asCell: true },
+          name: { type: "string", default: "Default Name", asCell: ["cell"] },
         },
         default: { name: "First default name" },
       } as const satisfies JSONSchema;
@@ -693,7 +693,11 @@ describe("Schema - Default Values", () => {
     it("should make immutable cells if they provide the default value", () => {
       const schema = {
         $defs: {
-          NameEntry: { type: "string", default: "Default Name", asCell: true },
+          NameEntry: {
+            type: "string",
+            default: "Default Name",
+            asCell: ["cell"],
+          },
         },
         type: "object",
         properties: {

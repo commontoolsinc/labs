@@ -557,7 +557,7 @@ Deno.bench("Cell asSchema - schema transformation (100x)", async () => {
     type: "object",
     properties: {
       id: { type: "number" },
-      metadata: { type: "object", asCell: true },
+      metadata: { type: "object", asCell: ["cell"] },
     },
     required: ["id", "metadata"],
   } as const satisfies JSONSchema;
@@ -669,7 +669,7 @@ Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
           value: { type: "number" },
         },
         required: ["value"],
-        asCell: true, // This creates a cell reference
+        asCell: ["cell"], // This creates a cell reference
       },
     },
     required: ["name", "age", "nested"],
@@ -689,7 +689,7 @@ Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
     const value = cell.get();
     value.name;
     value.age;
-    value.nested.get(); // nested is a Cell due to asCell: true
+    value.nested.get(); // nested is a Cell due to asCell: ["cell"]
   }
 
   await cleanup(runtime, storageManager, tx);
@@ -945,7 +945,7 @@ Deno.bench("Cell complex - schema with asCell references (100x)", async () => {
       id: { type: "number" },
       metadata: {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
       },
       tags: {
         type: "array",
@@ -957,7 +957,7 @@ Deno.bench("Cell complex - schema with asCell references (100x)", async () => {
           theme: { type: "string" },
           notifications: { type: "boolean" },
         },
-        asCell: true,
+        asCell: ["cell"],
       },
     },
     required: ["id", "metadata", "tags", "settings"],

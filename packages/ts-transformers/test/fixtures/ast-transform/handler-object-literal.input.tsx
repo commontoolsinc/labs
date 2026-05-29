@@ -30,8 +30,8 @@ export default pattern<State>((state) => {
 }, {
   type: "object",
   properties: {
-    value: { type: "number", asCell: true },
-    name: { type: "string", asCell: true },
+    value: { type: "number", asCell: ["cell"] },
+    name: { type: "string", asCell: ["cell"] },
   },
   required: ["value"],
 });

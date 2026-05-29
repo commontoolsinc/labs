@@ -32,8 +32,8 @@ const logger = getLogger("schema-generator.object", {
 /**
  * Check if a callable type (like ModuleFactory or HandlerFactory) returns a wrapper type.
  * ModuleFactory<T, R> when called returns OpaqueRef<R>.
- * If R is Stream<T>, we should generate { asStream: true } instead of skipping.
- * If R is Cell<T>, we should generate { asCell: true } instead of skipping.
+ * If R is Stream<T>, we should generate { asCell: ["stream"] } instead of skipping.
+ * If R is Cell<T>, we should generate { asCell: ["cell"] } instead of skipping.
  *
  * Returns the schema definition for the wrapper if detected, undefined otherwise.
  */
@@ -50,10 +50,10 @@ function getWrapperSchemaFromCallable(
   // Check if the return type is a wrapper (Stream<T>, Cell<T>, or OpaqueRef<...>)
   const wrapperInfo = getCellWrapperInfo(callReturnType, checker);
   if (wrapperInfo?.kind === "Stream") {
-    return { asStream: true };
+    return { asCell: ["stream"] };
   }
   if (wrapperInfo?.kind === "Cell") {
-    return { asCell: true };
+    return { asCell: ["cell"] };
   }
 
   // Also check if it's an OpaqueRef wrapping a Stream or Cell
@@ -65,10 +65,10 @@ function getWrapperSchemaFromCallable(
       const innerType = typeArgs[0]!;
       const innerWrapperInfo = getCellWrapperInfo(innerType, checker);
       if (innerWrapperInfo?.kind === "Stream") {
-        return { asStream: true };
+        return { asCell: ["stream"] };
       }
       if (innerWrapperInfo?.kind === "Cell") {
-        return { asCell: true };
+        return { asCell: ["cell"] };
       }
     }
   }
@@ -278,7 +278,7 @@ export class ObjectFormatter implements TypeFormatter {
 
       if (isFunctionLike(resolvedPropType)) {
         // Special case: ModuleFactory/HandlerFactory types that return Stream or Cell
-        // should generate { asStream: true } or { asCell: true } instead of being skipped
+        // should generate { asCell: ["stream"] } or { asCell: ["cell"] } instead of being skipped
         const wrapperSchema = getWrapperSchemaFromCallable(
           resolvedPropType,
           checker,

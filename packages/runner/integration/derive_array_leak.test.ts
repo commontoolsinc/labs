@@ -125,7 +125,7 @@ async function runTest() {
     properties: {
       value: { type: "number" },
       increment: {
-        asStream: true,
+        asCell: ["stream"],
       },
     },
     required: ["value", "increment"],

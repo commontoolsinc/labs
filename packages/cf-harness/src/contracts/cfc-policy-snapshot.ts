@@ -170,6 +170,19 @@ export const createHarnessCfcPolicySnapshot = (
     profileConfigs: options.subagentProfileConfigs.map((config) => ({
       ...config,
       allowedToolIds: [...config.allowedToolIds],
+      ...(config.skillNames !== undefined
+        ? { skillNames: [...config.skillNames] }
+        : {}),
+      ...(config.allowedSkillScripts !== undefined
+        ? {
+          allowedSkillScripts: config.allowedSkillScripts.map((script) => ({
+            ...script,
+          })),
+        }
+        : {}),
+      ...(config.skillScriptExecutionTarget !== undefined
+        ? { skillScriptExecutionTarget: config.skillScriptExecutionTarget }
+        : {}),
       ...(config.nativeModelToolIds !== undefined
         ? { nativeModelToolIds: [...config.nativeModelToolIds] }
         : {}),

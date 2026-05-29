@@ -14,7 +14,7 @@ Short notes on the JSON Schema generator and ref/definitions behavior.
 - Anonymous/type‑literal shapes (including aliases that resolve to anonymous
   types) are inlined.
 - `$ref` may appear with Common Fabric extensions as siblings (e.g.
-  `{ "$ref": "#/definitions/Foo", asStream: true }`).
+  `{ "$ref": "#/definitions/Foo", asCell: ["stream"] }`).
 
 Rationale: Improves human readability and re‑use of complex shared shapes while
 keeping wrapper semantics explicit and simple.

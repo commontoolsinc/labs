@@ -51,7 +51,7 @@ async function runNavigateHandlerTest(
       {
         type: "object",
         properties: {
-          menuOpen: { type: "boolean", asCell: true },
+          menuOpen: { type: "boolean", asCell: ["cell"] },
         },
         required: ["menuOpen"],
       },

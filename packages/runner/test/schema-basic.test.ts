@@ -101,7 +101,7 @@ describe("Schema - Basic Types and References", () => {
               name: { type: "string" },
               settings: {
                 type: "object",
-                asCell: true,
+                asCell: ["cell"],
               },
             },
             required: ["name", "settings"],
@@ -175,7 +175,7 @@ describe("Schema - Basic Types and References", () => {
           id: { type: "number" },
           metadata: {
             type: "object",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       } as const satisfies JSONSchema;
@@ -208,14 +208,14 @@ describe("Schema - Basic Types and References", () => {
       });
 
       const schema = {
-        asCell: true,
+        asCell: ["cell"],
         $ref: "#/$defs/Node",
         $defs: {
           "Node": {
             type: "object",
             properties: {
               id: { type: "number" },
-              nested: { $ref: "#/$defs/Node", asCell: true },
+              nested: { $ref: "#/$defs/Node", asCell: ["cell"] },
             },
             required: ["id"],
           },
@@ -513,7 +513,7 @@ describe("Schema - Basic Types and References", () => {
           },
         },
         $ref: "#/$defs/LinkedNode",
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema;
 
       const c = runtime.getCell(
@@ -570,7 +570,7 @@ describe("Schema - Basic Types and References", () => {
                   name: { type: "string" },
                   metadata: {
                     type: "object",
-                    asCell: true,
+                    asCell: ["cell"],
                   },
                 },
                 required: ["name", "metadata"],
@@ -623,7 +623,7 @@ describe("Schema - Basic Types and References", () => {
               type: "object",
               properties: { label: { type: "string" } },
               required: ["label"],
-              asCell: true,
+              asCell: ["cell"],
             },
           },
           required: ["current"],
@@ -674,7 +674,7 @@ describe("Schema - Basic Types and References", () => {
           properties: {
             current: {
               type: "string",
-              asCell: true,
+              asCell: ["cell"],
             },
           },
           required: ["current"],

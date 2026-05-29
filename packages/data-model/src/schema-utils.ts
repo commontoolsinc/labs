@@ -9,8 +9,8 @@ import type {
   JSONSchemaTypes,
   SchemaPathSelector,
 } from "@commonfabric/api";
-import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
-import { cloneIfNecessary } from "./fabric-value.ts";
+import { deepFreeze } from "./deep-freeze.ts";
+import { cloneIfNecessary, shallowMutableClone } from "./fabric-value.ts";
 import {
   internSchema,
   internSchemaAsTaggedHashString,
@@ -92,37 +92,22 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
   }
 
   // After the boolean check, `schema` is necessarily a `JSONSchemaObj`. We use
-  // a local `schemaObj` variable so TypeScript can track the object-only type through
-  // the spread and freeze operations, then cast back to `T` on return.
-  let schemaObj = schema as Exclude<T, boolean>;
+  // a local `schemaObj` variable so TypeScript can track the object-only type,
+  // then cast back to `T` on return.
+  const schemaObj = schema as Exclude<T, boolean>;
 
-  if (Object.isFrozen(schemaObj)) {
-    // `schemaObj` is already frozen...
-    if (isDeepFrozen(schemaObj)) {
-      // ...and is in fact already deep-frozen, so we can return it directly.
-      return schemaObj as T;
-    } else {
-      // ...but it's not deep-frozen, so we have to shallow-clone and modify
-      // (even if `canShare === true`).
-      schemaObj = { ...schemaObj };
-    }
-  } else if (!canShare) {
-    // `schemaObj` is not frozen but also can't be modified; shallow-clone it.
-    schemaObj = { ...schemaObj };
+  if (canShare) {
+    // The caller indicated that we get to freeze the result, so just do that.
+    // The call to `deepFreeze()` is a relatively inexpensive no-op if
+    // `schemaObj` is in fact already deep-frozen.
+    return deepFreeze(schemaObj);
+  } else {
+    // The caller indicated that the original `schema` has to be left alone, so
+    // make a deep-frozen clone of it. As with `deepFreeze()`, if it turns out
+    // `schemaObj` is already deep-frozen, the call is a relatively inexpensive
+    // no-op.
+    return cloneIfNecessary(schemaObj) as T;
   }
-
-  // At this point, we have a mutable `schemaObj` which is allowed to be
-  // directly frozen and is in fact to become the frozen return value.
-  // TODO(danfuzz): `structuredClone()` will no longer be appropriate to use
-  // once the schema system grows to support the full modern data model.
-  const schemaRecord = schemaObj as Record<string, unknown>;
-  for (const [key, value] of Object.entries(schemaRecord)) {
-    schemaRecord[key] = isDeepFrozen(value)
-      ? value
-      : deepFreeze(structuredClone(value));
-  }
-
-  return Object.freeze(schemaObj) as T;
 }
 
 /**
@@ -197,7 +182,13 @@ export function schemaWithProperties(
 
   // Both `schema` and `overrides` are objects.
 
-  const result = { ...schema, ...overrides };
+  // `shallowMutableClone()` gives a mutable top-level object whose
+  // bound children are deep-frozen -- cloning any mutable ones rather than
+  // freezing the `schema`/`overrides` inputs in place -- so the subsequent
+  // `toDeepFrozenSchema(result, true)` only has to seal the (owned) top.
+  const result = shallowMutableClone(
+    { ...schema, ...overrides } as FabricValue,
+  ) as JSONSchemaObj;
   return isInternedSchema(schema)
     ? internSchema(result)
     : toDeepFrozenSchema(result, true);
@@ -231,9 +222,15 @@ export function schemaWithoutProperties(
   }
 
   if (copy) {
+    // See `schemaWithProperties()`: deep-freeze the bound children (cloning any
+    // mutable ones, leaving the `schema` input untouched) so the subsequent
+    // `toDeepFrozenSchema` only has to seal the owned top.
+    const result = shallowMutableClone(
+      copy as FabricValue,
+    ) as JSONSchemaObj;
     return isInternedSchema(schema)
-      ? internSchema(copy)
-      : toDeepFrozenSchema(copy as JSONSchemaObj, true);
+      ? internSchema(result)
+      : toDeepFrozenSchema(result, true);
   } else {
     // Note: We still have to deep-freeze in the `!copy` case, though it will be
     // a no-op if `schema` was already deep-frozen (including interned).

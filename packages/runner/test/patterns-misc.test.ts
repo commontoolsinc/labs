@@ -110,7 +110,7 @@ describe("Pattern Runner - Miscellaneous", () => {
         },
         type: "object",
         properties: {
-          items: { $ref: "#/$defs/Items", asCell: true },
+          items: { $ref: "#/$defs/Items", asCell: ["cell"] },
         },
         required: ["items"],
       },
@@ -184,7 +184,7 @@ describe("Pattern Runner - Miscellaneous", () => {
       // == { piece: Cell<any> }
       {
         type: "object",
-        properties: { piece: { type: "object", asCell: true } },
+        properties: { piece: { type: "object", asCell: ["cell"] } },
         required: ["piece"],
       },
       // == { list: Cell<any>[] }
@@ -193,8 +193,8 @@ describe("Pattern Runner - Miscellaneous", () => {
         properties: {
           list: {
             type: "array",
-            items: { type: "object", asCell: true },
-            asCell: true,
+            items: { type: "object", asCell: ["cell"] },
+            asCell: ["cell"],
           },
         },
         required: ["list"],
@@ -235,7 +235,7 @@ describe("Pattern Runner - Miscellaneous", () => {
     // Add schema so we get the entry as a cell and can compare the two
     const listCell = piece.key("list").asSchema({
       type: "array",
-      items: { type: "object", asCell: true },
+      items: { type: "object", asCell: ["cell"] },
     });
     expect(isCell(listCell.get()[0])).toBe(true);
     expect(listCell.get()[0].equals(testCell.get())).toBe(true);
@@ -263,7 +263,7 @@ describe("Pattern Runner - Miscellaneous", () => {
     // Handler B receives an event (a cell reference) and logs its value
     const handlerB = handler(
       // Event: a cell reference (link to the doubled output)
-      { type: "number", asCell: true },
+      { type: "number", asCell: ["cell"] },
       // No state needed
       {},
       (eventCell, _state) => {
@@ -283,7 +283,7 @@ describe("Pattern Runner - Miscellaneous", () => {
       {
         type: "object",
         properties: {
-          streamB: { asStream: true },
+          streamB: { asCell: ["stream"] },
         },
         required: ["streamB"],
       },

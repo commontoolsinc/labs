@@ -540,23 +540,23 @@ describe("Schema - AnyOf Support", () => {
                 value: { type: "string" },
                 props: {
                   type: "object",
-                  additionalProperties: { asCell: true },
+                  additionalProperties: { asCell: ["cell"] },
                 },
                 children: {
                   type: "array",
                   items: {
                     anyOf: [
-                      { $ref: "#/$defs/VDom", asCell: true },
-                      { type: "string", asCell: true },
-                      { type: "number", asCell: true },
-                      { type: "boolean", asCell: true },
+                      { $ref: "#/$defs/VDom", asCell: ["cell"] },
+                      { type: "string", asCell: ["cell"] },
+                      { type: "number", asCell: ["cell"] },
+                      { type: "boolean", asCell: ["cell"] },
                       {
                         type: "array",
-                        items: { $ref: "#/$defs/VDom", asCell: true },
+                        items: { $ref: "#/$defs/VDom", asCell: ["cell"] },
                       },
                     ],
                   },
-                  asCell: true,
+                  asCell: ["cell"],
                 },
               },
               required: ["type"],

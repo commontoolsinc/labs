@@ -174,7 +174,7 @@ Deno.bench({
         id: { type: "number" },
         metadata: {
           type: "object",
-          asCell: true,
+          asCell: ["cell"],
         },
         tags: {
           type: "array",
@@ -186,7 +186,7 @@ Deno.bench({
             theme: { type: "string" },
             notifications: { type: "boolean" },
           },
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["id", "metadata", "tags", "settings"],

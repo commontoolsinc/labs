@@ -531,7 +531,7 @@ describe("toCell and toOpaqueRef hooks", () => {
           cellProp: {
             type: "object",
             properties: { value: { type: "number" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["regular", "cellProp"],

@@ -136,7 +136,7 @@ const outputSchema = {
       items: CommitSchema,
     },
     updater: {
-      asStream: true,
+      asCell: ["stream"],
       type: "object",
       properties: {},
     },

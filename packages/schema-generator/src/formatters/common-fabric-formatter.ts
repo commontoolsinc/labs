@@ -449,10 +449,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       return schema === false ? { not: true, scope } : { scope };
     }
 
-    if (schema.asCell === true) {
-      return { ...schema, asCell: [{ kind: "cell", scope }] };
-    }
-
     if (Array.isArray(schema.asCell) && schema.asCell.length > 0) {
       const [first, ...rest] = schema.asCell;
       return {
@@ -1967,9 +1963,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         ? { asCell: [propertyValue], not: true }
         : { asCell: [propertyValue] };
     }
-    if (schema.asCell === true) {
-      return { ...schema, asCell: [propertyValue, "cell"] };
-    } else if (schema.asCell) {
+    if (schema.asCell !== undefined) {
       return { ...schema, asCell: [propertyValue, ...schema.asCell] };
     }
     return { ...schema, asCell: [propertyValue] };

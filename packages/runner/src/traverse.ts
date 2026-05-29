@@ -61,6 +61,7 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { createReadOnlyTransactionError } from "./storage/interface.ts";
+import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -1447,9 +1448,11 @@ function trackVisitedDoc(
   }
   // Load the metadata-linked docs recursively unless we're a retracted fact.
   if (context.includeMeta) {
-    // Loading metadata requires the full doc. This could be narrowed, but it
-    // happens in a non-reactive context.
-    const { ok: fullDoc } = tx.read({ ...target, path: [] });
+    // Loading metadata requires the full doc. Ignore this read for scheduling.
+    const { ok: fullDoc } = tx.read(
+      { ...target, path: [] },
+      { meta: ignoreReadForScheduling },
+    );
     if (fullDoc) {
       loadMetaLinkedDocs(
         tx,
@@ -1498,8 +1501,9 @@ export function loadMetaLinkedDoc(
   if (address === undefined) {
     return undefined;
   }
-  // This only happens in the query path, so don't worry about scheduler
-  const result = tx.read(address);
+  // This read only loads the linked metadata doc so traversal can inspect it.
+  // The schema-guided traversal below records the real scheduling reads.
+  const result = tx.read(address, { meta: ignoreReadForScheduling });
   if (result.error) {
     return undefined;
   }
@@ -1630,7 +1634,7 @@ function combineOptionalSchema(
   return combineSchema(parentSchema, linkSchema);
 }
 
-// Merge any schema flags like asCell or asStream from flagSchema into schema.
+// Merge the asCell values from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
   const key = internSchemaPairAsKey(flagSchema, schema);
   const cached = _mergeSchemaFlagsCache.get(key);
@@ -1643,14 +1647,10 @@ function _mergeSchemaFlagsUncached(
   flagSchema: JSONSchema,
   schema: JSONSchema,
 ) {
-  if (isRecord(flagSchema)) {
-    // we want to preserve asCell and asStream -- if true, these will override
-    // the value in the schema
-    const { asCell, asStream } = flagSchema;
-    if (asCell || asStream) {
-      const props = { asCell: asCell ?? ["stream"] };
-      return schemaWithProperties(schema, props);
-    }
+  if (isRecord(flagSchema) && flagSchema.asCell !== undefined) {
+    // we want to preserve asCell -- if set, this will override the value in
+    // the schema
+    return schemaWithProperties(schema, { asCell: flagSchema.asCell });
   }
   return schema;
 }
@@ -3214,7 +3214,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   }
 
   /**
-   * Check whether the schema specifies asCell or asStream
+   * Check whether the schema specifies asCell
    *
    * This handling gets a little blurry with anyOf or oneOf schemas, and
    * in those cases, we base the value on whether every option has the flag.
@@ -3224,7 +3224,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    *
    * We do not resolve references in the anyOf or oneOf options, which means
    * we don't need to worry about cycles, but it also means we may miss some
-   * references that should be asCell or asStream.
+   * references that should be asCell.
    *
    * @param schema
    * @returns
@@ -3508,8 +3508,8 @@ function _mergeAnyOfBranchSchemasUncached(
     ...(requiredSet.size > 0 && { required: [...requiredSet] }),
     ...(!anyAllowsAdditional && { additionalProperties: false }),
     ...(mergedDefs && { $defs: mergedDefs }),
-    ...((outerSchema.asCell || outerSchema.asStream) &&
-      { asCell: outerSchema.asCell ?? ["stream"] }),
+    ...((outerSchema.asCell) &&
+      { asCell: outerSchema.asCell }),
   } as JSONSchemaObj;
 }
 
