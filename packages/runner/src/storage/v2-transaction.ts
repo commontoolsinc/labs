@@ -1133,7 +1133,14 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
 
     for (const write of writes) {
-      const key = `${write.address.space}|${write.address.id}`;
+      // The run is flushed against a single document, fetched from the first
+      // write's address (see `writeBatchRun`). Documents are keyed by scope as
+      // well as id (`makeDocKey`), so the run key must include scope: otherwise
+      // writes to different scoped instances of the same id would be merged into
+      // one run and applied to whichever instance came first, corrupting both.
+      const key = `${write.address.space}|${
+        normalizeCellScope(write.address.scope)
+      }|${write.address.id}`;
       if (runKey === undefined || key === runKey) {
         run.push(write);
         runKey = key;

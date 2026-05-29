@@ -310,9 +310,10 @@ declares, at every nesting level, not only at the top of the write:
 
 The narrower-scope instance is a different scoped instance of the same id, so
 its container structure (the value root and any intermediate objects/arrays
-along the written path) is created as needed; the broader instance keeps the
-non-scoped data and the links. Writes to different scope instances of one id are
-applied as separate operations, never merged into a single document write.
+along the written path) is created as needed by the storage write; the broader
+instance keeps the non-scoped data and the links. The storage layer keys
+documents — and batches writes — by scope key as well as id, so writes to
+different scoped instances of one id are never merged into a single document.
 
 ## Schema Semantics
 
