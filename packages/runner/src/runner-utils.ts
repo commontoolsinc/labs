@@ -33,6 +33,17 @@ export function sanitizeDebugLabel(label?: string): string | undefined {
   return label.replace(/^async\s+/, "").trim() || undefined;
 }
 
+/**
+ * Source maps include the content-derived compile id as a synthetic filename
+ * prefix. Scheduler identity needs the authored source location instead, so an
+ * exported pattern recompiled with a different entrypoint still matches the
+ * action observations created when it first ran inside its parent program.
+ */
+export function canonicalizeSchedulerActionLocation(name: string): string {
+  const match = name.match(/^\/?fid1:[^/]+(\/.+)$/);
+  return match?.[1] ?? name;
+}
+
 export function getSigilLink(id: URI): SigilLink {
   return { "/": { [LINK_V1_TAG]: { id } } };
 }

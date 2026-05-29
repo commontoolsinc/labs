@@ -1,6 +1,7 @@
 import type {
   IMemorySpaceAddress,
   TransactionReactivityLog,
+  TransactionReadWatermark,
 } from "../storage/interface.ts";
 
 export type SchedulerActionKind =
@@ -19,6 +20,8 @@ export interface SchedulerActionOptions {
   throttleMs?: number;
 }
 
+export type SchedulerObservedRead = TransactionReadWatermark;
+
 export interface SchedulerActionObservation {
   version: 1;
   ownerSpace?: string;
@@ -34,6 +37,7 @@ export interface SchedulerActionObservation {
   transactionKind: SchedulerObservationTransactionKind;
   reads: IMemorySpaceAddress[];
   shallowReads: IMemorySpaceAddress[];
+  readWatermarks?: SchedulerObservedRead[];
   actualChangedWrites: IMemorySpaceAddress[];
   currentKnownWrites: IMemorySpaceAddress[];
   declaredWrites: IMemorySpaceAddress[];
@@ -95,6 +99,14 @@ export function buildSchedulerActionObservation(
     transactionKind: options.transactionKind,
     reads: cloneAddresses(options.transactionLog.reads),
     shallowReads: cloneAddresses(options.transactionLog.shallowReads),
+    ...(options.transactionLog.readWatermarks &&
+        options.transactionLog.readWatermarks.length > 0
+      ? {
+        readWatermarks: cloneObservedReads(
+          options.transactionLog.readWatermarks,
+        ),
+      }
+      : {}),
     actualChangedWrites: cloneAddresses(options.transactionLog.writes),
     currentKnownWrites: cloneAddresses(options.currentKnownWrites ?? []),
     declaredWrites: cloneAddresses(options.declaredWrites ?? []),
@@ -138,6 +150,8 @@ export function isSchedulerActionObservation(
     isSchedulerObservationTransactionKind(candidate.transactionKind) &&
     Array.isArray(candidate.reads) &&
     Array.isArray(candidate.shallowReads) &&
+    (candidate.readWatermarks === undefined ||
+      Array.isArray(candidate.readWatermarks)) &&
     Array.isArray(candidate.actualChangedWrites) &&
     Array.isArray(candidate.currentKnownWrites) &&
     Array.isArray(candidate.declaredWrites) &&
@@ -151,6 +165,15 @@ function cloneAddresses(
   return addresses.map((address) => ({
     ...address,
     path: [...address.path],
+  }));
+}
+
+function cloneObservedReads(
+  reads: readonly SchedulerObservedRead[],
+): SchedulerObservedRead[] {
+  return reads.map((read) => ({
+    ...read,
+    path: [...read.path],
   }));
 }
 

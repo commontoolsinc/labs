@@ -34,6 +34,7 @@ import { type Action } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
+  findDeclaredWriteRedirectCells,
   unsafe_noteParentOnPatterns,
   unwrapOneLevelAndBindtoDoc,
 } from "./pattern-binding.ts";
@@ -71,6 +72,7 @@ import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import {
+  canonicalizeSchedulerActionLocation,
   describePatternOrModule,
   extractDefaultValues,
   getSigilLink,
@@ -139,16 +141,17 @@ function schedulerJavaScriptActionName(
   reads: readonly NormalizedFullLink[],
   writes: readonly NormalizedFullLink[],
 ): string {
+  const stableActionName = canonicalizeSchedulerActionLocation(actionName);
   const identity = hashOf({
     type: "javascript-node",
-    name: actionName,
+    name: stableActionName,
     process: schedulerActionLinkIdentity(
       processCell.getAsNormalizedFullLink(),
     ),
     reads: reads.map(schedulerActionLinkIdentity),
     writes: writes.map(schedulerActionLinkIdentity),
   }).toJSON()["/"].slice(0, 12);
-  return `action:${actionName}:${identity}`;
+  return `action:${stableActionName}:${identity}`;
 }
 
 function schedulerActionLinkIdentity(link: NormalizedFullLink) {
@@ -2951,7 +2954,11 @@ export class Runner {
     };
 
     if (name) {
-      setRunnableName(handler, `handler:${name}`, { setSrc: true });
+      setRunnableName(
+        handler,
+        `handler:${canonicalizeSchedulerActionLocation(name)}`,
+        { setSrc: true },
+      );
     }
 
     const wrappedHandler = Object.assign(handler, {
@@ -3458,10 +3465,18 @@ export class Runner {
       mappedInputBindings,
       processCell,
     );
+    const identityInputCells = findDeclaredWriteRedirectCells(
+      mappedInputBindings,
+      processCell,
+    );
     // outputCells tracks what cells this action writes to. This is needed for
     // pull-based scheduling so collectDirtyDependencies() can find computations
     // that write to cells being read by effects.
     const outputCells = findAllWriteRedirectCells(
+      mappedOutputBindings,
+      processCell,
+    );
+    const identityOutputCells = findDeclaredWriteRedirectCells(
       mappedOutputBindings,
       processCell,
     );
@@ -3560,10 +3575,9 @@ export class Runner {
       "anonymous";
     const rawName = schedulerRawActionName(
       rawTargetName,
-      inputCells,
-      outputCells,
+      identityInputCells,
+      identityOutputCells,
     );
-
     const action: Action = (tx: IExtendedStorageTransaction) => {
       logger.timeStart("raw", "run", rawTargetName);
       try {

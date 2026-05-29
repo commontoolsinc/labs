@@ -248,9 +248,13 @@ This is stronger than a pattern/module-name fallback because colocated pieces of
 the same pattern get distinct identities, but it is not a full graph generation.
 JavaScript action ids and raw builtin action ids must also include stable
 node-local binding information, such as a hash of the result cell plus their
-bound input and output cells, because a single piece can contain many
+declared bound input and output roots, because a single piece can contain many
 actions from the same source location or many `raw:map` / `raw:when` instances
-with the same implementation name. Future durable graph generations, stronger
+with the same implementation name. That identity hash must not chase write
+redirects through the current linked cell contents. For example, a `raw:map`
+over a linked list should keep the same action id whether the list is empty,
+partially populated, or fully hydrated; recursive link traversal is scheduling
+evidence, not durable node identity. Future durable graph generations, stronger
 implementation fingerprints, or schema/process migrations should invalidate or
 migrate these rows instead of treating them as fully versioned graph
 observations.
@@ -276,8 +280,9 @@ interface SchedulerActionObservationV1 {
   observedAtLocalSeq?: number;
   transactionKind: "dependency-collection" | "action-run" | "event-preflight";
 
-  reads: SchedulerRead[];
-  shallowReads: SchedulerRead[];
+  reads: SchedulerAddress[];
+  shallowReads: SchedulerAddress[];
+  readWatermarks?: SchedulerObservedRead[];
   actualChangedWrites: SchedulerAddress[];
   currentKnownWrites: SchedulerAddress[];
   declaredWrites: SchedulerAddress[];
@@ -295,10 +300,22 @@ interface SchedulerActionObservationV1 {
 }
 ```
 
-`SchedulerRead` should retain the read path, scope, and the confirmed or
-pending watermark used by the transaction. It should also preserve whether the
-read was recursive or shallow. Cross-space reads require a per-space seq
-watermark, because each space has an independent SQLite database.
+`reads` and `shallowReads` remain plain scheduler addresses so older
+observations can still restore trigger paths. New observations also carry
+`readWatermarks`, with entries shaped like:
+
+```ts
+interface SchedulerObservedRead extends SchedulerAddress {
+  kind: "recursive" | "shallow";
+  seq: number;
+}
+```
+
+Each entry records the confirmed server sequence observed for that exact read
+path. Cross-space reads require their own per-space sequence watermark, because
+each space has an independent SQLite database. Reads without a reliable
+confirmed sequence remain valid trigger evidence but cannot prove currentness
+during later sync hydration.
 
 `actualChangedWrites` is the transaction's changed write set. `currentKnownWrites`
 is the scheduler's post-observation active scheduling write set after applying
@@ -650,6 +667,14 @@ latest observations.
 9. Queue live effects, demanded computations, or idle materializers according
    to the normal pull-mode rules.
 
+When a rehydrated action read a source document that is not locally loaded yet,
+the persisted observation must stay usable. Loading that document later through
+pull/integrate sync is not itself a new write. If the sync payload reports the
+document at a sequence less than or equal to every matched read watermark, the
+pull scheduler keeps the action clean. If the sync payload is newer than a
+matched watermark, lacks sequence metadata, or overlaps a read without a
+watermark, the scheduler dirties conservatively.
+
 The current runner implementation uses these steps opportunistically during
 subscription. `Scheduler.rehydrateActionFromObservation()` rebuilds in-memory
 scheduler indexes from a validated observation, and
@@ -676,14 +701,18 @@ against one page.
 Runner startup passes this subscription option for pattern result, JavaScript,
 and raw actions using the result cell's stable space/scope/id identity. The
 version-1 graph generation is currently `0`. JavaScript actions add a stable
-hash of their result-cell anchor and bound input/output cells to the diagnostic
-action name before that name becomes the persisted scheduler action id. Raw
-builtin actions similarly add a stable hash of their bound input/output cells to
-the diagnostic raw action name. This prevents repeated source locations and
-multiple raw instances in one piece from sharing one snapshot row. Any future
-durable graph generation or stronger implementation fingerprinting
-should invalidate or migrate these observations rather than treating them as
-fully versioned graph snapshots.
+hash of their result-cell anchor and declared bound input/output roots to the
+diagnostic action name before that name becomes the persisted scheduler action
+id. Raw builtin actions similarly add a stable hash of their declared bound
+input/output roots to the diagnostic raw action name. The identity roots are
+intentionally shallower than dependency discovery: scheduler dependencies may
+follow write redirects into the current linked contents, but durable identity
+uses only the roots declared by the node binding. This prevents repeated source
+locations and multiple raw instances in one piece from sharing one snapshot row
+without making identity depend on whether a linked list or object was already
+loaded. Any future durable graph generation or stronger implementation
+fingerprinting should invalidate or migrate these observations rather than
+treating them as fully versioned graph snapshots.
 
 `unknown` is stricter than dirty. Dirty means the scheduler has a valid previous
 dependency view and knows what can make the action fresh again. Unknown means

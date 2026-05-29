@@ -26,6 +26,10 @@ import type {
   Runtime,
 } from "./scheduler-test-utils.ts";
 import type { SchedulerActionSnapshotResult } from "@commonfabric/memory/v2";
+import type {
+  IPullNotification,
+  IStorageSubscription,
+} from "../src/storage/interface.ts";
 
 const createSchedulerTestRuntime: typeof createBaseSchedulerTestRuntime = (
   apiUrl,
@@ -131,6 +135,18 @@ describe("persistent scheduler observations", () => {
       reads: [readAddress],
       shallowReads: [shallowReadAddress],
       writes: [writeAddress],
+      readWatermarks: [
+        {
+          ...readAddress,
+          kind: "recursive",
+          seq: 13,
+        },
+        {
+          ...shallowReadAddress,
+          kind: "shallow",
+          seq: 17,
+        },
+      ],
       attemptedWrites: [{
         space: "did:key:space" as const,
         scope: "space",
@@ -166,6 +182,18 @@ describe("persistent scheduler observations", () => {
         observedAtSeq: 42,
         reads: [readAddress],
         shallowReads: [shallowReadAddress],
+        readWatermarks: [
+          {
+            ...readAddress,
+            kind: "recursive",
+            seq: 13,
+          },
+          {
+            ...shallowReadAddress,
+            kind: "shallow",
+            seq: 17,
+          },
+        ],
         actualChangedWrites: [writeAddress],
         currentKnownWrites: [writeAddress],
         declaredWrites: [declaredWrite],
@@ -175,6 +203,213 @@ describe("persistent scheduler observations", () => {
     );
     expect("attemptedWrites" in observation).toBe(false);
     expect(isSchedulerActionObservation(observation)).toBe(true);
+  });
+
+  it("keeps rehydrated actions clean when a later sync is current enough", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const persistedAction = function persistedAction() {};
+      testRuntime.runtime.scheduler.subscribe(persistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+
+      const rehydrated = testRuntime.runtime.scheduler
+        .rehydrateActionFromObservation(persistedAction, {
+          observation: buildSchedulerActionObservation({
+            actionId: "persistedAction",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "of:piece",
+            processGeneration: 1,
+            implementationFingerprint: "impl:v1",
+            runtimeFingerprint: "runtime:test",
+            observedAtSeq: 42,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+              readWatermarks: [{
+                ...readAddress,
+                kind: "recursive",
+                seq: 13,
+              }],
+            },
+          }),
+        });
+
+      expect(rehydrated).toBe(true);
+      expect(testRuntime.runtime.scheduler.isDirty(persistedAction)).toBe(
+        false,
+      );
+
+      const subscription = (
+        testRuntime.runtime.scheduler as unknown as {
+          createStorageSubscription(): IStorageSubscription;
+        }
+      ).createStorageSubscription();
+      subscription.next(
+        {
+          type: "pull",
+          space: readAddress.space,
+          changes: [{
+            address: {
+              id: readAddress.id,
+              scope: readAddress.scope,
+              path: [],
+            },
+            before: undefined,
+            after: { value: { input: 1 } },
+            afterSeq: 13,
+          }],
+        } satisfies IPullNotification,
+      );
+
+      expect(testRuntime.runtime.scheduler.isDirty(persistedAction)).toBe(
+        false,
+      );
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("dirties rehydrated actions when a later sync is newer than the read", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const persistedAction = function persistedAction() {};
+      testRuntime.runtime.scheduler.subscribe(persistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+      testRuntime.runtime.scheduler.rehydrateActionFromObservation(
+        persistedAction,
+        {
+          observation: buildSchedulerActionObservation({
+            actionId: "persistedAction",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "of:piece",
+            processGeneration: 1,
+            implementationFingerprint: "impl:v1",
+            runtimeFingerprint: "runtime:test",
+            observedAtSeq: 42,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+              readWatermarks: [{
+                ...readAddress,
+                kind: "recursive",
+                seq: 13,
+              }],
+            },
+          }),
+        },
+      );
+
+      const subscription = (
+        testRuntime.runtime.scheduler as unknown as {
+          createStorageSubscription(): IStorageSubscription;
+        }
+      ).createStorageSubscription();
+      subscription.next(
+        {
+          type: "pull",
+          space: readAddress.space,
+          changes: [{
+            address: {
+              id: readAddress.id,
+              scope: readAddress.scope,
+              path: [],
+            },
+            before: undefined,
+            after: { value: { input: 1 } },
+            afterSeq: 14,
+          }],
+        } satisfies IPullNotification,
+      );
+
+      expect(testRuntime.runtime.scheduler.isDirty(persistedAction)).toBe(
+        true,
+      );
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("dirties rehydrated actions when sync seq metadata is missing", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const persistedAction = function persistedAction() {};
+      testRuntime.runtime.scheduler.subscribe(persistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+      testRuntime.runtime.scheduler.rehydrateActionFromObservation(
+        persistedAction,
+        {
+          observation: buildSchedulerActionObservation({
+            actionId: "persistedAction",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "of:piece",
+            processGeneration: 1,
+            implementationFingerprint: "impl:v1",
+            runtimeFingerprint: "runtime:test",
+            observedAtSeq: 42,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+              readWatermarks: [{
+                ...readAddress,
+                kind: "recursive",
+                seq: 13,
+              }],
+            },
+          }),
+        },
+      );
+
+      const subscription = (
+        testRuntime.runtime.scheduler as unknown as {
+          createStorageSubscription(): IStorageSubscription;
+        }
+      ).createStorageSubscription();
+      subscription.next(
+        {
+          type: "pull",
+          space: readAddress.space,
+          changes: [{
+            address: {
+              id: readAddress.id,
+              scope: readAddress.scope,
+              path: [],
+            },
+            before: undefined,
+            after: { value: { input: 1 } },
+          }],
+        } satisfies IPullNotification,
+      );
+
+      expect(testRuntime.runtime.scheduler.isDirty(persistedAction)).toBe(
+        true,
+      );
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
   });
 
   it("rejects persisted observations missing required scheduler metadata", () => {

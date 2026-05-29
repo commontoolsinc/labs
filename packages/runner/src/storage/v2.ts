@@ -1656,7 +1656,9 @@ class SpaceReplica implements ISpaceReplica {
           id: read.id as URI,
           scope,
           path: toCommitReadPath(read.path),
-          seq: typeof read.meta?.seq === "number"
+          seq: typeof read.seq === "number"
+            ? read.seq
+            : typeof read.meta?.seq === "number"
             ? read.meta.seq
             : record?.confirmed.seq ?? 0,
           ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
@@ -1694,6 +1696,13 @@ class SpaceReplica implements ISpaceReplica {
 
     const shouldNotifySubscribers = this.hasNotificationSubscribers();
     const shouldNotifySinks = this.hasSinkSubscribers(touched);
+    const beforeSeqByKey = new Map<string, number>();
+    for (const { id, scope } of touched) {
+      const record = this.#docs.get(docKey(id, scope));
+      if (record) {
+        beforeSeqByKey.set(docKey(id, scope), record.confirmed.seq);
+      }
+    }
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
@@ -1726,13 +1735,18 @@ class SpaceReplica implements ISpaceReplica {
     if (before !== undefined) {
       const changes = before.compare(this);
       if (type === "pull" || [...changes].length > 0) {
+        const annotatedChanges = annotateSyncChangeSequences(
+          changes,
+          sync,
+          beforeSeqByKey,
+        );
         this.#subscription.next({
           type,
           space: this.#space,
-          changes,
+          changes: annotatedChanges,
         } as StorageNotification);
         if (shouldNotifySinks) {
-          this.notifySinks(changes);
+          this.notifySinks(annotatedChanges);
         }
       }
     } else if (shouldNotifySinks) {
@@ -1972,6 +1986,32 @@ const snapshotState = (
       ...unclaimed({ of: id, the: DOCUMENT_MIME }),
       scope: normalizeCellScope(scope),
     } as State);
+};
+
+const annotateSyncChangeSequences = (
+  changes: IMergedChanges,
+  sync: SessionSync,
+  beforeSeqByKey: ReadonlyMap<string, number>,
+): IMergedChanges => {
+  const afterSeqByKey = new Map<string, number>();
+  for (const upsert of sync.upserts) {
+    afterSeqByKey.set(docKey(upsert.id as URI, upsert.scope), upsert.seq);
+  }
+
+  return {
+    *[Symbol.iterator]() {
+      for (const change of changes) {
+        const key = docKey(change.address.id, change.address.scope);
+        const beforeSeq = beforeSeqByKey.get(key);
+        const afterSeq = afterSeqByKey.get(key);
+        yield {
+          ...change,
+          ...(beforeSeq !== undefined ? { beforeSeq } : {}),
+          ...(afterSeq !== undefined ? { afterSeq } : {}),
+        };
+      }
+    },
+  };
 };
 
 const toConnectionError = (error: unknown): IConnectionError =>

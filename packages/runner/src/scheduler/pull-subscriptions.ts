@@ -141,6 +141,7 @@ export function subscribePullSchedulerAction(
       action,
       reads,
       shallowReads,
+      immediateLog?.readWatermarks,
     );
 
     // Register the cancel function for the latest trigger set.
@@ -225,6 +226,7 @@ export function resubscribePullSchedulerAction(
     action,
     reads,
     shallowReads,
+    log.readWatermarks,
   );
 
   logger.debug("schedule-resubscribe", () => [

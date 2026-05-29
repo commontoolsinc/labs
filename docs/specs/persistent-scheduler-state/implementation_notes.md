@@ -592,3 +592,86 @@
   the index exposes a space-level removal hook for unload paths; memory-v2
   scheduler read/write index reconciliation now shares the diff loop, and
   scheduler observation row writes wrap database failures with operation context.
+
+## 2026-05-29 - Read-Watermark-Aware Rehydration
+
+- Root cause: rehydrated trigger paths could dirty actions when a source
+  document was merely loaded locally at the same server sequence the action had
+  already observed. The scheduler restored read paths but not the per-read
+  sequence evidence needed to distinguish hydration from a newer write.
+- Decision: keep `reads` and `shallowReads` as compatibility trigger evidence,
+  and add separate read-watermark entries with read kind and confirmed server
+  sequence. Observations without watermarks stay valid but cannot suppress later
+  sync dirtying.
+- Implementation: V2 transaction read activities now retain confirmed read seqs,
+  scheduler observations persist `readWatermarks`, pull/integrate storage
+  notifications annotate changes with synced `afterSeq`, and pull notification
+  handling records `skip-current-sync` when all matched read paths are current
+  enough.
+- Conservative fallback: missing notification seq, missing read watermark,
+  local commit/revert notifications, and newer synced sequences all dirty as
+  before.
+- Cross-space note: the existing mirrored read-index behavior remains
+  non-atomic across spaces by design for this slice. Read watermarks reduce
+  client-side over-dirtying after hydration, but they do not change the current
+  accepted mirror failure/unknown-state policy.
+- Validation so far:
+  - `deno test -A packages/runner/test/scheduler-trigger-index.test.ts packages/runner/test/scheduler-observations.test.ts`
+  - `deno test -A packages/runner/test/memory-v2-subscription.test.ts packages/memory/test/v2-scheduler-state-test.ts`
+  - `deno test -A packages/runner/test/scheduler-trigger-index.test.ts packages/runner/test/scheduler-observations.test.ts packages/runner/test/memory-v2-subscription.test.ts packages/memory/test/v2-scheduler-state-test.ts packages/runner/test/transaction-inspection.test.ts`
+  - `HEADLESS=1 PIPE_CONSOLE=1 CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 deno task integration --port-offset=897 patterns-reload`
+  - `deno task check`
+- Follow-up finding: the reload integration still reported a high post-reload
+  action count after this fix. Inspecting the sqlite scheduler tables showed
+  that snapshots carried read watermarks, while many actions were already
+  durably dirty/stale. That points to remaining catch-up work in dirty-state
+  persistence rather than the same-seq hydration path fixed here. The reload
+  budget should not be lowered until that separate dirty-state source is
+  understood.
+- Follow-up finding: notebook action ids also included source-map compile ids.
+  A notebook callback first evaluated inside the default-app bundle used the
+  default-app compile id (`fid1:eU59...`), while the same exported Notebook
+  pattern recompiled on reload used the Notebook-entry compile id
+  (`fid1:hLsa...`). Both compile ids are causally derived, but they describe the
+  compilation entrypoint, not the authored action identity. Scheduler action
+  ids now canonicalize those source-map locations back to the authored file path
+  before hashing the process/read/write identity. Targeted helper coverage is
+  green; the reload integration still exceeded the current action budget, so
+  this was a real identity bug but not the only remaining source of reload work.
+- Follow-up finding: raw builtin action identity was still unstable for mapped
+  linked lists. `findAllWriteRedirectCells()` intentionally follows write
+  redirects into the current linked cell contents for scheduling, so the same
+  `raw:map` node could hash an empty or partially loaded list during creation
+  and a fully hydrated seven-note list after reload. That changed the raw action
+  id (`raw:map:fid1:...`) even though the causal node was the same, so persisted
+  snapshots for the map and its row children were missed.
+- Decision: keep recursive redirect traversal for scheduling evidence, but hash
+  only declared write-redirect roots for raw action identity. Added
+  `findDeclaredWriteRedirectCells()` to make that distinction explicit and
+  documented that durable identity must not depend on linked list/object
+  contents discovered at runtime.
+- Validation:
+  - `deno test -A packages/runner/test/pattern-binding.test.ts`
+  - `HEADLESS=1 PIPE_CONSOLE=1 CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 deno task integration --port-offset=904 patterns-reload`
+  - The reload integration passed with 108 total action runs and 68 computation
+    runs, down from the failing 207 total action runs and 131 computation runs
+    seen with source-location canonicalization alone.
+- Follow-up investigation: a clean rerun on port offset 906 passed with 85 total
+  action runs and 51 computation runs. The remaining high-count actions were no
+  longer the notebook row computations. SQLite inspection showed that several
+  remaining notebook computations were already durably dirty before reload
+  (`notebookSelectItems` dirtied by the `#notebook` wish result,
+  `_notebookRelationships` dirtied by note insertion, and `summary` dirtied by
+  later note-derived writes), while some wish/rendering actions had no
+  pre-reload observation at all.
+- Test sequencing decision: the reload shard should not navigate away as soon
+  as the notebook source state says seven notes exist. It now also waits for the
+  rendered notebook to show all seven note chips before reloading, so the reload
+  measurement does not inherit avoidable catch-up work from the rapid-create
+  flow.
+- Validation:
+  - `HEADLESS=1 PIPE_CONSOLE=1 CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 deno task integration --port-offset=907 patterns-reload`
+  - With the pre-reload render wait, the reload shard passed with 77 total
+    action runs and 45 computation runs. The remaining runs are mostly first
+    observations for wish/render helper actions or computations that were
+    legitimately dirty but not demanded before the reload.

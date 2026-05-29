@@ -67,6 +67,7 @@ export function collectDependenciesForAction(
     action,
     readsForTriggers,
     shallowReadsForTriggers,
+    log.readWatermarks,
   );
   setCancelForTriggerEntities(
     state.triggerSubscriptionState,

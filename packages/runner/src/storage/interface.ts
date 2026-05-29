@@ -440,6 +440,14 @@ export interface IMemoryChange {
    * Value memory address has after change.
    */
   after: Immutable<FabricValue>;
+  /**
+   * Confirmed server sequence before the change, when available.
+   */
+  beforeSeq?: number;
+  /**
+   * Confirmed server sequence after the change, when available.
+   */
+  afterSeq?: number;
 }
 
 export type StorageTransactionStatus =
@@ -1123,7 +1131,13 @@ export interface TransactionReactivityLog {
   reads: IMemorySpaceAddress[];
   shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
+  readWatermarks?: TransactionReadWatermark[];
   attemptedWrites?: IMemorySpaceAddress[];
+}
+
+export interface TransactionReadWatermark extends IMemorySpaceAddress {
+  kind: "recursive" | "shallow";
+  seq: number;
 }
 
 export interface TransactionWriteDetail {
@@ -1178,6 +1192,7 @@ export type Activity = Variant<{
 export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
   nonRecursive?: boolean;
+  seq?: number;
 }
 
 /**

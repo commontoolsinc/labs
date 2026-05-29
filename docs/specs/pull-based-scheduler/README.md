@@ -409,6 +409,13 @@ Subscription always:
   `scheduledFirstTime`, emits `scheduler.subscribe`, and returns an unsubscribe
   cancel function.
 
+Persistent subscription identities are separate from dependency traversal.
+Generated JavaScript and raw builtin actions may include declared binding roots
+in their durable identity so repeated source locations or repeated raw nodes do
+not share one snapshot row. That identity must not include values discovered by
+following those roots through current linked cell contents; recursive traversal
+belongs to dependency evidence and can change as data loads.
+
 Pull-mode subscription additionally:
 
 - Seeds declared writes for newly subscribed computations before the first run
@@ -501,6 +508,16 @@ The trigger index stores recursive and non-recursive read paths separately by
 entity. It uses path/value overlap filtering to return only actions whose
 registered read paths are affected by the concrete storage change.
 
+For actions restored from persistent scheduler observations, trigger entries may
+also carry read watermarks. A read watermark records the server sequence at
+which a specific recursive or shallow read was observed. Pull/integrate sync
+notifications can include the synced document sequence on each change. Pull
+mode uses that sequence only to suppress hydration that is already current: if
+all matched read paths for an action have watermarks at or after the synced
+sequence, the action is not dirtied. Missing sync sequence metadata, missing
+read watermarks, local commits, reverts, and genuinely newer synced sequences
+all fall back to normal dirtying.
+
 Both modes skip a triggered action when:
 
 - The change came from one of the action's own in-flight transactions.
@@ -521,7 +538,9 @@ When trigger tracing is enabled, each matched change records a bounded
 summary, scheduler mode, optional writer action ID, and one decision record per
 triggered action. Decisions include `schedule-push`, `schedule-effect`,
 `mark-dirty`, `already-dirty`, `skip-own-commit-source`, and
-`skip-same-change-group`.
+`skip-same-change-group`. Pull mode can also record `skip-current-sync` when a
+pull/integrate notification is only loading data at a sequence already covered
+by the action's persisted read watermarks.
 
 ### Pull Demand
 
@@ -925,6 +944,10 @@ interface ReactivityLog {
   reads: Address[];
   shallowReads: Address[];
   writes: Address[];
+  readWatermarks?: Array<Address & {
+    kind: "recursive" | "shallow";
+    seq: number;
+  }>;
 }
 
 interface TransactionReactivityLog extends ReactivityLog {

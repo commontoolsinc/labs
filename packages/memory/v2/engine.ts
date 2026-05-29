@@ -757,6 +757,11 @@ export interface SchedulerObservationAddress {
   path: readonly string[];
 }
 
+export interface SchedulerObservedRead extends SchedulerObservationAddress {
+  kind: "recursive" | "shallow";
+  seq: number;
+}
+
 export interface SchedulerActionObservation {
   version: 1;
   ownerSpace?: string;
@@ -772,6 +777,7 @@ export interface SchedulerActionObservation {
   transactionKind: SchedulerObservationTransactionKind;
   reads: SchedulerObservationAddress[];
   shallowReads: SchedulerObservationAddress[];
+  readWatermarks?: SchedulerObservedRead[];
   actualChangedWrites: SchedulerObservationAddress[];
   currentKnownWrites: SchedulerObservationAddress[];
   declaredWrites: SchedulerObservationAddress[];
@@ -2227,6 +2233,13 @@ function normalizeSchedulerObservation(
     observedAtSeq,
     reads: observation.reads.map(normalizeSchedulerAddress),
     shallowReads: observation.shallowReads.map(normalizeSchedulerAddress),
+    ...(observation.readWatermarks
+      ? {
+        readWatermarks: observation.readWatermarks.map(
+          normalizeSchedulerObservedRead,
+        ),
+      }
+      : {}),
     actualChangedWrites: observation.actualChangedWrites.map(
       normalizeSchedulerAddress,
     ),
@@ -2244,6 +2257,16 @@ function normalizeSchedulerObservation(
         ),
       }
       : {}),
+  };
+}
+
+function normalizeSchedulerObservedRead(
+  read: SchedulerObservedRead,
+): SchedulerObservedRead {
+  return {
+    ...normalizeSchedulerAddress(read),
+    kind: read.kind,
+    seq: read.seq,
   };
 }
 

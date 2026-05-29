@@ -5,6 +5,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   MediaType,
+  TransactionReadWatermark,
 } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
@@ -68,6 +69,7 @@ export type ReactivityLog = {
   /** Reads that should not invalidate on child writes unless they add a new key */
   shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
+  readWatermarks?: TransactionReadWatermark[];
 };
 
 export type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
@@ -155,7 +157,8 @@ export interface TriggerTraceActionRecord {
     | "mark-dirty"
     | "already-dirty"
     | "skip-own-commit-source"
-    | "skip-same-change-group";
+    | "skip-same-change-group"
+    | "skip-current-sync";
   pendingBefore: boolean;
   pendingAfter: boolean;
   dirtyBefore: boolean;

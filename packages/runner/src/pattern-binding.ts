@@ -364,6 +364,31 @@ export function findAllWriteRedirectCells<T>(
   binding: unknown,
   baseCell: AnyCell<T>,
 ): NormalizedFullLink[] {
+  return findWriteRedirectCells(binding, baseCell, {
+    followLinkedCellContents: true,
+  });
+}
+
+/**
+ * Traverses binding and returns only the write redirect roots declared by the
+ * binding itself. Unlike `findAllWriteRedirectCells()`, this does not follow
+ * current linked cell contents, so it is stable for identity derivation when a
+ * linked list or object changes over time.
+ */
+export function findDeclaredWriteRedirectCells<T>(
+  binding: unknown,
+  baseCell: AnyCell<T>,
+): NormalizedFullLink[] {
+  return findWriteRedirectCells(binding, baseCell, {
+    followLinkedCellContents: false,
+  });
+}
+
+function findWriteRedirectCells<T>(
+  binding: unknown,
+  baseCell: AnyCell<T>,
+  options: { followLinkedCellContents: boolean },
+): NormalizedFullLink[] {
   const seen: NormalizedFullLink[] = [];
   function find(binding: unknown, baseCell: AnyCell<T>): void {
     if (isLegacyAlias(binding) && typeof binding.$alias.cell === "number") {
@@ -377,6 +402,7 @@ export function findAllWriteRedirectCells<T>(
       const link = parseLink(binding, baseCell);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
+      if (!options.followLinkedCellContents) return;
       const linkCell = baseCell.runtime.getCellFromLink(
         link,
         undefined,

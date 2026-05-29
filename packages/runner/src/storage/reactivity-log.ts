@@ -78,6 +78,14 @@ export function reactivityLogFromActivities(
       } else {
         log.reads.push(address);
       }
+      if (typeof activity.read.seq === "number") {
+        log.readWatermarks ??= [];
+        log.readWatermarks.push({
+          ...address,
+          kind: activity.read.nonRecursive === true ? "shallow" : "recursive",
+          seq: activity.read.seq,
+        });
+      }
       if (isReadMarkedAsAttemptedWrite(activity.read.meta)) {
         log.attemptedWrites ??= [];
         log.attemptedWrites.push(address);

@@ -10,6 +10,7 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import type {
   IMemoryChange,
   IMemorySpaceAddress,
+  TransactionReadWatermark,
 } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
 import type { Action, SpaceScopeAndURI } from "./types.ts";
@@ -27,6 +28,7 @@ export interface TriggerIndexState {
     action: Action,
     reads: IMemorySpaceAddress[],
     shallowReads: IMemorySpaceAddress[],
+    readWatermarks?: readonly TransactionReadWatermark[],
   ): {
     entities: Set<SpaceScopeAndURI>;
     triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
@@ -47,6 +49,11 @@ export interface TriggerIndexState {
     hasMatchingTriggerPaths: boolean;
     triggeredActions: Action[];
   };
+  canSkipCurrentSyncForAction(
+    action: Action,
+    space: MemorySpace,
+    change: IMemoryChange,
+  ): boolean;
 }
 
 export interface TriggerSubscriptionState extends TriggerIndexState {
@@ -81,6 +88,45 @@ function removeTriggerMapSpace(
       triggerMap.delete(entity);
     }
   }
+}
+
+function pathsEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length &&
+    left.every((segment, index) => segment === right[index]);
+}
+
+function triggeredReadPathsForAction(
+  action: Action,
+  paths: SortedAndCompactPaths,
+  change: IMemoryChange,
+  nonRecursive: boolean,
+): Array<{
+  path: readonly string[];
+  kind: TransactionReadWatermark["kind"];
+}> {
+  const triggered: Array<{
+    path: readonly string[];
+    kind: TransactionReadWatermark["kind"];
+  }> = [];
+  for (const path of paths) {
+    const actions = determineTriggeredActions(
+      new Map([[action, [path]]]),
+      change.before,
+      change.after,
+      change.address.path,
+      nonRecursive ? { nonRecursive: true } : undefined,
+    );
+    if (actions.length > 0) {
+      triggered.push({
+        path,
+        kind: nonRecursive ? "shallow" : "recursive",
+      });
+    }
+  }
+  return triggered;
 }
 
 export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
@@ -122,11 +168,17 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
     action: Action,
     reads: IMemorySpaceAddress[],
     shallowReads: IMemorySpaceAddress[],
+    readWatermarks?: readonly TransactionReadWatermark[],
   ): {
     entities: Set<SpaceScopeAndURI>;
     triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
   } {
-    return this.state.triggerIndex.addActionReads(action, reads, shallowReads);
+    return this.state.triggerIndex.addActionReads(
+      action,
+      reads,
+      shallowReads,
+      readWatermarks,
+    );
   }
 
   removeActionFromEntities(
@@ -165,6 +217,18 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
       change,
     );
   }
+
+  canSkipCurrentSyncForAction(
+    action: Action,
+    space: MemorySpace,
+    change: IMemoryChange,
+  ): boolean {
+    return this.state.triggerIndex.canSkipCurrentSyncForAction(
+      action,
+      space,
+      change,
+    );
+  }
 }
 
 export class SchedulerTriggerIndex implements TriggerIndexState {
@@ -176,15 +240,21 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
   >();
+  private readonly readWatermarks = new WeakMap<
+    Action,
+    Map<SpaceScopeAndURI, TransactionReadWatermark[]>
+  >();
 
   addActionReads(
     action: Action,
     reads: IMemorySpaceAddress[],
     shallowReads: IMemorySpaceAddress[],
+    readWatermarks: readonly TransactionReadWatermark[] = [],
   ): {
     entities: Set<SpaceScopeAndURI>;
     triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
   } {
+    this.setActionReadWatermarks(action, readWatermarks);
     const pathsByEntity = addressesToPathByEntity(reads);
     const nonRecursivePathsByEntity = addressesToPathByEntity(shallowReads);
     const entities = new Set<SpaceScopeAndURI>();
@@ -221,6 +291,7 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     action: Action,
     entities: Iterable<SpaceScopeAndURI>,
   ): void {
+    this.readWatermarks.delete(action);
     for (const spaceAndURI of entities) {
       removeActionFromTriggerMap(this.triggers, spaceAndURI, action);
       removeActionFromTriggerMap(
@@ -328,6 +399,75 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
       triggeredActions: [...triggeredActionSet],
     };
   }
+
+  canSkipCurrentSyncForAction(
+    action: Action,
+    space: MemorySpace,
+    change: IMemoryChange,
+  ): boolean {
+    const afterSeq = change.afterSeq;
+    if (typeof afterSeq !== "number") {
+      return false;
+    }
+
+    const entity = entityKey({ ...change.address, space });
+    const watermarks = this.readWatermarks.get(action)?.get(entity);
+    if (!watermarks?.length) {
+      return false;
+    }
+
+    const triggeredPaths = [
+      ...triggeredReadPathsForAction(
+        action,
+        this.triggers.get(entity)?.get(action) ?? [],
+        change,
+        false,
+      ),
+      ...triggeredReadPathsForAction(
+        action,
+        this.nonRecursiveTriggers.get(entity)?.get(action) ?? [],
+        change,
+        true,
+      ),
+    ];
+    if (triggeredPaths.length === 0) {
+      return false;
+    }
+
+    return triggeredPaths.every(({ path, kind }) =>
+      watermarks.some((watermark) =>
+        watermark.kind === kind &&
+        watermark.seq >= afterSeq &&
+        pathsEqual(watermark.path, path)
+      )
+    );
+  }
+
+  private setActionReadWatermarks(
+    action: Action,
+    watermarks: readonly TransactionReadWatermark[],
+  ): void {
+    if (watermarks.length === 0) {
+      this.readWatermarks.delete(action);
+      return;
+    }
+
+    const byEntity = new Map<SpaceScopeAndURI, TransactionReadWatermark[]>();
+    for (const watermark of watermarks) {
+      const entity = entityKey(watermark);
+      const list = byEntity.get(entity);
+      const normalized = {
+        ...watermark,
+        path: [...watermark.path],
+      };
+      if (list) {
+        list.push(normalized);
+      } else {
+        byEntity.set(entity, [normalized]);
+      }
+    }
+    this.readWatermarks.set(action, byEntity);
+  }
 }
 
 export function addTriggerPathsToIndex(
@@ -335,11 +475,12 @@ export function addTriggerPathsToIndex(
   action: Action,
   reads: IMemorySpaceAddress[],
   shallowReads: IMemorySpaceAddress[],
+  readWatermarks?: readonly TransactionReadWatermark[],
 ): {
   entities: Set<SpaceScopeAndURI>;
   triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
 } {
-  return state.addActionReads(action, reads, shallowReads);
+  return state.addActionReads(action, reads, shallowReads, readWatermarks);
 }
 
 export function replaceActionTriggerPaths(
@@ -347,12 +488,19 @@ export function replaceActionTriggerPaths(
   action: Action,
   reads: IMemorySpaceAddress[],
   shallowReads: IMemorySpaceAddress[],
+  readWatermarks?: readonly TransactionReadWatermark[],
 ): {
   entities: Set<SpaceScopeAndURI>;
   triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
 } {
   clearActionTriggers(state, action);
-  return addTriggerPathsToIndex(state, action, reads, shallowReads);
+  return addTriggerPathsToIndex(
+    state,
+    action,
+    reads,
+    shallowReads,
+    readWatermarks,
+  );
 }
 
 export function clearActionTriggers(

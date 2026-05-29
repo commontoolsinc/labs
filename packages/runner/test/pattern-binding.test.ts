@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   findAllWriteRedirectCells,
+  findDeclaredWriteRedirectCells,
   sendValueToBinding,
   unwrapOneLevelAndBindtoDoc,
 } from "../src/pattern-binding.ts";
@@ -444,6 +445,29 @@ describe("pattern-binding", () => {
       expect(links[0].path).toEqual(["a"]);
       expect(links[1].path).toEqual(["b", "c"]);
       expect(links[2].path).toEqual(["a", "inner"]);
+    });
+
+    it("can find only declared write redirect roots without current linked contents", () => {
+      const testCell = runtime.getCell<{ list: unknown[]; first: number }>(
+        space,
+        "declared roots",
+        undefined,
+        tx,
+      );
+      testCell.key("first").set(1);
+      testCell.key("list").set([
+        testCell.key("first").getAsWriteRedirectLink({ base: testCell }),
+      ]);
+      const binding = { $alias: { path: ["list"] } };
+
+      expect(
+        findAllWriteRedirectCells(binding, testCell).map((link) => link.path),
+      ).toEqual([["list"], ["first"]]);
+      expect(
+        findDeclaredWriteRedirectCells(binding, testCell).map((link) =>
+          link.path
+        ),
+      ).toEqual([["list"]]);
     });
 
     it("should find all write redirect links in an array", () => {

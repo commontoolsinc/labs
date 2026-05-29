@@ -601,6 +601,9 @@ export class Scheduler {
       reads: observation.reads,
       shallowReads: observation.shallowReads,
       writes: observation.currentKnownWrites,
+      ...(observation.readWatermarks !== undefined
+        ? { readWatermarks: observation.readWatermarks }
+        : {}),
     }, {
       isEffect: observation.actionKind === "effect",
     });

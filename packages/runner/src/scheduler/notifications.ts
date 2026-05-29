@@ -102,10 +102,15 @@ export function planPullTriggeredAction(
   state: TriggeredActionSkipState & {
     readonly isEffect: boolean;
     readonly dirtyBefore: boolean;
+    readonly currentSync?: boolean;
   },
 ): TriggeredActionPlan {
   const skipped = planSkippedTriggeredAction(state);
   if (skipped) return skipped;
+
+  if (state.currentSync === true) {
+    return { decision: "skip-current-sync", operation: "none" };
+  }
 
   if (state.isEffect) {
     return { decision: "schedule-effect", operation: "schedule" };

@@ -154,5 +154,8 @@ function toSchedulerReactivityLog(
     reads: log.reads,
     shallowReads: log.shallowReads,
     writes: log.writes,
+    ...(log.readWatermarks && log.readWatermarks.length > 0
+      ? { readWatermarks: log.readWatermarks }
+      : {}),
   };
 }

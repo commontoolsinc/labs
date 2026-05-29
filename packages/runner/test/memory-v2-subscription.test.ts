@@ -394,7 +394,7 @@ describe("Memory v2 storage notifications", () => {
     storageManager.subscribe(subscription);
 
     const uri = `of:memory-v2-pull-dedupe-${Date.now()}` as URI;
-    await remoteSession.transact({
+    const applied = await remoteSession.transact({
       localSeq: remoteLocalSeq++,
       reads: { confirmed: [], pending: [] },
       operations: [{
@@ -417,6 +417,9 @@ describe("Memory v2 storage notifications", () => {
       schema: false,
     });
     expect(subscription.pulls).toHaveLength(1);
+    expect([...subscription.pulls[0].changes][0].afterSeq).toBe(
+      applied.seq,
+    );
 
     await provider.sync(uri, {
       path: ["items", "1", "count"],

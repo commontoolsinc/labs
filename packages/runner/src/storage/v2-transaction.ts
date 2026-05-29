@@ -957,6 +957,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         path: address.path,
         meta: readMeta,
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
+        ...(typeof doc.seq === "number" ? { seq: doc.seq } : {}),
       };
       this.#readActivities.push(readActivity);
       this.invalidateReactivityLog();
@@ -1648,6 +1649,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private buildReactivityLog(): TransactionReactivityLog {
     const reads: IMemorySpaceAddress[] = [];
     const shallowReads: IMemorySpaceAddress[] = [];
+    let readWatermarks: TransactionReactivityLog["readWatermarks"];
     let attemptedWrites: IMemorySpaceAddress[] | undefined;
 
     for (const read of this.#readActivities) {
@@ -1667,6 +1669,19 @@ export class V2StorageTransaction implements IStorageTransaction {
         shallowReads.push(address);
       } else {
         reads.push(address);
+      }
+      const seq = typeof read.seq === "number"
+        ? read.seq
+        : typeof read.meta?.seq === "number"
+        ? read.meta.seq
+        : undefined;
+      if (typeof seq === "number") {
+        readWatermarks ??= [];
+        readWatermarks.push({
+          ...address,
+          kind: read.nonRecursive === true ? "shallow" : "recursive",
+          seq,
+        });
       }
 
       if (isReadMarkedAsAttemptedWrite(meta)) {
@@ -1713,6 +1728,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       reads,
       shallowReads,
       writes,
+      ...(readWatermarks && readWatermarks.length > 0
+        ? { readWatermarks }
+        : {}),
       ...(attemptedWrites && attemptedWrites.length > 0
         ? { attemptedWrites }
         : {}),

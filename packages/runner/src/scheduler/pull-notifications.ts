@@ -99,9 +99,14 @@ export function processPullStorageNotification(
       const isOwnCommitSource = notification.type === "commit" &&
         notification.source !== undefined &&
         state.inFlightSources.get(action)?.has(notification.source) === true;
+      const currentSync = (
+        notification.type === "pull" || notification.type === "integrate"
+      ) &&
+        state.triggerIndex.canSkipCurrentSyncForAction(action, space, change);
       const plan = planPullTriggeredAction({
         isEffect: actionIsEffect,
         dirtyBefore,
+        currentSync,
         isOwnCommitSource,
         hasSourceChangeGroup,
         actionChangeGroup,

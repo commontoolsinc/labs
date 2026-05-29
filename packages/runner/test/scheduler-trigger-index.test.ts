@@ -49,4 +49,101 @@ describe("SchedulerTriggerIndex", () => {
     expect(triggerIndex.collectReadersForWrite(secondRead).size).toBe(1);
     expect(triggerIndex.hasRegisteredTriggers()).toBe(true);
   });
+
+  it("can skip current-enough sync for watermarked recursive reads", () => {
+    const triggerIndex = new SchedulerTriggerIndex();
+    const action: Action = () => {};
+    const read: IMemorySpaceAddress = {
+      space: "did:key:trigger-index-watermark",
+      scope: "space",
+      id: "of:cell",
+      path: ["value", "count"],
+    };
+    triggerIndex.addActionReads(action, [read], [], [{
+      ...read,
+      kind: "recursive",
+      seq: 13,
+    }]);
+
+    expect(triggerIndex.canSkipCurrentSyncForAction(action, read.space, {
+      address: {
+        id: read.id,
+        scope: read.scope,
+        path: [],
+      },
+      before: undefined,
+      after: { value: { count: 1 } },
+      afterSeq: 13,
+    })).toBe(true);
+    expect(triggerIndex.canSkipCurrentSyncForAction(action, read.space, {
+      address: {
+        id: read.id,
+        scope: read.scope,
+        path: [],
+      },
+      before: undefined,
+      after: { value: { count: 2 } },
+      afterSeq: 14,
+    })).toBe(false);
+  });
+
+  it("does not skip current sync when a triggered read lacks a watermark", () => {
+    const triggerIndex = new SchedulerTriggerIndex();
+    const action: Action = () => {};
+    const read: IMemorySpaceAddress = {
+      space: "did:key:trigger-index-no-watermark",
+      scope: "space",
+      id: "of:cell",
+      path: ["value"],
+    };
+    triggerIndex.addActionReads(action, [read], []);
+
+    expect(triggerIndex.canSkipCurrentSyncForAction(action, read.space, {
+      address: {
+        id: read.id,
+        scope: read.scope,
+        path: [],
+      },
+      before: undefined,
+      after: { value: 1 },
+      afterSeq: 13,
+    })).toBe(false);
+  });
+
+  it("uses shallow read overlap rules for current-enough sync skips", () => {
+    const triggerIndex = new SchedulerTriggerIndex();
+    const action: Action = () => {};
+    const read: IMemorySpaceAddress = {
+      space: "did:key:trigger-index-shallow-watermark",
+      scope: "space",
+      id: "of:cell",
+      path: ["value", "items"],
+    };
+    triggerIndex.addActionReads(action, [], [read], [{
+      ...read,
+      kind: "shallow",
+      seq: 13,
+    }]);
+
+    expect(triggerIndex.canSkipCurrentSyncForAction(action, read.space, {
+      address: {
+        id: read.id,
+        scope: read.scope,
+        path: ["value", "items", "1"],
+      },
+      before: { value: { items: [{ label: "one" }] } },
+      after: { value: { items: [{ label: "one" }, { label: "two" }] } },
+      afterSeq: 13,
+    })).toBe(true);
+    expect(triggerIndex.canSkipCurrentSyncForAction(action, read.space, {
+      address: {
+        id: read.id,
+        scope: read.scope,
+        path: ["value", "items", "0", "label"],
+      },
+      before: { value: { items: [{ label: "one" }] } },
+      after: { value: { items: [{ label: "updated" }] } },
+      afterSeq: 13,
+    })).toBe(false);
+  });
 });

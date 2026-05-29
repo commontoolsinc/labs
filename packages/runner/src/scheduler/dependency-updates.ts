@@ -55,6 +55,9 @@ export function setSchedulerDependencies(
     reads,
     shallowReads,
     writes,
+    ...(log.readWatermarks && log.readWatermarks.length > 0
+      ? { readWatermarks: log.readWatermarks }
+      : {}),
   };
   state.dependencies.set(action, schedulingLog);
 

@@ -234,6 +234,14 @@ describe("transaction inspection", () => {
           id,
           path: ["meta", "updatedAt"],
         }],
+        readWatermarks: [{
+          space,
+          scope: "space",
+          id,
+          path: ["source"],
+          kind: "recursive",
+          seq: 1,
+        }],
       };
 
       assertEquals(tx.getReactivityLog?.(), expected);

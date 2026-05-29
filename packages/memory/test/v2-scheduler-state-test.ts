@@ -65,6 +65,7 @@ const observation = {
   transactionKind: "action-run",
   reads: [sourceRead],
   shallowReads: [],
+  readWatermarks: [{ ...sourceRead, kind: "recursive", seq: 11 }],
   actualChangedWrites: [],
   currentKnownWrites: [targetWrite],
   declaredWrites: [],
@@ -242,6 +243,9 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
     });
     assertEquals(snapshot?.observedAtSeq, beforeHead);
     assertEquals(snapshot?.observation.observedAtSeq, beforeHead);
+    assertEquals(snapshot?.observation.readWatermarks, [
+      { ...sourceRead, kind: "recursive", seq: 11 },
+    ]);
 
     const replay = applyCommit(engine, {
       sessionId: "session:scheduler-observation",

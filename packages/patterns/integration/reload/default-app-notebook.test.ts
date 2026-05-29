@@ -74,6 +74,13 @@ describe("default-app notebook reload integration test", () => {
         state.showNewNotePrompt === false &&
         state.usedCreateAnotherNote === false;
     }, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitFor(async () => {
+      await waitForRuntimeIdle(page);
+      const state = await collectNotebookRenderState(page);
+      return state.isNotebook &&
+        state.noteCount === noteCreates &&
+        state.renderedNoteChips === noteCreates;
+    }, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
 
     await waitForRuntimeSynced(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
 
