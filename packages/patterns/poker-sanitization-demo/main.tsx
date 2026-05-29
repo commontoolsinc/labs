@@ -164,6 +164,16 @@ const HAND_ROW = {
   flexWrap: "wrap",
 };
 const NAME_COL = { minWidth: "90px", fontWeight: "700", fontSize: "15px" };
+const LABEL_BOX = {
+  fontSize: "11px",
+  maxHeight: "110px",
+  overflow: "auto",
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: "8px",
+  padding: "8px",
+  marginTop: "6px",
+};
 
 // Force high-contrast button colours so they read in both light and dark mode (CSS custom
 // properties inherit through cf-button's shadow DOM). Typed as Record so custom-prop keys are ok.
@@ -291,6 +301,79 @@ function pipelineArrow(label: string) {
       <div>{label}</div>
     </div>
   );
+}
+
+// Plain headline + muted CFC term + optional badge — teaches the term without leading with jargon.
+function dualHeading(plain: string, cfcTerm: string, badgeKind?: Badge) {
+  return (
+    <cf-hstack gap="2" style={{ alignItems: "baseline", flexWrap: "wrap" }}>
+      <cf-heading level={3}>{plain}</cf-heading>
+      <span style={{ fontSize: "12px", color: "#94a3b8", fontWeight: "500" }}>{cfcTerm}</span>
+      {badgeKind ? badge(badgeKind) : ""}
+    </cf-hstack>
+  );
+}
+
+const STEP_NUM = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "20px",
+  height: "20px",
+  borderRadius: "999px",
+  background: "#2563eb",
+  color: "#ffffff",
+  fontSize: "12px",
+  fontWeight: "700",
+  flexShrink: "0",
+};
+
+function tryThis() {
+  const step = (n: string, text: string) => (
+    <div style={{ display: "flex", gap: "8px", alignItems: "baseline" }}>
+      <span style={STEP_NUM}>{n}</span>
+      <span style={{ fontSize: "13px" }}>{text}</span>
+    </div>
+  );
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        background: "#f1f5f9",
+        borderRadius: "10px",
+        padding: "10px 12px",
+      }}
+    >
+      {step("1", "The hands below are hidden — the system itself refuses to show them.")}
+      {step("2", "Click “Showdown” to let the one trusted action reveal them.")}
+      {step("3", "Or release just the count — a summary the table can see, without the cards.")}
+    </div>
+  );
+}
+
+const BANNER_HIDDEN = {
+  borderRadius: "10px",
+  padding: "10px 14px",
+  fontWeight: "700",
+  background: "#fef3c7",
+  color: "#92400e",
+  border: "1px solid #fcd34d",
+};
+const BANNER_SHOWN = {
+  ...BANNER_HIDDEN,
+  background: "#dcfce7",
+  color: "#166534",
+  border: "1px solid #86efac",
+};
+
+// Per-row left border: amber while hidden, green once revealed (folded stays amber).
+function rowStyle(folded: boolean, shown: boolean) {
+  return {
+    ...HAND_ROW,
+    borderLeft: shown && !folded ? "4px solid #16a34a" : "4px solid #f59e0b",
+  };
 }
 
 function noteFor(folded: boolean, shown: boolean) {
@@ -472,6 +555,22 @@ export default pattern<unknown, PokerOutput>(() => {
   const bobNote = computed(() => noteFor(bobFolded.get(), revealed.get()));
   const charlieNote = computed(() => noteFor(charlieFolded.get(), revealed.get()));
 
+  const aliceRowStyle = computed(() => rowStyle(aliceFolded.get(), revealed.get()));
+  const bobRowStyle = computed(() => rowStyle(bobFolded.get(), revealed.get()));
+  const charlieRowStyle = computed(() => rowStyle(charlieFolded.get(), revealed.get()));
+
+  // Hero status banner + a click cue shown only while hidden.
+  const heroBanner = computed(() =>
+    revealed.get()
+      ? <div style={BANNER_SHOWN}>✅ Showdown! A trusted action just revealed the hands.</div>
+      : <div style={BANNER_HIDDEN}>🔒 The hands are SECRET. The system is refusing to show them.</div>
+  );
+  const clickCue = computed(() =>
+    revealed.get()
+      ? ""
+      : <div style={{ fontSize: "13px", color: "#2563eb", fontWeight: "600" }}>👇 Click “Showdown” to reveal the hands</div>
+  );
+
   // The two DYNAMIC boundaries are their own top-level computeds rendered as direct children
   // (the pattern that works for the hand rows) — not nested inside a bigger computed/stageBox.
   const aliceSecretCell = computed(() => {
@@ -489,11 +588,6 @@ export default pattern<unknown, PokerOutput>(() => {
   );
 
   const stepper = computed(() => phaseStepper(phase.get()));
-  const statusLine = computed(() =>
-    revealed.get()
-      ? "Showdown: hands declassified by the trusted reveal action."
-      : "Hands are confidential — the render boundary is blocking them."
-  );
   const boardDisplay = computed(() => {
     const b = (board.get() || []).filter((c) => c && c.rank);
     return b.length ? "" : "(no community cards yet — deal the flop)";
@@ -504,47 +598,66 @@ export default pattern<unknown, PokerOutput>(() => {
     [UI]: (
       <cf-screen title="Poker sanitization demo">
         <cf-vstack gap="3" style={OUTER_STYLE as never}>
-          {/* Intro */}
-          <cf-card>
-            <cf-vstack slot="content" gap="2">
-              <cf-heading level={2}>🃏 Confidential hands + a reducer that releases the count</cf-heading>
-              <cf-label>
-                CFC access is <b>binary</b> per value. Each hand is a <b>Confidential</b> cell that a{" "}
-                <b>cf-cfc-render-boundary</b> genuinely blocks. To let the table learn the{" "}
-                <i>count</i> without the cards, we don't add a "reveal level" — we run a{" "}
-                <b>reducer</b> (count = hand.length) into its <b>own</b> Confidential cell and{" "}
-                <b>relabel</b> that to the table. Each section is tagged by what CFC enforces.
-              </cf-label>
-              <cf-label>{statusLine}</cf-label>
-            </cf-vstack>
-          </cf-card>
+          {/* HERO — secret hands + the one trusted reveal (also the showdown trusted surface) */}
+          <cf-card
+            id="trusted-showdown-surface"
+            data-ui-surface={SHOWDOWN_SURFACE}
+            data-ui-pattern={SHOWDOWN_SURFACE}
+            data-ui-event-integrity={SHOWDOWN_SURFACE}
+          >
+            <cf-vstack slot="content" gap="3">
+              <cf-vstack gap="1">
+                <cf-heading level={2}>🃏 These poker hands are secret — the system itself won't show them</cf-heading>
+                <cf-label style={{ color: "#64748b" }}>
+                  The cards are hidden by the runtime, not a CSS trick: it refuses to render a value
+                  labelled secret (a <b>Confidential</b> cell behind a <b>CFC render boundary</b>).
+                  Only a trusted “Showdown” action can change that.
+                </cf-label>
+              </cf-vstack>
 
-          {/* ENFORCED: confidential hands behind render boundaries */}
-          <cf-card>
-            <cf-vstack slot="content" gap="2">
-              <cf-hstack gap="2" style={{ alignItems: "center" }}>
-                <cf-heading level={3}>🔒 Hands (CFC render boundary)</cf-heading>
-                {badge("ENFORCED")}
-              </cf-hstack>
-              <div style={HAND_ROW}>
+              {tryThis()}
+              {heroBanner}
+
+              <div style={aliceRowStyle}>
                 <div style={NAME_COL}>Alice</div>
                 {aliceCell}
                 {aliceNote}
               </div>
-              <div style={HAND_ROW}>
+              <div style={bobRowStyle}>
                 <div style={NAME_COL}>Bob</div>
                 {bobCell}
                 {bobNote}
               </div>
-              <div style={HAND_ROW}>
+              <div style={charlieRowStyle}>
                 <div style={NAME_COL}>Charlie</div>
                 {charlieCell}
                 {charlieNote}
               </div>
+
+              {clickCue}
+              <cf-hstack gap="2" style={{ alignItems: "center" }}>
+                <cf-button
+                  data-ui-action={SHOWDOWN_ACTION}
+                  onClick={reveal}
+                  color="primary"
+                  variant="solid"
+                  size="lg"
+                >
+                  🏆 Showdown — reveal the hands
+                </cf-button>
+                <cf-button onClick={conceal} color="neutral" variant="ghost" size="sm">
+                  Re-hide
+                </cf-button>
+                {badge("ENFORCED")}
+              </cf-hstack>
+              <cf-label style={{ fontSize: "12px", color: "#94a3b8" }}>
+                The reveal is the one <b>trusted action</b> (data-ui-action + TrustedActionWrite)
+                allowed to declassify the hands. Folded hands stay secret even at showdown.
+              </cf-label>
             </cf-vstack>
           </cf-card>
 
-          {/* REDUCER + RELABEL pipeline (a trusted surface) */}
+          {/* RELEASE A SUMMARY — reducer + relabel (count), the count trusted surface */}
           <cf-card
             id="trusted-count-surface"
             data-ui-surface={COUNT_SURFACE}
@@ -552,182 +665,137 @@ export default pattern<unknown, PokerOutput>(() => {
             data-ui-event-integrity={COUNT_SURFACE}
           >
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>🔢 Reducer + relabel: release the count to the table</cf-heading>
+              {dualHeading(
+                "🔢 Show how many cards someone holds — without showing the cards",
+                "reducer → its own Confidential cell → trusted relabel",
+              )}
               <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
-                "Bob sees the count, not the cards" is a reducer whose output is its own
-                binary-access cell, relabelled to the table by a trusted action — not a new label
-                level. Read left → right:
+                “The table sees you hold 2 cards, but not which 2” isn’t a half-secret. It’s a
+                brand-new, separate value (just the number) that a trusted step may publish — the
+                real cards stay locked.
               </cf-label>
               <div style={{ display: "flex", alignItems: "stretch", flexWrap: "wrap", gap: "4px" }}>
                 <div style={STAGE}>
-                  <div style={STAGE_TITLE}>Alice's secret hand</div>
+                  <div style={STAGE_TITLE}>1. Secret hand</div>
                   <div style={STAGE_BODY}>{aliceSecretCell}</div>
                   {badge("ENFORCED")}
                 </div>
-                {pipelineArrow("reducer count = hand.length")}
+                {pipelineArrow("reduce → count")}
                 {stageBox(
-                  "Reducer output",
-                  <span style={{ fontSize: "12px", color: "#64748b" }}>
-                    mints <code>ReducedBy&#123;count&#125;</code>; inherits the hand's label
+                  "2. Reducer output",
+                  <span style={{ fontSize: "11px", color: "#94a3b8" }}>
+                    just the number; <code>ReducedBy&#123;count&#125;</code>
                   </span>,
                   "SIMULATED",
                 )}
-                {pipelineArrow("relabel [Alice] → [table]")}
+                {pipelineArrow("trusted relabel → table")}
                 <div style={STAGE}>
-                  <div style={STAGE_TITLE}>Count cell (own atom)</div>
+                  <div style={STAGE_TITLE}>3. Count (own value)</div>
                   <div style={STAGE_BODY}>{countCellComputed}</div>
                   {badge("ENFORCED")}
                 </div>
               </div>
               <cf-label style={{ fontSize: "12px", color: "#64748b" }}>{countStatus}</cf-label>
               <cf-hstack gap="2">
-                <cf-button data-ui-action={COUNT_ACTION} onClick={releaseCount}>
-                  Release count to table (trusted relabel)
+                <cf-button
+                  data-ui-action={COUNT_ACTION}
+                  onClick={releaseCount}
+                  color="accent"
+                  variant="solid"
+                >
+                  Release the count to the table
                 </cf-button>
-                <cf-button onClick={hideCount}>Re-conceal count</cf-button>
+                <cf-button onClick={hideCount} color="neutral" variant="ghost" size="sm">
+                  Re-conceal
+                </cf-button>
               </cf-hstack>
-              <div
-                style={{
-                  fontSize: "11px",
-                  maxHeight: "90px",
-                  overflow: "auto",
-                  background: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "8px",
-                  padding: "8px",
-                }}
-              >
-                <cf-cfc-label data-cfc-label-surface="alice-count" $value={aliceCountConf} />
-              </div>
+              <details>
+                <summary style={{ cursor: "pointer", fontSize: "12px", color: "#64748b" }}>
+                  Inspect the count’s live CFC label
+                </summary>
+                <div style={LABEL_BOX}>
+                  <cf-cfc-label data-cfc-label-surface="alice-count" $value={aliceCountConf} />
+                </div>
+              </details>
             </cf-vstack>
           </cf-card>
 
-          {/* Live label on a hand */}
+          {/* PLAY THE HAND — community cards + dealer controls */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>🏷️ Live CFC label on a hand</cf-heading>
-              <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
-                The actual <code>ifc.confidentiality</code> the runtime attached to Alice's hand —
-                what the render boundary reads to decide whether to show it.
-              </cf-label>
-              <div
-                style={{
-                  fontSize: "11px",
-                  maxHeight: "100px",
-                  overflow: "auto",
-                  background: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "8px",
-                  padding: "8px",
-                }}
-              >
-                <cf-cfc-label data-cfc-label-surface="alice" $value={aliceConf} />
-              </div>
-            </cf-vstack>
-          </cf-card>
-
-          {/* Public table */}
-          <cf-card>
-            <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>🟢 Community cards (public — no label)</cf-heading>
+              {dualHeading("🃏 Play the hand", "community cards are public; hole cards stay confidential")}
               {stepper}
               <div style={ROW}>
                 {board.map(cardChip)}
                 <span style={{ color: "#64748b", fontSize: "13px" }}>{boardDisplay}</span>
               </div>
-            </cf-vstack>
-          </cf-card>
-
-          {/* Controls */}
-          <cf-card>
-            <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>Dealer controls</cf-heading>
               <cf-hstack gap="2">
-                <cf-button onClick={start}>🆕 New game (re-deal + conceal)</cf-button>
-                <cf-button onClick={flop}>Flop</cf-button>
-                <cf-button onClick={turn}>Turn</cf-button>
-                <cf-button onClick={river}>River</cf-button>
+                <cf-button onClick={start} color="neutral" variant="outline">🆕 New game</cf-button>
+                <cf-button onClick={flop} color="neutral" variant="outline">Flop</cf-button>
+                <cf-button onClick={turn} color="neutral" variant="outline">Turn</cf-button>
+                <cf-button onClick={river} color="neutral" variant="outline">River</cf-button>
               </cf-hstack>
-              <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
-                Folding keeps a hand confidential through the showdown.
+              <cf-label style={{ fontSize: "12px", color: "#94a3b8" }}>
+                Folding mucks a hand — it stays secret even at showdown.
               </cf-label>
               <cf-hstack gap="2">
-                <cf-button onClick={foldAlice}>Alice folds</cf-button>
-                <cf-button onClick={foldBob}>Bob folds</cf-button>
-                <cf-button onClick={foldCharlie}>Charlie folds</cf-button>
+                <cf-button onClick={foldAlice} color="neutral" variant="ghost" size="sm">Alice folds</cf-button>
+                <cf-button onClick={foldBob} color="neutral" variant="ghost" size="sm">Bob folds</cf-button>
+                <cf-button onClick={foldCharlie} color="neutral" variant="ghost" size="sm">Charlie folds</cf-button>
               </cf-hstack>
             </cf-vstack>
           </cf-card>
 
-          {/* Trusted showdown surface — the identity-reducer relabel */}
-          <cf-card
-            id="trusted-showdown-surface"
-            data-ui-surface={SHOWDOWN_SURFACE}
-            data-ui-pattern={SHOWDOWN_SURFACE}
-            data-ui-event-integrity={SHOWDOWN_SURFACE}
-          >
-            <cf-vstack slot="content" gap="2">
-              <cf-hstack gap="2" style={{ alignItems: "center" }}>
-                <cf-heading level={3}>🏆 Trusted Showdown</cf-heading>
-                {badge("ENFORCED")}
-              </cf-hstack>
-              <cf-label>
-                The "identity reducer" relabel: a <b>trusted action</b> (data-ui-action +
-                TrustedActionWrite) is the only thing that declassifies the full hands. Folded
-                hands stay confidential.
-              </cf-label>
-              <cf-hstack gap="2">
-                <cf-button data-ui-action={SHOWDOWN_ACTION} onClick={reveal}>
-                  Reveal hands (showdown)
-                </cf-button>
-                <cf-button onClick={conceal}>Re-conceal</cf-button>
-              </cf-hstack>
-            </cf-vstack>
-          </cf-card>
-
-          {/* The materialization gap */}
+          {/* UNDER THE HOOD (collapsed) */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-hstack gap="2" style={{ alignItems: "center" }}>
-                <cf-heading level={3}>🧭 The materialization gap</cf-heading>
-                {badge("SIMULATED")}
-              </cf-hstack>
-              <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
-                Reducers + relabels give the right labels. The piece CFC does <b>not</b> have is a
-                per-recipient <b>materialization</b> layer that runs the right reducer for each
-                reader and routes them only their projection:
-              </cf-label>
-              <div
-                style={{
-                  border: "1px dashed #fdba74",
-                  borderRadius: "10px",
-                  padding: "10px",
-                  background: "#fffbeb",
-                  fontSize: "13px",
-                }}
-              >
-                <div>reader <b>Alice</b> &nbsp;→&nbsp; her cards (satisfies <code>HoleCards(Alice)</code>)</div>
-                <div>reader <b>Bob</b> &nbsp;&nbsp;&nbsp;→&nbsp; the count (satisfies <code>[table]</code>)</div>
-                <div style={{ marginTop: "6px", color: "#9a3412" }}>
-                  This routing is simulated: the demo runs in one trusted host and shows both
-                  projections on one screen; it does not serve different bytes to different readers.
-                </div>
-              </div>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: "600", fontSize: "15px" }}>
+                  🏷️ Under the hood: the real CFC label & badge key
+                </summary>
+                <cf-vstack gap="2" style={{ marginTop: "8px" }}>
+                  <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
+                    The actual <code>ifc.confidentiality</code> the runtime attached to Alice’s hand
+                    — exactly what the render boundary reads to decide whether to show it.
+                  </cf-label>
+                  <div style={LABEL_BOX}>
+                    <cf-cfc-label data-cfc-label-surface="alice" $value={aliceConf} />
+                  </div>
+                  <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
+                    {badge("ENFORCED")} = real, runtime-enforced CFC. {badge("SIMULATED")} = the
+                    concept is real but no runtime primitive exists yet (we drive it from a trusted
+                    action instead).
+                  </cf-label>
+                </cf-vstack>
+              </details>
             </cf-vstack>
           </cf-card>
 
-          {/* Honest limitation + out of scope */}
+          {/* HONEST LIMITS (collapsed) */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-heading level={3}>⚠️ Scope & honest limitations</cf-heading>
-              <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
-                The render boundary hides labelled content in a <b>trusted host</b>; it does not
-                encrypt the cell, so real secrecy between mutually-distrusting players needs the
-                per-recipient materialization above. Two properties are <b>out of scope</b> for CFC
-                today: {badge("OUT OF SCOPE")} <b>recombination</b> (publishing several reducers of
-                one secret can leak more than any one — §14.3.2) and <b>unlinkability</b> (a shuffle
-                where you can't trace a card — a relational property CFC's lattice doesn't model).
-              </cf-label>
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: "600", fontSize: "15px" }}>
+                  ⚠️ What this demo fakes, and what’s out of scope
+                </summary>
+                <cf-vstack gap="2" style={{ marginTop: "8px" }}>
+                  <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
+                    {badge("SIMULATED")} <b>Per-reader routing.</b> CFC has the labels but no layer
+                    that serves each reader only their projection. Simulated here — one screen shows
+                    both:
+                  </cf-label>
+                  <div style={{ border: "1px dashed #fdba74", borderRadius: "10px", padding: "10px", background: "#fffbeb", fontSize: "13px" }}>
+                    <div>reader <b>Alice</b> → her cards</div>
+                    <div>reader <b>Bob</b> → only the count</div>
+                  </div>
+                  <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
+                    {badge("OUT OF SCOPE")} <b>Recombination</b> (many summaries of one secret can
+                    leak more than any one — §14.3.2) and <b>unlinkability</b> (a shuffle you can’t
+                    trace) — relational properties CFC’s lattice doesn’t model. Also: the render
+                    boundary hides content in a trusted host; it doesn’t encrypt the cell.
+                  </cf-label>
+                </cf-vstack>
+              </details>
             </cf-vstack>
           </cf-card>
         </cf-vstack>
