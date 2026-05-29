@@ -176,8 +176,7 @@ const LABEL_BOX = {
   color: "#334155",
 };
 
-// Force high-contrast button colours so they read in both light and dark mode (CSS custom
-// properties inherit through cf-button's shadow DOM). Typed as Record so custom-prop keys are ok.
+// Typed as Record so it satisfies the style prop via `as never` at the use site.
 const OUTER_STYLE: Record<string, string> = {
   padding: "1rem",
   maxWidth: "920px",
