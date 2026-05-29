@@ -30,7 +30,7 @@ describe("FabricEpochNsec", () => {
 
   describe("instance members", () => {
     describe(".value", () => {
-      it("wraps a bigint value", () => {
+      it("wraps a `bigint` value", () => {
         const sn = new FabricEpochNsec(1234567890000000000n);
         expect(sn.value).toBe(1234567890000000000n);
       });
@@ -56,7 +56,7 @@ describe("FabricEpochNsec", () => {
   // Exercises the free `shallowFabricFromNativeValue()` rather than a member
   // of the class, so it lives directly under the class `describe()`.
   describe("shallowFabricFromNativeValue() integration", () => {
-    it("passes through unchanged even with freeze=false", () => {
+    it("passes through unchanged even with `freeze=false`", () => {
       setDataModelConfig(true);
       try {
         const nsec = new FabricEpochNsec(123n);
