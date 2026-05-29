@@ -22,7 +22,6 @@ import {
   type SharedMessagesValue,
   type SharedProfilesValue,
   type SharedRoomsValue,
-  TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
 } from "./trusted.tsx";
 import { GroupChatDemo } from "./main.tsx";
 
@@ -45,7 +44,6 @@ export default pattern(() => {
     {} as ChatAdminRegistryValue,
   );
   const profileDraft = Writable.of("");
-  const adminDraft = Writable.of(true);
   const messageDraft = Writable.of("");
   const hostMessageDraft = Writable.of("");
   const roomDraft = Writable.of("");
@@ -56,7 +54,6 @@ export default pattern(() => {
     rooms,
     adminRegistry,
     profileDraft,
-    adminDraft,
     messageDraft,
     hostMessageDraft,
     roomDraft,
@@ -65,7 +62,6 @@ export default pattern(() => {
     {} as Default<EmptyMyProfileValue>,
   );
   const bobProfileDraft = Writable.of("");
-  const bobAdminDraft = Writable.of(true);
   const bobMessageDraft = Writable.of("");
   const bobHostMessageDraft = Writable.of("");
   const bobRoomDraft = Writable.of("");
@@ -76,7 +72,6 @@ export default pattern(() => {
     rooms,
     adminRegistry,
     profileDraft: bobProfileDraft,
-    adminDraft: bobAdminDraft,
     messageDraft: bobMessageDraft,
     hostMessageDraft: bobHostMessageDraft,
     roomDraft: bobRoomDraft,
@@ -97,16 +92,34 @@ export default pattern(() => {
   const action_set_room_ops = action(() => {
     chat.setRoomDraft.send("Ops");
   });
-  const action_try_add_room_without_admin = action(() => {
-    chat.addTrustedRoom.send();
-  });
-  const action_enable_admin_draft = action(() => {
-    chat.setAdminDraft.send(true);
-  });
-  const action_toggle_alice_admin = action(() => {
-    chat.toggleCurrentUserAdmin.send();
+  const action_set_room_bob = action(() => {
+    bobChat.setRoomDraft.send("Bob room");
   });
   const action_add_room = action(() => {
+    chat.addTrustedRoom.send();
+  });
+  const action_bob_try_add_room = action(() => {
+    bobChat.addTrustedRoom.send();
+  });
+  const action_disable_everyone_admin = action(() => {
+    chat.toggleEveryoneAdmin.send({
+      type: "click",
+      target: { name: "", value: "on" },
+    });
+  });
+  const action_toggle_bob_admin = action(() => {
+    chat.toggleParticipantAdmin.send({ name: "Bob" });
+  });
+  const action_try_remove_last_admin = action(() => {
+    chat.toggleCurrentUserAdmin.send({});
+  });
+  const action_bob_add_room = action(() => {
+    bobChat.addTrustedRoom.send();
+  });
+  const action_set_room_ops_again = action(() => {
+    chat.setRoomDraft.send("Ops 2");
+  });
+  const action_alice_add_second_room = action(() => {
     chat.addTrustedRoom.send();
   });
   const action_set_message_alice = action(() => {
@@ -158,58 +171,69 @@ export default pattern(() => {
     (myProfile.get() as MyProfileValue | undefined)?.profile === undefined &&
     (messages.get()?.length ?? 0) === 0
   );
-  const assert_admin_view_initially_locked = computed(() => {
+  const assert_admin_view_waits_for_profile = computed(() => {
     const managerChip = findNodeById(chat[UI], "group-chat-manager-chip");
     const panelStatus = findNodeById(
       chat[UI],
       "trusted-admin-manager-panel-status",
     );
-    return propValue(managerChip, "label") === "Manager off" &&
+    return propValue(managerChip, "label") === "No profile" &&
       propValue(panelStatus, "label") ===
-        "Save profile with admin-manager enabled to edit";
+        "Save a profile to manage admins";
   });
   const assert_profile_created = computed(() =>
     chat.currentProfileName === "Alice"
   );
-  const assert_profile_starts_non_admin = computed(() =>
-    chat.currentUserIsAdmin !== true
-  );
-  const assert_profile_can_manage_admins = computed(() =>
-    chat.currentUserCanManageAdmins === true
+  const assert_profile_bootstraps_admin = computed(() =>
+    chat.currentUserIsAdmin === true &&
+    chat.currentUserCanManageAdmins === true &&
+    chatAdminRolesValue(adminRegistry).length === 0
   );
   const assert_alice_sees_bob_without_bob_message = computed(() => {
     const participants = participantClaimsValue(profiles, myProfile, messages);
     return participants.some((participant) => participant.name === "Alice") &&
       participants.some((participant) => participant.name === "Bob");
   });
-  const assert_admin_view_manager_enabled = computed(() => {
+  const assert_admin_view_everyone_enabled = computed(() => {
     const toggleButton = findNodeByProp(
       chat[UI],
-      "data-ui-action",
-      TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+      "data-ui-control",
+      "admin-user-toggle",
+    );
+    const everyoneCheckbox = findNodeById(
+      chat[UI],
+      "trusted-everyone-admin-checkbox",
     );
     const managerChip = findNodeById(chat[UI], "group-chat-manager-chip");
     const panelStatus = findNodeById(
       chat[UI],
       "trusted-admin-manager-panel-status",
     );
-    return propValue(managerChip, "label") === "Can manage admins" &&
-      propValue(panelStatus, "label") === "Admin registry editing enabled" &&
-      propValue(toggleButton, "disabled") === false &&
-      nodeIncludesText(toggleButton, "Make admin");
+    return propValue(managerChip, "label") === "Everyone is admin" &&
+      propValue(panelStatus, "label") === "Everyone can add rooms" &&
+      propValue(everyoneCheckbox, "checked") === true &&
+      propValue(everyoneCheckbox, "disabled") === false &&
+      propValue(toggleButton, "disabled") === true &&
+      nodeIncludesText(toggleButton, "Admin via everyone");
   });
-  const assert_non_admin_cannot_add_room = computed(() =>
-    roomsValue(rooms).length === 0
-  );
-  const assert_admin_enabled = computed(() =>
+  const assert_bootstrap_admin_can_add_room = computed(() => {
+    const roomList = roomsValue(rooms);
+    return roomList.length === 1 &&
+      roomList[0]?.name === "Ops" &&
+      roomDraft.get() === "";
+  });
+  const assert_everyone_disabled_seeds_alice = computed(() =>
     chat.currentUserIsAdmin === true &&
-    chatAdminRolesValue(adminRegistry).length === 1
+    bobChat.currentUserIsAdmin !== true &&
+    chatAdminRolesValue(adminRegistry).length === 1 &&
+    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+      false
   );
-  const assert_admin_view_current_user_admin = computed(() => {
+  const assert_admin_view_explicit_alice = computed(() => {
     const toggleButton = findNodeByProp(
       chat[UI],
-      "data-ui-action",
-      TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+      "data-ui-control",
+      "admin-user-toggle",
     );
     return propValue(toggleButton, "disabled") === false &&
       nodeIncludesText(toggleButton, "Remove admin") &&
@@ -218,10 +242,38 @@ export default pattern(() => {
         "Admin",
       );
   });
-  const assert_admin_can_add_room = computed(() => {
+  const assert_admin_view_lists_bob_after_lockdown = computed(() => {
+    const userList = findNodeById(chat[UI], "trusted-admin-user-list");
+    return nodeIncludesText(userList, "Bob") &&
+      nodeIncludesText(userList, "Make admin");
+  });
+  const assert_last_admin_removal_blocked = computed(() =>
+    chat.currentUserIsAdmin === true &&
+    bobChat.currentUserIsAdmin !== true &&
+    chatAdminRolesValue(adminRegistry).length === 1 &&
+    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+      false
+  );
+  const assert_bob_cannot_add_room_after_lockdown = computed(() =>
+    roomsValue(rooms).length === 1
+  );
+  const assert_bob_admin_enabled = computed(() =>
+    bobChat.currentUserIsAdmin === true &&
+    bobChat.currentUserCanManageAdmins === true &&
+    chatAdminRolesValue(adminRegistry).length === 2 &&
+    (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
+      false
+  );
+  const assert_bob_can_add_room = computed(() => {
     const roomList = roomsValue(rooms);
-    return roomList.length === 1 &&
-      roomList[0]?.name === "Ops" &&
+    return roomList.length === 2 &&
+      roomList[1]?.name === "Bob room" &&
+      bobRoomDraft.get() === "";
+  });
+  const assert_alice_can_still_add_room = computed(() => {
+    const roomList = roomsValue(rooms);
+    return roomList.length === 3 &&
+      roomList[2]?.name === "Ops 2" &&
       roomDraft.get() === "";
   });
   const assert_message_sent_and_draft_cleared = computed(() =>
@@ -285,27 +337,34 @@ export default pattern(() => {
   return {
     tests: [
       { assertion: assert_initially_empty },
-      { assertion: assert_admin_view_initially_locked },
+      { assertion: assert_admin_view_waits_for_profile },
       { action: action_set_profile_alice },
       { action: action_save_profile },
       { assertion: assert_profile_created },
-      { assertion: assert_profile_starts_non_admin },
-      { assertion: assert_profile_can_manage_admins },
+      { assertion: assert_profile_bootstraps_admin },
       { action: action_set_profile_bob },
       { action: action_save_profile_bob },
       { assertion: assert_alice_sees_bob_without_bob_message },
-      { assertion: assert_admin_view_manager_enabled },
+      { assertion: assert_admin_view_everyone_enabled },
       { action: action_set_room_ops },
-      { action: action_try_add_room_without_admin },
-      { assertion: assert_non_admin_cannot_add_room },
-      { action: action_enable_admin_draft },
-      { action: action_save_profile },
-      { assertion: assert_profile_can_manage_admins },
-      { action: action_toggle_alice_admin },
-      { assertion: assert_admin_enabled },
-      { assertion: assert_admin_view_current_user_admin },
       { action: action_add_room },
-      { assertion: assert_admin_can_add_room },
+      { assertion: assert_bootstrap_admin_can_add_room },
+      { action: action_disable_everyone_admin },
+      { assertion: assert_everyone_disabled_seeds_alice },
+      { assertion: assert_admin_view_explicit_alice },
+      { assertion: assert_admin_view_lists_bob_after_lockdown },
+      { action: action_try_remove_last_admin },
+      { assertion: assert_last_admin_removal_blocked },
+      { action: action_set_room_bob },
+      { action: action_bob_try_add_room },
+      { assertion: assert_bob_cannot_add_room_after_lockdown },
+      { action: action_toggle_bob_admin },
+      { assertion: assert_bob_admin_enabled },
+      { action: action_bob_add_room },
+      { assertion: assert_bob_can_add_room },
+      { action: action_set_room_ops_again },
+      { action: action_alice_add_second_room },
+      { assertion: assert_alice_can_still_add_room },
       { action: action_set_message_alice },
       { action: action_send_message },
       { assertion: assert_message_sent_and_draft_cleared },

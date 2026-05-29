@@ -51,6 +51,7 @@ import {
   type AdminManagerCredential,
   adminManagerCredentialIsActive,
   adminRegistryEntries,
+  adminRegistryEveryoneIsAdmin,
 } from "../cfc/admin/mod.ts";
 import {
   type AddIntegrity,
@@ -81,11 +82,15 @@ type ProjectAdminManagerCredential = AdminManagerCredential<
 >;
 
 const admins = adminRegistryEntries<ProjectAdminRole>(adminRegistry);
+const everyoneIsAdmin = adminRegistryEveryoneIsAdmin(adminRegistry);
 const canEditAdmins = adminManagerCredentialIsActive(managerCredential.get());
 ```
 
 Keep subject lookup and local role toggling in the pattern when the domain model
 is local, such as people, profiles, rooms, or projects.
+`adminRegistryEveryoneIsAdmin` treats an empty admin list as bootstrap mode:
+everyone is an admin until the pattern writes at least one explicit admin role
+or explicitly stores `everyoneIsAdmin: false`.
 
 ## Use Prompt-Injection Helpers
 
