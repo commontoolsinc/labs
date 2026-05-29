@@ -2319,6 +2319,62 @@ describe("wish built-in", () => {
         .toBe("Ada Lovelace");
     });
 
+    it("resolves profile targets from writeonly profile value wrappers", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-writeonly-wrapper-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-writeonly-wrapper-default",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Grace Hopper",
+        initialNameApplied: "Grace Hopper",
+        avatar: "grace.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-writeonly-wrapper",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profile").set({ value: profileDefaultCell });
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+        profileName: wish({ query: "#profileName" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-writeonly-wrapper-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Grace Hopper");
+      expect(result.key("profileName").get()?.result).toBe("Grace Hopper");
+    });
+
     it("#profileDefault is not a well-known profile target", async () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-profile-default-removed-space",

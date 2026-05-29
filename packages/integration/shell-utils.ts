@@ -69,6 +69,29 @@ export async function login(page: Page, identity: Identity): Promise<void> {
         });
       }
       await globalThis.app.setIdentity(rawId);
+      await new Promise<void>((resolve, reject) => {
+        const startedAt = performance.now();
+        const check = async () => {
+          try {
+            const rt = globalThis.commonfabric?.rt;
+            const home = await rt?.getHomeSpaceCell?.();
+            const ref = home?.ref?.();
+            if (ref?.space === nextDID) {
+              await rt?.idle?.();
+              resolve();
+              return;
+            }
+          } catch {
+            // Runtime is still initializing; retry until the deadline.
+          }
+          if (performance.now() - startedAt > 30_000) {
+            reject(new Error("Timed out waiting for runtime login"));
+            return;
+          }
+          setTimeout(check, 50);
+        };
+        void check();
+      });
     },
     {
       args: [transferrableId, identity.did()],

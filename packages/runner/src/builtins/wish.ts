@@ -30,6 +30,7 @@ import {
 import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { isRecord } from "@commonfabric/utils/types";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
@@ -270,7 +271,9 @@ function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
     "profile",
   );
   const profileRaw = profileField.getRaw();
-  const profileDefault = profileField.resolveAsCell();
+  const profileDefault = isRecord(profileRaw) && "value" in profileRaw
+    ? profileField.key("value").resolveAsCell()
+    : profileField.resolveAsCell();
   const profileLink = profileDefault.getAsNormalizedFullLink();
   if (
     profileRaw === undefined ||
@@ -1406,6 +1409,18 @@ export function wish(
     }
     profileCreatePatternReadyCell.get();
 
+    const profileCreateInputForTx = (tx: IExtendedStorageTransaction) => {
+      const bindInputCell = (cell: unknown) =>
+        cell && typeof (cell as { withTx?: unknown }).withTx === "function"
+          ? (cell as Cell<unknown>).withTx(tx)
+          : cell;
+      return profileCreatePatternInput && {
+        ...profileCreatePatternInput,
+        profile: bindInputCell(profileCreatePatternInput.profile),
+        profileName: bindInputCell(profileCreatePatternInput.profileName),
+      };
+    };
+
     if (!profileCreatePattern) {
       if (!profileCreatePatternFetchPromise) {
         profileCreatePatternFetchPromise = fetchProfileCreatePattern(runtime)
@@ -1428,20 +1443,10 @@ export function wish(
           try {
             const runTx = runtime.edit();
             const resultCell = profileCreatePatternResultCell.withTx(runTx);
-            const input = profileCreatePatternInput && {
-              ...profileCreatePatternInput,
-              profile: typeof (profileCreatePatternInput.profile as {
-                  withTx?: unknown;
-                }).withTx === "function"
-                ? (profileCreatePatternInput.profile as Cell<unknown>).withTx(
-                  runTx,
-                )
-                : profileCreatePatternInput.profile,
-            };
             runtime.run(
               runTx,
               pattern,
-              input,
+              profileCreateInputForTx(runTx),
               resultCell,
             );
             runtime.prepareTxForCommit(runTx);
@@ -1480,8 +1485,8 @@ export function wish(
       runtime.run(
         tx,
         profileCreatePattern,
-        profileCreatePatternInput,
-        profileCreatePatternResultCell,
+        profileCreateInputForTx(tx),
+        profileCreatePatternResultCell.withTx(tx),
       );
     }
 

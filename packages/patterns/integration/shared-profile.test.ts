@@ -75,8 +75,8 @@ describe("shared profile integration test", () => {
     await waitForText(page, "#shared-profile-name", "Ada Lovelace");
     await waitForSelector(page, "#shared-profile-wish-ui cf-cell-link");
 
-    await shell.login(secondIdentity);
-    await shell.waitForState({
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
       identity: secondIdentity,
       view: { spaceDid: sharedSpaceDid as `did:${string}:${string}`, pieceId },
     });
@@ -274,6 +274,15 @@ async function readProfileCreateProbe(page: Page) {
               error instanceof Error ? error.message : String(error),
             ),
         }));
+        const profileValue = profile?.key?.("value");
+        const resolvedProfileValue = await profileValue?.resolveAsCell?.()
+          .catch((error: unknown) => ({
+            ref: () => undefined,
+            sync: () =>
+              Promise.resolve(
+                error instanceof Error ? error.message : String(error),
+              ),
+          }));
         return {
           defaultPattern: defaultPattern?.ref?.(),
           profile: await profile?.sync?.(),
@@ -281,6 +290,11 @@ async function readProfileCreateProbe(page: Page) {
           resolvedProfile: {
             ref: resolvedProfile?.ref?.(),
             value: await resolvedProfile?.sync?.(),
+          },
+          profileValue: await profileValue?.sync?.(),
+          resolvedProfileValue: {
+            ref: resolvedProfileValue?.ref?.(),
+            value: await resolvedProfileValue?.sync?.(),
           },
         };
       } catch (error) {

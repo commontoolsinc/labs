@@ -702,3 +702,50 @@ made before committing.
 
 - Specs that mention the profile default pattern by exported `[NAME]` should use
   `Profile`; `ProfileHome` is only the source/module concept.
+
+## Slice 18: Cached Wish Profile Create Inputs
+
+### Ambiguity or Incorrect Spec
+
+- The wish-created profile UI has two execution paths: the first render waits
+  for `profile-create.tsx` to load, while later renders reuse the cached pattern.
+  The spec did not call out that both paths must bind writable home cells to the
+  transaction used to run the trusted create surface.
+- The second-identity browser flow exposed the difference: the first user's
+  profile link was rewritten into the named profile DID, but the cached path
+  wrote the second user's home profile link as a same-home-space opaque cell.
+
+### Decision
+
+- Build the profile-create pattern input through one helper that rebinds both
+  `profile` and `profileName` with `withTx(tx)` whenever the trusted pattern is
+  run.
+- Resolve `#profile` through `home.defaultPattern.profile.value` when the
+  profile field is represented as a writeonly cell wrapper. The home pattern can
+  still expose `profile` as a writable cell while wishes dereference the actual
+  profile default stored inside the wrapper.
+- The browser login helper now waits for the replacement runtime's home-space
+  cell to match the requested identity before tests continue.
+- Keep the integration assertion strict: after creation, the wish UI must render
+  a profile link, not only the projected `profileName`.
+
+### Tests Added
+
+- `packages/runner/test/pattern-scope.test.ts`
+  - Extends the named `.inSpace()` handler side-effect regression to assert the
+    stored link resolves to the derived DID, not merely that the annotation was
+    replaced in memory.
+- `packages/runner/test/wish.test.ts`
+  - Verifies profile wishes follow writeonly profile value wrappers.
+- `packages/patterns/integration/shared-profile.test.ts`
+  - The existing headless two-identity flow is the red/green regression for the
+    cached profile-create path.
+
+### Spec Correction Needed
+
+- The spec should mention that trusted profile-create surfaces may be cached,
+  but every run still needs fresh transaction-bound home profile cells for the
+  current identity/runtime.
+- The spec should call out the home profile storage shape: the public well-known
+  field is `profile`, but writeonly bindings can persist the actual profile
+  default link under `profile.value`.

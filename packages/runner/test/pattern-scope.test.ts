@@ -722,8 +722,111 @@ Deno.test("pattern factory .inSpace() replaces named annotations with resolved D
     await runtime.idle();
     await runtime.storageManager.synced();
     await result.pull();
+    await target.pull();
 
     assertEquals(getCellInSpaceAnnotation(capturedChild), expectedSpace);
+    const childLink = parseLink(
+      (target.getRaw() as { value?: unknown }).value,
+      target,
+    );
+    assertEquals(childLink?.space, expectedSpace);
+    assertEquals(
+      await target.key("value", "value").pull(),
+      "annotated child" as any,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern factory .inSpace() rewrites named child links through writeonly bindings", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+  const spaceName = `pattern-factory-in-space-writeonly-${crypto.randomUUID()}`;
+  const expectedSpace = (await createSession({
+    identity: signer,
+    spaceName,
+  })).space;
+
+  try {
+    const { handler, pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const childSchema = {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    } as const;
+    const Child = pattern<{ value: string }>(({ value }) => ({ value }));
+    const createChild = handler<
+      { value: string },
+      { target: Cell<unknown> }
+    >({
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    }, {
+      type: "object",
+      properties: {
+        target: { ...childSchema, asCell: ["writeonly"] },
+      },
+      required: ["target"],
+    }, ({ value }, { target }) => {
+      target.set(Child.inSpace(spaceName)({ value }));
+    });
+    const Root = pattern<{ target: Cell<unknown> }>(
+      ({ target }) => ({
+        target,
+        createChild: createChild({ target }),
+      }),
+      {
+        type: "object",
+        properties: {
+          target: { ...childSchema, asCell: ["cell"] },
+        },
+        required: ["target"],
+      } as const,
+    );
+
+    const target = runtime.getCell(
+      signer.did(),
+      "pattern factory handler inSpace writeonly target",
+      undefined,
+      tx,
+    );
+    const resultCell = runtime.getCell(
+      space,
+      "pattern factory handler inSpace writeonly result",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { target }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    result.key("createChild").send({ value: "writeonly child" });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+    await target.pull();
+
+    const childLink = parseLink(
+      (target.getRaw() as { value?: unknown }).value,
+      target,
+    );
+    assertEquals(childLink?.space, expectedSpace);
+    assertEquals(
+      await target.key("value", "value").pull(),
+      "writeonly child" as any,
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
