@@ -493,7 +493,7 @@ describe("native-instance-utils", () => {
     const frozenCtx = new DummyReconstructionContext(true);
     const mutableCtx = new DummyReconstructionContext(false);
 
-    it("`FabricError`: `shouldDeepFreeze` `true` => deep-frozen, `false` => mutable", () => {
+    it("`FabricError`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {
         type: "Error",
         name: null,
@@ -505,7 +505,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("`FabricRegExp`: `shouldDeepFreeze` `true` => deep-frozen, `false` => mutable", () => {
+    it("`FabricRegExp`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {
         source: "abc",
         flags: "g",
@@ -518,7 +518,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("`ProblematicValue`: `shouldDeepFreeze` `true` => deep-frozen, `false` => mutable", () => {
+    it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {
         type: "Bad@1",
         state: { x: 1 },
@@ -530,7 +530,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("`UnknownValue`: `shouldDeepFreeze` `true` => deep-frozen, `false` => mutable", () => {
+    it("`UnknownValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = { type: "Fancy@3", state: { y: 2 } } as unknown as {
         type: string;
         state: FabricValue;

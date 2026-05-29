@@ -179,7 +179,7 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(fr.regex)).toBe(true);
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` `true` only when wrapper + `RegExp` frozen", () => {
+      it("via dispatch: `[IS_DEEP_FROZEN]` is `true` only when wrapper + `RegExp` frozen", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(isDeepFrozenFabricValue(fr)).toBe(false);
         deepFreeze(fr);
@@ -195,7 +195,7 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(fr.regex)).toBe(true);
       });
 
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` `true` only when wrapper + `RegExp` frozen", () => {
+      it("via direct member invocation: `[IS_DEEP_FROZEN]` is `true` only when wrapper + `RegExp` frozen", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fr[DEEP_FREEZE](subFreeze);
@@ -215,7 +215,7 @@ describe("FabricRegExp", () => {
         expect(result.flavor).toBe("es2025");
       });
 
-      it("defaults to empty `source`, `flags`, and `es2025` `flavor`", () => {
+      it("defaults to empty `source`, `flags`, and `es2025` flavor", () => {
         const state = {} as FabricValue;
         const result = FabricRegExp[RECONSTRUCT](state, dummyContext);
         expect(result.regex.source).toBe("(?:)");

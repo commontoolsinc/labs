@@ -244,7 +244,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(childObj)).toBe(true);
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` `true` only when wrapper + cause are frozen", () => {
+      it("via dispatch: `[IS_DEEP_FROZEN]` is `true` only when wrapper + cause are frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(isDeepFrozenFabricValue(fe)).toBe(false);
         Object.freeze(fe); // wrapper only; some descendants still mutable
@@ -276,7 +276,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(childObj)).toBe(true);
       });
 
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` `true` only when wrapper is frozen", () => {
+      it("via direct member invocation: `[IS_DEEP_FROZEN]` is `true` only when wrapper is frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fe[DEEP_FREEZE](subFreeze);
