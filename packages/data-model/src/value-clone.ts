@@ -101,18 +101,6 @@ export function cloneIfNecessary<T extends FabricValue>(
 }
 
 /**
- * Shallow-thaws a `FabricValue` to a fresh mutable top-level copy: the
- * top-level container is always copied, while its children stay
- * identity-shared with the input. Equivalent to
- * `cloneIfNecessary(value, { frozen: false, deep: false, force: true })`.
- *
- * @param value - An already-valid `FabricValue`.
- */
-export function shallowMutableClone<T extends FabricValue>(value: T): T {
-  return cloneIfNecessary(value, { frozen: false, deep: false, force: true });
-}
-
-/**
  * Returns a fresh **mutable top-level** copy of a `FabricValue` whose every
  * bound child is guaranteed **deep-frozen**. This is the shape wanted by the
  * "mutate the top, then deep-freeze the whole" pattern: a caller can freely
@@ -125,18 +113,16 @@ export function shallowMutableClone<T extends FabricValue>(value: T): T {
  * mutable children are deep-cloned-and-frozen. The input is never mutated:
  * mutable children are cloned, not frozen in place.
  *
- * This differs from `shallowMutableClone()`, which leaves children
- * identity-shared with the input exactly as they are (mutable stays mutable).
- * Use that one when you need to preserve child identity / structural sharing
- * (e.g. persistent-structure updates); use this one when you intend to seal the
- * result with a single deep-freeze.
- *
  * Inherently-immutable inputs (primitives, `FabricPrimitive`s) are returned
  * as-is, since there is no mutable top level to produce.
  *
+ * Callers that need to preserve child identity / structural sharing (e.g. the
+ * persistent-structure spine thaw used in patch application) should reach for
+ * `cloneForMutation()` instead.
+ *
  * @param value - An already-valid `FabricValue`.
  */
-export function shallowMutableDeepFrozenClone<T extends FabricValue>(
+export function shallowMutableClone<T extends FabricValue>(
   value: T,
 ): T {
   // Deep-freeze-clone first (cloning only where needed, never mutating the

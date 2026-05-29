@@ -3,7 +3,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import {
   type FabricObject,
   type FabricValue,
-  shallowMutableDeepFrozenClone,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
@@ -451,7 +451,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // transaction's working copy, which must not be mutated in place), and
         // it deep-freezes the bound children as inexpensive defense-in-depth
         // against accidental deeper mutation of the shared input.
-        valueObj = shallowMutableDeepFrozenClone(
+        valueObj = shallowMutableClone(
           currentValue as FabricValue,
         ) as FabricObject;
       }

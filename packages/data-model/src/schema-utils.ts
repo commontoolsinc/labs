@@ -10,10 +10,7 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import { deepFreeze } from "./deep-freeze.ts";
-import {
-  cloneIfNecessary,
-  shallowMutableDeepFrozenClone,
-} from "./fabric-value.ts";
+import { cloneIfNecessary, shallowMutableClone } from "./fabric-value.ts";
 import {
   internSchema,
   internSchemaAsTaggedHashString,
@@ -185,11 +182,11 @@ export function schemaWithProperties(
 
   // Both `schema` and `overrides` are objects.
 
-  // `shallowMutableDeepFrozenClone()` gives a mutable top-level object whose
+  // `shallowMutableClone()` gives a mutable top-level object whose
   // bound children are deep-frozen -- cloning any mutable ones rather than
   // freezing the `schema`/`overrides` inputs in place -- so the subsequent
   // `toDeepFrozenSchema(result, true)` only has to seal the (owned) top.
-  const result = shallowMutableDeepFrozenClone(
+  const result = shallowMutableClone(
     { ...schema, ...overrides } as FabricValue,
   ) as JSONSchemaObj;
   return isInternedSchema(schema)
@@ -228,7 +225,7 @@ export function schemaWithoutProperties(
     // See `schemaWithProperties()`: deep-freeze the bound children (cloning any
     // mutable ones, leaving the `schema` input untouched) so the subsequent
     // `toDeepFrozenSchema` only has to seal the owned top.
-    const result = shallowMutableDeepFrozenClone(
+    const result = shallowMutableClone(
       copy as FabricValue,
     ) as JSONSchemaObj;
     return isInternedSchema(schema)

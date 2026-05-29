@@ -1,6 +1,6 @@
 import {
   type FabricValue,
-  shallowMutableDeepFrozenClone,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import {
@@ -168,7 +168,7 @@ export function extractDefaultValues(
     // shallow copy would suffice for correctness; we deep-freeze the bound
     // children as inexpensive defense-in-depth against accidental deeper
     // mutation of the shared default.
-    const obj = shallowMutableDeepFrozenClone(
+    const obj = shallowMutableClone(
       (isRecord(schema.default) ? schema.default : {}) as FabricValue,
     ) as Record<string, FabricValue>;
     for (const [propKey, propSchema] of Object.entries(schema.properties)) {

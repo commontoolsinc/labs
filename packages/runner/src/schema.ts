@@ -9,7 +9,7 @@ import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   type FabricValue,
-  shallowMutableDeepFrozenClone,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -830,11 +830,11 @@ function annotateWithBackToCellSymbols(
   if (!extensible || isCellResultForDereferencing(value)) {
     // We have to clone `value` to get a mutable top before attaching the
     // back-to-cell symbol. See function header comment for details.
-    // `shallowMutableDeepFrozenClone` deep-freezes the bound children as
+    // `shallowMutableClone` deep-freezes the bound children as
     // inexpensive defense-in-depth; in practice the only trigger here is a
     // non-extensible (hence, under the modern data model, deep-frozen) value,
     // so the children are already deep-frozen and pass through by identity.
-    value = shallowMutableDeepFrozenClone(value as FabricValue);
+    value = shallowMutableClone(value as FabricValue);
   }
 
   // Non-enumerable, so that {...obj} won't copy these symbols

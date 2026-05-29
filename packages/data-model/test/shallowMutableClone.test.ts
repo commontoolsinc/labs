@@ -1,17 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { cloneIfNecessary, shallowMutableClone } from "../src/fabric-value.ts";
-import { deepFreeze } from "../src/deep-freeze.ts";
+import { shallowMutableClone } from "../src/fabric-value.ts";
+import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
 import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
 
-// `shallowMutableClone(v)` is a thin wrapper for
-// `cloneIfNecessary(v, { frozen: false, deep: false, force: true })`, so the
-// coverage here is intentionally light: it pins the wrapper's headline
-// guarantees (fresh mutable top-level copy, identity-shared children,
-// class-preserving) rather than re-testing `cloneIfNecessary` exhaustively.
-describe("shallowMutableClone", () => {
+describe("shallowMutableClone()", () => {
   it("returns a fresh, mutable, top-level object copy", () => {
     const input = deepFreeze({ a: 1, b: 2 });
     const out = shallowMutableClone(input);
@@ -35,12 +30,39 @@ describe("shallowMutableClone", () => {
     expect(Object.isFrozen(out)).toBe(false);
   });
 
-  it("shares children by identity (shallow, not deep)", () => {
+  it("identity-passes already-deep-frozen children (zero-copy)", () => {
     const child = deepFreeze({ nested: true });
-    const input = deepFreeze({ child });
+    const input = { child };
     const out = shallowMutableClone(input) as Record<string, unknown>;
 
+    expect(Object.isFrozen(out)).toBe(false);
     expect(out.child).toBe(child);
+  });
+
+  it("deep-freezes mutable children by cloning, leaving the input untouched", () => {
+    const child = { nested: true };
+    const input = { child };
+    const out = shallowMutableClone(input) as Record<
+      string,
+      typeof child
+    >;
+
+    // Top stays mutable; the child is now deep-frozen...
+    expect(Object.isFrozen(out)).toBe(false);
+    expect(Object.isFrozen(out.child)).toBe(true);
+    expect(out.child).toEqual({ nested: true });
+    // ...but it's a clone, so the caller's input is not frozen in place.
+    expect(out.child).not.toBe(child);
+    expect(Object.isFrozen(child)).toBe(false);
+  });
+
+  it("yields a fully deep-frozen value after a single top-level freeze", () => {
+    // The headline use case: mutate the top, then deep-freeze the whole.
+    const input = { a: { b: 1 }, c: [1, 2, { d: 3 }] };
+    const out = shallowMutableClone(input);
+
+    Object.freeze(out);
+    expect(isDeepFrozen(out)).toBe(true);
   });
 
   it("always copies, even an already-mutable input (force)", () => {
@@ -74,21 +96,5 @@ describe("shallowMutableClone", () => {
     const outBytes = shallowMutableClone(bytes);
     expect(outBytes).toBe(bytes);
     expect(outBytes.length).toBe(3);
-  });
-
-  it("matches the equivalent `cloneIfNecessary()` options", () => {
-    const input = deepFreeze({ a: { b: 1 } });
-    const viaWrapper = shallowMutableClone(input) as Record<string, unknown>;
-    const viaOptions = cloneIfNecessary(input, {
-      frozen: false,
-      deep: false,
-      force: true,
-    }) as Record<string, unknown>;
-
-    // Same shallow semantics: top-level copied, child shared by identity.
-    expect(viaWrapper).not.toBe(input);
-    expect(viaOptions).not.toBe(input);
-    expect(viaWrapper.a).toBe((input as Record<string, unknown>).a);
-    expect(viaOptions.a).toBe((input as Record<string, unknown>).a);
   });
 });
