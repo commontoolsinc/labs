@@ -457,14 +457,31 @@ export default pattern<unknown, PokerOutput>(() => {
   const bobNote = computed(() => noteFor(bobFolded.get(), revealed.get()));
   const charlieNote = computed(() => noteFor(charlieFolded.get(), revealed.get()));
 
-  // The reducer pipeline's stage 3 (the count cell) + its blocked/released note.
-  const countCell = computed(() => {
+  // The whole reducer pipeline as ONE computed so every stage (incl. the count cell) renders and
+  // reacts to release/deal. stage 3 calls countBoundary directly (no nested computed).
+  const pipelineRow = computed(() => {
     dealIndex.get();
-    return countBoundary(aliceCountConf, alice.get().length, countReleased.get());
+    const released = countReleased.get();
+    return (
+      <div style={{ display: "flex", alignItems: "stretch", flexWrap: "wrap", gap: "4px" }}>
+        {stageBox("Alice's secret hand", handBoundary(aliceConf, alice, false), "ENFORCED")}
+        {pipelineArrow("reducer count = hand.length")}
+        {stageBox(
+          "Reducer output",
+          <span style={{ fontSize: "12px", color: "#64748b" }}>
+            mints <code>ReducedBy&#123;count&#125;</code>; inherits the hand's label
+          </span>,
+          "SIMULATED",
+        )}
+        {pipelineArrow("relabel [Alice] → [table]")}
+        {stageBox(
+          "Count cell (own atom)",
+          countBoundary(aliceCountConf, alice.get().length, released),
+          "ENFORCED",
+        )}
+      </div>
+    );
   });
-  const countNote = computed(() =>
-    countReleased.get() ? "" : <span style={{ fontSize: "11px", color: "#9a3412" }}>🔒 blocked</span>
-  );
   const countStatus = computed(() =>
     countReleased.get()
       ? "Released: the table now sees the count (a separate labelled value)."
@@ -541,23 +558,7 @@ export default pattern<unknown, PokerOutput>(() => {
                 binary-access cell, relabelled to the table by a trusted action — not a new label
                 level. Read left → right:
               </cf-label>
-              <div style={{ display: "flex", alignItems: "stretch", flexWrap: "wrap", gap: "4px" }}>
-                {stageBox("Alice's secret hand", handBoundary(aliceConf, alice, false), "ENFORCED")}
-                {pipelineArrow("reducer count = hand.length")}
-                {stageBox(
-                  "Reducer output",
-                  <span style={{ fontSize: "12px", color: "#64748b" }}>
-                    mints <code>ReducedBy&#123;count&#125;</code>; inherits the hand's label
-                  </span>,
-                  "SIMULATED",
-                )}
-                {pipelineArrow("relabel [Alice] → [table]")}
-                {stageBox(
-                  "Count cell (own atom)",
-                  <span style={{ ...ROW, gap: "6px" }}>{countCell}{countNote}</span>,
-                  "ENFORCED",
-                )}
-              </div>
+              {pipelineRow}
               <cf-label style={{ fontSize: "12px", color: "#64748b" }}>{countStatus}</cf-label>
               <cf-hstack gap="2">
                 <cf-button data-ui-action={COUNT_ACTION} onClick={releaseCount}>
