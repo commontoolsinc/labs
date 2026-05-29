@@ -131,7 +131,7 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const item = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
-                const boundCastVote = __cf_pattern_input.params.boundCastVote;
+                const boundCastVote = __cf_pattern_input.key("params", "boundCastVote");
                 return (<div>
               {__cfHelpers.when({
                     type: "boolean"

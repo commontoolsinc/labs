@@ -235,7 +235,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
           {aisleNames.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const aisleName = __cf_pattern_input.key("element");
-                const groupedByAisle = __cf_pattern_input.params.groupedByAisle;
+                const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
                 return (<div>
               <h3>{aisleName}</h3>
               {__cfHelpers.lift<{

@@ -76,7 +76,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length)({ summary: {
-                length: summary.length
+                length: summary.key("length")
             } }).for(["__patternResult", "charCount"], true)
     };
 }, {

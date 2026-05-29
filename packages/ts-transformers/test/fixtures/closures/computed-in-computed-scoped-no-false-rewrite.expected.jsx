@@ -24,7 +24,7 @@ export default pattern(() => {
         const condition = 1 > 0;
         if (condition) {
             const config = __cfHelpers.lift(false, () => ({ bar: 1 }))().for("config", true);
-            return config.bar;
+            return config.key("bar");
         }
         return config.bar;
     })().for("outer", true);

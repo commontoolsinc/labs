@@ -65,7 +65,49 @@ export default pattern((__cf_pattern_input) => {
                     required: ["id"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items ?? [])({ items: items })).map((item) => <span data-inline-id={item.id}>{item.id}</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items ?? [])({ items: items })).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            return <span data-inline-id={item.key("id")}>{item.key("id")}</span>;
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["element"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "string"
+                        }
+                    },
+                    required: ["id"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema), {})}
         {(__cfHelpers.lift<{
             items?: Item[] | undefined;
         }, Item[]>({
@@ -105,7 +147,49 @@ export default pattern((__cf_pattern_input) => {
                     required: ["id"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ items: items })).map((item) => (<span data-cast-id={item.id}>{item.id}</span>))}
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ items: items })).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            return (<span data-cast-id={item.key("id")}>{item.key("id")}</span>);
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["element"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "string"
+                        }
+                    },
+                    required: ["id"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema), {})}
         {(__cfHelpers.lift<{
             items?: Item[] | undefined;
         }, Item[]>({
@@ -145,7 +229,49 @@ export default pattern((__cf_pattern_input) => {
                     required: ["id"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({ items: items })).map((item) => (<span data-satisfies-id={item.id}>{item.id}</span>))}
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({ items: items })).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            return (<span data-satisfies-id={item.key("id")}>{item.key("id")}</span>);
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["element"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "string"
+                        }
+                    },
+                    required: ["id"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema), {})}
       </div>),
     };
 }, {

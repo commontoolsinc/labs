@@ -804,7 +804,12 @@ function isReactiveOriginKind(callKind: CallKind): boolean {
     case "cell-for":
       return true;
     case "lift-applied":
-      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("derive");
+      // The lift-applied shape `lift(fn)(input)` (which `computed` also lowers to,
+      // and which `derive` used to produce) is inherently a reactive origin.
+      // Previously this checked `.has("derive")` — effectively always true, since
+      // derive was a registered reactive-origin call; that coupling broke when
+      // derive was removed from the registry. The shape is reactive regardless.
+      return true;
     case "ifElse":
       return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("ifElse");
     case "when":

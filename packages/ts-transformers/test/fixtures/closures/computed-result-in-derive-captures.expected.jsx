@@ -103,8 +103,8 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, ({ stats }) => `${stats.count} of ${stats.total} done`)({ stats: {
-                count: stats.count,
-                total: stats.total
+                count: stats.key("count"),
+                total: stats.key("total")
             } })}
       </div>),
     };
