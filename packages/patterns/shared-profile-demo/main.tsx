@@ -14,7 +14,6 @@ export default pattern(
         ? `Profile: ${profileNameWish.result}`
         : "No profile"
     );
-
     return {
       [NAME]: "Shared Profile Demo",
       [UI]: (

@@ -20,10 +20,24 @@ export default pattern(() => {
     }
   });
 
+  const action_clear_name = action(() => {
+    profile.setName.send({ name: "" });
+  });
+
+  const action_set_name = action(() => {
+    profile.setName.send({ name: "Grace Hopper" });
+  });
+
   const assert_initial_state = computed(() =>
     profile.initialNameApplied === "Ada Lovelace" &&
     profile.elements.length === 0
   );
+
+  const assert_name_set = computed(() =>
+    profile.initialNameApplied === "Grace Hopper"
+  );
+
+  const assert_name_cleared = computed(() => profile.initialNameApplied === "");
 
   const assert_added_element = computed(() => {
     const element = profile.elements[0];
@@ -38,6 +52,10 @@ export default pattern(() => {
   return {
     tests: [
       { assertion: assert_initial_state },
+      { action: action_set_name },
+      { assertion: assert_name_set },
+      { action: action_clear_name },
+      { assertion: assert_name_cleared },
       { action: action_add_catalog_element },
       { assertion: assert_added_element },
       { action: action_remove_catalog_element },

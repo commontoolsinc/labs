@@ -314,6 +314,49 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("rejects ownerPrincipal schemas without matching integrity claims", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "profile-trust-owner-without-integrity",
+        actingPrincipal: alice.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: PROFILE_WRITER,
+      });
+
+      const cell = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-without-integrity",
+        {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              ifc: {
+                ownerPrincipal: alice.did(),
+                writeAuthorizedBy: [PROFILE_WRITER],
+              },
+            },
+          },
+          required: ["name"],
+        },
+        tx,
+      );
+      cell.set({ name: "Ada" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("ownerPrincipal");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("marks the home profile link as integrity-protected data", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -367,7 +410,7 @@ describe("profile owner CFC policy", () => {
     try {
       const homePattern = await compileHomePattern(runtime);
       const tx = runtime.edit();
-      const homeDefault = runtime.getCell(
+      runtime.getCell(
         alice.did(),
         "home-profile-link-untrusted",
         homePattern.resultSchema,

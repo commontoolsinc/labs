@@ -26,14 +26,14 @@ export const submitProfileCreation = handler<
   CreateProfileEvent,
   {
     draftName?: Writable<string>;
-    profile: Cell<ProfileHomeOutput>;
+    profile: Writable<ProfileHomeOutput>;
     profileName?: Writable<string>;
   }
 >((event, { draftName, profile, profileName }) => {
   const name = (event.name ?? event.detail?.message ?? event.target?.value ??
     draftName?.get() ?? "").trim();
   if (name) {
-    (profile.resolveAsCell() as Writable<ProfileHomeOutput>).set(
+    profile.set(
       ProfileHome.inSpace(name)({
         initialName: name,
       }) as ProfileHomeOutput,

@@ -38,17 +38,19 @@ describe("PiecesController profile default patterns", () => {
     controllers = [];
     fetchedPaths = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL | Request) => {
+    globalThis.fetch = ((input: string | URL | Request) => {
       const url = new URL(input instanceof Request ? input.url : input);
       fetchedPaths.push(url.pathname);
       const source = sourcesByPath.get(url.pathname);
       if (source === undefined) {
-        return new Response("not found", { status: 404 });
+        return Promise.resolve(new Response("not found", { status: 404 }));
       }
-      return new Response(source, {
-        status: 200,
-        headers: { "content-type": "text/typescript" },
-      });
+      return Promise.resolve(
+        new Response(source, {
+          status: 200,
+          headers: { "content-type": "text/typescript" },
+        }),
+      );
     }) as typeof globalThis.fetch;
   });
 
@@ -84,6 +86,19 @@ describe("PiecesController profile default patterns", () => {
     const value = profileDefault.getCell().get();
 
     expect(value?.[NAME]).toBe("ProfileHome");
+    expect(fetchedPaths).toContain("/api/patterns/system/profile-home.tsx");
+  });
+
+  it("repairs profile spaces that already have an ordinary default pattern", async () => {
+    const profileDID = await deriveProfileSpaceDID(signer);
+    const controller = await controllerForSpace(profileDID);
+
+    const ordinaryDefault = await controller.ensureDefaultPattern();
+    expect(ordinaryDefault.getCell().get()?.[NAME]).toBe("DefaultPieceList");
+
+    const profileDefault = await controller.ensureProfileDefaultPattern();
+    expect(profileDefault.getCell().get()?.[NAME]).toBe("ProfileHome");
+    expect(fetchedPaths).toContain("/api/patterns/system/default-app.tsx");
     expect(fetchedPaths).toContain("/api/patterns/system/profile-home.tsx");
   });
 

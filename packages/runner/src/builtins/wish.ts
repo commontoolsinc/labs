@@ -361,7 +361,7 @@ function searchFavoritesForHashtag(
   );
 }
 
-type MentionableSearchResult = {
+type HashtagSearchResult = {
   matches: BaseResolution[];
   /** true when cell data has loaded (even if empty); false when still pending */
   loaded: boolean;
@@ -377,7 +377,7 @@ function searchMentionablesForHashtag(
   searchTermWithoutHash: string,
   pathPrefix: string[],
   spaceCell?: Cell<unknown>,
-): MentionableSearchResult {
+): HashtagSearchResult {
   const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
   const mentionableCell = measureWishPhase(
     "mentionable-cell",
@@ -469,7 +469,7 @@ function searchProfileForHashtag(
   ctx: WishContext,
   searchTermWithoutHash: string,
   pathPrefix: string[],
-): BaseResolution[] {
+): HashtagSearchResult {
   const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
   const elementsCell = measureWishPhase(
     "profile-elements-cell",
@@ -482,8 +482,13 @@ function searchProfileForHashtag(
   const elements = measureWishPhase(
     "profile-elements-get",
     queryKey,
-    () => elementsCell.get() || [],
-  ) as Array<{
+    () => elementsCell.get(),
+  );
+  if (elements === undefined || elements === null) {
+    return { matches: [], loaded: false };
+  }
+
+  const profileElements = elements as Array<{
     cell?: Cell<unknown>;
     tag?: string;
     userTags?: string[];
@@ -493,7 +498,7 @@ function searchProfileForHashtag(
     "profile-elements-filter",
     queryKey,
     () =>
-      elements.filter((entry) => {
+      profileElements.filter((entry) => {
         const userTags = entry.userTags ?? [];
         for (const t of userTags) {
           if (t.toLowerCase() === searchTermWithoutHash) return true;
@@ -502,14 +507,17 @@ function searchProfileForHashtag(
       }),
   );
 
-  return measureWishPhase(
-    "profile-elements-result-map",
-    queryKey,
-    () =>
-      matches.flatMap((match) =>
-        match.cell ? [{ cell: match.cell, pathPrefix }] : []
-      ),
-  );
+  return {
+    matches: measureWishPhase(
+      "profile-elements-result-map",
+      queryKey,
+      () =>
+        matches.flatMap((match) =>
+          match.cell ? [{ cell: match.cell, pathPrefix }] : []
+        ),
+    ),
+    loaded: true,
+  };
 }
 
 /**
@@ -531,7 +539,7 @@ function searchByHashtag(
   const searchProfile = ctx.scope?.includes("profile");
 
   const allMatches: BaseResolution[] = [];
-  let allMentionablesLoaded = true;
+  let allScopedDataLoaded = true;
 
   if (searchFavorites) {
     allMatches.push(
@@ -546,13 +554,17 @@ function searchByHashtag(
       parsed.path,
     );
     allMatches.push(...matches);
-    if (!loaded) allMentionablesLoaded = false;
+    if (!loaded) allScopedDataLoaded = false;
   }
 
   if (searchProfile) {
-    allMatches.push(
-      ...searchProfileForHashtag(ctx, searchTermWithoutHash, parsed.path),
+    const { matches, loaded } = searchProfileForHashtag(
+      ctx,
+      searchTermWithoutHash,
+      parsed.path,
     );
+    allMatches.push(...matches);
+    if (!loaded) allScopedDataLoaded = false;
   }
 
   // Search mentionables in arbitrary DID spaces
@@ -566,12 +578,12 @@ function searchByHashtag(
       didSpaceCell,
     );
     allMatches.push(...matches);
-    if (!loaded) allMentionablesLoaded = false;
+    if (!loaded) allScopedDataLoaded = false;
   }
 
   if (allMatches.length === 0) {
-    if (!allMentionablesLoaded) {
-      // Some mentionable data not loaded yet — return empty so the reactive
+    if (!allScopedDataLoaded) {
+      // Some scoped data not loaded yet — return empty so the reactive
       // system re-triggers wish when cell data arrives.
       return [];
     }

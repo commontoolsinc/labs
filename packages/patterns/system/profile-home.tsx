@@ -71,7 +71,7 @@ export type SetProfileAvatarEvent = {
 export type ProfileHomeOutput = {
   [NAME]: string;
   [UI]: unknown;
-  name: OwnerProtectedProfileWrite<string, typeof applyInitialName>;
+  name: OwnerProtectedProfileWrite<string, typeof setName>;
   avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof addElement>;
   setName: Stream<SetProfileNameEvent>;
@@ -163,7 +163,7 @@ const setName = handler<SetProfileNameEvent, { name: Writable<string> }>(
     }
     const name = (event.name ?? event.detail?.message ??
       event.target?.value ?? "").trim();
-    if (name) state.name.set(name);
+    state.name.set(name);
   },
 );
 
@@ -182,11 +182,7 @@ const applyInitialName = lift<
   { initialName?: string; name: Writable<string> },
   string
 >(({ initialName, name }) => {
-  const trimmed = initialName?.trim() ?? "";
-  if (trimmed && !name.get()) {
-    name.set(trimmed);
-  }
-  return name.get();
+  return name.get() ?? trimInitialName(initialName);
 });
 
 const addCatalogElement = handler<void, {
@@ -242,7 +238,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
   ({ initialName }) => {
     const initialProfileName = trimInitialName(initialName);
     const name = new Writable<
-      OwnerProtectedProfileWrite<string, typeof applyInitialName>
+      OwnerProtectedProfileWrite<string, typeof setName>
     >(initialProfileName).for("name");
     const avatar = new Writable<
       OwnerProtectedProfileWrite<string, typeof setAvatar>

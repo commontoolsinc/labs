@@ -2029,9 +2029,11 @@ export function retargetCellSpace(
 }
 
 function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
-  if (!isCell(cell)) return undefined;
   const maybeToCell = (cell as { [toCell]?: () => Cell<unknown> })[toCell];
-  const unproxied = typeof maybeToCell === "function" ? maybeToCell() : cell;
+  const unproxied = typeof maybeToCell === "function"
+    ? maybeToCell.call(cell)
+    : cell;
+  if (!isCell(unproxied)) return undefined;
   return unproxied as unknown as CellImpl<FabricValue>;
 }
 

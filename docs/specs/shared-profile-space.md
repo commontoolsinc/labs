@@ -102,6 +102,7 @@ Add a well-known field to the home default pattern:
 type HomeDefaultPattern = {
   favorites: Favorite[];
   profile?: Cell<ProfileDefaultPattern>;
+  profileName?: string;
 };
 ```
 
@@ -151,6 +152,7 @@ type ProfileDefaultPattern = {
   elements: ProfileElement[];
   addElement: Stream<AddProfileElementEvent>;
   removeElement: Stream<{ cell: Cell<unknown> }>;
+  initialNameApplied: string;
 };
 ```
 

@@ -103,7 +103,7 @@ that link:
 
 ```tsx
 wish({ query: "#profile" }) // profile default pattern
-wish({ query: "#profileName" }) // home profileName projection, then profile initialName
+wish({ query: "#profileName" }) // home profileName projection, then profile initialNameApplied
 wish({ query: "#profileAvatar" }) // profile.avatar
 wish({ query: "#profileSpace" }) // profile space cell
 ```

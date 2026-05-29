@@ -532,7 +532,6 @@ export class Runner {
                 change.address.scope ?? "space"
               }/${change.address.id}`,
             );
-            return;
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
@@ -2504,7 +2503,7 @@ export class Runner {
         setCellUnlinkedSpace(ref, space);
         const after = getCellFullLinkIfAvailable(ref);
         if (after !== undefined && frame.tx !== undefined) {
-          this.rewriteResolvedInSpaceLinks(frame.tx, before, after);
+          this.rewriteResolvedInSpaceLinks(frame.tx, before, after, annotation);
         }
       } catch (error) {
         if (
@@ -2515,7 +2514,12 @@ export class Runner {
           const after = getCellFullLinkIfAvailable(ref) ??
             (before ? { ...before, space } : undefined);
           if (after !== undefined && frame.tx !== undefined) {
-            this.rewriteResolvedInSpaceLinks(frame.tx, before, after);
+            this.rewriteResolvedInSpaceLinks(
+              frame.tx,
+              before,
+              after,
+              annotation,
+            );
           }
           return;
         }
@@ -2528,6 +2532,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     before: NormalizedFullLink | undefined,
     after: NormalizedFullLink,
+    unresolvedSpace?: unknown,
   ): void {
     const log = tx.getReactivityLog?.();
     const spaces = new Set<MemorySpace>([
@@ -2539,7 +2544,12 @@ export class Runner {
     for (const space of spaces) {
       const details = [...(tx.getWriteDetails?.(space) ?? [])];
       for (const detail of details) {
-        const next = this.replaceLinkInValue(detail.value, before, after);
+        const next = this.replaceLinkInValue(
+          detail.value,
+          before,
+          after,
+          unresolvedSpace,
+        );
         if (next !== detail.value && !deepEqual(next, detail.value)) {
           tx.writeValueOrThrow({
             ...detail.address,
@@ -2554,6 +2564,7 @@ export class Runner {
     value: unknown,
     before: NormalizedFullLink | undefined,
     after: NormalizedFullLink,
+    unresolvedSpace?: unknown,
   ): FabricValue | undefined {
     if (value === undefined) {
       return undefined;
@@ -2565,6 +2576,9 @@ export class Runner {
         (before
           ? areNormalizedLinksSame(parsed, before)
           : parsed.id === after.id &&
+            (parsed.space === undefined ||
+              (typeof unresolvedSpace === "string" &&
+                parsed.space === unresolvedSpace)) &&
             normalizeCellScope(
                 parsed.scope === "inherit" ? undefined : parsed.scope,
               ) === normalizeCellScope(after.scope) &&
@@ -2577,7 +2591,12 @@ export class Runner {
     if (Array.isArray(value)) {
       let changed = false;
       const next = value.map((entry) => {
-        const replaced = this.replaceLinkInValue(entry, before, after);
+        const replaced = this.replaceLinkInValue(
+          entry,
+          before,
+          after,
+          unresolvedSpace,
+        );
         changed ||= replaced !== entry;
         return replaced;
       });
@@ -2589,7 +2608,12 @@ export class Runner {
     let changed = false;
     const next: Record<string, FabricValue | undefined> = {};
     for (const [key, entry] of Object.entries(value)) {
-      const replaced = this.replaceLinkInValue(entry, before, after);
+      const replaced = this.replaceLinkInValue(
+        entry,
+        before,
+        after,
+        unresolvedSpace,
+      );
       changed ||= replaced !== entry;
       next[key] = replaced;
     }

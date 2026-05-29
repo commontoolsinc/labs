@@ -608,3 +608,54 @@ made before committing.
 
 - Document that shell identity changes are logout/login transitions. Direct
   cross-DID mutation of an active app identity is unsupported.
+
+## Slice 16: Review Follow-Up Hardening
+
+### Ambiguity or Incorrect Spec
+
+- The profile default-pattern helper promised a profile default, but the spec
+  did not state how to repair a profile space that already had an ordinary
+  default pattern.
+- `ownerPrincipal` was only exercised together with explicit integrity atoms,
+  leaving the no-integrity failure mode unspecified in tests.
+- Profile hashtag search had no loaded-state distinction, unlike mentionables.
+- The initial-name projection was both support state for `#profileName` and a
+  write-capable lift, which made blank names ambiguous.
+
+### Decision
+
+- `ensureProfileDefaultPattern()` validates an existing default pattern by
+  `[NAME]` and repairs non-profile defaults by unlinking them before creating
+  `ProfileHome`.
+- `ownerPrincipal` without a matching `represents-principal` integrity claim is
+  rejected even when the schema has no other integrity arrays.
+- Profile hashtag search now returns a loaded flag and waits for profile
+  elements to load before throwing a no-match error.
+- The initial-name value is applied only by the writable's initial value.
+  Clearing the profile name to blank is a valid owner action.
+- The `.inSpace(name)` link rewrite must match unresolved named-space links in
+  handler side effects; checking only for links without a space leaves durable
+  profile links pointed at the unresolved name instead of the derived DID.
+- Pattern-level rendering of the `#profile` wish UI must keep using the
+  `WishState` UIRenderable path. Extracting `$UI` directly rendered the visual
+  wrapper but lost the embedded trusted profile-create action wiring in the
+  browser integration.
+
+### Tests Added
+
+- `packages/piece/test/profile-default-pattern.test.ts`
+  - Verifies profile default creation repairs a pre-existing ordinary default.
+- `packages/patterns/system/profile-home.test.tsx`
+  - Verifies clearing the initial profile name remains blank.
+- `packages/runner/test/profile-owner-cfc.test.ts`
+  - Verifies `ownerPrincipal` schemas without matching integrity claims fail.
+- `packages/patterns/integration/shared-profile.test.ts`
+  - Headless browser coverage caught the `$UI` extraction regression and
+    verifies the trusted wish-created profile flow still creates both users'
+    profile names.
+
+### Spec Correction Needed
+
+- The data model should keep documenting `profileName` and
+  `initialNameApplied` as implementation support for immediate profile-name
+  wishes.

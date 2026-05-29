@@ -1,6 +1,7 @@
 import {
   type Cell,
   type JSONSchema,
+  NAME,
   Runtime,
   RuntimeProgram,
   type Schema,
@@ -20,6 +21,7 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
 const PROFILE_DEFAULT_PATTERN_URL = "/api/patterns/system/profile-home.tsx";
+const PROFILE_DEFAULT_PATTERN_NAME = "ProfileHome";
 
 async function timePiecesPhase<T>(
   label: string,
@@ -458,13 +460,21 @@ export class PiecesController<T = unknown> {
   async ensureProfileDefaultPattern(): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
 
-    const existingPattern = await this.#manager.getDefaultPattern();
-    if (existingPattern) {
+    const existingPattern = await this.#manager.getDefaultPattern(false);
+    if (existingPattern?.get()?.[NAME] === PROFILE_DEFAULT_PATTERN_NAME) {
       return new PieceController<NameSchema>(this.#manager, existingPattern);
+    }
+    if (existingPattern) {
+      try {
+        await this.#manager.stopPiece(existingPattern);
+      } catch {
+        // The existing default may never have been started.
+      }
+      await this.#manager.unlinkDefaultPattern();
     }
 
     const patternConfig = {
-      name: "ProfileHome",
+      name: PROFILE_DEFAULT_PATTERN_NAME,
       urlPath: PROFILE_DEFAULT_PATTERN_URL,
       cause: "profile-home",
     };

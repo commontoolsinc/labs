@@ -930,9 +930,6 @@ const currentPrincipalIntegrityReason = (
   const integrity = Array.isArray(ifc.integrity) ? ifc.integrity : [];
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const currentPrincipalValues = [...integrity, ...addIntegrity];
-  if (currentPrincipalValues.length === 0) {
-    return undefined;
-  }
   const ownerPrincipalSpec = ifc.ownerPrincipal;
   if (ownerPrincipalSpec !== undefined) {
     const trustSnapshot = tx.getCfcState().trustSnapshot;
@@ -977,6 +974,9 @@ const currentPrincipalIntegrityReason = (
     if (ifc.writeAuthorizedBy === undefined) {
       return `ownerPrincipal requires writeAuthorizedBy at /${path.join("/")}`;
     }
+    return undefined;
+  }
+  if (currentPrincipalValues.length === 0) {
     return undefined;
   }
   if (hasLiteralDidCurrentPrincipalClaim(currentPrincipalValues)) {
