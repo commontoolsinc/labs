@@ -316,7 +316,7 @@ describe("Pattern Runner - Handlers", () => {
         properties: {
           counter: {
             type: "number",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       },

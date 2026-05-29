@@ -276,7 +276,7 @@ describe("Cell commit callbacks", () => {
         items: {
           type: "object",
           properties: { name: { type: "string" }, value: { type: "number" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(Array.isArray(result)).toBe(true);
@@ -325,7 +325,7 @@ describe("Cell commit callbacks", () => {
         items: {
           type: "object",
           properties: { name: { type: "string" }, value: { type: "number" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(isCell(result[0])).toBe(true);
@@ -381,7 +381,7 @@ describe("Cell commit callbacks", () => {
         items: {
           type: "object",
           properties: { name: { type: "string" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(result.length).toBe(3);
@@ -413,7 +413,7 @@ describe("Cell commit callbacks", () => {
         items: {
           type: "object",
           properties: { value: { type: "number" } },
-          asCell: true,
+          asCell: ["cell"],
         },
       }).get();
       expect(result.length).toBe(2);
@@ -470,7 +470,7 @@ describe("Cell commit callbacks", () => {
           items: {
             type: "object",
             properties: { name: { type: "string" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         tx,
@@ -504,7 +504,7 @@ describe("Cell commit callbacks", () => {
           items: {
             type: "object",
             properties: { name: { type: "string" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         tx,
@@ -838,7 +838,7 @@ describe("Cell commit callbacks", () => {
           items: {
             type: "object",
             properties: { foo: { type: "number" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         } as const satisfies JSONSchema;
 
@@ -873,7 +873,7 @@ describe("Cell commit callbacks", () => {
           items: {
             type: "object",
             properties: { foo: { type: "number" } },
-            asCell: true,
+            asCell: ["cell"],
           },
         } as const satisfies JSONSchema;
 
@@ -1252,7 +1252,7 @@ describe("Cell commit callbacks", () => {
               resultSchema: { type: "object" },
               nodes: { type: "array", items: { type: "object" } },
             },
-            asCell: true,
+            asCell: ["cell"],
           },
           extraParams: {
             type: "object",

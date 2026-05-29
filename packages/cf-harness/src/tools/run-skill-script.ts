@@ -7,6 +7,7 @@ import type {
   HarnessSkillResourceRecord,
   HarnessSkillScriptExecution,
   HarnessSkillScriptExecutionErrorCode,
+  HarnessSkillScriptExecutionTarget,
   HarnessSkillScriptRuntime,
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
@@ -14,6 +15,8 @@ import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,
 } from "../skills/scripts.ts";
+import { normalizeCdpOrigin } from "./browser-host-command-policy.ts";
+import { createClearedHostProcessEnv } from "./host-process-env.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -41,6 +44,7 @@ export interface RunSkillScriptToolOutput {
   skill: string;
   path: string;
   status: "executed" | "error";
+  executionTarget?: HarnessSkillScriptExecutionTarget;
   runtime?: HarnessSkillScriptRuntime;
   argv?: readonly string[];
   args?: readonly string[];
@@ -110,6 +114,7 @@ export const runSkillScriptToolDescriptor: HarnessToolDescriptor = {
       skill: { type: "string" },
       path: { type: "string" },
       status: { type: "string", enum: ["executed", "error"] },
+      executionTarget: { type: "string", enum: ["sandbox", "host"] },
       runtime: { type: "string", enum: ["deno", "shebang", "unknown"] },
       argv: { type: "array", items: { type: "string" } },
       args: { type: "array", items: { type: "string" } },
@@ -210,6 +215,55 @@ const normalizeTimeoutMs = (timeoutMs: number | undefined): number => {
     );
   }
   return resolved;
+};
+
+const findCdpArg = (
+  args: readonly string[],
+): { value?: string; error?: string } => {
+  let value: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg !== "--cdp" && !arg.startsWith("--cdp=")) {
+      continue;
+    }
+    if (value !== undefined) {
+      return {
+        error: "host agent-browser skill scripts may supply --cdp only once",
+      };
+    }
+    if (arg === "--cdp") {
+      value = args[index + 1];
+      index += 1;
+    } else {
+      value = arg.slice("--cdp=".length);
+    }
+    if (value === undefined || value === "") {
+      return {
+        error: "host agent-browser skill scripts require a --cdp value",
+      };
+    }
+  }
+  return { value };
+};
+
+const validateHostAgentBrowserScriptArgs = (
+  args: readonly string[],
+  expectedCdpUrl: string | undefined,
+): string | undefined => {
+  const expectedCdpOrigin = normalizeCdpOrigin(expectedCdpUrl);
+  if (expectedCdpOrigin === undefined) {
+    return "host agent-browser skill scripts require a Browser Access lease endpoint";
+  }
+  const cdpArg = findCdpArg(args);
+  if (cdpArg.error !== undefined) {
+    return cdpArg.error;
+  }
+  if (cdpArg.value === undefined) {
+    return "host agent-browser skill scripts must pass --cdp explicitly";
+  }
+  return normalizeCdpOrigin(cdpArg.value) === expectedCdpOrigin
+    ? undefined
+    : "host agent-browser skill script --cdp must match the Browser Access lease endpoint";
 };
 
 const splitShebangWords = (shebang: string): string[] =>
@@ -617,6 +671,7 @@ const baseOutput = (
     skill: string;
     path: string;
     status: RunSkillScriptToolOutput["status"];
+    executionTarget?: HarnessSkillScriptExecutionTarget;
     diagnostics?: HarnessSkillDiagnostic[];
   },
 ): RunSkillScriptToolOutput => ({
@@ -625,6 +680,9 @@ const baseOutput = (
   skill: options.skill,
   path: options.path,
   status: options.status,
+  ...(options.executionTarget !== undefined
+    ? { executionTarget: options.executionTarget }
+    : {}),
   diagnostics: options.diagnostics ?? [],
 });
 
@@ -635,6 +693,7 @@ const errorOutput = (
     path: string;
     code: HarnessSkillScriptExecutionErrorCode;
     message: string;
+    executionTarget?: HarnessSkillScriptExecutionTarget;
     diagnostics?: HarnessSkillDiagnostic[];
     resource?: HarnessSkillResourceRecord;
     observedDigest?: string;
@@ -646,6 +705,7 @@ const errorOutput = (
     skill: options.skill,
     path: options.path,
     status: "error",
+    executionTarget: options.executionTarget,
     diagnostics: options.diagnostics,
   }),
   ...(options.resource !== undefined
@@ -688,6 +748,9 @@ const buildExecutionRecord = (
   path: options.output.path,
   status: options.output.status,
   executedAt: options.executedAt,
+  ...(options.output.executionTarget !== undefined
+    ? { executionTarget: options.output.executionTarget }
+    : {}),
   ...(options.output.runtime !== undefined
     ? { runtime: options.output.runtime }
     : {}),
@@ -732,6 +795,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
   async invoke(context, input) {
     const outputId = context.nextOutputId("run_skill_script");
     const executedAt = context.now();
+    const executionTarget = context.skillScriptExecutionTarget;
     let normalizedPath: string;
     let args: string[];
     let timeoutMs: number;
@@ -1025,49 +1089,131 @@ export const runSkillScriptTool: HarnessToolDefinition<
     }
     const scriptExecution = scriptExecutionPlan.execution;
 
+    if (executionTarget === "host" && skill.name === "agent-browser") {
+      const browserLeaseError = validateHostAgentBrowserScriptArgs(
+        args,
+        context.browserAccess?.cdpUrl,
+      );
+      if (browserLeaseError !== undefined) {
+        const output = errorOutput({
+          outputId,
+          skill: skill.name,
+          path: normalizedPath,
+          executionTarget,
+          code: "permission_denied",
+          message: browserLeaseError,
+          resource,
+          observedDigest,
+          observedSizeBytes,
+        });
+        await context.recordSkillScriptExecution(
+          buildExecutionRecord({
+            output,
+            runId: context.runId,
+            executedAt,
+            resourcePath: resource.resourcePath,
+          }),
+        );
+        return output;
+      }
+    }
+
     const cwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
       : context.sandbox.defaultWorkingDirectory();
-    const env = {
+    const hostCwd = executionTarget === "host"
+      ? context.resolveHostPath(cwd)
+      : undefined;
+    if (
+      hostCwd !== undefined &&
+      (!(await context.isHostPathWithinWorkspace(hostCwd)) ||
+        await context.isHostPathWithinArtifactRoot(hostCwd, {
+          allowMissing: true,
+        }))
+    ) {
+      const output = errorOutput({
+        outputId,
+        skill: skill.name,
+        path: normalizedPath,
+        executionTarget,
+        code: "permission_denied",
+        message:
+          "host skill scripts must execute from a workspace path outside cf-harness artifacts",
+        resource,
+        observedDigest,
+        observedSizeBytes,
+      });
+      await context.recordSkillScriptExecution(
+        buildExecutionRecord({
+          output,
+          runId: context.runId,
+          executedAt,
+          resourcePath: resource.resourcePath,
+        }),
+      );
+      return output;
+    }
+    const sandboxEnv = {
       CF_HARNESS_RUN_ID: context.runId,
       SKILL_NAME: skill.name,
       SKILL_DIR: skill.sandboxSkillDir,
       SKILL_SCRIPT: resource.sandboxResourcePath,
+      CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: executionTarget,
     };
-    const result = await context.sandbox.run({
-      argv: scriptExecution.argv,
-      cwd,
-      env,
-      ...(scriptExecution.stdinText !== undefined
-        ? { stdinText: scriptExecution.stdinText }
-        : {}),
-      timeoutMs,
-      cfcInvocationContext: await context.createCfcInvocationContext({
-        toolId: "run_skill_script",
-        toolOutputId: outputId,
-        operation: "command",
-        cwd,
-        argv: scriptExecution.argv,
-        args,
-        env,
+    const result = executionTarget === "host"
+      ? await context.hostProcessRunner.run({
+        command: scriptExecution.argv[0]!,
+        args: scriptExecution.argv.slice(1),
+        cwd: hostCwd,
+        clearEnv: true,
+        env: createClearedHostProcessEnv({
+          CF_HARNESS_RUN_ID: context.runId,
+          SKILL_NAME: skill.name,
+          SKILL_DIR: skill.skillDir,
+          SKILL_SCRIPT: resource.resourcePath,
+          CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: executionTarget,
+        }),
         ...(scriptExecution.stdinText !== undefined
           ? { stdinText: scriptExecution.stdinText }
           : {}),
-        ...(input.cfcInputLabels !== undefined
-          ? { cfcInputLabels: input.cfcInputLabels }
+        timeoutMs,
+      })
+      : await context.sandbox.run({
+        argv: scriptExecution.argv,
+        cwd,
+        env: sandboxEnv,
+        ...(scriptExecution.stdinText !== undefined
+          ? { stdinText: scriptExecution.stdinText }
           : {}),
-        cfcInputLabelPaths: input.cwd !== undefined
-          ? [["argv"], ["args"], ["cwd"], ["env"]]
-          : [["argv"], ["args"], ["env"]],
-      }),
-    });
+        timeoutMs,
+        cfcInvocationContext: await context.createCfcInvocationContext({
+          toolId: "run_skill_script",
+          toolOutputId: outputId,
+          operation: "command",
+          cwd,
+          argv: scriptExecution.argv,
+          args,
+          env: sandboxEnv,
+          ...(scriptExecution.stdinText !== undefined
+            ? { stdinText: scriptExecution.stdinText }
+            : {}),
+          ...(input.cfcInputLabels !== undefined
+            ? { cfcInputLabels: input.cfcInputLabels }
+            : {}),
+          cfcInputLabelPaths: input.cwd !== undefined
+            ? [["argv"], ["args"], ["cwd"], ["env"]]
+            : [["argv"], ["args"], ["env"]],
+        }),
+      });
 
+    const cfcResult = (result as { cfcResult?: CfcSandboxResult }).cfcResult;
     const output: RunSkillScriptToolOutput = {
       ...baseOutput({
         outputId,
         skill: skill.name,
         path: normalizedPath,
         status: "executed",
+        executionTarget,
       }),
       runtime: scriptExecution.runtime,
       argv: scriptExecution.argv,
@@ -1082,9 +1228,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
       stdout: result.stdout,
       stderr: result.stderr,
       exitCode: result.exitCode,
-      ...(result.cfcResult !== undefined
-        ? { cfcResult: result.cfcResult }
-        : {}),
+      ...(cfcResult !== undefined ? { cfcResult } : {}),
     };
     await context.recordSkillScriptExecution(
       buildExecutionRecord({

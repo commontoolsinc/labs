@@ -51,15 +51,15 @@ describe("resolveSchema", () => {
     });
 
     it("preserves asCell in returned schema", () => {
-      const schema: JSONSchema = { type: "string", asCell: true };
+      const schema: JSONSchema = { type: "string", asCell: ["cell"] };
       const result = expectNontrivial(resolveSchema(schema));
-      expect(result.asCell).toBe(true);
+      expect(result.asCell).toEqual(["cell"]);
     });
 
-    it("preserves asStream in returned schema", () => {
-      const schema: JSONSchema = { type: "string", asStream: true };
+    it("preserves asCell stream in returned schema", () => {
+      const schema: JSONSchema = { type: "string", asCell: ["stream"] };
       const result = expectNontrivial(resolveSchema(schema));
-      expect(result.asStream).toBe(true);
+      expect(result.asCell).toEqual(["stream"]);
     });
   });
 

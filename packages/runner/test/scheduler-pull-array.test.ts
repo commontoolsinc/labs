@@ -341,7 +341,7 @@ describe("pull mode array reactivity", () => {
     const spaceSchema = {
       type: "object",
       properties: {
-        // Not using asCell: true here - we want inline array data for simplicity
+        // Not using asCell: ["cell"] here - we want inline array data for simplicity
         allPieces: allPiecesSchema,
       },
     } as const satisfies JSONSchema;
@@ -379,7 +379,7 @@ describe("pull mode array reactivity", () => {
       actionTx,
     ) {
       const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
-      // Now pieces should be an array since we don't have asCell: true
+      // Now pieces should be an array since we don't have asCell: ["cell"]
       const visible = pieces.filter((c) => !c.isHidden);
       visiblePiecesCell.withTx(actionTx).send(visible);
     };
@@ -446,7 +446,7 @@ describe("pull mode array reactivity", () => {
         allPieces: {
           type: "array",
           items: { type: "object" },
-          // Not using asCell: true - testing inline array data
+          // Not using asCell: ["cell"] - testing inline array data
         },
       },
     } as const satisfies JSONSchema;

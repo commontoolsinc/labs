@@ -104,13 +104,13 @@ const GcalImporterInputs = {
           type: "string",
           description: "Calendar ID to fetch events from",
           default: "primary",
-          asCell: true,
+          asCell: ["cell"],
         },
         limit: {
           type: "number",
           description: "number of events to import",
           default: 250,
-          asCell: true,
+          asCell: ["cell"],
         },
         syncToken: {
           type: "string",
@@ -136,7 +136,7 @@ const ResultSchema = {
         properties: CalendarEventSchema.properties,
       },
     },
-    googleUpdater: { asStream: true, type: "object", properties: {} },
+    googleUpdater: { asCell: ["stream"], type: "object", properties: {} },
   },
 } as const satisfies JSONSchema;
 
@@ -151,7 +151,7 @@ const updateLimit = handler({
   },
 }, {
   type: "object",
-  properties: { limit: { type: "number", asCell: true } },
+  properties: { limit: { type: "number", asCell: ["cell"] } },
   required: ["limit"],
 }, ({ detail }, state) => {
   state.limit.set(parseInt(detail?.value ?? "250") || 0);
@@ -168,7 +168,7 @@ const updateCalendarId = handler({
   },
 }, {
   type: "object",
-  properties: { calendarId: { type: "string", asCell: true } },
+  properties: { calendarId: { type: "string", asCell: ["cell"] } },
   required: ["calendarId"],
 }, ({ detail }, state) => {
   state.calendarId.set(detail?.value ?? "primary");
@@ -205,10 +205,10 @@ const calendarUpdater = handler(
         type: "array",
         items: CalendarEventSchema,
         default: [],
-        asCell: true,
+        asCell: ["cell"],
       },
-      auth: { ...AuthSchema, asCell: true },
-      settings: { ...GcalImporterInputs.properties.settings, asCell: true },
+      auth: { ...AuthSchema, asCell: ["cell"] },
+      settings: { ...GcalImporterInputs.properties.settings, asCell: ["cell"] },
     },
     required: ["events", "auth", "settings"],
   } as const satisfies JSONSchema,
@@ -522,12 +522,12 @@ const getCalendars = handler(
   {
     type: "object",
     properties: {
-      auth: { ...AuthSchema, asCell: true },
+      auth: { ...AuthSchema, asCell: ["cell"] },
       calendars: {
         type: "array",
         items: CalendarSchema,
         default: [],
-        asCell: true,
+        asCell: ["cell"],
       },
     },
     required: ["auth", "calendars"],
@@ -567,7 +567,7 @@ const clearEvents = handler(
         type: "array",
         items: CalendarEventSchema,
         default: [],
-        asCell: true,
+        asCell: ["cell"],
       },
     },
     required: ["events"],

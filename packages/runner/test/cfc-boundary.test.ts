@@ -2639,6 +2639,52 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("applies wildcard policy entries with refs resolved from parent defs", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-resolved-ref-policy-match",
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                $ref: "#/$defs/GuardedItem",
+              },
+            },
+          },
+          $defs: {
+            GuardedItem: {
+              $ref: "#/$defs/GuardedItemShape",
+              ifc: { writeAuthorizedBy: ["trusted-handler"] },
+            },
+            GuardedItemShape: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+              },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ items: [{ title: "resolved" }] });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity at /items/*",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not apply wildcard policy entries when item value shape mismatches", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

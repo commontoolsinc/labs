@@ -784,7 +784,7 @@ Deno.bench({
 });
 
 // =============================================================================
-// SCHEMA WITH NESTED CELLS (asCell: true)
+// SCHEMA WITH NESTED CELLS (asCell: ["cell"])
 // Test performance impact of asCell which creates sub-cell references
 // =============================================================================
 
@@ -798,7 +798,7 @@ const schemaWithAsCell = {
         bio: { type: "string" },
         avatar: { type: "string" },
       },
-      asCell: true,
+      asCell: ["cell"],
     },
     settings: {
       type: "object",
@@ -806,7 +806,7 @@ const schemaWithAsCell = {
         theme: { type: "string" },
         notifications: { type: "boolean" },
       },
-      asCell: true,
+      asCell: ["cell"],
     },
     metadata: {
       type: "object",
@@ -814,7 +814,7 @@ const schemaWithAsCell = {
         created: { type: "string" },
         updated: { type: "string" },
       },
-      asCell: true,
+      asCell: ["cell"],
     },
   },
 } as const satisfies JSONSchema;

@@ -1822,14 +1822,14 @@ describe("canBranchMatch", () => {
   });
 
   it("never rejects asCell branches", () => {
-    expect(canBranchMatch({ asCell: true, type: "number" }, "hello")).toBe(
+    expect(canBranchMatch({ asCell: ["cell"], type: "number" }, "hello")).toBe(
       true,
     );
   });
 
-  it("never rejects asStream branches", () => {
+  it("never rejects asCell stream branches", () => {
     expect(
-      canBranchMatch({ asStream: true, type: "number" }, "hello"),
+      canBranchMatch({ asCell: ["stream"], type: "number" }, "hello"),
     ).toBe(true);
   });
 
@@ -3305,7 +3305,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const schema = {
       type: "object",
       properties: {
-        inner: { type: "unknown", asCell: true },
+        inner: { type: "unknown", asCell: ["cell"] },
       },
       required: ["inner"],
       additionalProperties: false,
@@ -3373,7 +3373,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const schema = {
       type: "object",
       properties: {
-        inner: { type: "object", asCell: true },
+        inner: { type: "object", asCell: ["cell"] },
       },
       required: ["inner"],
       additionalProperties: false,

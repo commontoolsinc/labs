@@ -331,7 +331,7 @@ handler.populateDependencies = (tx, event) => {
 };
 ```
 
-The `traverseCells: true` flag tells `validateAndTransform` to recursively read into nested `Cell` objects (from `asCell: true` in schemas), capturing all dependencies.
+The `traverseCells: true` flag tells `validateAndTransform` to recursively read into nested `Cell` objects (from `asCell: ["cell"]` in schemas), capturing all dependencies.
 
 ### Handler Execution Flow
 

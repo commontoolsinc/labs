@@ -259,6 +259,47 @@ Deno.test("interactive NDJSON transport waits for active turns before close afte
   assertEquals(closeBeforeLoopFinished, false);
 });
 
+Deno.test("interactive NDJSON transport preserves write failure over close hook failure", async () => {
+  let closeCalls = 0;
+  const service = new HarnessInteractiveChatService({
+    onEvent: async () => {},
+  });
+
+  await assertRejects(
+    () =>
+      runHarnessInteractiveChatNdjsonTransport({
+        lines: [
+          JSON.stringify({
+            type: HARNESS_CHAT_REQUEST_TYPE,
+            protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+            requestId: "req-start-session",
+            method: "start_session",
+            params: {
+              sessionId: "session-1",
+              workspace: { hostPath: "/workspace" },
+              model: "gpt-test",
+            },
+          }),
+        ],
+        createService: () => service,
+        closeService: () => {
+          closeCalls += 1;
+          throw new Error("simulated close failure");
+        },
+        writeLine: (line) => {
+          const envelope = JSON.parse(line) as Record<string, unknown>;
+          if (envelope.requestId === "req-start-session") {
+            throw new Error("simulated stdout failure");
+          }
+        },
+      }),
+    Error,
+    "simulated stdout failure",
+  );
+
+  assertEquals(closeCalls, 1);
+});
+
 Deno.test("interactive NDJSON transport calls close hook after normal completion", async () => {
   const output: string[] = [];
   let closeCalls = 0;

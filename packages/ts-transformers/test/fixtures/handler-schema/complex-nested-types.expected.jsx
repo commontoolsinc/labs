@@ -138,7 +138,7 @@ export default pattern(() => {
     type: "object",
     properties: {
         userHandler: {
-            asStream: true
+            asCell: ["stream"]
         }
     },
     required: ["userHandler"]

@@ -296,7 +296,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const output = runtime.getCell(
       space,
@@ -361,12 +361,12 @@ describe("CFC trusted UI event enforcement", () => {
     const sourceStream = runtime.getCell(
       space,
       "cfc-ui-contract-source-stream-forged-public-send",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const protectedStream = runtime.getCell(
       space,
       "cfc-ui-contract-protected-stream-forged-public-send",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const output = runtime.getCell(
       space,
@@ -986,7 +986,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-untyped-write",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const output = runtime.getCell(
       space,
@@ -1053,7 +1053,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-dynamic-write",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const output = runtime.getCell(
       space,
@@ -1118,7 +1118,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-array-item-push",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const messages = runtime.getCell<Array<{ body: string }>>(
       space,
@@ -1203,17 +1203,17 @@ describe("CFC trusted UI event enforcement", () => {
     const trustedStream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-mixed-array-trusted-write-auth",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const fakeSentStream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-mixed-array-fake-sent-write-auth",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const importedStream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-mixed-array-imported-write-auth",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const messages = runtime.getCell<Array<{ origin: string; body: string }>>(
       space,
@@ -1417,17 +1417,17 @@ describe("CFC trusted UI event enforcement", () => {
     const trustedStream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-nested-mixed-array-trusted-write-auth",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const fakeSentStream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-nested-mixed-array-fake-sent-write-auth",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const importedStream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-nested-mixed-array-imported-write-auth",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const state = runtime.getCell<
       { messages: Array<{ origin: string; body: string }> }
@@ -1635,7 +1635,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-array-push-reject",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const messages = runtime.getCell<string[]>(
       space,
@@ -1701,7 +1701,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-object-array-push-reject",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const messages = runtime.getCell<
       Array<{ id: string; body: string }>
@@ -1779,7 +1779,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-nested-cell-link-schema",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const protectedMessagesSchema = {
       type: "array",
@@ -1879,7 +1879,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-reject",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const output = runtime.getCell(
       space,
@@ -1956,7 +1956,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-same-path-mismatch",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const output = runtime.getCell(
       space,
@@ -2031,7 +2031,7 @@ describe("CFC trusted UI event enforcement", () => {
     const stream = runtime.getCell(
       space,
       "cfc-ui-contract-stream-recover",
-      { asStream: true },
+      { asCell: ["stream"] },
     );
     const output = runtime.getCell(
       space,

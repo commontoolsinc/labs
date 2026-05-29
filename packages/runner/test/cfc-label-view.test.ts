@@ -714,8 +714,8 @@ describe("CFC label view helpers", () => {
         {
           type: "object",
           properties: {
-            a: { type: "string", asCell: true },
-            b: { type: "string", asCell: true },
+            a: { type: "string", asCell: ["cell"] },
+            b: { type: "string", asCell: ["cell"] },
           },
         },
         tx,

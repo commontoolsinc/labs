@@ -284,7 +284,7 @@ describe("Pattern Runner - Lift", () => {
       "should create and use a named cell inside a lift",
       {
         type: "object",
-        properties: { value: { type: "number", asCell: true } },
+        properties: { value: { type: "number", asCell: ["cell"] } },
         required: ["value"],
       },
     );
@@ -338,7 +338,7 @@ describe("Pattern Runner - Lift", () => {
         type: "object",
         properties: {
           first: { type: "number" },
-          second: { type: "number", asCell: true },
+          second: { type: "number", asCell: ["cell"] },
         },
         required: ["first", "second"],
       } as const satisfies JSONSchema,

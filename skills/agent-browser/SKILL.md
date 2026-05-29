@@ -12,6 +12,24 @@ Read that guide first. It is the canonical reference.
 
 # Browser Automation with agent-browser
 
+## cf-harness browser profile
+
+When this skill is activated inside a `cf-harness` browser-profile subagent, the
+profile intentionally narrows the generic `agent-browser` capability surface
+described below. Use the leased CDP endpoint provided in the task, for example
+`agent-browser --cdp http://host.docker.internal:9362 snapshot -i`, and do not
+open or attach to any other browser endpoint.
+
+The cf-harness browser profile allows only a small set of page commands: `open`
+for HTTP(S) URLs, `snapshot`, `get title/url/text`, bounded `wait`, and
+ref-based `fill`, `type`, `select`, `check`, `click`, and `press`. Broader
+commands in this skill, including storage/cookie/session/HAR/network/file
+capture, profile/session setup, and auth workflows, may be unavailable in that
+profile. The default allowlisted skill scripts are limited to
+`scripts/form-automation.sh` and `scripts/capture-workflow.sh`; credentialed
+workflows such as `scripts/authenticated-session.sh` require a separate,
+explicit credential grant and origin-binding design.
+
 ## Core Workflow
 
 Every browser automation follows this pattern:

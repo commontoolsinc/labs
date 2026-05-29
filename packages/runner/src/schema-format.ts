@@ -129,7 +129,7 @@ function schemaToTypeStringInner(
     return "unknown"; // Can't resolve ref
   }
 
-  // Normalize asCell/asStream into a single asCellValues array for easier handling
+  // Normalize asCell array for easier handling
   const asCellValues = ContextualFlowControl.getAsCellValues(schema);
 
   // At max depth, return simplified representation
@@ -149,7 +149,7 @@ function schemaToTypeStringInner(
 
   // Normalize asCell/asStream into a single asCellValue array for easier handling
   if (asCellValues.length > 0) {
-    const { asCell: _c, asStream: _s, scope: _scope, ...restSchema } = schema;
+    const { asCell: _c, scope: _scope, ...restSchema } = schema;
     // Wrapper arrays are ordered outermost-first, so apply them from the end.
     let innerType = schemaToTypeString(restSchema, nextOpts);
     for (let i = asCellValues.length - 1; i >= 0; i--) {
