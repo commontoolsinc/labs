@@ -26,19 +26,21 @@ export class ACLManager {
       throw new Error("No ACL initialized for space.");
     }
 
-    return cloneIfNecessary(aclData as FabricValue, { frozen: false }) as ACL;
+    // Return an immutable, isolated view: `cloneIfNecessary` (frozen by
+    // default) identity-passes the already-deep-frozen stored value (zero-copy)
+    // and otherwise freezes a clone. Callers that change the ACL (`set` /
+    // `remove`) build a fresh object rather than mutating this.
+    return cloneIfNecessary(aclData as FabricValue) as ACL;
   }
 
   async set(user: ACLUser, capability: Capability): Promise<void> {
     const acl = await this.get();
-    acl[user] = capability;
-    await this.#write(acl);
+    await this.#write({ ...acl, [user]: capability });
   }
 
   async remove(user: ACLUser): Promise<void> {
-    const acl = await this.get();
-    delete acl[user];
-    await this.#write(acl);
+    const { [user]: _removed, ...rest } = await this.get();
+    await this.#write(rest);
   }
 
   async #write(acl: ACL): Promise<void> {
