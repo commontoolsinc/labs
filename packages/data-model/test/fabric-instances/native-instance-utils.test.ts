@@ -112,7 +112,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("output is not frozen when `frozen=false`", () => {
+    it("leaves output unfrozen when `frozen=false`", () => {
       const obj = Object.freeze({
         a: 1,
         b: "two",
@@ -127,7 +127,7 @@ describe("native-instance-utils", () => {
       expect(result.a).toBe(99);
     });
 
-    it("output is frozen when `frozen=true` (default)", () => {
+    it("freezes output when `frozen=true` (default)", () => {
       const obj = { a: 1, b: "two" } as unknown as FabricValue;
       const result = nativeFromFabricValueModern(obj) as Record<
         string,
@@ -224,10 +224,6 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(result.cause)).toBe(false);
     });
   });
-
-  // --------------------------------------------------------------------------
-  // tagFromNativeValue / tagFromNativeClass / isConvertibleNativeInstance
-  // --------------------------------------------------------------------------
 
   describe("tagFromNativeValue", () => {
     it("returns `Error` tag for standard `Error` subclasses", () => {
@@ -542,24 +538,18 @@ describe("native-instance-utils", () => {
     });
   });
 
-  // --------------------------------------------------------------------------
-  // Arm 3 cycle behavior via [DEEP_FREEZE] protocol
-  //
-  // Cycle-capable wired impls: `FabricError` (recurses through
-  // `error.cause` + custom enumerable own properties), `ProblematicValue`
-  // (recurses through `state`), `UnknownValue` (recurses through
-  // `state`). `FabricRegExp.[DEEP_FREEZE]` ignores its `subFreeze`
-  // parameter (only freezes `this.regex` + `this`) and so is structurally
-  // cycle-free by construction at the protocol level -- omitted
-  // intentionally, not a gap.
+  // Cycle-capable wired impls: `FabricError` (recurses through `error.cause`
+  // + custom enumerable own properties), `ProblematicValue` (recurses through
+  // `state`), `UnknownValue` (recurses through `state`).
+  // `FabricRegExp.[DEEP_FREEZE]` ignores its `subFreeze` parameter (only
+  // freezes `this.regex` + `this`) and so is structurally cycle-free by
+  // construction at the protocol level -- omitted intentionally, not a gap.
   //
   // Termination assertion: a cycle without shared-`inProgress` threading
   // would manifest as `RangeError: Maximum call stack size exceeded` (a
   // clean fast throw, not a hang); `.not.toThrow()` is the discriminating
   // assertion.
-  // --------------------------------------------------------------------------
-
-  describe("Arm 3 cycle behavior via `[DEEP_FREEZE]`", () => {
+  describe("cycle behavior via `[DEEP_FREEZE]`", () => {
     it("`FabricError`: cycle through `error.cause` terminates", () => {
       // Build a cycle: a plain-object wrapper holds the FabricError, and the
       // FabricError's `error.cause` points back at the wrapper. When
@@ -593,7 +583,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(cycle)).toBe(true);
     });
 
-    it("cross-instance cycle (`FabricError` <-> `ProblematicValue`) terminates", () => {
+    it("terminates on a cross-instance cycle (`FabricError` <-> `ProblematicValue`)", () => {
       // Two `FabricInstance` subclasses pointing into each other via their
       // recursing slots. Both must terminate, both must end deep-frozen.
       // FabricError snapshots its FabricValue state at construction, so wire
