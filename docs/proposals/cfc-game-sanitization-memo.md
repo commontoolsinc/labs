@@ -1,4 +1,4 @@
-# Modeling hidden-information games with CFC — a forcing function for graded, per-reader declassification
+# Modeling hidden-information games with CFC — graded reveal is reducers + relabel policies, and the real gap is per-recipient materialization
 
 **Status:** Design exploration / motivating sketch (non-normative)
 **For:** CFC designers (`../specs/cfc`) and anyone weighing what belongs on the CFC roadmap
@@ -8,23 +8,26 @@
 
 ## What this is, and the decision it informs
 
-This memo uses a board game as a **forcing function** to surface a capability CFC does not yet
-have and probably wants: **declassification that produces a *reduced shape* of a value,
-different for each reader, evaluated when the value is read.**
+This memo uses a board game as a **forcing function** for hidden-information modeling in CFC, and
+arrives at a sharper conclusion than it set out with: the per-viewer "graded reveal" a card game
+needs is **already expressible** in CFC as *trusted reducers + integrity-guarded relabel policies*,
+with **no new label primitive**. What's actually missing is an *enforcement* layer
+(per-recipient materialization), not a label-model feature.
 
-It is **not** a proposal to ship a poker game. The game is the crispest, most self-contained way
-to exhibit the missing primitive; the same primitive underwrites a class of real product
-features (below). The decision this memo informs is:
+It is **not** a proposal to ship a poker game. The decision this memo informs is:
 
-> Should *graded, per-reader projection* (and its sibling, *policy-controlled unlinkability*) be
-> on the CFC roadmap as first-class primitives — or is the intended answer always "partition into
-> scopes"?
+> CFC's label model already covers graded per-reader reveal (via reducers + relabel policies). The
+> roadmap question is therefore narrower: **build a per-recipient materialization layer** (run the
+> right reducer per reader, route outputs server-side) and a **canned-reducer library** — or keep
+> steering people to scope-partitioning (`PerUser`)? And separately, is *unlinkability* (shuffles)
+> worth research, given it's the one behaviour with no CFC home?
 
-**Central claim, in one sentence.** CFC's group/role model, opaque references, and collection
-constraints already cover most of a hidden-information game; the two things genuinely missing are
-(1) a small *ordered* reveal dimension with a read-time projecting declassifier, and (2) a way to
-make a reference's *linkability* a policy-controlled, declassifiable fact. Everything else maps
-onto machinery that already exists.
+**Central claim, in one sentence.** CFC access is binary per `(value, principal)` with gradation on
+the label lattice; "Bob sees the count, not the cards" is a *trusted reducer* (`count = length`,
+inheriting the cards' confidentiality and minting a resolution-reduction integrity atom) whose
+output a *policy relabels* to a lower audience — so the only genuine gaps are **per-recipient
+materialization** (architecture, not labels) and **unlinkability** (an open research property),
+with **recombination** (§14.3.2) bounding how many reducers you can safely publish at once.
 
 ---
 
@@ -190,220 +193,179 @@ time-varying* reveal on values that stay put. That's the new capability.
 
 ---
 
-## Proposed primitives (prioritized)
+## How CFC already models this: trusted reducers + relabel policies
 
-Four primitives. If only one is built, build **#2** (graded per-reader projection) — it is the
-core capability and #1 is its data model. #3 (unlinkability) is the novel, higher-risk research
-piece. #4 is an enforcement-architecture question more than a label-model one.
+> **Correction.** An earlier draft of this memo proposed a *new ordered "reveal" label dimension*
+> (`hidden ≺ existence ≺ cardinality ≺ order ≺ values`). That was a modeling error. CFC access is
+> **binary** per `(value, principal)` — you satisfy a value's label and read the whole thing, or
+> you don't (§3.1.4; projecting a field *inherits*, never reduces, confidentiality — §8.3.1).
+> "Gradation" lives on the **label lattice** (more CNF clauses = more restrictive; join =
+> concatenation), not on a graded read of one value; even classic MLS levels are *modeled as
+> policy*, not a built-in axis (§4.7.2). So a graded reveal is **already expressible** with two
+> things CFC has, and needs no new label dimension.
 
-Signatures are illustrative, in the style of the existing CFC chapters.
+The idiom is a **reducer + a relabel policy**:
 
-### Priority 1 — #1 Facet labels (the data model)
+1. **A reducer is an ordinary transform** that takes the secret and emits a less-informative
+   value: `count(hand) = hand.length`, `exists(hand) = hand.length > 0`,
+   `orderSkeleton(hand) = hand.map(_ => BLANK)`, … By the transition rules the reducer's output
+   **inherits the input's confidentiality** (the count starts out as secret as the cards — §8.7,
+   §8.1 table) and gains **new integrity *from the reducer itself*** — specifically a
+   *semantic-correctness / resolution-reduction* integrity atom, which the spec names explicitly
+   (§3.3, class 2: "unit conversions, **resolution reduction**"). Call it
+   `ReducedBy{ reducer: CodeHash, kind: "count" }`.
 
-Generalize §8.5.6.1's two-way (membership vs member) split into a small fixed set of **facets**,
-each independently gated, ordered as a reveal lattice that mirrors boardgame exactly:
+2. **A policy trusts that reducer to relabel its output.** An integrity-guarded exchange rule
+   (§5.3.2) fires when the value carries `ReducedBy{reducer: H}` and **relaxes the
+   confidentiality**: `removeMatchedClauses` drops `[Alice]`, `addAlternatives` adds the lower
+   audience (e.g. `[table]`). In the spec author's words: *"I trust the count-reducer (hash H);
+   when its output is so labelled, that output may carry `[table]`."* This is **robust
+   declassification** (§10 inv. 7): the relabel is gated on integrity that **only the trusted
+   reducer's code identity can mint** (§3.3: integrity facts are minted only by trusted code and
+   are non-malleable), so untrusted pattern code cannot forge "this is now public." The GPS
+   **"round to city"** declassifier (§3.1.5) is the same shape; §8.5.6.1's membership-vs-member
+   split is exactly why `count` is separable from the cards in the first place.
 
 ```ts
-type RevealLevel = "hidden" | "existence" | "cardinality" | "order" | "values";
-//   hidden      → field appears absent                         (≈ PolicyHidden)
-//   existence   → one bit: present / non-empty                 (≈ PolicyNonEmpty)
-//   cardinality → count, no order, no values                   (≈ PolicyLen)
-//   order       → positions / identity slots, no values        (≈ PolicyOrder)
-//   values      → full contents                                (≈ PolicyVisible)
-// Scalars collapse to {hidden, values}.
+// 1. Reducer (a normal trusted transform). Output inherits the card's confidentiality and gains
+//    a resolution-reduction integrity atom naming this reducer.
+const countReducer = trustedTransform("poker.count", (hand: Card[]) => hand.length);
+//    → output value: number,  integrity: [ReducedBy{ reducer: <hash>, kind: "count" }]
 
-type FacetPolicy = {
-  audiences: Array<{ audience: AudienceRef; level: RevealLevel }>;
-  default: RevealLevel; // recommend "hidden" as the safe default
+// 2. Relabel policy (an exchange rule keyed to the reducer's identity).
+const releaseCountToTable = {
+  integrityPre: [{ type: ".../ReducedBy", reducer: countReducerHash }],
+  confidentialityPre: [HoleCards(player)],     // matches the hand's secret clause
+  removeMatchedClauses: true,                  // drop the player-only secrecy
+  addAlternatives: [TableReader(table)],       // ... and release to the table
 };
 ```
 
-Carried in schema `ifc` under a new `reveal` key, parallel to `confidentiality`:
+So **"reveal level" = which reducer you run; "audience" = the new label its policy grants.** Both
+are ordinary CFC. The boardgame ladder is just a *family of canned reducers*: `exists` (≈
+PolicyNonEmpty), `count` (≈ PolicyLen), `orderSkeleton` (≈ PolicyOrder), identity (≈ PolicyVisible).
+No new primitive.
 
-```jsonc
-{
-  "type": "array",
-  "items": { "$ref": "#/$defs/Card" },
-  "ifc": {
-    "reveal": {
-      "default": "hidden",
-      "audiences": [
-        { "audience": { "role": "self" },         "level": "values"      },
-        { "audience": { "role": "table-reader" }, "level": "cardinality" }
-      ]
-    }
-  }
-}
-```
+## What is genuinely missing
 
-`AudienceRef` resolves through **existing space roles** (§3.6) — `self`, `table-reader`, a team
-role, etc. The reveal lattice reuses CFC's disjunctive-authorization-via-roles wholesale; only the
-*graded ordered level* is new.
+Given the above, only one thing is a real **gap**, one is **ergonomics**, and two are **out of
+scope**:
 
-**Design question for spec authors:** the levels are *ordered* and resolved *least-restrictive-
-wins per reader*, which the conjunctive CNF lattice cannot express. So this looks like a small
-*third* label dimension (ordered), beside confidentiality (CNF) and integrity (meet) — analogous
-to how integrity already sits beside confidentiality. Is that the right shape, or should it be
-sugar over confidentiality caveats? (CNF can't do ordered resolution, which is why I lean toward a
-separate dimension.)
+### The real gap — per-recipient materialization (enforcement/architecture)
 
-### Priority 1 — #2 Reveal projection (the core operation)
-
-A **projecting declassifier**: instead of allow/deny, emit a *reduced value* plus a *residual
-label* protecting what was not revealed. This is the capability CFC lacks.
+CFC specifies the *check* (`canAccess`) and the *relabel* (exchange rules), but **not an
+orchestration that, per reader, runs the right reducer and routes each reader to the projection
+they can satisfy.** Boardgame's `SanitizedForPlayer` is exactly that: a server-authoritative,
+per-recipient materialization that runs before bytes leave the trusted boundary. The CFC spec
+describes no per-recipient projection/materialization layer (the closest, error declassification
+§5.4.2 and multi-party consent §3.9.5, each produce *one* shared output, not per-reader variants).
+A sketch of the missing piece — the read-time dual of the sink gate (§5.2):
 
 ```ts
-function revealLevelFor(policy: FacetPolicy, reader: Principal): RevealLevel {
-  const matches = policy.audiences.filter(a => reader.satisfies(a.audience));
-  return matches.length ? maxLevel(matches.map(m => m.level)) : policy.default; // least-restrictive-wins
-}
-
-type RevealedView<T> = {
-  level: RevealLevel;
-  value: ProjectedShape<T>; // full T at "values"; placeholders at "order"; {count} at
-                            // "cardinality"; bool at "existence"; absent at "hidden"
-  residualLabel: Label;     // still protects everything NOT revealed at this level
-};
-
-function project<T>(value: T, facets: FacetPolicy, reader: Principal): RevealedView<T>;
+// Trusted boundary: for THIS reader, run the most-revealing reducer whose relabelled output the
+// reader can satisfy, and emit only that. Nothing below it ever sees the raw cell.
+function materializeForReader(cell: CellRef, reader: Principal): { value: unknown; label: Label };
 ```
 
-Projecting a 2-card hand:
+Today the runtime has no such layer (the legacy query-time redaction was removed; the
+`cf-cfc-render-boundary` is a *trusted-host UI gate*, not server-side projection). **This — not a
+label primitive — is the thing to put on the roadmap, and it's the fork worth Berni's call:** a
+trusted materializer participants delegate to, vs. partitioning each player's secret into a scope
+peers can't read (`PerUser`, the cooperative-demo answer; not a hard boundary — §3.6 / multi-user
+docs).
 
-| level | `value` shape |
-|---|---|
-| `values` | `[{suit:"♠",rank:"A"}, {suit:"♥",rank:"K"}]` |
-| `order` | `[Blinded#a1, Blinded#a2]` (positions kept, faces gone — see #3) |
-| `cardinality` | `{ count: 2 }` |
-| `existence` | `true` |
-| `hidden` | `undefined` |
+### Ergonomics — a canned reducer/projection library
 
-This is the read-time dual of §8.5's write-time collection constraints, and it subsumes #1 (each
-lower level reveals strictly fewer facets).
+Authors must hand-write one reducer + one relabel rule per level. A small standard library
+(`exists`/`count`/`orderSkeleton`) plus an authoring affordance ("for audience X serve reduction
+R") would make the common cases declarative. This is sugar over the model above, not new
+semantics.
 
-**Soundness obligation (flag for spec authors):** the residual label must dominate exactly the
-un-revealed facets, and the overlapping-declassifier hazard (`14.3.2`) is *sharper* here — a
-reader simultaneously in two audiences must get the join, and must never be able to combine an
-`order` projection from one render with a `cardinality` projection from another to learn more than
-`order` alone. Mitigation (boardgame's): make `project` **deterministic in `(value, reader,
-epoch)`** so repeated projections are stable and non-leaky (boardgame salts its order/len
-permutation, `randPermForStack`, for exactly this reason).
+### Out of scope — recombination and unlinkability
 
-### Priority 2 — #3 Blinded references with policy-controlled re-linkability (the novel one)
-
-No current analogue. Extend the opaque handle (§8.13) with a **linkage epoch**, and make
-*linkability itself a labeled, declassifiable fact.*
-
-```ts
-type Blinded<T> = {
-  opaqueId: string;     // unguessable; STABLE while linkage is preserved (animation token)
-  epoch: number;        // bumped on re-blinding (≈ secretMoveCount)
-  // content readable only by a reader whose reveal level for this value is "values"
-};
-
-// Public move: identity preserved → a UI can animate "the same token" between containers.
-function publicMove<T>(b: Blinded<T>, from: Container, to: Container): Blinded<T>; // SAME id+epoch
-
-// Re-blind (shuffle / secret move): severs linkability.
-function reblind<T>(items: Blinded<T>[]): { next: Blinded<T>[]; bridge: LinkageBridge };
-
-type LinkageBridge = {
-  type: "https://commonfabric.org/cfc/atom/LinkageBridge";
-  before: string[];  // old opaqueIds (multiset)
-  after: string[];   // new opaqueIds (multiset)
-  // asserts "these became those" but NOT which→which   (≈ IDsLastSeen)
-};
-```
-
-The new policy idea: **unlinkability is a confidentiality property.** After `reblind`, the
-relation *old-id ↦ new-id* carries a clause declassifiable only to a reader whose reveal level
-over the container is `order` or higher. A `cardinality`/`existence` viewer gets the
-`LinkageBridge` (animation resolves) but not the relation — matching boardgame's
-`Shuffle` (scrambles) vs `PublicShuffle` (doesn't). This expresses things confidentiality +
-integrity alone cannot: *"you may see a card moved from deck to discard, but not that it is the
-same card you saw earlier."*
-
-### Priority 3 — #4 Trusted per-reader materialization boundary (the architecture question)
-
-Boardgame's secrecy is real because `SanitizedForPlayer` runs **server-side before egress.** CFC
-enforces at commit-time and at render-time-in-a-trusted-host (UI-only). For real (not UI-only)
-secrecy, define a **materialization sink** — the read-time dual of the sink gate (§5.2):
-
-```ts
-function materializeForReader(cell: CellRef, reader: Principal): RevealedView<unknown>;
-// applies #1 facets via #2 projection and #3 re-blinding before bytes leave the authoritative space
-```
-
-This is the heaviest lift and the right place to be explicit about trust: in a peer-to-peer space
-where every participant's runtime can read the raw bytes, true secrecy needs either (a) a trusted
-materializer participants delegate to, or (b) keeping each player's secret facet in a scope peers
-can't read (today's `PerUser` answer). The skeleton uses (b) and marks where (a) would replace it.
-**This is genuinely a fork in the road, and #2/#3 only deliver real secrecy if it's resolved** —
-worth Berni's explicit call.
+- **Recombination.** Exposing several reducers' outputs at once can leak more than any one
+  intended — the spec's own city+grid example is *literally two reducers composing* (§14.3.2,
+  explicitly unsolved; §14.4.1). A poker table with many simultaneous partial reveals lands here.
+  This bounds how many reducers you can safely publish for one secret.
+- **Unlinkability** (boardgame's shuffle/`scrambleIds`: "you may see a card move, but not that it
+  is the same card"). This is a *relational* property — not who-may-read-a-value but
+  whether-two-values-correlate — which CFC's lattice does not model and the spec does not address
+  (nearest acknowledgement: the composition/contamination problems, §14.3.2/§14.4.2). It is the
+  one boardgame behaviour with **no** CFC home today; treat it as an open research question, not a
+  primitive to bolt on.
 
 ---
 
 ## Worked example: Texas Hold'em
 
-| Field | Lives in | `reveal` policy | Primitive(s) |
+Each hand is `Confidential<Card[], [HoleCards(player)]>`. "Reveal level" = which trusted reducer's
+output a policy releases to the table; "audience" = the label it's released to. (M) marks the one
+step that needs the missing **materialization** layer; (R) the open **recombination** caveat; (U)
+the open **unlinkability** problem.
+
+| Field | Label | How others learn anything | Mechanism |
 |---|---|---|---|
-| `deck` (pre-deal) | table | `{ default: hidden }`, members `Blinded` | #1, #3 |
-| `holeCards[p]` | player scope | `{ self: values, table: cardinality }` | #1, #2 |
-| `board` (flop/turn/river) | table | `{ default: values }` | #2 (declassify-on-reveal) |
-| `pot`, `bets`, `toAct` | table | `{ default: values }` | — (public) |
-| `muck` (folded cards) | table | `{ default: existence }`, members `Blinded` | #1, #3 |
+| `holeCards[p]` | `[HoleCards(p)]` | table gets `count` only | `countReducer` + relabel `[HoleCards(p)]→[table]` |
+| `board` (flop/turn/river) | `[HoleCards(deck)] → [table]` | everyone, once dealt | identity reducer relabelled by a trusted "deal community" action |
+| `pot`, `bets`, `toAct` | `[table]` | everyone | public; no reducer |
+| `muck` (folded hand) | `[HoleCards(p)]` | table learns a hand exists | `existsReducer` + relabel to `[table]` |
 
-1. **Shuffle** → `reblind(deck)`: fresh ids + `LinkageBridge`. UIs animate; no one below `order`
-   traces a card through it. (#3)
-2. **Deal** → cards `publicMove` deck→hand, then a *secret* deal `reblind`s the destination so the
-   hand can't be correlated with deck positions. `holeCards[p]` projects `values` to `self`,
-   `cardinality` to the table: Alice sees `A♠ K♥`; Bob sees `{count: 2}`. (#2, #3)
-3. **Flop** → three cards `publicMove` deck→board; `board` is `values` to all — a graded
-   declassification *up* the lattice, gated by a trusted "reveal community card" intent. Cards keep
-   their `opaqueId`, so deal→flip animates continuously. (#2)
-4. **Betting** → `pot`/`bets` are public scalars. No new machinery.
-5. **Showdown** → surviving hands transition the table's level `cardinality → values`, gated by a
-   `Showdown` intent (trusted UI action, §3.8/§6). A graded declassification *event*. (#2)
-6. **Muck (fold without showing)** → hand `publicMove`s to `muck` (`existence` to the table) and is
-   reblinded in. Everyone learns *a* hand folded; no one ever learns its contents, and no one can
-   later prove *which* cards were folded even once the deck is revealed. (#1, #3)
+1. **Deal** → `holeCards[p]` is `[HoleCards(p)]`-secret. A `countReducer` emits `length` (inherits
+   the secret, mints `ReducedBy{count}`); `releaseCountToTable` relabels *that derived value* to
+   `[table]`. Alice (who satisfies `HoleCards(Alice)`) sees her cards; the table sees `{count: 2}`.
+   **(M)** the runtime must actually run the reducer per-reader and serve Alice the cards but Bob
+   the count — that routing is the missing materialization layer.
+2. **Flop/Turn/River** → community cards start `[HoleCards(deck)]`-secret; a trusted "deal
+   community card" action (§3.8/§6) authorizes an identity-reducer relabel to `[table]`. A normal
+   declassification event.
+3. **Showdown** → the *same* `holeCards[p]` are relabelled `[HoleCards(p)] → [table]` by the
+   trusted Showdown action — the identity reducer this time (full cards). Folded hands simply don't
+   get this relabel, so they stay secret. **(R)** publishing both `count` (step 1) and full cards
+   (here) over a session is multiple reducers on one secret — fine sequentially, but a caution if
+   many partial reveals coexist.
+4. **Muck (fold without showing)** → `existsReducer` releases one bit (`[table]`); the cards' full
+   label is never relaxed, so contents stay secret forever. **(U)** "you can't tell *which* cards
+   were folded even after the deck is shown" is the unlinkability property CFC has no home for.
 
-Every mechanic — graded reveal, group resolution, stable-id animation, scramble unlinkability,
-declassify-on-reveal — lands on one of the four primitives.
+Every mechanic except unlinkability is `{trusted reducer} + {relabel policy}` over the binary
+lattice; the only new machinery anyone has to *build* is the per-reader materialization in step 1.
 
 ---
 
 ## Expressible today vs needs adding
 
-| Capability | Today | With proposal |
+| Capability | CFC today | Verdict |
 |---|---|---|
-| Per-player hidden vs visible hands | ✅ scopes (`PerUser` + `PerSpace`) | same, as policy not data partition |
-| "Any table member sees the board" | ✅ spaces + roles | same |
-| "Opponent has N cards" (count, not values) | ⚠️ only via a hand-maintained separate count cell | ✅ `reveal: cardinality` (#1/#2) |
-| "Tile positions visible, faces hidden" (order) | ❌ | ✅ `reveal: order` (#2) |
-| Animate a card across public moves | ⚠️ only if its id is public (no secrecy) | ✅ stable `Blinded.opaqueId` (#3) |
-| Can't trace a card through a shuffle | ❌ no unlinkability concept | ✅ `reblind` + `LinkageBridge` (#3) |
-| One canonical cell, many reader projections | ❌ (render-time, UI-only) | ✅ `materializeForReader` (#4) |
-| Reveal that *changes over time* (deal→hidden→showdown) | ⚠️ as data migration between scopes | ✅ a label change on a value that never moves (#2) |
+| Per-player hidden vs visible hands | `Confidential` label + binary access | ✅ already |
+| "Any table member sees the board" | spaces + roles | ✅ already |
+| "Opponent has N cards" (count, not cards) | `countReducer` + integrity-guarded relabel (§8.7, §3.3, §5.3.2) | ✅ already expressible (label model) |
+| "Positions visible, faces hidden" (order) | `orderSkeletonReducer` + relabel | ✅ already expressible (label model) |
+| Reveal that changes over time (deal→showdown) | trusted action fires the relabel exchange rule | ✅ already (a relabel, not a data move) |
+| **One cell, the right reduced view served to each reader** | — | ❌ **missing: per-recipient materialization** (architecture) |
+| Canned `count`/`order`/`exists` reducers + declarative authoring | hand-write reducer + rule each | ⚠️ ergonomic gap (library) |
+| Publish several partial reveals of one secret safely | — | ⚠️ recombination, open (§14.3.2) |
+| Can't trace a card through a shuffle (unlinkability) | — | ❌ out of scope / open research |
 
 ---
 
 ## Open questions for CFC designers
 
-1. **Third label dimension, or sugar over confidentiality?** The ordered, least-restrictive-wins
-   reveal lattice is not expressible in the conjunctive CNF lattice. A small separate ordered
-   dimension (like integrity) seems cleaner — agree?
-2. **Where is the materialization boundary?** Is the intended answer always "partition into
-   scopes," with `reveal` being a *render-time* convenience over a scope partition the policy
-   compiler derives — or is a trusted server-side materializer in scope? (#4 is the fork.)
-3. **Re-linkability vs the recombination attack (`14.3.2`).** `reblind` is a *sanctioned*
-   unlinkability op. Does it interact with the open recombination hazard, or is it separable
-   because it withholds a *relation* rather than declassifying a *value*?
-4. **Determinism of projections.** Should `project` be required deterministic in `(value, reader,
-   epoch)`, as boardgame's salted permutation effectively is?
-5. **Authoring surface.** Does a graded `reveal` belong in `cfc_authoring_contract.md` as e.g.
-   `Reveal<T, { self: "values"; table: "cardinality" }>`, lowering to `ifc.reveal`, parallel to
-   the existing `Confidential<T, X>`?
+1. **Is "graded reveal" settled as reducers + relabel policies?** This memo now argues yes — no new
+   label dimension. Sanity-check that against the spec's intent (esp. §3.3 resolution-reduction
+   integrity + §5.3.2 exchange rules). If agreed, the earlier "ordered dimension" idea should be
+   formally retired.
+2. **Per-recipient materialization — build it, or stay scope-only?** The real fork. Is a trusted
+   server-side materializer (run reducer per reader, route outputs) on the roadmap, or is the
+   intended answer always `PerUser` scope-partitioning (with its "addressing, not authorization"
+   caveat)?
+3. **A standard reducer library + authoring affordance.** Worth a `count`/`order`/`exists` library
+   and sugar like *"for audience X, serve reduction R"* lowering to a reducer + exchange rule?
+4. **Recombination budget.** When one secret has several reducers (count *and* later full cards,
+   etc.), how is the composition hazard (§14.3.2) bounded — per-secret reducer allow-lists,
+   linkage tracking, a DP-style budget?
+5. **Unlinkability — research or out of scope?** Boardgame's scramble has no CFC analogue (it's a
+   relational, not who-may-read, property). Is it worth a research track, or explicitly declared
+   out of scope?
 
 ---
 
