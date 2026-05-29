@@ -1,8 +1,8 @@
 import { ACL, ACLUser, DID } from "@commonfabric/memory/acl";
 import { Capability } from "@commonfabric/memory/interface";
 import {
+  cloneIfNecessary,
   type FabricValue,
-  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
@@ -26,21 +26,21 @@ export class ACLManager {
       throw new Error("No ACL initialized for space.");
     }
 
-    // `set`/`remove` only write or delete a single top-level entry, so a
-    // mutable top-level copy is all that's needed.
-    return shallowMutableClone(aclData as FabricValue) as ACL;
+    // Return an immutable, isolated view: `cloneIfNecessary` (frozen by
+    // default) identity-passes the already-deep-frozen stored value (zero-copy)
+    // and otherwise freezes a clone. Callers that change the ACL (`set` /
+    // `remove`) build a fresh object rather than mutating this.
+    return cloneIfNecessary(aclData as FabricValue) as ACL;
   }
 
   async set(user: ACLUser, capability: Capability): Promise<void> {
     const acl = await this.get();
-    acl[user] = capability;
-    await this.#write(acl);
+    await this.#write({ ...acl, [user]: capability });
   }
 
   async remove(user: ACLUser): Promise<void> {
-    const acl = await this.get();
-    delete acl[user];
-    await this.#write(acl);
+    const { [user]: _removed, ...rest } = await this.get();
+    await this.#write(rest);
   }
 
   async #write(acl: ACL): Promise<void> {
