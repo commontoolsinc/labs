@@ -36,22 +36,16 @@ function hashBytesOf(value: FabricValue): Uint8Array {
   return hashOf(value).bytes;
 }
 
-// =========================================================================
-// Primitive types
-// =========================================================================
-
 describe("value-hash", () => {
   describe("hashOf()", () => {
-    // --- null ---
-
+    // null
     it("produces `TAG_NULL` byte stream for `null`", () => {
       // Byte stream: [0x20]
       const expected = sha256([0x20]);
       expect(hashBytesOf(null)).toEqual(expected);
     });
 
-    // --- boolean ---
-
+    // boolean
     it("produces `TAG_BOOLEAN` + `0x01` for `true`", () => {
       // [0x22, 0x01]
       const expected = sha256([0x22, 0x01]);
@@ -68,8 +62,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(true))).not.toBe(hex(hashBytesOf(false)));
     });
 
-    // --- number ---
-
+    // number
     it("produces `TAG_NUMBER` + IEEE 754 float64 BE for `42`", () => {
       const expected = sha256([
         0x23,
@@ -207,8 +200,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(Number.MAX_VALUE))).toBe(hex(expected));
     });
 
-    // --- string ---
-
+    // string
     it("produces `TAG_STRING` + LEB128 byte length + UTF-8 for `hello`", () => {
       // UTF-8 for "hello": [0x68, 0x65, 0x6c, 0x6c, 0x6f], 5 bytes
       // LEB128(5) = [0x05]
@@ -277,8 +269,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
     });
 
-    // --- bigint ---
-
+    // bigint
     it("encodes `0n` as `TAG_BIGINT` + LEB128 length 1 + `[0x00]`", () => {
       // LEB128(1) = [0x01]
       const expected = sha256([0x26, 0x01, 0x00]);
@@ -372,16 +363,14 @@ describe("value-hash", () => {
       );
     });
 
-    // --- undefined ---
-
+    // undefined
     it("produces `TAG_UNDEFINED` for `undefined`", () => {
       // [0x21]
       const expected = sha256([0x21]);
       expect(hashBytesOf(undefined)).toEqual(expected);
     });
 
-    // --- cross-type distinctness ---
-
+    // cross-type distinctness
     it("produces different hashes for `null`, `undefined`, and `false`", () => {
       const nullH = hex(hashBytesOf(null));
       const undefH = hex(hashBytesOf(undefined));
@@ -400,9 +389,7 @@ describe("value-hash", () => {
       expect(bigH).not.toBe(strH);
     });
 
-    // =========================================================================
     // FabricBytes
-    // =========================================================================
 
     it("produces `TAG_BYTES` + LEB128 length + raw bytes for a `FabricBytes`", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
@@ -423,9 +410,7 @@ describe("value-hash", () => {
       expect(hashBytesOf(bytes)).toEqual(expected);
     });
 
-    // =========================================================================
     // FabricEpochNsec (dedicated TAG_EPOCH_NSEC primitive tag)
-    // =========================================================================
 
     it("matches a hand-computed byte stream for `FabricEpochNsec(0n)`", () => {
       // TAG_EPOCH_NSEC (0x27) + LEB128(1) + [0x00]
@@ -449,9 +434,7 @@ describe("value-hash", () => {
       expect(hash.length).toBe(32);
     });
 
-    // =========================================================================
     // FabricEpochDays (dedicated TAG_EPOCH_DAYS primitive tag)
-    // =========================================================================
 
     it("matches a hand-computed byte stream for `FabricEpochDays(0n)`", () => {
       // TAG_EPOCH_DAYS (0x28) + LEB128(1) + [0x00]
@@ -482,9 +465,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
     });
 
-    // =========================================================================
     // FabricError (FabricInstance via DECONSTRUCT)
-    // =========================================================================
 
     it("matches a byte stream built from `[DECONSTRUCT]` output for `FabricError`", () => {
       // Build the expected byte stream programmatically because the
@@ -550,9 +531,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(e1))).not.toBe(hex(hashBytesOf(e2)));
     });
 
-    // =========================================================================
     // Arrays
-    // =========================================================================
 
     it("produces TAG_ARRAY + TAG_END for an empty array", () => {
       const expected = sha256([0x10, 0x00]);
@@ -656,9 +635,7 @@ describe("value-hash", () => {
       expect(hex(hash)).not.toBe(hex(hashBytesOf([1, 2, 3])));
     });
 
-    // =========================================================================
     // Objects
-    // =========================================================================
 
     it("produces TAG_OBJECT + TAG_END for an empty object", () => {
       const expected = sha256([0x11, 0x00]);
@@ -732,9 +709,7 @@ describe("value-hash", () => {
       );
     });
 
-    // =========================================================================
     // Consistency and distinctness
-    // =========================================================================
 
     it("produces the same hash for the same value every time", () => {
       expect(hashBytesOf(42)).toEqual(hashBytesOf(42));
@@ -785,9 +760,7 @@ describe("value-hash", () => {
       expect(hashes.size).toBe(9);
     });
 
-    // =========================================================================
     // Edge cases
-    // =========================================================================
 
     it("hashes a deeply nested structure", () => {
       const deep = { a: { b: { c: { d: [1, { e: true }] } } } };
@@ -958,9 +931,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
     });
 
-    // =========================================================================
     // FabricHash hashing (TAG_CONTENT_ID = 0x29)
-    // =========================================================================
 
     it("matches a hand-computed byte stream for `FabricHash`", () => {
       // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
@@ -1019,9 +990,7 @@ describe("value-hash", () => {
       expect(() => hashOf(fact)).not.toThrow();
     });
 
-    // =========================================================================
     // hashOf() returns FabricHash
-    // =========================================================================
 
     it("returns a `FabricHash` with the `fid1` tag", () => {
       const result = hashOf(42);
@@ -1043,10 +1012,6 @@ describe("value-hash", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // Caching behavior
-  // ---------------------------------------------------------------------------
 
   describe("hashOf() caching", () => {
     it("returns the same precomputed-constant object for `null`", () => {
@@ -1115,13 +1080,8 @@ describe("value-hash", () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Native instance hashing (on-the-fly conversion)
-  // ---------------------------------------------------------------------------
-
   describe("hashOf() native instances", () => {
-    // --- Date ---
-
+    // Date
     it("hashes a native `Date` without throwing", () => {
       const date = new Date("2024-01-01T00:00:00Z");
       const hash = hashBytesOf(date);
@@ -1142,8 +1102,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
     });
 
-    // --- RegExp ---
-
+    // RegExp
     it("hashes a native `RegExp` without throwing", () => {
       const re = /hello/gi;
       const hash = hashBytesOf(re);
@@ -1163,8 +1122,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(r1))).not.toBe(hex(hashBytesOf(r2)));
     });
 
-    // --- Uint8Array ---
-
+    // Uint8Array
     it("hashes a native `Uint8Array` without throwing", () => {
       const buf = new Uint8Array([1, 2, 3]);
       const hash = hashBytesOf(buf);
@@ -1184,8 +1142,7 @@ describe("value-hash", () => {
       expect(hex(hashBytesOf(b1))).not.toBe(hex(hashBytesOf(b2)));
     });
 
-    // --- Deferred types (not yet handled — these document known gaps) ---
-
+    // Deferred types (not yet handled — these document known gaps)
     it("throws for `Map` (deferred — needs recursive translation)", () => {
       expect(() => hashOf(new Map([["a", 1]]))).toThrow(
         "unsupported object type",
@@ -1209,10 +1166,6 @@ describe("value-hash", () => {
       expect(() => hashOf(obj)).toThrow("unsupported object type");
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // hashStringOf
-  // ---------------------------------------------------------------------------
 
   describe("hashStringOf", () => {
     it("returns a string", () => {
@@ -1273,10 +1226,6 @@ describe("value-hash", () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // taggedHashStringOf
-  // ---------------------------------------------------------------------------
-
   describe("taggedHashStringOf", () => {
     it("returns a string", () => {
       const result = taggedHashStringOf(42);
@@ -1295,10 +1244,6 @@ describe("value-hash", () => {
       expect(sansTag).toBe(hashStringOf(value));
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // IncrementalHasher.digest("base64url")
-  // ---------------------------------------------------------------------------
 
   describe("IncrementalHasher digest base64url", () => {
     it("returns a string", () => {
