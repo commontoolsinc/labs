@@ -717,6 +717,7 @@ export class RuntimeProcessor {
       const cell = await this.cc.manager().get(
         target,
         request.runIt ?? false,
+        request.schema,
       );
       return {
         page: createPageRef(cell),
@@ -726,6 +727,7 @@ export class RuntimeProcessor {
     const cell = await this.cc.manager().get(
       request.pageId,
       request.runIt ?? false,
+      request.schema,
     );
 
     return {

@@ -254,6 +254,16 @@ export const uiSchema = internSchema(
 
 export type UISchema = Schema<typeof uiSchema>;
 
+export const nameAndUiSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      [NAME]: { type: "string" },
+      [UI]: rendererVDOMSchema,
+    },
+  },
+);
+
 // We specify type unknown for the items, since we don't want to recursively
 // load them
 export const pieceListSchema = internSchema(

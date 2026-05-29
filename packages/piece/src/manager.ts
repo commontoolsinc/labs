@@ -308,25 +308,26 @@ export class PieceManager {
         undefined,
         scope,
       );
+    const pieceToSync = asSchema ? piece.asSchema<T>(asSchema) : piece;
 
     if (runIt) {
       // Load persisted result/metadata before start() decides whether this is a
       // resumed piece that needs dependency sync before scheduler wiring.
-      await timePiecePhase("get.piece.sync", () => piece.sync());
+      await timePiecePhase("get.piece.sync", () => pieceToSync.sync());
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(
         "get.runtime.start",
-        () => this.runtime.start(piece),
+        () => this.runtime.start(pieceToSync),
       );
     } else {
       // Just sync the cell if not running
-      await timePiecePhase("get.piece.sync", () => piece.sync());
+      await timePiecePhase("get.piece.sync", () => pieceToSync.sync());
     }
 
     // If caller provided a schema, use it
     if (asSchema) {
-      return piece.asSchema<T>(asSchema);
+      return pieceToSync as Cell<T>;
     }
 
     // Otherwise, recover the result schema from the cell's metadata if present.

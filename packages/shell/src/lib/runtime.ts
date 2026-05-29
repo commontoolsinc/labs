@@ -1,6 +1,6 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
-import { NameSchema } from "@commonfabric/runner/schemas";
+import { nameAndUiSchema, NameSchema } from "@commonfabric/runner/schemas";
 import {
   CellHandle,
   FavoritesManager,
@@ -178,30 +178,42 @@ export class RuntimeInternals extends EventTarget {
     return pattern;
   }
 
-  getPattern(id: string): Promise<PageHandle<NameSchema>> {
+  getPattern(
+    id: string,
+    options: { render?: boolean } = {},
+  ): Promise<PageHandle<NameSchema>> {
     this.#check();
-    const cached = this.#patternCache.get(id);
+    const cacheKey = `${options.render ? "render" : "plain"}:${id}`;
+    const cached = this.#patternCache.get(cacheKey);
     if (cached) {
       return cached;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, true);
+      const page = await this.#client.getPage<NameSchema>(
+        id,
+        true,
+        options.render ? nameAndUiSchema : undefined,
+      );
       if (!page) {
         throw new Error(`Pattern not found: ${id}`);
       }
       return page;
     })();
-    this.#patternCache.set(id, promise);
+    this.#patternCache.set(cacheKey, promise);
     return promise;
   }
 
   invalidatePattern(id: string): void {
-    this.#patternCache.delete(id);
+    this.#patternCache.delete(`plain:${id}`);
+    this.#patternCache.delete(`render:${id}`);
   }
 
-  async refreshPattern(id: string): Promise<PageHandle<NameSchema>> {
+  async refreshPattern(
+    id: string,
+    options: { render?: boolean } = {},
+  ): Promise<PageHandle<NameSchema>> {
     this.invalidatePattern(id);
-    return await this.getPattern(id);
+    return await this.getPattern(id, options);
   }
 
   async getSlugCell(slug: string): Promise<CellHandle<unknown>> {
@@ -250,9 +262,8 @@ export class RuntimeInternals extends EventTarget {
     try {
       const spaceRoot = await this.getSpaceRootPattern();
       const trackRecent = spaceRoot.cell().key("trackRecent" as any);
-      const page = await this.#client.getPage(pieceId);
-      if (!page) return;
-      await (trackRecent as any).send({ piece: page.cell() });
+      const piece = await this.#client.getCell(this.#space, { "/": pieceId });
+      await (trackRecent as any).send({ piece });
     } catch (e) {
       console.error("[RuntimeInternals] Failed to track recent piece:", e);
     }

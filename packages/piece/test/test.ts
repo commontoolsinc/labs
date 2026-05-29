@@ -6,16 +6,28 @@ describe("noop", () => {
 });
 
 describe("PieceManager.get", () => {
-  it("syncs a loaded piece before starting it", async () => {
-    let pieceSynced = false;
-    let startSawSyncedPiece = false;
+  it("syncs the supplied schema view before starting it", async () => {
+    const schema = { type: "object" } as const;
+    let rootPieceSynced = false;
+    let schemaPieceSynced = false;
+    let startSawSyncedSchemaPiece = false;
 
-    const piece = {
+    const schemaPiece = {
       sync: () => {
-        pieceSynced = true;
+        schemaPieceSynced = true;
         return Promise.resolve();
       },
-      asSchema: () => piece,
+      asSchema: () => schemaPiece,
+    };
+    const piece = {
+      sync: () => {
+        rootPieceSynced = true;
+        return Promise.resolve();
+      },
+      asSchema: (requestedSchema: unknown) => {
+        expect(requestedSchema).toBe(schema);
+        return schemaPiece;
+      },
     };
     const runtime = {
       userIdentityDID: "did:key:home",
@@ -23,8 +35,9 @@ describe("PieceManager.get", () => {
         sync: () => Promise.resolve(),
       }),
       getCellFromEntityId: () => piece,
-      start: () => {
-        startSawSyncedPiece = pieceSynced;
+      start: (startedPiece: unknown) => {
+        startSawSyncedSchemaPiece = startedPiece === schemaPiece &&
+          schemaPieceSynced;
         return Promise.resolve(true);
       },
     };
@@ -33,8 +46,9 @@ describe("PieceManager.get", () => {
       space: "did:key:test-space" as never,
     }, runtime as never);
 
-    await manager.get("piece-id", true, { type: "object" });
+    await manager.get("piece-id", true, schema);
 
-    expect(startSawSyncedPiece).toBe(true);
+    expect(rootPieceSynced).toBe(false);
+    expect(startSawSyncedSchemaPiece).toBe(true);
   });
 });

@@ -199,11 +199,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async getPage<T = unknown>(
     pageId: string,
     runIt?: boolean,
+    schema?: JSONSchema,
   ): Promise<PageHandle<T> | null> {
     const response = await this.#conn.request<RequestType.PageGet>({
       type: RequestType.PageGet,
       pageId: pageId,
       runIt,
+      schema,
     });
 
     if (!response) return null;

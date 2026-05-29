@@ -106,7 +106,7 @@ export class XAppView extends BaseView {
       if ("pieceSlug" in app.view && app.view.pieceSlug) {
         try {
           const pieceId = slugIdForSpace(rt.space(), app.view.pieceSlug);
-          const pattern = await rt.getPattern(pieceId);
+          const pattern = await rt.getPattern(pieceId, { render: true });
           // Track as recently visited (fire-and-forget)
           rt.trackRecentPiece(pieceId);
           return pattern;
@@ -118,7 +118,9 @@ export class XAppView extends BaseView {
       }
       if ("pieceId" in app.view && app.view.pieceId) {
         try {
-          const pattern = await rt.getPattern(app.view.pieceId);
+          const pattern = await rt.getPattern(app.view.pieceId, {
+            render: true,
+          });
           const slug = await rt.getSlug(app.view.pieceId);
           if (!signal.aborted && slug) {
             this.#replacePieceUrlWithSlug(app.view, slug);
@@ -257,7 +259,12 @@ export class XAppView extends BaseView {
 
     let targetKey: string;
     try {
-      const pattern = await rt.refreshPattern(slugIdForSpace(rt.space(), slug));
+      const pattern = await rt.refreshPattern(
+        slugIdForSpace(rt.space(), slug),
+        {
+          render: true,
+        },
+      );
       targetKey = pattern.id();
     } catch (error) {
       if (notify) {

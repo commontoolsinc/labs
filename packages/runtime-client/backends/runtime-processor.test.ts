@@ -22,6 +22,7 @@ import {
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import { Runtime } from "@commonfabric/runner";
+import { nameAndUiSchema } from "@commonfabric/runner/schemas";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
 
@@ -175,6 +176,48 @@ describe("page slug redirects", () => {
     };
   }
 
+  it("loads direct page pieces through the piece manager with render schema", async () => {
+    const pageRef: CellRef = {
+      id: "of:fid1-page" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const resultRef: CellRef = {
+      id: "of:fid1-page-result" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const pageCell = mockCell(pageRef);
+    const resultCell = mockCell(resultRef);
+    const calls: unknown[][] = [];
+    const manager = {
+      get: (...args: unknown[]) => {
+        calls.push(args);
+        return Promise.resolve(resultCell);
+      },
+    };
+    const processor = {
+      pieceManager: { getSpace: () => space },
+      runtime: {
+        getCellFromEntityId: () => pageCell,
+      },
+      cc: { manager: () => manager },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      .call(processor, {
+        type: RequestType.PageGet,
+        pageId: "fid1-page",
+        runIt: true,
+        schema: nameAndUiSchema,
+      });
+
+    expect(calls).toEqual([["fid1-page", true, nameAndUiSchema]]);
+    expect(result.page.cell).toMatchObject(resultRef);
+  });
+
   it("renders slug redirects to output cells directly", async () => {
     const targetRef: CellRef = {
       id: "of:fid1-sub-page" as CellRef["id"],
@@ -214,6 +257,7 @@ describe("page slug redirects", () => {
         type: RequestType.PageGet,
         pageId: "fid1-slug-doc",
         runIt: true,
+        schema: nameAndUiSchema,
       });
 
     expect(targetSynced).toBe(true);
@@ -288,6 +332,7 @@ describe("page slug redirects", () => {
         type: RequestType.PageGet,
         pageId: "fid1-slug-doc",
         runIt: true,
+        schema: nameAndUiSchema,
       });
 
     expect(targetSynced).toBe(true);
@@ -346,9 +391,10 @@ describe("page slug redirects", () => {
         type: RequestType.PageGet,
         pageId: "fid1-slug-doc",
         runIt: true,
+        schema: nameAndUiSchema,
       });
 
-    expect(calls).toEqual([[pieceCell, true]]);
+    expect(calls).toEqual([[pieceCell, true, nameAndUiSchema]]);
     expect(result.page.cell).toMatchObject(resultRef);
   });
 });

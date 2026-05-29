@@ -442,6 +442,7 @@ export interface PageGetRequest extends BaseRequest {
   type: RequestType.PageGet;
   pageId: string;
   runIt?: boolean;
+  schema?: JSONSchema;
 }
 
 export interface PageGetSlugRequest extends BaseRequest {
