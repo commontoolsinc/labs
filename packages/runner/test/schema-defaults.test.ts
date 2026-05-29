@@ -634,7 +634,7 @@ describe("Schema - Default Values", () => {
       });
     });
 
-    it("should make immutable cells if they provide the default value", () => {
+    it("should make mutable cells if they provide the default value", () => {
       const schema = {
         type: "object",
         properties: {
@@ -659,8 +659,7 @@ describe("Schema - Default Values", () => {
         runtime.getImmutableCell(space, { name: "Updated Name" }),
       );
 
-      // Expect the cell to be immutable
-      expect(value?.name?.get()).toBe("Default Name");
+      expect(value?.name?.get()).toBe("Updated Name");
     });
 
     it("should make mutable cells if parent provides the default value", () => {
@@ -686,11 +685,10 @@ describe("Schema - Default Values", () => {
 
       cell.set({ name: runtime.getImmutableCell(space, "Updated Name") });
 
-      // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
     });
 
-    it("should make immutable cells if they provide the default value", () => {
+    it("should make mutable cells if they provide the default value through $ref", () => {
       const schema = {
         $defs: {
           NameEntry: { type: "string", default: "Default Name", asCell: true },
@@ -718,8 +716,7 @@ describe("Schema - Default Values", () => {
         runtime.getImmutableCell(space, { name: "Updated Name" }),
       );
 
-      // Expect the cell to be immutable
-      expect(value?.name?.get()).toBe("Default Name");
+      expect(value?.name?.get()).toBe("Updated Name");
     });
   });
 });

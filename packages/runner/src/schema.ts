@@ -591,32 +591,23 @@ export function processDefaultValue(
       if (asCellKind === undefined) {
         return undefined;
       }
-      // If schema indicates this should be some sort of a cell
-      // If the cell itself has a default value, make it its own (immutable)
-      // doc, to emulate the behavior of .get() returning a different underlying
-      // document when the value is changed. A classic example is
-      // `currentlySelected` with a default of `null`.
-      if (defaultValue === undefined && resolvedSchema.default !== undefined) {
-        return runtime.getImmutableCell(
-          link.space,
-          resolvedSchema.default,
-          resolvedSchema,
-          tx,
-          cfcLabelView,
-        );
-      } else {
-        return createCell(
-          runtime,
-          {
-            ...linkWithAsCellScope(link, asCellEntry),
-            schema: mergeDefaults(resolvedSchema, defaultValue),
-          },
-          getTransactionForChildCells(tx),
-          synced,
-          asCellKind,
-          cfcLabelView,
-        );
-      }
+      // If schema indicates this should be some sort of a cell, create a
+      // mutable cell while preserving a schema-provided default for reads.
+      const cellDefault = defaultValue === undefined &&
+          resolvedSchema.default !== undefined
+        ? resolvedSchema.default
+        : defaultValue;
+      return createCell(
+        runtime,
+        {
+          ...linkWithAsCellScope(link, asCellEntry),
+          schema: mergeDefaults(resolvedSchema, cellDefault),
+        },
+        getTransactionForChildCells(tx),
+        synced,
+        asCellKind,
+        cfcLabelView,
+      );
     }
   }
 

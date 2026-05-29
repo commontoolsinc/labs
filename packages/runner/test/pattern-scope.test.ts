@@ -473,6 +473,95 @@ Deno.test("per-user pointer can create and update a space-scoped profile cell", 
   }
 });
 
+Deno.test("pattern node input schema preserves explicit cell arguments", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { derive, handler, pattern, Writable } =
+      createTrustedBuilder(runtime).commonfabric;
+
+    const profilesSchema = {
+      type: "array",
+      items: { type: "string" },
+      default: [],
+    } as const;
+    const profilesCellSchema = {
+      ...profilesSchema,
+      asCell: [{ kind: "cell", scope: "space" }],
+    } as const;
+
+    const addProfile = handler<
+      { name: string },
+      { profiles: Cell<string[]> }
+    >({
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    }, {
+      type: "object",
+      properties: { profiles: profilesCellSchema },
+      required: ["profiles"],
+    }, ({ name }, { profiles }) => {
+      profiles.set([...profiles.get(), name]);
+    });
+
+    const Child = pattern<{
+      profiles: Cell<string[]>;
+    }>(({ profiles }) => ({
+      addProfile: addProfile({ profiles }),
+    }), {
+      type: "object",
+      properties: { profiles: profilesCellSchema },
+      required: ["profiles"],
+    });
+
+    const Root = pattern(() => {
+      const profiles = Writable.of<string[]>([], profilesSchema).for(
+        "profiles",
+        true,
+      );
+      const child = Child({ profiles });
+      return {
+        profiles,
+        addProfile: child.addProfile,
+        hasBob: derive(
+          profiles,
+          (profiles) => (profiles as unknown as string[]).includes("Bob"),
+        ),
+      };
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "pattern node explicit cell input binding",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, Root, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    result.key("addProfile").send({ name: "Bob" });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(result.key("profiles").get(), ["Bob"]);
+    assertEquals(result.key("hasBob").get() as unknown, true);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("pattern factory .asScope() sets child pattern result scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

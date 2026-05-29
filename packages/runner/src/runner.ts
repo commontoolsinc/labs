@@ -3492,7 +3492,7 @@ export class Runner {
       argumentCellLink,
       internalCellLink,
       resultCellLink,
-      { targetSchema: patternImpl.argumentSchema, tx },
+      { tx },
     );
 
     // If output bindings is a link to a non-redirect cell,

@@ -261,6 +261,14 @@ const scopedLinkForSchemaWrite = (
   return undefined;
 };
 
+const isLinkToScopedTarget = (
+  value: unknown,
+  scopedLink: NormalizedFullLink,
+  base: NormalizedFullLink,
+): boolean =>
+  areMaybeLinkAndNormalizedLinkSame(value, scopedLink, base) ||
+  areMaybeLinkAndNormalizedLinkSame(value, scopedLink, scopedLink);
+
 /**
  * Traverses newValue and updates `current` and any relevant linked documents.
  *
@@ -489,7 +497,7 @@ export function normalizeAndDiff(
   }
 
   // If we're about to create a reference to ourselves, no-op
-  if (areMaybeLinkAndNormalizedLinkSame(newValue, link)) {
+  if (areMaybeLinkAndNormalizedLinkSame(newValue, link, link)) {
     diffLogger.debug(
       "diff",
       () =>
@@ -758,30 +766,58 @@ export function normalizeAndDiff(
       };
       const scopedChildLink = scopedLinkForSchemaWrite(childLink);
       if (scopedChildLink !== undefined) {
+        const scopedChildLinkForWrite = scopedChildLink as NormalizedFullLink;
+        const newArray = newValue as unknown[];
+        if (isCell(newArray[i]) || isCellLink(newArray[i])) {
+          changes.push(
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              childLink,
+              newArray[i],
+              context,
+              options,
+              seen,
+              inCur ? currentArray![i] : undefined,
+            ),
+          );
+          continue;
+        }
+        const isScopedTargetValue = isLinkToScopedTarget(
+          newArray[i],
+          scopedChildLinkForWrite,
+          childLink,
+        );
         const currentChildValue = inCur ? currentArray![i] : undefined;
         changes.push(
           ...normalizeAndDiff(
             runtime,
             tx,
             childLink,
-            createSigilLinkFromParsedLink(scopedChildLink, { base: childLink }),
+            isScopedTargetValue
+              ? newArray[i]
+              : createSigilLinkFromParsedLink(scopedChildLinkForWrite, {
+                base: childLink,
+              }),
             context,
             options,
             seen,
             currentChildValue,
           ),
         );
-        changes.push(
-          ...normalizeAndDiff(
-            runtime,
-            tx,
-            scopedChildLink,
-            newValue[i],
-            context,
-            options,
-            seen,
-          ),
-        );
+        if (!isScopedTargetValue) {
+          changes.push(
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              scopedChildLinkForWrite,
+              newArray[i],
+              context,
+              options,
+              seen,
+            ),
+          );
+        }
         continue;
       }
       const nestedChanges = normalizeAndDiff(
@@ -907,29 +943,57 @@ export function normalizeAndDiff(
       };
       const scopedChildLink = scopedLinkForSchemaWrite(childLink);
       if (scopedChildLink !== undefined) {
+        const scopedChildLinkForWrite = scopedChildLink as NormalizedFullLink;
+        const newRecord = newValue as Record<string, unknown>;
+        if (isCell(newRecord[key]) || isCellLink(newRecord[key])) {
+          changes.push(
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              childLink,
+              newRecord[key],
+              context,
+              options,
+              seen,
+              currentRecord[key],
+            ),
+          );
+          continue;
+        }
+        const isScopedTargetValue = isLinkToScopedTarget(
+          newRecord[key],
+          scopedChildLinkForWrite,
+          childLink,
+        );
         changes.push(
           ...normalizeAndDiff(
             runtime,
             tx,
             childLink,
-            createSigilLinkFromParsedLink(scopedChildLink, { base: childLink }),
+            isScopedTargetValue
+              ? newRecord[key]
+              : createSigilLinkFromParsedLink(scopedChildLinkForWrite, {
+                base: childLink,
+              }),
             context,
             options,
             seen,
             currentRecord[key],
           ),
         );
-        changes.push(
-          ...normalizeAndDiff(
-            runtime,
-            tx,
-            scopedChildLink,
-            newValue[key],
-            context,
-            options,
-            seen,
-          ),
-        );
+        if (!isScopedTargetValue) {
+          changes.push(
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              scopedChildLinkForWrite,
+              newRecord[key],
+              context,
+              options,
+              seen,
+            ),
+          );
+        }
         continue;
       }
       const nestedChanges = normalizeAndDiff(
