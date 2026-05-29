@@ -342,7 +342,10 @@ describe("profile owner CFC policy", () => {
           .properties ?? {};
 
       for (const field of ["name", "avatar", "elements"]) {
-        const fieldSchema = resolveLocalSchemaRef(rootSchema, properties[field]);
+        const fieldSchema = resolveLocalSchemaRef(
+          rootSchema,
+          properties[field],
+        );
         const ifc = (fieldSchema as { ifc?: Record<string, unknown> }).ifc;
         expect(ifc?.ownerPrincipal).toEqual({
           __ctCurrentPrincipal: true,
