@@ -11,15 +11,7 @@ import { FabricError } from "../src/fabric-instances/FabricError.ts";
 import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 describe("value-debug", () => {
-  // --------------------------------------------------------------------------
-  // toCompactDebugString
-  // --------------------------------------------------------------------------
-
   describe("toCompactDebugString", () => {
     it("compactly stringifies a plain object", () => {
       expect(toCompactDebugString({ a: 1, b: "two" }))
@@ -330,10 +322,6 @@ describe("value-debug", () => {
     });
   });
 
-  // --------------------------------------------------------------------------
-  // toIndentedDebugString
-  // --------------------------------------------------------------------------
-
   describe("toIndentedDebugString", () => {
     it("indents object output with 2 spaces", () => {
       expect(toIndentedDebugString({ a: 1, b: "two" }))
@@ -405,10 +393,6 @@ describe("value-debug", () => {
         .toBe('{\n  "x": 1,\n  "self": <circle>\n}');
     });
   });
-
-  // --------------------------------------------------------------------------
-  // toDebugKindString
-  // --------------------------------------------------------------------------
 
   describe("toDebugKindString", () => {
     it("renders `null` and `undefined` literally", () => {
