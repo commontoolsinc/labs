@@ -51,9 +51,9 @@ describe("schema-utils", () => {
         expect(result).toBe(schema);
         expect(Object.isFrozen(schema)).toBe(true);
 
-        // Property values are replaced with frozen clones (not the originals).
+        // Property values are frozen in place — same references, now frozen.
         expect(Object.isFrozen(schema.properties)).toBe(true);
-        expect(schema.properties).not.toBe(originalProperties);
+        expect(schema.properties).toBe(originalProperties);
         expect(Object.isFrozen(schema.properties!.name)).toBe(true);
       });
 
@@ -263,7 +263,7 @@ describe("schema-utils", () => {
         expect(result).toBe(schema);
       });
 
-      it("shallow-clones a frozen but not deep-frozen schema even with `canShare=true`", () => {
+      it("deep-freezes a frozen-but-not-deep schema in place (`canShare=true`)", () => {
         const inner = { type: "string" } as JSONSchemaObj;
         const schema: JSONSchemaObj = Object.freeze({
           type: "object",
@@ -273,22 +273,20 @@ describe("schema-utils", () => {
 
         const result = toDeepFrozenSchema(schema, true);
 
-        // Must be a different reference (shallow-cloned) since original is
-        // frozen and can't be mutated.
-        expect(result).not.toBe(schema);
+        // Same reference — `canShare=true` lets us complete the deep-freeze in
+        // place rather than cloning.
+        expect(result).toBe(schema);
 
-        // Result must be deeply frozen.
+        // Result (and the previously-unfrozen `inner`) must now be deeply frozen.
         expect(Object.isFrozen(result)).toBe(true);
         const obj = result as JSONSchemaObj;
         expect(Object.isFrozen(obj.properties)).toBe(true);
+        expect(Object.isFrozen(inner)).toBe(true);
       });
     });
 
-    describe("per-property optimization", () => {
-      it("reuses already-deep-frozen top-level values", () => {
-        // The per-property optimization works on the schema's own top-level
-        // fields (e.g., "type", "properties", "required"). An already-deep-frozen
-        // field value is kept as-is; an unfrozen one is structuredClone'd.
+    describe("subtree reuse", () => {
+      it("reuses already-deep-frozen subtrees, freezes the rest in place (`canShare=true`)", () => {
         const frozenProperties = deepFreeze({
           name: { type: "string" },
         } as Record<string, JSONSchemaObj>);
@@ -301,13 +299,14 @@ describe("schema-utils", () => {
 
         const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
-        // The already-deep-frozen "properties" value should be the same reference.
+        // The already-deep-frozen "properties" subtree is reused by reference.
         expect(result.properties).toBe(frozenProperties);
 
-        // The unfrozen "required" should be a different reference (cloned).
-        expect(result.required).not.toBe(unfrozenRequired);
+        // The unfrozen "required" is frozen in place (same reference, now frozen)
+        // rather than cloned, since `canShare=true`.
+        expect(result.required).toBe(unfrozenRequired);
 
-        // Both should be deeply frozen in the result.
+        // Both are deeply frozen in the result.
         expect(Object.isFrozen(result.properties)).toBe(true);
         expect(Object.isFrozen(result.required)).toBe(true);
       });
