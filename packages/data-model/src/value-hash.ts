@@ -23,9 +23,9 @@ import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-// ---------------------------------------------------------------------------
+//
 // Type tag bytes (Section 2 of the byte-level spec)
-// ---------------------------------------------------------------------------
+//
 
 // Meta (0x0N)
 const TAG_END = 0x00;
@@ -52,9 +52,9 @@ const TAG_SYMBOL = 0x2a;
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
 
-// ---------------------------------------------------------------------------
+//
 // Pre-allocated tag byte arrays (avoids per-call allocation)
-// ---------------------------------------------------------------------------
+//
 
 const TAG_END_BYTES = new Uint8Array([TAG_END]);
 const TAG_HOLE_BYTES = new Uint8Array([TAG_HOLE]);
@@ -73,9 +73,9 @@ const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 
-// ---------------------------------------------------------------------------
+//
 // Core: recursive value feeding
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Maximum encoded length of a string which is represented in just-encoded form.
@@ -383,9 +383,9 @@ function feedPlainObject(
   hasher.update(TAG_END_BYTES);
 }
 
-// ---------------------------------------------------------------------------
+//
 // Uncached hash computation
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Computes the hash of a value without consulting or populating any cache.
@@ -406,9 +406,9 @@ function computeHashAsString(value: unknown): string {
   return hasher.digest("base64url");
 }
 
-// ---------------------------------------------------------------------------
+//
 // Caches
-// ---------------------------------------------------------------------------
+//
 
 /** Pre-computed constant hashes (these values never change). */
 const NULL_HASH = computeHash(null);
@@ -452,9 +452,9 @@ function cachedPrimitiveHash(
   return result;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Public API
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Common helper for the two exported hash functions, which _might_ return a

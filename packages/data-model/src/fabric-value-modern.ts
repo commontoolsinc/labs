@@ -466,9 +466,11 @@ export function isFabricValueModern(
   }
 }
 
-// ---------------------------------------------------------------------------
-// `isFabricCompatible()`: deep check for fabric compatibility
-// ---------------------------------------------------------------------------
+//
+// `isFabricCompatible()`
+//
+// Deep check for fabric compatibility.
+//
 
 /**
  * Returns `true` if `fabricFromNativeValue()` would succeed on the value --
@@ -493,9 +495,9 @@ export function isFabricCompatibleModern(
   return isFabricCompatibleInternal(value, new Set());
 }
 
-// ---------------------------------------------------------------------------
+//
 // Unified clone: `cloneIfNecessary()`
-// ---------------------------------------------------------------------------
+//
 
 function isFabricCompatibleInternal(
   value: unknown,
@@ -588,9 +590,9 @@ function isFabricCompatibleInternal(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Deep unwrap: `FabricValue` -> native JS types (modern path)
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Recursively walks a `FabricValue` tree, unwrapping any
