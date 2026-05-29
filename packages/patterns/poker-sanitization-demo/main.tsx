@@ -165,6 +165,17 @@ const HAND_ROW = {
 };
 const NAME_COL = { minWidth: "90px", fontWeight: "700", fontSize: "15px" };
 
+// Force high-contrast button colours so they read in both light and dark mode (CSS custom
+// properties inherit through cf-button's shadow DOM). Typed as Record so custom-prop keys are ok.
+const OUTER_STYLE: Record<string, string> = {
+  padding: "1rem",
+  maxWidth: "920px",
+  "--cf-theme-color-primary": "#2563eb",
+  "--cf-theme-color-primary-foreground": "#ffffff",
+  "--cf-theme-color-secondary": "#e2e8f0",
+  "--cf-theme-color-secondary-foreground": "#0f172a",
+};
+
 // ENFORCED / SIMULATED / OUT OF SCOPE badge — replaces the retired reveal-level "pill".
 type Badge = "ENFORCED" | "SIMULATED" | "OUT OF SCOPE";
 const BADGE_STYLE: Record<Badge, { bg: string; fg: string }> = {
@@ -492,7 +503,7 @@ export default pattern<unknown, PokerOutput>(() => {
     [NAME]: "Poker sanitization demo (idiomatic CFC)",
     [UI]: (
       <cf-screen title="Poker sanitization demo">
-        <cf-vstack gap="3" style={{ padding: "1rem", maxWidth: "920px" }}>
+        <cf-vstack gap="3" style={OUTER_STYLE as never}>
           {/* Intro */}
           <cf-card>
             <cf-vstack slot="content" gap="2">
