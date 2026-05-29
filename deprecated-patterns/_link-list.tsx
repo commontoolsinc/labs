@@ -46,7 +46,7 @@ const ResultSchema = {
     items: { type: "array", items: ItemSchema },
     questions: { type: "array", items: { type: "string" } },
     addItem: {
-      asStream: true,
+      asCell: ["stream"],
       type: "object",
       properties: {
         title: { type: "string" },
@@ -74,7 +74,7 @@ const addItem = handler(
   {
     type: "object",
     properties: {
-      items: { asCell: true, ...ListSchema.properties.items },
+      items: { asCell: ["cell"], ...ListSchema.properties.items },
     },
     default: { items: [] },
   },

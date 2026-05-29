@@ -3505,7 +3505,7 @@ function _mergeAnyOfBranchSchemasUncached(
     ...(!anyAllowsAdditional && { additionalProperties: false }),
     ...(mergedDefs && { $defs: mergedDefs }),
     ...((outerSchema.asCell) &&
-      { asCell: outerSchema.asCell ?? ["stream"] }),
+      { asCell: outerSchema.asCell }),
   } as JSONSchemaObj;
 }
 

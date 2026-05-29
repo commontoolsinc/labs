@@ -161,7 +161,7 @@ type SchemaCore<
   Depth extends DepthLevel,
   WrapCells extends boolean,
 > = T extends { $ref: "#" } ? SchemaInner<
-    Omit<Root, "asCell" | "asStream">,
+    Omit<Root, "asCell">,
     Root,
     DecrementDepth<Depth>,
     WrapCells
