@@ -7,6 +7,7 @@ import {
   extendTrackedGraph,
   type QueryTraversalStats,
   refreshTrackedGraph,
+  toDirtyKey,
   type TrackedGraphState,
   trackGraph,
 } from "../v2/query.ts";
@@ -131,6 +132,9 @@ const linkTo = (id: URI): Link => ({
     },
   },
 });
+
+const dirtyKeySet = (ids: Iterable<URI>): Set<string> =>
+  new Set(Array.from(ids, (id) => toDirtyKey(id)));
 
 const baseChildIds = (): URI[] =>
   Array.from({ length: DOC_COUNT - 1 }, (_, index) => baseChildId(index));
@@ -322,7 +326,7 @@ async function collectDiagnostics(): Promise<Diagnostics> {
         space,
         engine,
         tracked,
-        new Set(dirtyIds),
+        dirtyKeySet(dirtyIds),
       )?.stats;
     } finally {
       await cleanup(engine, path);
@@ -337,7 +341,7 @@ async function collectDiagnostics(): Promise<Diagnostics> {
         space,
         engine,
         tracked,
-        new Set([rootId]),
+        dirtyKeySet([rootId]),
       )?.stats;
     } finally {
       await cleanup(engine, path);
@@ -352,7 +356,7 @@ async function collectDiagnostics(): Promise<Diagnostics> {
         space,
         engine,
         tracked,
-        new Set([rootId]),
+        dirtyKeySet([rootId]),
       )?.stats;
     } finally {
       await cleanup(engine, path);
@@ -439,7 +443,7 @@ Deno.bench({
     updateLeaves(engine, dirtyIds, 1);
     try {
       b.start();
-      refreshTrackedGraph(space, engine, tracked, new Set(dirtyIds));
+      refreshTrackedGraph(space, engine, tracked, dirtyKeySet(dirtyIds));
       b.end();
     } finally {
       await cleanup(engine, path);
@@ -458,7 +462,7 @@ Deno.bench({
     updateRoot(engine, rootValue(1), 1);
     try {
       b.start();
-      refreshTrackedGraph(space, engine, tracked, new Set([rootId]));
+      refreshTrackedGraph(space, engine, tracked, dirtyKeySet([rootId]));
       b.end();
     } finally {
       await cleanup(engine, path);
@@ -477,7 +481,7 @@ Deno.bench({
     updateRoot(engine, retargetedRootValue(), 1);
     try {
       b.start();
-      refreshTrackedGraph(space, engine, tracked, new Set([rootId]));
+      refreshTrackedGraph(space, engine, tracked, dirtyKeySet([rootId]));
       b.end();
     } finally {
       await cleanup(engine, path);

@@ -52,15 +52,25 @@ async function compileProgram(program: RuntimeProgram) {
 }
 
 async function loadParkingCoordinatorProgram(): Promise<RuntimeProgram> {
-  const contents = await Deno.readTextFile(
-    new URL(
-      "../../patterns/factory-outputs/parking-coordinator/main.tsx",
-      import.meta.url,
+  const [contents, adminContents, vehiclesContents] = await Promise.all([
+    Deno.readTextFile(
+      new URL(
+        "../../patterns/factory-outputs/parking-coordinator/main.tsx",
+        import.meta.url,
+      ),
     ),
-  );
+    Deno.readTextFile(
+      new URL("../../patterns/cfc/admin/mod.ts", import.meta.url),
+    ),
+    Deno.readTextFile(new URL("../../patterns/vehicles.ts", import.meta.url)),
+  ]);
   return {
-    main: "/main.tsx",
-    files: [{ name: "/main.tsx", contents }],
+    main: "/factory-outputs/parking-coordinator/main.tsx",
+    files: [
+      { name: "/factory-outputs/parking-coordinator/main.tsx", contents },
+      { name: "/cfc/admin/mod.ts", contents: adminContents },
+      { name: "/vehicles.ts", contents: vehiclesContents },
+    ],
   };
 }
 

@@ -19,7 +19,7 @@ const createDefaultPattern = () => {
   const { handler, pattern } = commonfabric;
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { allPieces: Cell<unknown>[] }
+    { allPieces: Cell<Cell<unknown>[]> }
   >(
     ({ piece }, { allPieces }) => {
       allPieces.push(piece);

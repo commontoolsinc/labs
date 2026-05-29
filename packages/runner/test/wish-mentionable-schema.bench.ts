@@ -203,6 +203,6 @@ Deno.bench({
   },
 });
 
-if (resultSink < 0) {
-  console.log(resultSink);
+if (resultSink < 0 && Deno.env.get("BENCH_DIAGNOSTICS") === "1") {
+  console.error(resultSink);
 }

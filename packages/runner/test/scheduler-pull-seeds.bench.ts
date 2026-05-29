@@ -3,6 +3,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { markSchedulerDirty } from "../src/scheduler/staleness.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -16,6 +17,25 @@ type SchedulerInternals = {
     memo?: Map<Action, boolean>,
   ) => boolean;
 };
+
+function getSchedulerInternals(
+  scheduler: Runtime["scheduler"],
+): SchedulerInternals {
+  const internal = scheduler as unknown as {
+    dirtySchedulingState: Parameters<typeof markSchedulerDirty>[0];
+    scheduleAffectedEffects: SchedulerInternals["scheduleAffectedEffects"];
+    collectDirtyDependencies: SchedulerInternals["collectDirtyDependencies"];
+  };
+
+  return {
+    markDirty: (action) =>
+      markSchedulerDirty(internal.dirtySchedulingState, action),
+    scheduleAffectedEffects: (action) =>
+      internal.scheduleAffectedEffects(action),
+    collectDirtyDependencies: (action, workSet, memo) =>
+      internal.collectDirtyDependencies(action, workSet, memo),
+  };
+}
 
 async function setupSharedSeedGraph(effectCount: number) {
   const storageManager = StorageManager.emulate({
@@ -110,8 +130,7 @@ Deno.bench(
     const { runtime, storageManager, computation } = await setupSharedSeedGraph(
       50,
     );
-    const schedulerInternal = runtime
-      .scheduler as unknown as SchedulerInternals;
+    const schedulerInternal = getSchedulerInternals(runtime.scheduler);
 
     for (let i = 0; i < 20; i++) {
       schedulerInternal.markDirty(computation);
@@ -130,8 +149,7 @@ Deno.bench(
     const { runtime, storageManager, computation } = await setupSharedSeedGraph(
       200,
     );
-    const schedulerInternal = runtime
-      .scheduler as unknown as SchedulerInternals;
+    const schedulerInternal = getSchedulerInternals(runtime.scheduler);
 
     for (let i = 0; i < 10; i++) {
       schedulerInternal.markDirty(computation);
@@ -150,8 +168,7 @@ Deno.bench(
     const { runtime, storageManager, effects } = await setupSharedSeedGraph(
       200,
     );
-    const schedulerInternal = runtime
-      .scheduler as unknown as SchedulerInternals;
+    const schedulerInternal = getSchedulerInternals(runtime.scheduler);
 
     for (let i = 0; i < 20; i++) {
       const workSet = new Set<Action>(effects);
@@ -171,8 +188,7 @@ Deno.bench(
   async () => {
     const { runtime, storageManager, computation, effects } =
       await setupSharedSeedGraph(200);
-    const schedulerInternal = runtime
-      .scheduler as unknown as SchedulerInternals;
+    const schedulerInternal = getSchedulerInternals(runtime.scheduler);
 
     schedulerInternal.markDirty(computation);
 

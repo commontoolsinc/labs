@@ -37,7 +37,7 @@ async function createBenchEnv(): Promise<BenchEnv> {
 
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { allPieces: Cell<unknown>[] }
+    { allPieces: Cell<Cell<unknown>[]> }
   >(
     ({ piece }, { allPieces }) => {
       allPieces.push(piece);
@@ -83,16 +83,25 @@ async function createBenchEnv(): Promise<BenchEnv> {
 
 const env = await createBenchEnv();
 
-Deno.bench("PiecesController.ensureDefaultPattern(existing)", async () => {
-  await env.pieces.ensureDefaultPattern();
-});
+Deno.bench(
+  "PiecesController.ensureDefaultPattern(existing)",
+  async () => {
+    await env.pieces.ensureDefaultPattern();
+  },
+);
 
-Deno.bench("PieceManager.startPiece(existing)", async () => {
-  await env.manager.stopPiece(env.piece);
-  await env.manager.startPiece(env.piece);
-});
+Deno.bench(
+  "PieceManager.startPiece(existing)",
+  async () => {
+    await env.manager.stopPiece(env.piece);
+    await env.manager.startPiece(env.piece);
+  },
+);
 
-Deno.bench("PiecesController.get(runIt=true)", async () => {
-  await env.manager.stopPiece(env.piece);
-  await env.pieces.get(pieceId(env.piece)!, true);
-});
+Deno.bench(
+  "PiecesController.get(runIt=true)",
+  async () => {
+    await env.manager.stopPiece(env.piece);
+    await env.pieces.get(pieceId(env.piece)!, true);
+  },
+);
