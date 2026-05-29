@@ -1,8 +1,8 @@
 import { ACL, ACLUser, DID } from "@commonfabric/memory/acl";
 import { Capability } from "@commonfabric/memory/interface";
 import {
-  cloneIfNecessary,
   type FabricValue,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
@@ -26,7 +26,9 @@ export class ACLManager {
       throw new Error("No ACL initialized for space.");
     }
 
-    return cloneIfNecessary(aclData as FabricValue, { frozen: false }) as ACL;
+    // `set`/`remove` only write or delete a single top-level entry, so a
+    // mutable top-level copy is all that's needed.
+    return shallowMutableClone(aclData as FabricValue) as ACL;
   }
 
   async set(user: ACLUser, capability: Capability): Promise<void> {
