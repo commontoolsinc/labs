@@ -94,6 +94,21 @@ const compileHomePattern = async (runtime: Runtime) => {
   return await runtime.patternManager.compilePattern(program);
 };
 
+const compileProfileHomePattern = async (runtime: Runtime) => {
+  const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+    /\/$/,
+    "",
+  );
+  const sourcePath = new URL(
+    "../../patterns/system/profile-home.tsx",
+    import.meta.url,
+  ).pathname;
+  const program = await runtime.harness.resolve(
+    new FileSystemProgramResolver(sourcePath, repoRoot),
+  );
+  return await runtime.patternManager.compilePattern(program);
+};
+
 const resolveLocalSchemaRef = (root: JSONSchema, schema: JSONSchema) => {
   const ref = (schema as { $ref?: string }).$ref;
   if (!ref?.startsWith("#/$defs/")) {
@@ -317,6 +332,33 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("marks production profile fields as owner-protected data", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const profileHomePattern = await compileProfileHomePattern(runtime);
+      const rootSchema = profileHomePattern.resultSchema as JSONSchema;
+      const properties =
+        (rootSchema as { properties?: Record<string, JSONSchema> })
+          .properties ?? {};
+
+      for (const field of ["name", "avatar", "elements"]) {
+        const fieldSchema = resolveLocalSchemaRef(rootSchema, properties[field]);
+        const ifc = (fieldSchema as { ifc?: Record<string, unknown> }).ifc;
+        expect(ifc?.ownerPrincipal).toEqual({
+          __ctCurrentPrincipal: true,
+        });
+        expect(ifc?.addIntegrity).toContainEqual({
+          kind: "represents-principal",
+          subject: { __ctCurrentPrincipal: true },
+        });
+        expect(ifc?.writeAuthorizedBy).toBeDefined();
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects direct untrusted writes to the home profile link", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -352,6 +394,20 @@ describe("profile owner CFC policy", () => {
       writeTx.prepareCfc();
       const result = await writeTx.commit();
       expect(result.error?.message).toContain("trusted");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not expose a writable profile creation trigger", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const properties =
+        (homePattern.resultSchema as { properties?: Record<string, unknown> })
+          .properties ?? {};
+      expect(properties.requestedProfileName).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

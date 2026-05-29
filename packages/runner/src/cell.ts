@@ -604,12 +604,40 @@ export class CellImpl<T extends FabricValue>
     return inSpaceAnnotations.get(this._causeContainer.cell);
   }
 
+  replaceInSpaceAnnotation(space: unknown): void {
+    inSpaceAnnotations.set(this._causeContainer.cell, space);
+  }
+
   setUnlinkedSpace(space: MemorySpace): void {
     if (this._causeContainer.id || this._link.id) {
       throw new Error(
         "Cannot set space: cell already has a link.",
       );
     }
+    this._causeContainer.space = space;
+    this._link = { ...this._link, space };
+    for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
+      (node.module as Module).targetSpace = space;
+    }
+  }
+
+  getFullLinkIfAvailable(): NormalizedFullLink | undefined {
+    const id = this._causeContainer.id ?? this._link.id;
+    const space = this._causeContainer.space ?? this._link.space;
+    if (id === undefined || space === undefined) {
+      return undefined;
+    }
+    return {
+      ...this._link,
+      id,
+      space,
+      scope: normalizeCellScope(
+        this._link.scope === "inherit" ? undefined : this._link.scope,
+      ),
+    };
+  }
+
+  retargetLinkedSpace(space: MemorySpace): void {
     this._causeContainer.space = space;
     this._link = { ...this._link, space };
     for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
@@ -1973,11 +2001,31 @@ export function getCellInSpaceAnnotation(cell: unknown): unknown {
   return asCellImpl(cell)?.getInSpaceAnnotation();
 }
 
+export function replaceCellInSpaceAnnotation(
+  cell: unknown,
+  space: unknown,
+): void {
+  asCellImpl(cell)?.replaceInSpaceAnnotation(space);
+}
+
 export function setCellUnlinkedSpace(
   cell: unknown,
   space: MemorySpace,
 ): void {
   asCellImpl(cell)?.setUnlinkedSpace(space);
+}
+
+export function getCellFullLinkIfAvailable(
+  cell: unknown,
+): NormalizedFullLink | undefined {
+  return asCellImpl(cell)?.getFullLinkIfAvailable();
+}
+
+export function retargetCellSpace(
+  cell: unknown,
+  space: MemorySpace,
+): void {
+  asCellImpl(cell)?.retargetLinkedSpace(space);
 }
 
 function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {

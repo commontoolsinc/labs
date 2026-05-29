@@ -4,7 +4,11 @@ export default pattern(
   () => {
     const profileWish = wish({ query: "#profile" });
     const profileNameWish = wish<string>({ query: "#profileName" });
-    const displayName = computed(() => profileNameWish.result ?? "No profile");
+    const displayName = computed(() =>
+      (profileWish.result as { initialNameApplied?: string } | undefined)
+        ?.initialNameApplied ??
+        profileNameWish.result ?? "No profile"
+    );
     const status = computed(() =>
       profileNameWish.result
         ? `Profile: ${profileNameWish.result}`

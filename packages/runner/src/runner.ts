@@ -33,8 +33,11 @@ import {
 import {
   type Cell,
   createCell,
+  getCellFullLinkIfAvailable,
   getCellInSpaceAnnotation,
   isCell,
+  replaceCellInSpaceAnnotation,
+  retargetCellSpace,
   setCellUnlinkedSpace,
 } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
@@ -75,7 +78,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
-import { isCellScope, narrowestScope } from "./scope.ts";
+import { isCellScope, narrowestScope, normalizeCellScope } from "./scope.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
@@ -529,6 +532,7 @@ export class Runner {
                 change.address.scope ?? "space"
               }/${change.address.id}`,
             );
+            return;
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
@@ -1360,6 +1364,7 @@ export class Runner {
     resultCell: Cell<T>,
     pattern: Pattern,
     inputs: FabricValue,
+    pullOnceAfterStart = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
     tx.addCommitCallback((_committedTx, result) => {
@@ -1382,6 +1387,10 @@ export class Runner {
               "Error committing deferred cross-space pattern transaction",
               error,
             );
+            return;
+          }
+          if (pullOnceAfterStart) {
+            this.pullCellOnceInPullMode(committedResultCell);
           }
         }).catch((error) => {
           this.stop(committedResultCell);
@@ -2397,13 +2406,39 @@ export class Runner {
     }
 
     const resultPattern = patternFromFrame(() => result);
-    const resultCell = this.handlerResultPatternMustStartAfterCommit(
+    const resultSpace = result === undefined
+      ? this.handlerResultPatternMaterializationSpace(
         resultPattern,
+        processCell.space,
       )
+      : processCell.space;
+    const mustStartAfterCommit = this.handlerResultPatternMustStartAfterCommit(
+      resultPattern,
+      processCell,
+    );
+    if (result === undefined && mustStartAfterCommit) {
+      const resultCell = this.runtime.getCell(
+        resultSpace,
+        { resultFor: cause },
+        undefined,
+        tx,
+      );
+      this.runPatternAfterSuccessfulCommit(
+        tx,
+        resultCell,
+        resultPattern,
+        undefined,
+        true,
+      );
+      addCancel(() => this.stop(resultCell));
+      return result;
+    }
+
+    const resultCell = mustStartAfterCommit
       ? this.setupDeferredHandlerResultPattern(
         tx,
         resultPattern,
-        processCell,
+        resultSpace,
         cause,
       )
       : this.run(
@@ -2411,7 +2446,7 @@ export class Runner {
         resultPattern,
         undefined,
         this.runtime.getCell(
-          processCell.space,
+          resultSpace,
           { resultFor: cause },
           undefined,
           tx,
@@ -2462,9 +2497,103 @@ export class Runner {
     await Promise.all(refs.map(async (ref) => {
       const annotation = getCellInSpaceAnnotation(ref);
       if (annotation === undefined) return;
+      const before = getCellFullLinkIfAvailable(ref);
       const space = await this.resolveInSpaceAnnotation(annotation);
-      setCellUnlinkedSpace(ref, space);
+      replaceCellInSpaceAnnotation(ref, space);
+      try {
+        setCellUnlinkedSpace(ref, space);
+        const after = getCellFullLinkIfAvailable(ref);
+        if (after !== undefined && frame.tx !== undefined) {
+          this.rewriteResolvedInSpaceLinks(frame.tx, before, after);
+        }
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes("cell already has a link")
+        ) {
+          retargetCellSpace(ref, space);
+          const after = getCellFullLinkIfAvailable(ref) ??
+            (before ? { ...before, space } : undefined);
+          if (after !== undefined && frame.tx !== undefined) {
+            this.rewriteResolvedInSpaceLinks(frame.tx, before, after);
+          }
+          return;
+        }
+        throw error;
+      }
     }));
+  }
+
+  private rewriteResolvedInSpaceLinks(
+    tx: IExtendedStorageTransaction,
+    before: NormalizedFullLink | undefined,
+    after: NormalizedFullLink,
+  ): void {
+    const log = tx.getReactivityLog?.();
+    const spaces = new Set<MemorySpace>([
+      after.space,
+      ...(before ? [before.space] : []),
+      ...(log?.writes ?? []).map((write) => write.space),
+      ...(log?.attemptedWrites ?? []).map((write) => write.space),
+    ]);
+    for (const space of spaces) {
+      const details = [...(tx.getWriteDetails?.(space) ?? [])];
+      for (const detail of details) {
+        const next = this.replaceLinkInValue(detail.value, before, after);
+        if (next !== detail.value && !deepEqual(next, detail.value)) {
+          tx.writeValueOrThrow({
+            ...detail.address,
+            scope: normalizeCellScope(detail.address.scope),
+          }, next);
+        }
+      }
+    }
+  }
+
+  private replaceLinkInValue(
+    value: unknown,
+    before: NormalizedFullLink | undefined,
+    after: NormalizedFullLink,
+  ): FabricValue | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (isCellLink(value) || isSigilLink(value) || isWriteRedirectLink(value)) {
+      const parsed = parseLink(value);
+      if (
+        parsed &&
+        (before
+          ? areNormalizedLinksSame(parsed, before)
+          : parsed.id === after.id &&
+            normalizeCellScope(
+                parsed.scope === "inherit" ? undefined : parsed.scope,
+              ) === normalizeCellScope(after.scope) &&
+            deepEqual(parsed.path, after.path))
+      ) {
+        return createSigilLinkFromParsedLink(after);
+      }
+      return value as FabricValue;
+    }
+    if (Array.isArray(value)) {
+      let changed = false;
+      const next = value.map((entry) => {
+        const replaced = this.replaceLinkInValue(entry, before, after);
+        changed ||= replaced !== entry;
+        return replaced;
+      });
+      return changed ? next as FabricValue : value as FabricValue;
+    }
+    if (!isRecord(value)) {
+      return value as FabricValue;
+    }
+    let changed = false;
+    const next: Record<string, FabricValue | undefined> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const replaced = this.replaceLinkInValue(entry, before, after);
+      changed ||= replaced !== entry;
+      next[key] = replaced;
+    }
+    return changed ? next as FabricValue : value as FabricValue;
   }
 
   private async resolveInSpaceAnnotation(
@@ -2489,20 +2618,38 @@ export class Runner {
     );
   }
 
-  private handlerResultPatternMustStartAfterCommit(pattern: Pattern): boolean {
+  private handlerResultPatternMustStartAfterCommit(
+    pattern: Pattern,
+    processCell: Cell<any>,
+  ): boolean {
     return pattern.nodes.some(({ module }) =>
-      module.type === "ref" && module.implementation === "navigateTo"
+      (module.type === "ref" && module.implementation === "navigateTo") ||
+      (module.targetSpace !== undefined &&
+        module.targetSpace !== processCell.space)
     );
+  }
+
+  private handlerResultPatternMaterializationSpace(
+    pattern: Pattern,
+    fallback: MemorySpace,
+  ): MemorySpace {
+    const targetSpaces = new Set<MemorySpace>();
+    for (const { module } of pattern.nodes) {
+      if (module.targetSpace !== undefined) {
+        targetSpaces.add(module.targetSpace);
+      }
+    }
+    return targetSpaces.size === 1 ? [...targetSpaces][0] : fallback;
   }
 
   private setupDeferredHandlerResultPattern(
     tx: IExtendedStorageTransaction,
     resultPattern: Pattern,
-    processCell: Cell<any>,
+    resultSpace: MemorySpace,
     cause: Record<string, any>,
   ): Cell<any> {
     const resultCell = this.runtime.getCell(
-      processCell.space,
+      resultSpace,
       { resultFor: cause },
       undefined,
       tx,

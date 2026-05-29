@@ -5,22 +5,22 @@ export default pattern(() => {
   const home = Home({});
 
   const action_create_profile = action(() => {
-    home.createProfile.send({ detail: { message: "Ada Lovelace" } });
+    home.createProfile.send({ name: "Ada Lovelace" });
   });
 
   const assert_initial_profile_missing = computed(() =>
     home.profile === undefined
   );
 
-  const assert_profile_created_with_name = computed(() =>
-    home.profile?.name === "Ada Lovelace"
+  const assert_untrusted_stream_does_not_create_profile = computed(() =>
+    home.profile === undefined
   );
 
   return {
     tests: [
       { assertion: assert_initial_profile_missing },
       { action: action_create_profile },
-      { assertion: assert_profile_created_with_name },
+      { assertion: assert_untrusted_stream_does_not_create_profile },
     ],
   };
 });

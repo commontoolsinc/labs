@@ -1548,7 +1548,7 @@ export type JSONSchemaObj = {
     readonly addIntegrity?: readonly ImmutableJSONValue[];
     readonly requiredIntegrity?: readonly ImmutableJSONValue[];
     readonly maxConfidentiality?: readonly ImmutableJSONValue[];
-    readonly ownerPrincipal?: string;
+    readonly ownerPrincipal?: string | { readonly __ctCurrentPrincipal: true };
     readonly writeAuthorizedBy?:
       | readonly string[]
       | {

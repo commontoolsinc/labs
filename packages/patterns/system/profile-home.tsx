@@ -1,14 +1,34 @@
 import {
+  Cfc,
   computed,
   equals,
   handler,
   lift,
   NAME,
   pattern,
+  RepresentsCurrentUser,
   Stream,
   UI,
   Writable,
+  WriteAuthorizedBy,
 } from "commonfabric";
+
+export const TRUSTED_PROFILE_HOME_SURFACE = "ProfileHome";
+export const TRUSTED_PROFILE_EDIT_ACTION = "EditProfile";
+
+type CurrentPrincipal = { readonly __ctCurrentPrincipal: true };
+
+type OwnerProtectedProfileWrite<
+  T,
+  Binding,
+> = RepresentsCurrentUser<
+  Cfc<
+    WriteAuthorizedBy<T, Binding>,
+    {
+      ownerPrincipal: CurrentPrincipal;
+    }
+  >
+>;
 
 type ProfileElementCell = {
   [NAME]?: string;
@@ -35,19 +55,25 @@ export type RemoveProfileElementEvent = {
 };
 
 export type SetProfileNameEvent = {
-  name: string;
+  name?: string;
+  detail?: { message?: string };
+  key?: string;
+  target?: { value?: string };
 };
 
 export type SetProfileAvatarEvent = {
-  avatar: string;
+  avatar?: string;
+  detail?: { message?: string };
+  key?: string;
+  target?: { value?: string };
 };
 
 export type ProfileHomeOutput = {
   [NAME]: string;
   [UI]: unknown;
-  name: string;
-  avatar: string;
-  elements: ProfileElement[];
+  name: OwnerProtectedProfileWrite<string, typeof applyInitialName>;
+  avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
+  elements: OwnerProtectedProfileWrite<ProfileElement[], typeof addElement>;
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   addElement: Stream<AddProfileElementEvent>;
@@ -58,6 +84,9 @@ export type ProfileHomeOutput = {
 export type ProfileHomeInput = {
   initialName?: string;
 };
+
+const trimInitialName = (initialName?: string): string =>
+  (initialName ?? "").trim();
 
 const ProfileCatalogCard = pattern<{ title: string }, ProfileElementCell>(
   ({ title }) => ({
@@ -128,11 +157,25 @@ const removeElement = handler<
 });
 
 const setName = handler<SetProfileNameEvent, { name: Writable<string> }>(
-  (event, state) => state.name.set(event.name),
+  (event, state) => {
+    if (event.key !== undefined && event.key !== "Enter") {
+      return;
+    }
+    const name = (event.name ?? event.detail?.message ??
+      event.target?.value ?? "").trim();
+    if (name) state.name.set(name);
+  },
 );
 
 const setAvatar = handler<SetProfileAvatarEvent, { avatar: Writable<string> }>(
-  (event, state) => state.avatar.set(event.avatar),
+  (event, state) => {
+    if (event.key !== undefined && event.key !== "Enter") {
+      return;
+    }
+    const avatar = (event.avatar ?? event.detail?.message ??
+      event.target?.value ?? "").trim();
+    state.avatar.set(avatar);
+  },
 );
 
 const applyInitialName = lift<
@@ -197,9 +240,16 @@ const removeElementCell = handler<void, {
 
 export default pattern<ProfileHomeInput, ProfileHomeOutput>(
   ({ initialName }) => {
-    const name = new Writable("").for("name");
-    const avatar = new Writable("").for("avatar");
-    const elements = new Writable<ProfileElement[]>([]).for("elements");
+    const initialProfileName = trimInitialName(initialName);
+    const name = new Writable<
+      OwnerProtectedProfileWrite<string, typeof applyInitialName>
+    >(initialProfileName).for("name");
+    const avatar = new Writable<
+      OwnerProtectedProfileWrite<string, typeof setAvatar>
+    >("").for("avatar");
+    const elements = new Writable<
+      OwnerProtectedProfileWrite<ProfileElement[], typeof addElement>
+    >([]).for("elements");
     const patternUrl = new Writable("").for("patternUrl");
     const elementTitle = new Writable("").for("elementTitle");
     const elementTag = new Writable("").for("elementTag");
@@ -223,7 +273,10 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       removeElement: removeElement({ elements }),
       initialNameApplied,
       [UI]: (
-        <cf-screen>
+        <cf-screen
+          data-ui-pattern={TRUSTED_PROFILE_HOME_SURFACE}
+          data-ui-event-integrity={TRUSTED_PROFILE_HOME_SURFACE}
+        >
           <cf-toolbar slot="header" sticky>
             <div slot="start">
               <h2 style={{ margin: 0, fontSize: "18px" }}>Profile</h2>
@@ -233,12 +286,24 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
           <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "720px" }}>
             <cf-vstack gap="2">
               <label>Name</label>
-              <cf-input $value={name} placeholder="Your name" />
+              <strong>{name}</strong>
+              <cf-message-input
+                data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
+                placeholder="Your name"
+                appearance="rounded"
+                oncf-send={setName({ name })}
+              />
             </cf-vstack>
 
             <cf-vstack gap="2">
               <label>Avatar</label>
-              <cf-input $value={avatar} placeholder="Avatar URL or text" />
+              <span>{avatar}</span>
+              <cf-message-input
+                data-ui-action={TRUSTED_PROFILE_EDIT_ACTION}
+                placeholder="Avatar URL or text"
+                appearance="rounded"
+                oncf-send={setAvatar({ avatar })}
+              />
             </cf-vstack>
 
             <cf-vstack gap="2">

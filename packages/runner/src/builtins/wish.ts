@@ -265,13 +265,34 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
 }
 
 function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
-  const profileField = getHomeSpaceCell(ctx).key("defaultPattern").key(
+  const homeSpaceCell = getHomeSpaceCell(ctx);
+  const profileField = homeSpaceCell.key("defaultPattern").key(
     "profile",
-  ).resolveAsCell();
-  if (profileField.getRaw() === undefined) {
+  );
+  const profileRaw = profileField.getRaw();
+  const profileDefault = profileField.resolveAsCell();
+  const profileLink = profileDefault.getAsNormalizedFullLink();
+  if (
+    profileRaw === undefined ||
+    profileLink.space === homeSpaceCell.space ||
+    profileLink.path.length > 0
+  ) {
     throw new WishError("homeSpaceCell.defaultPattern.profile is not set");
   }
-  return profileField.resolveAsCell();
+  void profileDefault.pull().catch((error) => {
+    wishFlowLogger.warn("profile-pull", () => [
+      "Failed to pull profile default pattern",
+      error,
+    ]);
+  });
+  void profileDefault.key("initialNameApplied").pull().catch((error) => {
+    wishFlowLogger.warn("profile-name-pull", () => [
+      "Failed to pull profile default name",
+      error,
+    ]);
+  });
+  profileDefault.key("initialNameApplied").get();
+  return profileDefault;
 }
 
 function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
@@ -664,9 +685,21 @@ function resolveHomeSpaceTarget(
     }
 
     case "#profileName": {
+      const profileName = getHomeSpaceCell(ctx).key("defaultPattern")
+        .resolveAsCell()
+        .key("profileName");
+      const profileNameValue = profileName.get() as unknown;
+      if (
+        typeof profileNameValue === "string" && profileNameValue.length > 0
+      ) {
+        return [{
+          cell: profileName,
+          pathPrefix: [],
+        }];
+      }
       return [{
         cell: getProfileDefaultCell(ctx),
-        pathPrefix: ["name"],
+        pathPrefix: ["initialNameApplied"],
       }];
     }
 
@@ -1182,12 +1215,14 @@ export function wish(
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
   let profileCreatePatternInput:
     | {
-      createProfile: Cell<unknown>;
+      profile: unknown;
+      profileName: unknown;
       inputId: string;
       buttonId: string;
     }
     | undefined;
   let profileCreatePatternResultCell: Cell<any> | undefined;
+  let profileCreatePatternReadyCell: Cell<boolean> | undefined;
 
   addCancel(() => {
     cancelled = true;
@@ -1319,9 +1354,13 @@ export function wish(
   ): Cell<any> {
     const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
       .resolveAsCell();
-    void runtime.start(homeDefaultPattern).catch(() => {});
     profileCreatePatternInput = {
-      createProfile: homeDefaultPattern.key("createProfile"),
+      profile: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("profile").getAsNormalizedFullLink(),
+      ),
+      profileName: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("profileName").getAsNormalizedFullLink(),
+      ),
       inputId: "wish-profile-name-input",
       buttonId: "wish-profile-create-button",
     };
@@ -1330,28 +1369,99 @@ export function wish(
     if (!profileCreatePatternResultCell) {
       profileCreatePatternResultCell = runtime.getCell(
         parentCell.space,
-        { wish: { profileCreatePattern: cause } },
+        {
+          wish: {
+            profileCreatePattern: cause,
+            user: runtime.userIdentityDID,
+          },
+        },
         undefined,
         tx,
       );
     }
+    if (!profileCreatePatternReadyCell) {
+      profileCreatePatternReadyCell = runtime.getCell<boolean>(
+        parentCell.space,
+        {
+          wish: {
+            profileCreatePatternReady: cause,
+            user: runtime.userIdentityDID,
+          },
+        },
+        undefined,
+        tx,
+      );
+    }
+    profileCreatePatternReadyCell.get();
 
     if (!profileCreatePattern) {
       if (!profileCreatePatternFetchPromise) {
         profileCreatePatternFetchPromise = fetchProfileCreatePattern(runtime)
           .then((pattern) => {
             profileCreatePattern = pattern;
+            if (pattern && profileCreatePatternReadyCell) {
+              const readyTx = runtime.edit();
+              profileCreatePatternReadyCell.withTx(readyTx).set(true);
+              runtime.prepareTxForCommit(readyTx);
+              readyTx.commit();
+            }
+            if (!pattern) {
+              profileCreatePatternFetchPromise = undefined;
+            }
             return pattern;
           });
       }
       void profileCreatePatternFetchPromise.then((pattern) => {
         if (!cancelled && pattern && profileCreatePatternResultCell) {
-          runtime.run(
-            undefined,
-            pattern,
-            profileCreatePatternInput,
-            profileCreatePatternResultCell,
-          );
+          try {
+            const runTx = runtime.edit();
+            const resultCell = profileCreatePatternResultCell.withTx(runTx);
+            const input = profileCreatePatternInput && {
+              ...profileCreatePatternInput,
+              profile: typeof (profileCreatePatternInput.profile as {
+                  withTx?: unknown;
+                }).withTx === "function"
+                ? (profileCreatePatternInput.profile as Cell<unknown>).withTx(
+                  runTx,
+                )
+                : profileCreatePatternInput.profile,
+            };
+            runtime.run(
+              runTx,
+              pattern,
+              input,
+              resultCell,
+            );
+            runtime.prepareTxForCommit(runTx);
+            runTx.commit().then(({ error }) => {
+              if (error) {
+                const errorTx = runtime.edit();
+                profileCreatePatternResultCell!.withTx(errorTx).set({
+                  [UI]: errorUI(toCompactDebugString(error)),
+                });
+                runtime.prepareTxForCommit(errorTx);
+                errorTx.commit();
+              }
+            }).catch((error) => {
+              const errorTx = runtime.edit();
+              profileCreatePatternResultCell!.withTx(errorTx).set({
+                [UI]: errorUI(
+                  error instanceof Error ? error.message : String(error),
+                ),
+              });
+              runtime.prepareTxForCommit(errorTx);
+              errorTx.commit();
+            });
+          } catch (error) {
+            const errorTx = runtime.edit();
+            profileCreatePatternResultCell.withTx(errorTx).set({
+              [UI]: errorUI(
+                error instanceof Error ? error.message : String(error),
+              ),
+            });
+            runtime.prepareTxForCommit(errorTx);
+            errorTx.commit();
+          }
         }
       });
     } else if (!cancelled && profileCreatePatternResultCell) {

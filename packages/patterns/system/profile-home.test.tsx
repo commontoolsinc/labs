@@ -2,12 +2,7 @@ import { action, computed, pattern } from "commonfabric";
 import ProfileHome from "./profile-home.tsx";
 
 export default pattern(() => {
-  const profile = ProfileHome({});
-
-  const action_set_name_avatar = action(() => {
-    profile.setName.send({ name: "Ada Lovelace" });
-    profile.setAvatar.send({ avatar: "ada.png" });
-  });
+  const profile = ProfileHome({ initialName: "Ada Lovelace" });
 
   const action_add_catalog_element = action(() => {
     profile.addElement.send({
@@ -26,14 +21,8 @@ export default pattern(() => {
   });
 
   const assert_initial_state = computed(() =>
-    profile.name === "" &&
-    profile.avatar === "" &&
+    profile.initialNameApplied === "Ada Lovelace" &&
     profile.elements.length === 0
-  );
-
-  const assert_name_avatar_updated = computed(() =>
-    profile.name === "Ada Lovelace" &&
-    profile.avatar === "ada.png"
   );
 
   const assert_added_element = computed(() => {
@@ -49,8 +38,6 @@ export default pattern(() => {
   return {
     tests: [
       { assertion: assert_initial_state },
-      { action: action_set_name_avatar },
-      { assertion: assert_name_avatar_updated },
       { action: action_add_catalog_element },
       { assertion: assert_added_element },
       { action: action_remove_catalog_element },

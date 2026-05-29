@@ -72,6 +72,9 @@ If the link is missing, the system home pattern renders a profile-name input.
 Submitting a name starts `/api/patterns/system/profile-home.tsx` in a new
 profile space with `PatternFactory.inSpace(name)` and stores the resulting
 profile default-pattern link at `defaultPattern.profile`.
+The requested name is also mirrored into `defaultPattern.profileName` so
+viewer-specific `#profileName` wishes can update immediately while the linked
+profile default pattern finishes materializing.
 
 The `defaultPattern.profile` link is CFC-protected profile-link data. It must be
 created by the home default pattern's trusted profile creation flow; direct

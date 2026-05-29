@@ -82,7 +82,9 @@ result schema so each viewer sees their own profile projection.
   `homeSpaceCell.defaultPattern.profile`.
 - `PatternFactory.inSpace(space?: string | AnyCell<unknown>)` exists. DID
   strings and cell arguments resolve synchronously; named spaces and omitted
-  spaces resolve during async action/handler post-run.
+  spaces resolve during async action/handler post-run. Post-run resolution
+  replaces the runtime annotation itself with the resolved DID; unresolved names
+  must not survive outside the handler frame.
 - `wish()` currently supports scope values `"~"` for home favorites, `"."` for
   current-space mentionables, and arbitrary DIDs for other spaces.
 - The string `#profile` was previously a well-known home target that resolved
@@ -125,7 +127,8 @@ const profile = ProfileHome.inSpace(spaceName)({ initialName: name });
 When `spaceName` is a non-DID string, the runner resolves it during async
 post-run through the existing named-space derivation path. When the argument is
 omitted, the runner generates a fresh DID. The home default pattern's `profile`
-link is the durable source of truth after creation.
+link is the durable source of truth after creation. Runtime-only `.inSpace`
+annotations are also rewritten to the resolved DID during post-run.
 
 ### Profile Default Pattern Output
 
@@ -335,7 +338,7 @@ Add these explicit profile targets:
 ```tsx
 wish({ query: "#profile" })            // homeDefault.profile
 wish({ query: "#profileSpace" })       // the profile space cell, derived from the profile link
-wish({ query: "#profileName" })        // homeDefault.profile.name
+wish({ query: "#profileName" })        // homeDefault.profileName, then profile.initialNameApplied
 wish({ query: "#profileAvatar" })      // homeDefault.profile.avatar
 ```
 

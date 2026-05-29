@@ -933,23 +933,8 @@ const currentPrincipalIntegrityReason = (
   if (currentPrincipalValues.length === 0) {
     return undefined;
   }
-  const ownerPrincipal = ifc.ownerPrincipal;
-  if (ownerPrincipal !== undefined) {
-    if (
-      typeof ownerPrincipal !== "string" ||
-      !ownerPrincipal.startsWith("did:")
-    ) {
-      return `ownerPrincipal must be a DID at /${path.join("/")}`;
-    }
-    const representedOwners = literalDidSubjectsForPrincipalClaim(
-      currentPrincipalValues,
-      "represents-principal",
-    );
-    if (!representedOwners.some((subject) => subject === ownerPrincipal)) {
-      return `ownerPrincipal requires matching represents-principal integrity at /${
-        path.join("/")
-      }`;
-    }
+  const ownerPrincipalSpec = ifc.ownerPrincipal;
+  if (ownerPrincipalSpec !== undefined) {
     const trustSnapshot = tx.getCfcState().trustSnapshot;
     if (trustSnapshot === undefined) {
       return `ownerPrincipal requires a trust snapshot at /${path.join("/")}`;
@@ -964,14 +949,33 @@ const currentPrincipalIntegrityReason = (
         path.join("/")
       }`;
     }
+    const ownerPrincipal = isCurrentPrincipalPlaceholder(ownerPrincipalSpec)
+      ? trustSnapshot.actingPrincipal
+      : ownerPrincipalSpec;
+    if (
+      typeof ownerPrincipal !== "string" ||
+      !ownerPrincipal.startsWith("did:")
+    ) {
+      return `ownerPrincipal must be a DID at /${path.join("/")}`;
+    }
+    const resolvedCurrentPrincipalValues = resolveCurrentPrincipalLabelValues(
+      currentPrincipalValues,
+      trustSnapshot.actingPrincipal,
+    ) ?? currentPrincipalValues;
+    const representedOwners = literalDidSubjectsForPrincipalClaim(
+      resolvedCurrentPrincipalValues,
+      "represents-principal",
+    );
+    if (!representedOwners.some((subject) => subject === ownerPrincipal)) {
+      return `ownerPrincipal requires matching represents-principal integrity at /${
+        path.join("/")
+      }`;
+    }
     if (trustSnapshot.actingPrincipal !== ownerPrincipal) {
       return `ownerPrincipal mismatch at /${path.join("/")}`;
     }
     if (ifc.writeAuthorizedBy === undefined) {
       return `ownerPrincipal requires writeAuthorizedBy at /${path.join("/")}`;
-    }
-    if (ifc.uiContract === undefined) {
-      return `ownerPrincipal requires uiContract at /${path.join("/")}`;
     }
     return undefined;
   }

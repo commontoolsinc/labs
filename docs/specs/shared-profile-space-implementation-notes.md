@@ -233,11 +233,12 @@ made before committing.
 ### Decision
 
 - Home now exports `profile?: ProfileHomeOutput` and `createProfile`.
-- The profile tab accepts a name via `cf-message-input`; the handler stores the
-  requested name in a durable `requestedProfileName` cell.
-- A lift reacts to `requestedProfileName` and returns
-  `ProfileHome.inSpace(name)({ initialName: name })`. The returned profile
-  default-pattern link becomes `home.defaultPattern.profile`.
+- The profile tab accepts a name and the trusted profile-creation handler writes
+  `ProfileHome.inSpace(name)({ initialName: name })` directly to
+  `home.defaultPattern.profile`.
+- The handler also mirrors the requested name into `home.defaultPattern.profileName`
+  so profile-name wishes can update before the profile default pattern finishes
+  materializing.
 - `profile-home.tsx` accepts `initialName?: string` and applies it through a
   small lift that writes the owned `name` cell once when it is empty.
 
@@ -430,27 +431,24 @@ made before committing.
 - A direct handler that both writes the home link and starts the profile pattern
   in a new space would cross spaces in one write transaction. The existing
   runtime write isolation rejects that shape.
-- A direct trusted handler that writes the home `requestedProfileName` cell from
-  the wish-created UI does not by itself run the home pattern's reactive
-  profile-link lift. The existing home `createProfile` stream is still the
-  correct host boundary for the two-step creation flow.
+- The wish-created UI needs to vend the same trusted profile-creation action as
+  the home tab so CFC authorizes writes to the protected home profile link.
 
 ### Decision
 
 - `homeSpaceCell.defaultPattern.profile` now has static `"profile-link"`
   add-integrity and is `WriteAuthorizedBy` the home pattern's profile-link
   creation flow.
-- Profile creation keeps the two-step home implementation: the trusted create
-  surface sends the home `createProfile` stream, that stream writes the
-  requested profile name, and the reactive `.inSpace(name)` pattern factory
-  creates the profile link.
+- Profile creation uses the trusted `submitProfileCreation` handler directly:
+  it writes the `.inSpace(name)` profile default-pattern link and the
+  `profileName` projection.
 - The missing-profile `#profile` wish UI now loads
   `packages/patterns/system/profile-create.tsx` and renders that trusted
   surface via `cf-render`. The pattern sends the same create-profile stream used
   by the home profile tab and does not navigate.
-- The transient `requestedProfileName` trigger remains ordinary home default
-  state. The protected durable surface in this slice is the resulting
-  `homeSpaceCell.defaultPattern.profile` link.
+- The protected durable surface in this slice is the resulting
+  `homeSpaceCell.defaultPattern.profile` link; the `profileName` projection is
+  support state for immediate well-known wish resolution.
 
 ### Tests Added
 
@@ -501,3 +499,112 @@ made before committing.
 ### Spec Correction Needed
 
 - None.
+
+## Slice 13: Trusted Wish Profile Creation Follow-Up
+
+### Ambiguity or Incorrect Spec
+
+- The plan said the wish persona UI should create the profile without
+  navigating, but it did not specify how a wish-launched child pattern should
+  cross from the shared pattern space into the user's home/profile spaces.
+- Passing a protected profile link as a protected pattern argument caused CFC to
+  reject setup of the trusted create surface. The protected data is the home
+  profile field, not the transient pattern argument that carries a handle to it.
+- A handler that creates `ProfileHome.inSpace(name)` and writes the home profile
+  link returns `undefined`, but still has opaque refs that must be materialized.
+  Materializing those refs in the handler transaction can violate single-writer
+  transaction isolation.
+- The profile default pattern's initialized name is not synchronously available
+  to `#profileName` in the browser flow. The home default pattern needs a small
+  colocated profile-name projection for immediate persona wishes.
+
+### Decision
+
+- `ProfileCreate` accepts a plain writable profile handle and optional
+  `profileName` projection, while the home `profile` field remains the
+  CFC-protected durable link.
+- The wish launcher passes full sigil links for `profile` and `profileName` so
+  they are resolved in the user's home space, not relative to the shared
+  pattern's process cell.
+- `undefined` handler results that only materialize `.inSpace(...)` opaque refs
+  now run that materialization pattern after the handler transaction commits;
+  this avoids cross-space writes in one transaction.
+- Wish-created profile-create result cells are keyed by current user DID to
+  avoid stale shared result cells after identity switches.
+- `#profileName` prefers the home default `profileName` projection and falls
+  back to the profile default pattern's `initialNameApplied` projection.
+
+### Tests Added
+
+- `packages/runner/test/pattern-scope.test.ts`
+  - Reproduces a handler side effect that writes a linked `.inSpace(...)` child
+    into a cell in another space.
+- `packages/patterns/integration/shared-profile.test.ts`
+  - Verifies the wish-created profile UI creates names for two identities in
+    headless browser mode.
+
+### Spec Correction Needed
+
+- Document the home default `profileName` projection as v1 support state for
+  immediate `#profileName` wishes after profile creation.
+
+## Slice 14: Named `.inSpace()` Annotation Replacement
+
+### Ambiguity or Incorrect Spec
+
+- The post-run design said `.inSpace(name)` names are resolved after an async
+  handler call, but did not explicitly say whether the runtime-only annotation
+  should also be rewritten from the name to the resolved DID.
+
+### Decision
+
+- Treat unresolved names as a handler-frame-only intermediate value. Post-run
+  resolution must replace the annotation itself with the resolved DID, not just
+  retarget the cell link and pattern module.
+
+### Tests Added
+
+- `packages/runner/test/pattern-scope.test.ts`
+  - Reproduces a named `.inSpace(...)` annotation surviving post-run as the
+    human-readable space name.
+
+### Spec Correction Needed
+
+- Document that `.inSpace(name)` names must not survive post-run processing;
+  all durable links, target spaces, and runtime annotations should contain the
+  resolved DID.
+
+## Slice 15: Identity Switch Runtime Boundary
+
+### Ambiguity or Incorrect Spec
+
+- The shared-profile browser test switched identities in the same page. That
+  exposed that pattern/runtime closures can outlive `app.setIdentity(...)` when
+  a test jumps directly from one identity to another.
+- Too much runtime state assumes the authenticated identity is stable for the
+  lifetime of the runtime connection.
+
+### Decision
+
+- `App.setIdentity(...)` now rejects changing from one logged-in DID directly to
+  another. Callers must clear the identity first.
+- The integration shell login helper logs out and waits for
+  `globalThis.commonfabric.rt` to clear before logging in as a different DID.
+  This keeps identity changes on the same browser page, but forces a new
+  runtime instance and connection.
+- Do not special-case `wish()` caches for identity switching; runtime teardown is
+  the boundary.
+
+### Tests Added
+
+- `packages/shell/test/app-state.test.ts`
+  - Verifies `App.setIdentity(...)` rejects direct cross-DID switching and
+    allows login after logout.
+- `packages/patterns/integration/shared-profile.test.ts`
+  - Continues to verify two identities in headless browser mode through the
+    normal shell login helper.
+
+### Spec Correction Needed
+
+- Document that shell identity changes are logout/login transitions. Direct
+  cross-DID mutation of an active app identity is unsupported.

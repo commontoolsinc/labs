@@ -2267,6 +2267,7 @@ describe("wish built-in", () => {
       );
       profileDefaultCell.set({
         name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
         avatar: "ada.png",
         elements: [],
       });
@@ -2330,6 +2331,7 @@ describe("wish built-in", () => {
       );
       profileDefaultCell.set({
         name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
         avatar: "ada.png",
         elements: [],
       });
@@ -2386,6 +2388,7 @@ describe("wish built-in", () => {
       );
       profileDefaultCell.set({
         name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
         avatar: "ada.png",
         elements: [],
       });
@@ -2495,6 +2498,7 @@ describe("wish built-in", () => {
       profileCard.set({ title: "Profile Card", kind: "card" });
       profileDefaultCell.set({
         name: "Ada",
+        initialNameApplied: "Ada",
         avatar: "",
         elements: [{
           cell: profileCard,
