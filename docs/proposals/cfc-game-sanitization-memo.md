@@ -402,20 +402,8 @@ encryption; **recombination** and **unlinkability** out of scope).
 It **type-checks, deploys, and runs** (`deno task cf check … --no-run`, exit 0; deployed to a local
 toolshed and driven in-browser, 0 console errors).
 
-### Live demo (screenshots)
+### Live demo
 
-(`docs/proposals/images/`)
-
-- **Hero — "view as Alice"** (`poker-hero-viewas.png`): the per-reader projection. Acting as Alice,
-  her hand renders (`10♥ 6♥`, "👁 your hand") while Bob and Charlie show *"secret from you"* — their
-  CFC render boundaries refusing to render. The viewer switch is labelled **SIMULATED** because it's
-  the per-recipient *materialization* the memo proposes (faked here via a button, not real
-  authenticated identity). The Showdown action reveals everyone's hands to all.
-- **Reducer pipeline, released** (`poker-reducer-released.png`): `secret hand` (ENFORCED) → `reducer`
-  (SIMULATED: mints `ReducedBy{count}`) → relabel → `Count (own value): 2 cards` (ENFORCED) — the
-  count is a *separate* labelled value the table can read while the full hand stays blocked. Below
-  it, the "Play the hand" controls show the status breadcrumb (`PHASE … preflop …`) and the
-  phase-gated deal buttons.
-
-![Hero — viewing as Alice: her hand renders; opponents stay secret](./images/poker-hero-viewas.png)
-![Reducer pipeline — the count released to the table as a separate labelled value](./images/poker-reducer-released.png)
+Deploy `packages/patterns/poker-sanitization-demo/main.tsx` and click through it: act as a
+player (per-reader view), deal the streets in order, release just the count, or run the Showdown.
+Verified in-browser (light + dark), type-checks via `deno task cf check`.
