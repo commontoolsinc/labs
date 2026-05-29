@@ -9,7 +9,14 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
+import {
+  type CellScope,
+  ID,
+  ID_FIELD,
+  type JSONSchema,
+} from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
 import {
   CellImpl,
@@ -263,6 +270,24 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
  * @param context - The context of the change.
  * @returns Whether any changes were made.
  */
+/**
+ * The scope a cell's own schema declares for its content: the outermost
+ * `asCell` entry scope if present, otherwise the top-level `scope`. This is the
+ * scope at which the cell's data lives. It is distinct from a follow cap and
+ * from the link's base scope.
+ */
+function declaredCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  if (!isRecord(schema)) return undefined;
+  const asCellScope = ContextualFlowControl.getAsCellScope(
+    ContextualFlowControl.getAsCellValues(schema).at(0),
+  );
+  if (isCellScope(asCellScope)) return asCellScope;
+  if (isCellScope(schema.scope)) return schema.scope;
+  return undefined;
+}
+
 export function diffAndUpdate(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
@@ -271,6 +296,31 @@ export function diffAndUpdate(
   context?: unknown,
   options?: IReadOptions,
 ): boolean {
+  // Never write content into a scope broader than the data's own declared
+  // scope. If the target cell's schema declares a narrower scope than the
+  // link's base scope, write the content into the narrower-scope instance and
+  // leave a redirect link in the broader-scope location, so readers at the
+  // broader scope follow it to the narrower instance. This does not apply when
+  // writing a link value (a reference carries its own target scope) — only when
+  // writing the cell's own content. The check lives here, at the top-level
+  // write entry, so it only narrows the write target and not every nested path
+  // (recursion goes through `normalizeAndDiff`).
+  const declared = declaredCellScope(link.schema);
+  if (
+    declared !== undefined &&
+    scopeRank(declared) > scopeRank(link.scope) &&
+    !isCellLink(newValue) &&
+    !isCell(newValue)
+  ) {
+    const scopedLink: NormalizedFullLink = { ...link, scope: declared };
+    diffAndUpdate(runtime, tx, scopedLink, newValue, context, options);
+    tx.writeValueOrThrow(
+      link,
+      createSigilLinkFromParsedLink(scopedLink, { base: link }) as FabricValue,
+    );
+    return true;
+  }
+
   const readOptions: IReadOptions = {
     ...options,
     meta: {

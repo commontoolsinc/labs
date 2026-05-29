@@ -1162,15 +1162,18 @@ export class CellImpl<T extends FabricValue>
       // Create a child link with extended path
       // When we have a childSchema, we need to preserve the schema that contains $defs
       // for resolving $ref references. If schema wasn't set, fall back to the parent schema.
+      //
+      // key() only extends the path and walks the schema. It must NOT change the
+      // link's scope: scope lives in the schema (top-level and asCell entries)
+      // and is resolved later as a follow cap during reads and as the target
+      // scope during writes. Stamping schema scope onto this link here would
+      // re-address the value to the wrong scoped instance of the container doc
+      // (see CT-1623).
       currentLink = {
         ...currentLink,
         path: [...currentLink.path, key.toString()] as string[],
         schema: childSchema,
       };
-
-      if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
-        currentLink = { ...currentLink, scope: childSchema.scope };
-      }
     }
 
     // Determine the kind based on schema flags
@@ -1183,10 +1186,6 @@ export class CellImpl<T extends FabricValue>
         const asCellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
         if (asCellKind !== undefined) {
           kind = asCellKind;
-        }
-        const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
-        if (isCellScope(asCellScope)) {
-          currentLink = { ...currentLink, scope: asCellScope };
         }
       }
     }

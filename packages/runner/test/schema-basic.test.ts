@@ -7,6 +7,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -742,8 +743,79 @@ describe("Schema - Basic Types and References", () => {
         tx,
       );
 
+      // key() does not stamp the asCell entry scope onto the navigated link:
+      // the link stays at the container's base scope, with the declared scope
+      // carried on the schema (where it is honored as a follow cap on reads and
+      // as the target scope on writes).
       const currentCell = outer.key("current");
-      expect(currentCell.getAsNormalizedFullLink().scope).toBe("user");
+      const link = currentCell.getAsNormalizedFullLink();
+      expect(link.scope).toBe("space");
+      expect(
+        ContextualFlowControl.getAsCellScope(
+          ContextualFlowControl.getAsCellValues(link.schema).at(0),
+        ),
+      ).toBe("user");
+    });
+
+    it("key() only extends the path and walks the schema, never the scope, without reading", () => {
+      // .key() is a pure link/schema transformation: it appends to the path and
+      // walks the schema, and it must NOT read storage NOR change the link's
+      // scope. Scope lives only in the schema (top-level and asCell entries) and
+      // is resolved later (as a follow cap on reads, as the target scope on
+      // writes). We assert on a document with no committed data so any read
+      // would be observable via the transaction's read activities.
+      const root = runtime.getCell(
+        space,
+        "key-no-read-scope-walk",
+        {
+          type: "object",
+          properties: {
+            account: {
+              type: "object",
+              scope: "user",
+              properties: {
+                draft: {
+                  type: "string",
+                  asCell: [{ kind: "cell", scope: "session" }],
+                },
+                name: { type: "string" },
+              },
+            },
+          },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      const getReadActivities = tx.getReadActivities;
+      expect(getReadActivities).toBeDefined();
+      const readCountBefore = [...getReadActivities!.call(tx)].length;
+
+      // The link scope stays at the cell's base scope through every key()...
+      const account = root.key("account");
+      expect(account.getAsNormalizedFullLink().path).toEqual(["account"]);
+      expect(account.getAsNormalizedFullLink().scope).toBe("space");
+
+      const name = root.key("account", "name");
+      expect(name.getAsNormalizedFullLink().path).toEqual(["account", "name"]);
+      expect(name.getAsNormalizedFullLink().scope).toBe("space");
+
+      const draft = root.key("account", "draft");
+      expect(draft.getAsNormalizedFullLink().path).toEqual([
+        "account",
+        "draft",
+      ]);
+      expect(draft.getAsNormalizedFullLink().scope).toBe("space");
+
+      // ...while the scope it walked to is carried on the link's schema, where
+      // reads/writes resolve it.
+      expect(
+        (account.getAsNormalizedFullLink().schema as JSONSchema as any)
+          ?.scope,
+      ).toBe("user");
+
+      // key() performed no storage reads.
+      const readCountAfter = [...getReadActivities!.call(tx)].length;
+      expect(readCountAfter).toBe(readCountBefore);
     });
 
     it("should preserve nested asCell wrappers through anyOf branches", () => {

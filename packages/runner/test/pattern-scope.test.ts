@@ -9,7 +9,7 @@ import { type Cell, createCell } from "../src/cell.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-Deno.test("Cell.key applies concrete scope from child schema", async () => {
+Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -37,14 +37,27 @@ Deno.test("Cell.key applies concrete scope from child schema", async () => {
       tx,
     );
 
+    // key() only extends the path; it never changes the link's scope. The
+    // declared scope lives in the schema and is realized on read/write (via
+    // redirect links), not stamped onto the navigated link.
     assertEquals(cell.getAsNormalizedFullLink().scope, "space");
-    assertEquals(cell.key("name").getAsNormalizedFullLink().scope, "user");
+    assertEquals(cell.key("name").getAsNormalizedFullLink().scope, "space");
     assertEquals(
       cell.key("selectedRoom").getAsNormalizedFullLink().scope,
-      "session",
+      "space",
     );
     assertEquals(
       cell.key("selectedRoom", "room").getAsNormalizedFullLink().scope,
+      "space",
+    );
+
+    // The scope is carried on the schema of the navigated link.
+    assertEquals(
+      (cell.key("name").getAsNormalizedFullLink().schema as any)?.scope,
+      "user",
+    );
+    assertEquals(
+      (cell.key("selectedRoom").getAsNormalizedFullLink().schema as any)?.scope,
       "session",
     );
   } finally {
