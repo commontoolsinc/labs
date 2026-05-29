@@ -35,18 +35,23 @@ export default pattern(() => {
   const assert_initial_scoped_fields = computed(() => chat.roomCount === 0);
 
   const assert_added_room_is_selected = computed(() =>
+    conversation.get().rooms.length === 1 &&
+    selectedRoom.get().room?.name === "Garden" &&
     chat.roomCount === 1 &&
     chat.selectedRoom.room?.name === "Garden" &&
     chat.messageCount === 0
   );
 
   const assert_second_room_is_selected = computed(() =>
+    conversation.get().rooms.length === 2 &&
+    selectedRoom.get().room?.name === "Library" &&
     chat.roomCount === 2 &&
     chat.selectedRoom.room?.name === "Library" &&
     chat.messageCount === 0
   );
 
   const assert_selected_room_reference_changed = computed(() =>
+    selectedRoom.get().room?.name === "Garden" &&
     chat.selectedRoom.room?.name === "Garden"
   );
 
