@@ -240,20 +240,23 @@ function countBoundary(
   );
 }
 
-// A labelled stage box in the reducer pipeline.
+const STAGE = {
+  border: "1px solid #e2e8f0",
+  borderRadius: "10px",
+  padding: "10px",
+  minWidth: "150px",
+  background: "#ffffff",
+};
+const STAGE_TITLE = { fontSize: "12px", fontWeight: "700", marginBottom: "6px" };
+const STAGE_BODY = { marginBottom: "6px", minHeight: "30px" };
+
+// A labelled stage box for STATIC pipeline stages (dynamic boundaries are rendered inline so their
+// computeds are direct children — see the pattern body).
 function stageBox(title: string, body: unknown, kind: Badge) {
   return (
-    <div
-      style={{
-        border: "1px solid #e2e8f0",
-        borderRadius: "10px",
-        padding: "10px",
-        minWidth: "150px",
-        background: "#ffffff",
-      }}
-    >
-      <div style={{ fontSize: "12px", fontWeight: "700", marginBottom: "6px" }}>{title}</div>
-      <div style={{ marginBottom: "6px", minHeight: "30px" }}>{body}</div>
+    <div style={STAGE}>
+      <div style={STAGE_TITLE}>{title}</div>
+      <div style={STAGE_BODY}>{body}</div>
       {badge(kind)}
     </div>
   );
@@ -458,30 +461,15 @@ export default pattern<unknown, PokerOutput>(() => {
   const bobNote = computed(() => noteFor(bobFolded.get(), revealed.get()));
   const charlieNote = computed(() => noteFor(charlieFolded.get(), revealed.get()));
 
-  // The whole reducer pipeline as ONE computed so every stage (incl. the count cell) renders and
-  // reacts to release/deal. stage 3 calls countBoundary directly (no nested computed).
-  const pipelineRow = computed(() => {
+  // The two DYNAMIC boundaries are their own top-level computeds rendered as direct children
+  // (the pattern that works for the hand rows) — not nested inside a bigger computed/stageBox.
+  const aliceSecretCell = computed(() => {
     dealIndex.get();
-    const released = countReleased.get();
-    return (
-      <div style={{ display: "flex", alignItems: "stretch", flexWrap: "wrap", gap: "4px" }}>
-        {stageBox("Alice's secret hand", handBoundary(aliceConf, alice, false), "ENFORCED")}
-        {pipelineArrow("reducer count = hand.length")}
-        {stageBox(
-          "Reducer output",
-          <span style={{ fontSize: "12px", color: "#64748b" }}>
-            mints <code>ReducedBy&#123;count&#125;</code>; inherits the hand's label
-          </span>,
-          "SIMULATED",
-        )}
-        {pipelineArrow("relabel [Alice] → [table]")}
-        {stageBox(
-          "Count cell (own atom)",
-          countBoundary(aliceCountConf, alice.get().length, released),
-          "ENFORCED",
-        )}
-      </div>
-    );
+    return handBoundary(aliceConf, alice, false); // always blocked: the secret-hand stage
+  });
+  const countCellComputed = computed(() => {
+    dealIndex.get();
+    return countBoundary(aliceCountConf, alice.get().length, countReleased.get());
   });
   const countStatus = computed(() =>
     countReleased.get()
@@ -559,7 +547,27 @@ export default pattern<unknown, PokerOutput>(() => {
                 binary-access cell, relabelled to the table by a trusted action — not a new label
                 level. Read left → right:
               </cf-label>
-              {pipelineRow}
+              <div style={{ display: "flex", alignItems: "stretch", flexWrap: "wrap", gap: "4px" }}>
+                <div style={STAGE}>
+                  <div style={STAGE_TITLE}>Alice's secret hand</div>
+                  <div style={STAGE_BODY}>{aliceSecretCell}</div>
+                  {badge("ENFORCED")}
+                </div>
+                {pipelineArrow("reducer count = hand.length")}
+                {stageBox(
+                  "Reducer output",
+                  <span style={{ fontSize: "12px", color: "#64748b" }}>
+                    mints <code>ReducedBy&#123;count&#125;</code>; inherits the hand's label
+                  </span>,
+                  "SIMULATED",
+                )}
+                {pipelineArrow("relabel [Alice] → [table]")}
+                <div style={STAGE}>
+                  <div style={STAGE_TITLE}>Count cell (own atom)</div>
+                  <div style={STAGE_BODY}>{countCellComputed}</div>
+                  {badge("ENFORCED")}
+                </div>
+              </div>
               <cf-label style={{ fontSize: "12px", color: "#64748b" }}>{countStatus}</cf-label>
               <cf-hstack gap="2">
                 <cf-button data-ui-action={COUNT_ACTION} onClick={releaseCount}>
