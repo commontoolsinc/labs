@@ -150,14 +150,28 @@ const replaceAtPath = (
  */
 const validateAddSpine = (root: FabricValue, path: string[]): void => {
   let current: FabricValue = root;
+  // Becomes true once we pass a missing object key: everything below is freshly
+  // created, so all containers from there down are empty.
+  let creating = false;
   for (let i = 0; i < path.length - 1; i++) {
     const segment = path[i]!;
+    if (creating) {
+      // A freshly-created array is empty, so an intermediate array index (or the
+      // `-` append marker) can never resolve to an existing element to traverse
+      // into -- reject it rather than fabricate one. Plain object keys are fine;
+      // they get created on the way down.
+      if (isArraySegment(segment) || segment === "-") {
+        throw new Error(`missing path ${encodePointer(path)}`);
+      }
+      continue;
+    }
     if (Array.isArray(current)) {
       current = current[requireExistingArrayIndex(current, segment, path)];
     } else if (isPatchObject(current)) {
-      // Once a key is missing, everything below it is freshly created, so there
-      // is nothing further to validate.
-      if (!Object.hasOwn(current, segment)) return;
+      if (!Object.hasOwn(current, segment)) {
+        creating = true;
+        continue;
+      }
       current = current[segment];
     } else {
       throw new Error(`path is not traversable at ${encodePointer(path)}`);
