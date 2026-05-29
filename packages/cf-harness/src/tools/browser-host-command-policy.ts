@@ -9,15 +9,21 @@ export interface BrowserHostCommandPlan {
   workspacePathArgs: readonly string[];
 }
 
+export interface BrowserHostCommandPolicyOptions {
+  browserAccessCdpUrl?: string;
+}
+
 export const BROWSER_HOST_COMMAND_DENIED_EXIT_CODE = 126;
 export const BROWSER_HOST_COMMAND_DENIED_PREFIX =
   "bash-no-sandbox command denied";
 
 const AGENT_BROWSER_COMMAND = "agent-browser";
 const MAX_FIND_DEPTH = 5;
+const MAX_WAIT_MS = 30_000;
 
 export const validateBrowserHostCommand = (
   command: string,
+  options: BrowserHostCommandPolicyOptions = {},
 ): BrowserHostCommandPolicyResult => {
   const parsed = parseSimpleShellCommand(command);
   if (parsed.error !== undefined) {
@@ -26,7 +32,7 @@ export const validateBrowserHostCommand = (
   const [commandName, ...args] = parsed.tokens;
   switch (commandName) {
     case AGENT_BROWSER_COMMAND:
-      return validateAgentBrowserCommand(args);
+      return validateAgentBrowserCommand(args, options);
     case "command":
       return validateCommandBuiltin(args);
     case "find":
@@ -66,44 +72,54 @@ const deny = (reason: string): BrowserHostCommandPolicyResult => ({
 
 const validateAgentBrowserCommand = (
   args: readonly string[],
+  options: BrowserHostCommandPolicyOptions,
 ): BrowserHostCommandPolicyResult => {
-  const cdpEndpoint = extractAgentBrowserCdpEndpoint(args);
+  const expectedCdpOrigin = normalizeCdpOrigin(options.browserAccessCdpUrl);
+  if (
+    options.browserAccessCdpUrl !== undefined && expectedCdpOrigin === undefined
+  ) {
+    return deny("configured Browser Access CDP endpoint is invalid");
+  }
+  const cdpEndpoint = extractAgentBrowserCdpEndpoint(args, expectedCdpOrigin);
   if (cdpEndpoint.error !== undefined) {
     return deny(cdpEndpoint.error);
   }
 
-  for (const arg of args) {
-    const flag = normalizeLongFlag(arg);
-    if (
-      DISALLOWED_AGENT_BROWSER_FLAGS.has(flag) ||
-      isDisallowedAgentBrowserShortFlag(arg)
-    ) {
-      return deny(`agent-browser flag ${flag} is not allowed from cf-harness`);
-    }
-  }
-
   const command = findAgentBrowserSubcommand(args);
-  if (command !== undefined) {
-    if (DISALLOWED_AGENT_BROWSER_COMMANDS.has(command.name)) {
-      return deny(
-        `agent-browser ${command.name} is not allowed from cf-harness`,
-      );
-    }
-    if (
-      command.name === "open" &&
-      args.slice(command.index + 1).some((arg) => /^file:/i.test(arg))
-    ) {
-      return deny("agent-browser open file: URLs are not allowed");
-    }
+  if (command === undefined) {
+    return args.length === 1 && args[0] === "--help"
+      ? allow([AGENT_BROWSER_COMMAND, "--help"])
+      : deny("agent-browser command must be explicitly allowlisted");
   }
-  if (
-    command !== undefined &&
-    !AGENT_BROWSER_LOCAL_COMMANDS.has(command.name) &&
-    cdpEndpoint.endpoint === undefined
-  ) {
+  const globalArgsError = validateAgentBrowserGlobalArgs(args, command.index);
+  if (globalArgsError !== undefined) {
+    return deny(globalArgsError);
+  }
+  const commandArgs = args.slice(command.index + 1);
+  if (AGENT_BROWSER_LOCAL_COMMANDS.has(command.name)) {
+    return commandArgs.length === 0
+      ? allow([AGENT_BROWSER_COMMAND, ...args])
+      : deny(`agent-browser ${command.name} does not accept arguments here`);
+  }
+  if (!AGENT_BROWSER_PAGE_COMMANDS.has(command.name)) {
+    return deny(`agent-browser ${command.name} is not allowlisted`);
+  }
+  if (expectedCdpOrigin === undefined) {
     return deny(
-      "agent-browser page commands must use --cdp with an approved local endpoint",
+      "agent-browser page commands require a Browser Access lease endpoint",
     );
+  }
+  if (cdpEndpoint.endpoint === undefined) {
+    return deny(
+      "agent-browser page commands must use --cdp with the Browser Access lease endpoint",
+    );
+  }
+  const commandError = validateAgentBrowserPageCommand(
+    command.name,
+    commandArgs,
+  );
+  if (commandError !== undefined) {
+    return deny(commandError);
   }
   return allow([AGENT_BROWSER_COMMAND, ...args]);
 };
@@ -113,42 +129,21 @@ const AGENT_BROWSER_LOCAL_COMMANDS = new Set([
   "version",
 ]);
 
-const DISALLOWED_AGENT_BROWSER_COMMANDS = new Set([
-  "connect",
-  "download",
-  "eval",
-  "install",
-  "pdf",
-  "profiler",
-  "record",
-  "screenshot",
-  "state",
-  "trace",
-  "upload",
-]);
-
-const DISALLOWED_AGENT_BROWSER_FLAGS = new Set([
-  "--allow-file-access",
-  "--args",
-  "--auto-connect",
-  "--config",
-  "--device",
-  "--executable-path",
-  "--extension",
-  "--headers",
-  "--ignore-https-errors",
-  "--profile",
-  "--provider",
-  "--proxy",
-  "--proxy-bypass",
-  "--state",
-  "--user-agent",
+const AGENT_BROWSER_PAGE_COMMANDS = new Set([
+  "check",
+  "click",
+  "fill",
+  "get",
+  "open",
+  "press",
+  "select",
+  "snapshot",
+  "type",
+  "wait",
 ]);
 
 const AGENT_BROWSER_VALUE_FLAGS = new Set([
   "--cdp",
-  "--session",
-  "--session-name",
 ]);
 
 const ALLOWED_CDP_HOSTS = new Set([
@@ -161,6 +156,7 @@ const ALLOWED_CDP_HOSTS = new Set([
 
 const extractAgentBrowserCdpEndpoint = (
   args: readonly string[],
+  expectedCdpOrigin: string | undefined,
 ): { endpoint?: string; error?: undefined } | {
   endpoint?: undefined;
   error: string;
@@ -181,7 +177,10 @@ const extractAgentBrowserCdpEndpoint = (
     if (value === undefined || value === "") {
       return { error: "agent-browser --cdp requires a local endpoint value" };
     }
-    const endpointError = validateAgentBrowserCdpEndpoint(value);
+    const endpointError = validateAgentBrowserCdpEndpoint(
+      value,
+      expectedCdpOrigin,
+    );
     if (endpointError !== undefined) {
       return { error: endpointError };
     }
@@ -195,30 +194,47 @@ const extractAgentBrowserCdpEndpoint = (
 
 const validateAgentBrowserCdpEndpoint = (
   endpoint: string,
+  expectedCdpOrigin: string | undefined,
 ): string | undefined => {
+  const origin = normalizeCdpOrigin(endpoint);
+  if (origin === undefined) {
+    return "agent-browser --cdp must be an http:// local origin with an explicit port";
+  }
+  if (expectedCdpOrigin !== undefined && origin !== expectedCdpOrigin) {
+    return "agent-browser --cdp must match the Browser Access lease endpoint";
+  }
+  return undefined;
+};
+
+export const normalizeCdpOrigin = (
+  endpoint: string | undefined,
+): string | undefined => {
+  if (endpoint === undefined) {
+    return undefined;
+  }
   let url: URL;
   try {
     url = new URL(endpoint);
   } catch {
-    return "agent-browser --cdp must be an http:// local endpoint";
+    return undefined;
   }
   if (url.protocol !== "http:") {
-    return "agent-browser --cdp must use http://";
+    return undefined;
   }
   if (!ALLOWED_CDP_HOSTS.has(url.hostname)) {
-    return "agent-browser --cdp must target localhost or host.docker.internal";
+    return undefined;
   }
   if (url.port === "") {
-    return "agent-browser --cdp must include an explicit port";
+    return undefined;
   }
   const port = Number.parseInt(url.port, 10);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    return "agent-browser --cdp port must be between 1 and 65535";
+    return undefined;
   }
   if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
-    return "agent-browser --cdp must be an origin without path, query, or fragment";
+    return undefined;
   }
-  return undefined;
+  return url.origin;
 };
 
 const normalizeLongFlag = (arg: string): string => {
@@ -247,6 +263,146 @@ const findAgentBrowserSubcommand = (
     return { name: arg, index };
   }
   return undefined;
+};
+
+const validateAgentBrowserGlobalArgs = (
+  args: readonly string[],
+  commandIndex: number,
+): string | undefined => {
+  for (let index = 0; index < commandIndex; index += 1) {
+    const arg = args[index]!;
+    const flag = normalizeLongFlag(arg);
+    if (flag !== "--cdp") {
+      return `agent-browser global flag ${flag} is not allowlisted`;
+    }
+    if (!arg.includes("=")) {
+      index += 1;
+    }
+  }
+  return undefined;
+};
+
+const validateAgentBrowserPageCommand = (
+  commandName: string,
+  args: readonly string[],
+): string | undefined => {
+  switch (commandName) {
+    case "open":
+      return validateAgentBrowserOpen(args);
+    case "snapshot":
+      return validateAgentBrowserSnapshot(args);
+    case "get":
+      return validateAgentBrowserGet(args);
+    case "wait":
+      return validateAgentBrowserWait(args);
+    case "click":
+    case "check":
+      return validateAgentBrowserRefCommand(commandName, args, 1);
+    case "fill":
+    case "type":
+    case "select":
+      return validateAgentBrowserRefCommand(commandName, args, 2);
+    case "press":
+      return validateAgentBrowserPress(args);
+    default:
+      return `agent-browser ${commandName} is not allowlisted`;
+  }
+};
+
+const validateAgentBrowserOpen = (
+  args: readonly string[],
+): string | undefined => {
+  if (args.length !== 1) {
+    return "agent-browser open requires exactly one URL";
+  }
+  const url = args[0]!;
+  if (!/^https?:\/\//i.test(url)) {
+    return "agent-browser open only allows http(s) URLs";
+  }
+  return /^file:/i.test(url)
+    ? "agent-browser open file: URLs are not allowed"
+    : undefined;
+};
+
+const validateAgentBrowserSnapshot = (
+  args: readonly string[],
+): string | undefined => {
+  if (args.length === 0) {
+    return undefined;
+  }
+  return args.length === 1 && args[0] === "-i"
+    ? undefined
+    : "agent-browser snapshot only allows the optional -i flag";
+};
+
+const validateAgentBrowserGet = (
+  args: readonly string[],
+): string | undefined => {
+  const [kind, target, ...extra] = args;
+  if (kind === "title" || kind === "url") {
+    return target === undefined && extra.length === 0
+      ? undefined
+      : `agent-browser get ${kind} does not accept arguments here`;
+  }
+  if (kind === "text") {
+    return extra.length === 0 && target !== undefined
+      ? undefined
+      : "agent-browser get text requires exactly one target";
+  }
+  return "agent-browser get only allows title, url, or text";
+};
+
+const validateAgentBrowserWait = (
+  args: readonly string[],
+): string | undefined => {
+  if (args.length === 1) {
+    const target = args[0]!;
+    if (/^\d+$/.test(target)) {
+      const ms = Number.parseInt(target, 10);
+      return ms >= 0 && ms <= MAX_WAIT_MS
+        ? undefined
+        : `agent-browser wait milliseconds must be between 0 and ${MAX_WAIT_MS}`;
+    }
+    return target.startsWith("@")
+      ? undefined
+      : "agent-browser wait target must be a ref or bounded milliseconds";
+  }
+  if (args.length === 2 && args[0] === "--load") {
+    return ["domcontentloaded", "load", "networkidle"].includes(args[1]!)
+      ? undefined
+      : "agent-browser wait --load state is not allowlisted";
+  }
+  if (args.length === 2 && args[0] === "--url") {
+    return args[1] !== "" && !/^file:/i.test(args[1]!)
+      ? undefined
+      : "agent-browser wait --url requires a non-file pattern";
+  }
+  return "agent-browser wait arguments are not allowlisted";
+};
+
+const validateAgentBrowserRefCommand = (
+  commandName: string,
+  args: readonly string[],
+  expectedLength: number,
+): string | undefined => {
+  if (args.length !== expectedLength) {
+    return `agent-browser ${commandName} requires ${expectedLength} argument(s)`;
+  }
+  const ref = args[0]!;
+  return ref.startsWith("@")
+    ? undefined
+    : `agent-browser ${commandName} target must be an interactive ref`;
+};
+
+const validateAgentBrowserPress = (
+  args: readonly string[],
+): string | undefined => {
+  if (args.length !== 1 || args[0] === "") {
+    return "agent-browser press requires exactly one key";
+  }
+  return /^[A-Za-z0-9_+.-]+$/.test(args[0]!)
+    ? undefined
+    : "agent-browser press key contains unsupported characters";
 };
 
 const validateCommandBuiltin = (

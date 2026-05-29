@@ -3,6 +3,7 @@ export interface ProcessRunRequest {
   args: string[];
   cwd?: string;
   env?: Record<string, string>;
+  clearEnv?: boolean;
   stdinText?: string;
   timeoutMs?: number;
 }
@@ -55,6 +56,7 @@ export class DenoProcessRunner implements ProcessRunner {
         args: request.args,
         cwd: request.cwd,
         env: request.env,
+        clearEnv: request.clearEnv,
         stdin: request.stdinText !== undefined ? "piped" : "null",
         stdout: "piped",
         stderr: "piped",

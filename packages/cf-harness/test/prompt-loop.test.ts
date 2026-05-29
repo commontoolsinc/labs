@@ -2040,7 +2040,6 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   assertEquals(output.subagent.manifest.skillNames, ["agent-browser"]);
   assertEquals(output.subagent.manifest.allowedSkillScripts, [
     { skill: "agent-browser", path: "scripts/form-automation.sh" },
-    { skill: "agent-browser", path: "scripts/authenticated-session.sh" },
     { skill: "agent-browser", path: "scripts/capture-workflow.sh" },
   ]);
   assertEquals(output.subagent.manifest.skillScriptExecutionTarget, "host");
@@ -2116,11 +2115,25 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       }>;
       tools: Array<{ function: { name: string } }>;
     }> = [];
+    const returnSchema = {
+      type: "object",
+      properties: {
+        ok: { type: "boolean" },
+        captured: { type: "string" },
+      },
+      required: ["ok", "captured"],
+      additionalProperties: false,
+    };
     const loop = new CfHarnessPromptLoop({
       apiKey: "test-key",
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["browser"],
       engine,
+      browserAccess: {
+        type: "cf-harness.chat.browser-access-lease",
+        leaseId: "lease-1",
+        cdpUrl: "http://127.0.0.1:9222",
+      },
       fetchFn: (_input, init) => {
         const body = JSON.parse(String(init?.body)) as {
           messages: Array<{
@@ -2146,6 +2159,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
                     arguments: JSON.stringify({
                       goal: "Capture the deployed pattern page.",
                       profile: "browser",
+                      returnSchema,
                     }),
                   },
                 }],
@@ -2184,7 +2198,11 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
               index: 0,
               message: {
                 role: "assistant",
-                content: "Browser child ran capture script.",
+                content: JSON.stringify({
+                  ok: true,
+                  captured:
+                    "captured=http://localhost:8000/piece\ntarget=host\n",
+                }),
               },
             }],
           }
@@ -2252,7 +2270,9 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
         "http://localhost:8000/piece",
       ],
       cwd: workspace,
+      clearEnv: true,
       env: {
+        PATH: hostRunner.requests[0]!.env!.PATH,
         CF_HARNESS_RUN_ID: "run-browser-subagent-skills.subagent.1",
         SKILL_NAME: "agent-browser",
         SKILL_DIR: skillDir,
@@ -2261,6 +2281,30 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       },
       stdinText: scriptSource,
       timeoutMs: 60000,
+    });
+    const delegateToolMessage = result.transcript.at(-2);
+    if (delegateToolMessage?.role !== "tool") {
+      throw new Error("expected delegate_task tool response");
+    }
+    assertEquals(
+      delegateToolMessage.content.includes(
+        "captured=http://localhost:8000/piece",
+      ),
+      false,
+    );
+    const delegateOutput = JSON.parse(delegateToolMessage.content) as {
+      subagent: {
+        structuredReturn?: {
+          value?: {
+            ok?: boolean;
+            captured?: unknown;
+          };
+        };
+      };
+    };
+    assertEquals(delegateOutput.subagent.structuredReturn?.value?.ok, true);
+    assertEquals(delegateOutput.subagent.structuredReturn?.value?.captured, {
+      "@link": "opaque:run-browser-subagent-skills.subagent.1#/captured",
     });
     assertEquals(
       result.finalAssistantText,
@@ -2516,6 +2560,11 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
       apiKey: "test-key",
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["browser"],
+      browserAccess: {
+        type: "cf-harness.chat.browser-access-lease",
+        leaseId: "lease-structured",
+        cdpUrl: "http://host.docker.internal:9362",
+      },
       engine: new CfHarnessEngine({
         artifactStore,
         processRunner: hostRunner,
@@ -2648,6 +2697,8 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
         "body",
       ],
       cwd: workspaceHostPath,
+      clearEnv: true,
+      env: { PATH: hostRunner.requests[0]!.env!.PATH },
       timeoutMs: 30000,
     }]);
 

@@ -48,7 +48,6 @@ export const BROWSER_SUBAGENT_SKILL_NAMES = [
 ] as const satisfies readonly string[];
 export const BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS = [
   { skill: "agent-browser", path: "scripts/form-automation.sh" },
-  { skill: "agent-browser", path: "scripts/authenticated-session.sh" },
   { skill: "agent-browser", path: "scripts/capture-workflow.sh" },
 ] as const satisfies readonly HarnessAllowedSkillScript[];
 export const WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS = [

@@ -15,6 +15,7 @@ import type {
   HarnessSkillScriptExecution,
   HarnessSkillScriptExecutionTarget,
 } from "../contracts/skill.ts";
+import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -27,6 +28,7 @@ export interface HarnessToolContext {
   skillActivations?: HarnessSkillActivations;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
+  browserAccess?: HarnessBrowserAccessLease;
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;

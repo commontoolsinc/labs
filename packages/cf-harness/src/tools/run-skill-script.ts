@@ -15,6 +15,8 @@ import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,
 } from "../skills/scripts.ts";
+import { normalizeCdpOrigin } from "./browser-host-command-policy.ts";
+import { createClearedHostProcessEnv } from "./host-process-env.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -213,6 +215,55 @@ const normalizeTimeoutMs = (timeoutMs: number | undefined): number => {
     );
   }
   return resolved;
+};
+
+const findCdpArg = (
+  args: readonly string[],
+): { value?: string; error?: string } => {
+  let value: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg !== "--cdp" && !arg.startsWith("--cdp=")) {
+      continue;
+    }
+    if (value !== undefined) {
+      return {
+        error: "host agent-browser skill scripts may supply --cdp only once",
+      };
+    }
+    if (arg === "--cdp") {
+      value = args[index + 1];
+      index += 1;
+    } else {
+      value = arg.slice("--cdp=".length);
+    }
+    if (value === undefined || value === "") {
+      return {
+        error: "host agent-browser skill scripts require a --cdp value",
+      };
+    }
+  }
+  return { value };
+};
+
+const validateHostAgentBrowserScriptArgs = (
+  args: readonly string[],
+  expectedCdpUrl: string | undefined,
+): string | undefined => {
+  const expectedCdpOrigin = normalizeCdpOrigin(expectedCdpUrl);
+  if (expectedCdpOrigin === undefined) {
+    return "host agent-browser skill scripts require a Browser Access lease endpoint";
+  }
+  const cdpArg = findCdpArg(args);
+  if (cdpArg.error !== undefined) {
+    return cdpArg.error;
+  }
+  if (cdpArg.value === undefined) {
+    return "host agent-browser skill scripts must pass --cdp explicitly";
+  }
+  return normalizeCdpOrigin(cdpArg.value) === expectedCdpOrigin
+    ? undefined
+    : "host agent-browser skill script --cdp must match the Browser Access lease endpoint";
 };
 
 const splitShebangWords = (shebang: string): string[] =>
@@ -1038,6 +1089,35 @@ export const runSkillScriptTool: HarnessToolDefinition<
     }
     const scriptExecution = scriptExecutionPlan.execution;
 
+    if (executionTarget === "host" && skill.name === "agent-browser") {
+      const browserLeaseError = validateHostAgentBrowserScriptArgs(
+        args,
+        context.browserAccess?.cdpUrl,
+      );
+      if (browserLeaseError !== undefined) {
+        const output = errorOutput({
+          outputId,
+          skill: skill.name,
+          path: normalizedPath,
+          executionTarget,
+          code: "permission_denied",
+          message: browserLeaseError,
+          resource,
+          observedDigest,
+          observedSizeBytes,
+        });
+        await context.recordSkillScriptExecution(
+          buildExecutionRecord({
+            output,
+            runId: context.runId,
+            executedAt,
+            resourcePath: resource.resourcePath,
+          }),
+        );
+        return output;
+      }
+    }
+
     const cwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
       : context.sandbox.defaultWorkingDirectory();
@@ -1085,13 +1165,14 @@ export const runSkillScriptTool: HarnessToolDefinition<
         command: scriptExecution.argv[0]!,
         args: scriptExecution.argv.slice(1),
         cwd: hostCwd,
-        env: {
+        clearEnv: true,
+        env: createClearedHostProcessEnv({
           CF_HARNESS_RUN_ID: context.runId,
           SKILL_NAME: skill.name,
           SKILL_DIR: skill.skillDir,
           SKILL_SCRIPT: resource.resourcePath,
           CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: executionTarget,
-        },
+        }),
         ...(scriptExecution.stdinText !== undefined
           ? { stdinText: scriptExecution.stdinText }
           : {}),

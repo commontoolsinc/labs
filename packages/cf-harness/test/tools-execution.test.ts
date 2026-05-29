@@ -11,6 +11,7 @@ import type {
   HarnessSkillResourceRead,
   HarnessSkillScriptExecution,
 } from "../src/contracts/skill.ts";
+import type { HarnessBrowserAccessLease } from "../src/contracts/browser-access.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { discoverHarnessSkills } from "../src/skills/registry.ts";
 import { bashTool } from "../src/tools/bash.ts";
@@ -198,6 +199,7 @@ const createContext = (
   skillScriptExecutions: HarnessSkillScriptExecution[] = [],
   skillScriptExecutionTarget: HarnessToolContext["skillScriptExecutionTarget"] =
     "sandbox",
+  browserAccess?: HarnessBrowserAccessLease,
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
@@ -210,6 +212,7 @@ const createContext = (
     skillActivations,
     allowedSkillScripts,
     skillScriptExecutionTarget,
+    browserAccess,
     get currentDir() {
       return currentDir;
     },
@@ -1097,6 +1100,8 @@ Deno.test("bash-no-sandbox tool executes the command through the host process ru
     command: "agent-browser",
     args: ["--help"],
     cwd: "/tmp/cf-harness-workspace/browser",
+    clearEnv: true,
+    env: { PATH: hostRunner.calls[0]!.env!.PATH },
     timeoutMs: 1000,
   }]);
   assertEquals(context.currentDir, "/workspace/browser");
@@ -1189,6 +1194,8 @@ Deno.test("bash-no-sandbox translates command -v agent-browser to direct argv", 
     command: "which",
     args: ["agent-browser"],
     cwd: "/tmp/cf-harness-workspace/repo",
+    clearEnv: true,
+    env: { PATH: hostRunner.calls[0]!.env!.PATH },
     timeoutMs: 30_000,
   }]);
 });
@@ -1221,6 +1228,8 @@ Deno.test("bash-no-sandbox lets allowed host commands handle missing workspace p
     command: "ls",
     args: ["missing.txt"],
     cwd: "/tmp/cf-harness-workspace/repo",
+    clearEnv: true,
+    env: { PATH: hostRunner.calls[0]!.env!.PATH },
     timeoutMs: 30_000,
   }]);
   assertEquals(output, {
@@ -2151,27 +2160,34 @@ Deno.test({
         exitCode: 0,
       }]);
       const executions: HarnessSkillScriptExecution[] = [];
-      const output = await runSkillScriptTool.invoke(
-        createContext(
-          sandbox,
-          "/workspace/subdir",
-          hostRunner,
-          "observe",
-          undefined,
-          registry,
-          [],
-          workspace,
-          activations,
-          [{ skill: "agent-browser", path: "scripts/capture-workflow.sh" }],
-          executions,
-          "host",
-        ),
+      const context = createContext(
+        sandbox,
+        "/workspace/subdir",
+        hostRunner,
+        "observe",
+        undefined,
+        registry,
+        [],
+        workspace,
+        activations,
+        [{ skill: "agent-browser", path: "scripts/capture-workflow.sh" }],
+        executions,
+        "host",
         {
-          skill: "agent-browser",
-          path: "scripts/capture-workflow.sh",
-          args: ["http://localhost:8000/piece"],
+          type: "cf-harness.chat.browser-access-lease",
+          leaseId: "lease-1",
+          cdpUrl: "http://localhost:9362",
         },
       );
+      const output = await runSkillScriptTool.invoke(context, {
+        skill: "agent-browser",
+        path: "scripts/capture-workflow.sh",
+        args: [
+          "--cdp",
+          "http://localhost:9362",
+          "http://localhost:8000/piece",
+        ],
+      });
 
       assertEquals(output.status, "executed");
       assertEquals(output.executionTarget, "host");
@@ -2183,9 +2199,17 @@ Deno.test({
       assertEquals(hostRunner.calls.length, 1);
       assertEquals(hostRunner.calls[0], {
         command: "bash",
-        args: ["-s", "--", "http://localhost:8000/piece"],
+        args: [
+          "-s",
+          "--",
+          "--cdp",
+          "http://localhost:9362",
+          "http://localhost:8000/piece",
+        ],
         cwd: workspace,
+        clearEnv: true,
         env: {
+          PATH: hostRunner.calls[0]!.env!.PATH,
           CF_HARNESS_RUN_ID: "run-1",
           SKILL_NAME: "agent-browser",
           SKILL_DIR: skill.skillDir,
@@ -2200,8 +2224,28 @@ Deno.test({
         "bash",
         "-s",
         "--",
+        "--cdp",
+        "http://localhost:9362",
         "http://localhost:8000/piece",
       ]);
+
+      const deniedOutput = await runSkillScriptTool.invoke(context, {
+        skill: "agent-browser",
+        path: "scripts/capture-workflow.sh",
+        args: [
+          "--cdp",
+          "http://localhost:9444",
+          "http://localhost:8000/piece",
+        ],
+      });
+      assertEquals(deniedOutput.status, "error");
+      assertEquals(deniedOutput.error?.code, "permission_denied");
+      assertStringIncludes(
+        deniedOutput.error?.message ?? "",
+        "Browser Access lease endpoint",
+      );
+      assertEquals(hostRunner.calls.length, 1);
+      assertEquals(executions[1].status, "error");
     } finally {
       await Deno.remove(workspace, { recursive: true });
     }
