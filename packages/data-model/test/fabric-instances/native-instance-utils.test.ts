@@ -398,7 +398,7 @@ describe("native-instance-utils", () => {
   });
 
   describe("isConvertibleNativeInstance", () => {
-    it("returns true for all convertible types", () => {
+    it("returns `true` for all convertible types", () => {
       expect(isConvertibleNativeInstance(new Error("e"))).toBe(true);
       expect(isConvertibleNativeInstance(new TypeError("e"))).toBe(true);
       expect(isConvertibleNativeInstance(new Map())).toBe(true);
@@ -407,57 +407,57 @@ describe("native-instance-utils", () => {
       expect(isConvertibleNativeInstance(new Uint8Array())).toBe(true);
     });
 
-    it("returns true for exotic Error subclass", () => {
+    it("returns `true` for exotic `Error` subclass", () => {
       class WeirdError extends RangeError {}
       expect(isConvertibleNativeInstance(new WeirdError("weird"))).toBe(true);
     });
 
-    it("returns true for RegExp", () => {
+    it("returns `true` for `RegExp`", () => {
       expect(isConvertibleNativeInstance(/abc/)).toBe(true);
     });
 
-    it("returns false for non-convertible types", () => {
+    it("returns `false` for non-convertible types", () => {
       expect(isConvertibleNativeInstance({})).toBe(false);
       expect(isConvertibleNativeInstance([])).toBe(false);
       expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
     });
 
-    it("returns false for objects with `toJSON()`", () => {
+    it("returns `false` for objects with `toJSON()`", () => {
       expect(isConvertibleNativeInstance({ toJSON: () => "x" })).toBe(false);
     });
   });
 
   describe("FabricInstance instanceof checks", () => {
-    it("returns false for `null`", () => {
+    it("returns `false` for `null`", () => {
       expect((null as unknown) instanceof FabricInstance).toBe(false);
     });
 
-    it("returns false for `undefined`", () => {
+    it("returns `false` for `undefined`", () => {
       expect((undefined as unknown) instanceof FabricInstance).toBe(false);
     });
 
-    it("returns false for primitives", () => {
+    it("returns `false` for primitives", () => {
       expect((42 as unknown) instanceof FabricInstance).toBe(false);
       expect(("hello" as unknown) instanceof FabricInstance).toBe(false);
       expect((true as unknown) instanceof FabricInstance).toBe(false);
     });
 
-    it("returns false for plain objects", () => {
+    it("returns `false` for plain objects", () => {
       expect(({} as unknown) instanceof FabricInstance).toBe(false);
       expect(({ a: 1 } as unknown) instanceof FabricInstance).toBe(false);
     });
 
-    it("returns true for `UnknownValue`", () => {
+    it("returns `true` for `UnknownValue`", () => {
       const us = new UnknownValue("Test@1", null);
       expect(us instanceof FabricInstance).toBe(true);
     });
 
-    it("returns true for `ProblematicValue`", () => {
+    it("returns `true` for `ProblematicValue`", () => {
       const ps = new ProblematicValue("Test@1", null, "oops");
       expect(ps instanceof FabricInstance).toBe(true);
     });
 
-    it("returns true for custom `FabricInstance` subclass", () => {
+    it("returns `true` for custom `FabricInstance` subclass", () => {
       class CustomFabInst extends BaseFabricInstance {
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
@@ -483,7 +483,7 @@ describe("native-instance-utils", () => {
       expect(instance instanceof FabricInstance).toBe(true);
     });
 
-    it("returns true for `FabricError`", () => {
+    it("returns `true` for `FabricError`", () => {
       const se = FabricError.fromNativeError(new Error("test"));
       expect(se instanceof FabricInstance).toBe(true);
     });
@@ -493,7 +493,7 @@ describe("native-instance-utils", () => {
     const frozenCtx = new DummyReconstructionContext(true);
     const mutableCtx = new DummyReconstructionContext(false);
 
-    it("`FabricError`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
+    it("`FabricError`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {
         type: "Error",
         name: null,
@@ -505,7 +505,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("`FabricRegExp`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
+    it("`FabricRegExp`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {
         source: "abc",
         flags: "g",
@@ -518,7 +518,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("`ProblematicValue`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
+    it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {
         type: "Bad@1",
         state: { x: 1 },
@@ -530,7 +530,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("`UnknownValue`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
+    it("`UnknownValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = { type: "Fancy@3", state: { y: 2 } } as unknown as {
         type: string;
         state: FabricValue;

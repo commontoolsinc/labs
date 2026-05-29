@@ -129,50 +129,6 @@ describe("frozen-object safety contracts", () => {
     });
   });
 
-  describe("setupInternal deep-copies frozen previousInternal", () => {
-    // setupInternal uses Object.assign({}, deepCopy(defaults), deepCopy(initial),
-    // previousInternal) to merge internal state. When modernDataModel is ON,
-    // previousInternal (read from storage) may be deep-frozen. Object.assign
-    // copies properties shallowly, so frozen nested references propagate into
-    // the mutable result. Deep-copying previousInternal ensures the merged
-    // object is fully mutable.
-
-    it("Object.assign propagates frozen nested references", () => {
-      const frozen = Object.freeze({
-        counter: 0,
-        nested: Object.freeze({ items: [1, 2, 3] }),
-      });
-
-      // Object.assign copies properties shallowly -- the nested reference
-      // is still frozen.
-      const merged = Object.assign({}, frozen);
-      expect(Object.isFrozen(merged)).toBe(false); // target is mutable
-      expect(Object.isFrozen(merged.nested)).toBe(true); // but nested is frozen
-
-      // Mutating the nested reference throws.
-      expect(() => {
-        (merged.nested as Record<string, unknown>).newProp = "value";
-      }).toThrow(TypeError);
-    });
-
-    it("deep copy of frozen object produces fully mutable result", () => {
-      // cellAwareDeepCopy deep-clones the frozen structure, yielding a fully
-      // mutable result. Verified here with structuredClone as a stand-in.
-      const frozen = Object.freeze({
-        counter: 0,
-        nested: Object.freeze({ items: Object.freeze([1, 2, 3]) }),
-      });
-
-      // Deep copy yields fully mutable result.
-      const copied = structuredClone(frozen) as Record<string, unknown>;
-      expect(Object.isFrozen(copied)).toBe(false);
-      const nested = (copied as { nested: Record<string, unknown> }).nested;
-      expect(Object.isFrozen(nested)).toBe(false);
-      nested.newProp = "value";
-      expect(nested.newProp).toBe("value");
-    });
-  });
-
   describe("createObject clones frozen values before injecting defaults", () => {
     // createObject (schema.ts) injects missing default properties into objects.
     // When the input object is frozen, it must be cloned first. These tests

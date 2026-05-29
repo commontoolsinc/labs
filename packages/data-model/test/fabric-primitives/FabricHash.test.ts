@@ -115,7 +115,7 @@ describe("FabricHash", () => {
 
   describe("static members", () => {
     describe("fromJson()", () => {
-      it("works on the result of the instance method toJSON()", () => {
+      it("works on the result of the instance method `toJSON()`", () => {
         const original = new FabricHash(SAMPLE_HASH, "fid1");
         const json = original.toJSON();
         const reconstructed = FabricHash.fromJson(json);
@@ -127,7 +127,7 @@ describe("FabricHash", () => {
     });
 
     describe("fromString()", () => {
-      it("works on the result of the instance method toString()", () => {
+      it("works on the result of the instance method `toString()`", () => {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.
         const original = new FabricHash(SAMPLE_HASH, "sha3");
         const str = original.toString();

@@ -44,7 +44,7 @@ describe("fabric-value-dispatch", () => {
       expect(nativeFromFabricValue(value)).toBe(value);
     });
 
-    it("converts Error via legacy path through `fabricFromNativeValue`", () => {
+    it("converts `Error` via legacy path through `fabricFromNativeValue`", () => {
       setDataModelConfig(false);
       // `fabricFromNativeValue()` handles Error conversion directly.
       const error = new Error("legacy error");
@@ -79,12 +79,12 @@ describe("fabric-value-dispatch", () => {
       expect(roundTrip(true as FabricValue)).toBe(true);
     });
 
-    it("round-trip preserves undefined", () => {
+    it("round-trip preserves `undefined`", () => {
       setDataModelConfig(true);
       expect(roundTrip(undefined)).toBe(undefined);
     });
 
-    it("round-trip preserves bigint", () => {
+    it("round-trip preserves `bigint`", () => {
       setDataModelConfig(true);
       expect(roundTrip(42n as FabricValue)).toBe(42n);
     });
@@ -101,14 +101,14 @@ describe("fabric-value-dispatch", () => {
       expect(roundTrip(value)).toEqual([1, "two", null]);
     });
 
-    it("wraps Error into FabricError via `fabricFromNativeValue`", () => {
+    it("wraps `Error` into `FabricError` via `fabricFromNativeValue`", () => {
       setDataModelConfig(true);
       const error = new Error("test error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).toBeInstanceOf(FabricError);
     });
 
-    it("unwraps FabricError back to Error via `nativeFromFabricValue`", () => {
+    it("unwraps `FabricError` back to `Error` via `nativeFromFabricValue`", () => {
       setDataModelConfig(true);
       const error = new Error("test error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
@@ -143,14 +143,14 @@ describe("fabric-value-dispatch", () => {
   // --------------------------------------------------------------------------
 
   describe("config lifecycle", () => {
-    it("setDataModelConfig(true) enables conversion", () => {
+    it("`setDataModelConfig(true)` enables conversion", () => {
       setDataModelConfig(true);
       const error = new Error("test");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).toBeInstanceOf(FabricError);
     });
 
-    it("resetDataModelConfig() restores the default state", () => {
+    it("`resetDataModelConfig()` restores the default state", () => {
       const defaultState = getDataModelConfig();
       setDataModelConfig(!defaultState);
       expect(getDataModelConfig()).toBe(!defaultState);
@@ -170,7 +170,7 @@ describe("fabric-value-dispatch", () => {
       }
     });
 
-    it("setDataModelConfig(false) after true restores legacy conversion", () => {
+    it("`setDataModelConfig(false)` after `true` restores legacy conversion", () => {
       setDataModelConfig(true);
       setDataModelConfig(false);
       const error = new Error("toggle test");

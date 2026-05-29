@@ -70,7 +70,6 @@ import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import {
-  cellAwareDeepCopy,
   describePatternOrModule,
   extractDefaultValues,
   getSigilLink,
@@ -91,7 +90,6 @@ import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 export {
-  cellAwareDeepCopy,
   extractDefaultValues,
   mergeObjects,
   validateAndCheckOpaqueRefs,
@@ -737,8 +735,11 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
+      // Convert-and-freeze (default): a deep-frozen value lets the storage
+      // write boundary's `cloneIfNecessary` identity-pass instead of
+      // deep-cloning-to-freeze.
       writableResultCell.setRawUntyped(
-        fabricFromNativeValue(result, false),
+        fabricFromNativeValue(result),
       );
     }
   }
@@ -766,21 +767,27 @@ export class Runner {
     );
     const previousInternal = internalCell.getRawUntyped({
       meta: ignoreReadForScheduling,
-      frozen: false,
     });
+    // `fabricFromNativeValue()` below rebuilds a fresh tree from `internal`
+    // without mutating its inputs (true on both the modern and legacy paths),
+    // and `internal` isn't used after that. So the operands can be merged by
+    // reference: no defensive deep copy of `defaults` / `pattern.initial`, and
+    // no mutable (`frozen: false`) read of `previousInternal`, is needed --
+    // `Object.assign` only reads their top-level keys.
     const internal = Object.assign(
       {},
-      cellAwareDeepCopy(
-        (defaults as unknown as { internal: FabricValue })?.internal,
-      ),
-      cellAwareDeepCopy(
-        isRecord(pattern.initial) && isRecord(pattern.initial.internal)
-          ? pattern.initial.internal
-          : {},
-      ),
+      (defaults as unknown as { internal?: FabricValue })?.internal,
+      isRecord(pattern.initial) && isRecord(pattern.initial.internal)
+        ? pattern.initial.internal
+        : {},
       isRecord(previousInternal) ? previousInternal : {},
     ) as FabricValue;
-    internalCell.setRawUntyped(fabricFromNativeValue(internal, false));
+    // Convert-and-freeze (default): the convert step is load-bearing -- it
+    // normalizes nested `toJSON`-bearing values (so this can't be a plain
+    // clone) -- and producing a deep-frozen result lets the storage write
+    // boundary's `cloneIfNecessary` identity-pass instead of
+    // deep-cloning-to-freeze.
+    internalCell.setRawUntyped(fabricFromNativeValue(internal));
     if (internalLink === undefined) {
       setResultCell(internalCell, resultCell.asSchema(pattern.resultSchema));
       const newInternalCellLink = internalCell.getAsWriteRedirectLink({
@@ -1910,7 +1917,7 @@ export class Runner {
         );
         targets.push(target);
       } catch (error) {
-        // Some setup paths have not fully materialized process-cell redirects
+        // Some setup paths have not fully materialized metadata redirects
         // yet. Leave those to runtime dependency collection after the action
         // has run, but keep debug context for unexpected resolution failures.
         logger.debug("static-redirect-write-target", () => [

@@ -117,12 +117,12 @@ describe("schema-hash dispatch", () => {
           expect(result).toBe(schema);
         });
 
-        it("handles boolean schema true", () => {
+        it("handles boolean schema `true`", () => {
           const result = callIntern(true);
           expect(result).toBe(true);
         });
 
-        it("handles boolean schema false", () => {
+        it("handles boolean schema `false`", () => {
           const result = callIntern(false);
           expect(result).toBe(false);
         });
@@ -190,25 +190,25 @@ describe("schema-hash dispatch", () => {
   });
 
   describe("isInternedSchema()", () => {
-    it("returns true for boolean true", () => {
+    it("returns `true` for boolean `true`", () => {
       expect(isInternedSchema(true)).toBe(true);
     });
 
-    it("returns true for boolean false", () => {
+    it("returns `true` for boolean `false`", () => {
       expect(isInternedSchema(false)).toBe(true);
     });
 
-    it("returns true for a freshly interned schema", () => {
+    it("returns `true` for a freshly interned schema", () => {
       const schema = internSchema({ type: "string" });
       expect(isInternedSchema(schema)).toBe(true);
     });
 
-    it("returns false for a non-interned schema", () => {
+    it("returns `false` for a non-interned schema", () => {
       const schema: JSONSchemaObj = { type: "string" };
       expect(isInternedSchema(schema)).toBe(false);
     });
 
-    it("returns false for an equivalent-but-different object", () => {
+    it("returns `false` for an equivalent-but-different object", () => {
       internSchema({ type: "number" });
       const equivalent: JSONSchemaObj = { type: "number" };
       expect(isInternedSchema(equivalent)).toBe(false);
@@ -269,7 +269,7 @@ describe("schema-hash dispatch", () => {
           expectSame(found, sah);
         });
 
-        it("returns undefined for unknown hash", () => {
+        it("returns `undefined` for unknown hash", () => {
           const unknown = new FabricHash(new Uint8Array(32), "fid1");
           const found = callFind(unknown);
           expect(found).toBe(undefined);
@@ -348,7 +348,7 @@ describe("schema-hash dispatch", () => {
     });
   });
 
-  it("hashSchema returns base64url strings (no algorithm prefix)", () => {
+  it("`hashSchema()` returns base64url strings (no algorithm prefix)", () => {
     const result = hashSchema({ type: "number" });
     expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
   });

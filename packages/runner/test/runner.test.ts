@@ -1375,7 +1375,7 @@ describe("setup/start", () => {
     const patternValue = resultCell.getMetaRaw("pattern");
     expect(patternValue).toBeDefined();
 
-    // Also verify the argument was updated in the process cell
+    // Also verify the argument metadata cell was updated
     await resultCell.pull();
     const argumentValue = runtime.getCellFromLink<{ input: number }>(
       getMetaLink(resultCell, "argument")!,

@@ -152,7 +152,7 @@ describe("Pattern Runner - Lift", () => {
       result2: 6,
     });
 
-    // We mark the process cell dirty, run, then mark the process cell dirty again.
+    // We mark the owning result cell dirty, run, then mark it dirty again.
     expect(runCounts).toMatchObject({
       multiply: 2,
       multiplyGenerator: 1,

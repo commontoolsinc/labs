@@ -1,7 +1,6 @@
 import {
   computed,
   type Default,
-  derive,
   generateText,
   handler,
   NAME,
@@ -375,35 +374,34 @@ const ChatNote = pattern<Input, Output>(
     const beforeAIInsert = new Writable<string>("");
 
     // Watch for LLM streaming partial updates
-    // Use explicit dependency array for proper reactive tracking
-    derive(
-      [isGenerating, llmResponse.partial, beforeAIInsert],
-      () => {
-        const generating = isGenerating.get();
-        const partial = llmResponse.partial;
-        const prefix = beforeAIInsert.get();
-        if (generating && partial && prefix) {
-          content.set(prefix + partial);
-        }
-      },
-    );
+    // Side-effect-only reactive computation: tracks its reactive reads
+    // (isGenerating, llmResponse.partial, beforeAIInsert) automatically.
+    computed(() => {
+      const generating = isGenerating.get();
+      const partial = llmResponse.partial;
+      const prefix = beforeAIInsert.get();
+      if (generating && partial && prefix) {
+        content.set(prefix + partial);
+      }
+    });
 
     // Watch for LLM completion
-    derive(
-      [isGenerating, llmResponse.pending, llmResponse.result],
-      ([generating, pending, result]) => {
-        // When complete, finalize with result and closing separator
-        if (!pending && result && generating) {
-          const prefix = beforeAIInsert.get();
-          if (prefix) {
-            content.set(prefix + result + "\n---\n");
-          }
-          isGenerating.set(false);
-          llmMessages.set([]);
-          beforeAIInsert.set("");
+    // Side-effect-only reactive computation; reactive reads tracked automatically.
+    computed(() => {
+      const generating = isGenerating.get();
+      const pending = llmResponse.pending;
+      const result = llmResponse.result;
+      // When complete, finalize with result and closing separator
+      if (!pending && result && generating) {
+        const prefix = beforeAIInsert.get();
+        if (prefix) {
+          content.set(prefix + result + "\n---\n");
         }
-      },
-    );
+        isGenerating.set(false);
+        llmMessages.set([]);
+        beforeAIInsert.set("");
+      }
+    });
 
     // Compute parent notebook
     const parentNotebook = computed(() => {
@@ -420,10 +418,8 @@ const ChatNote = pattern<Input, Output>(
       return custom || JSON.stringify(ChatNote);
     });
 
-    // Computed for generation state display
-    const showGenerating = computed(
-      () => isGenerating.get() && llmResponse.pending,
-    );
+    // Generation state display (reactive expression auto-wraps at use sites)
+    const showGenerating = isGenerating.get() && llmResponse.pending;
 
     // Can generate when there's content and not already generating
     // Optimized to avoid splitting entire content on every keystroke
@@ -458,7 +454,7 @@ const ChatNote = pattern<Input, Output>(
     const modelChangeHandler = handleModelChange({ model });
 
     return {
-      [NAME]: computed(() => `💬 ${title.get()}`),
+      [NAME]: `💬 ${title.get()}`,
       [UI]: (
         <cf-screen>
           <cf-vstack
@@ -474,10 +470,7 @@ const ChatNote = pattern<Input, Output>(
               gap="2"
               align="center"
               style={{
-                display: computed(() => {
-                  const p = (self as any).parentNotebook;
-                  return p ? "flex" : "none";
-                }),
+                display: (self as any).parentNotebook ? "flex" : "none",
                 marginBottom: "4px",
               }}
             >
@@ -490,10 +483,8 @@ const ChatNote = pattern<Input, Output>(
                 In:
               </span>
               <cf-chip
-                label={computed(() => {
-                  const p = (self as any).parentNotebook;
-                  return p?.[NAME] ?? p?.title ?? "Notebook";
-                })}
+                label={(self as any).parentNotebook?.[NAME] ??
+                  (self as any).parentNotebook?.title ?? "Notebook"}
                 interactive
                 oncf-click={goToParent({ self })}
               />
@@ -503,9 +494,7 @@ const ChatNote = pattern<Input, Output>(
               {/* Editable Title - click to edit */}
               <div
                 style={{
-                  display: computed(() =>
-                    isEditingTitle.get() ? "none" : "flex"
-                  ),
+                  display: isEditingTitle.get() ? "none" : "flex",
                   alignItems: "center",
                   gap: "8px",
                   cursor: "pointer",
@@ -521,9 +510,7 @@ const ChatNote = pattern<Input, Output>(
               </div>
               <div
                 style={{
-                  display: computed(() =>
-                    isEditingTitle.get() ? "flex" : "none"
-                  ),
+                  display: isEditingTitle.get() ? "flex" : "none",
                   flex: 1,
                   marginRight: "12px",
                 }}
@@ -542,7 +529,7 @@ const ChatNote = pattern<Input, Output>(
                 value={model}
                 onChange={modelChangeHandler}
                 style={{
-                  display: computed(() => (showGenerating ? "none" : "block")),
+                  display: showGenerating ? "none" : "block",
                   padding: "4px 8px",
                   fontSize: "13px",
                   borderRadius: "6px",
@@ -566,9 +553,9 @@ const ChatNote = pattern<Input, Output>(
                   mentionable,
                   beforeAIInsert,
                 })}
-                disabled={computed(() => !canGenerate)}
+                disabled={!canGenerate}
                 style={{
-                  display: computed(() => (showGenerating ? "none" : "flex")),
+                  display: showGenerating ? "none" : "flex",
                 }}
                 title="Generate (Cmd+Enter)"
               >
@@ -580,7 +567,7 @@ const ChatNote = pattern<Input, Output>(
                 gap="2"
                 align="center"
                 style={{
-                  display: computed(() => (showGenerating ? "flex" : "none")),
+                  display: showGenerating ? "flex" : "none",
                   flexShrink: 0,
                 }}
               >

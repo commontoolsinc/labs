@@ -53,7 +53,7 @@ cause computation.
 - Scope does not replace CFC or IFC labels.
 - Scope does not create a general authorization model by itself.
 - Scope does not change causal id computation.
-- Scope does not require source/provenance links to obey normal data-read scope
+- Scope does not require metadata/provenance links to obey normal data-read scope
   filtering.
 
 ## Terminology
@@ -418,8 +418,8 @@ Cells already have schemas, which provide the cell-level scope-setting surface.
 Local schemas on pattern inputs, result schemas, or cell schemas override the
 factory default for the specific value or cell they describe.
 
-Pattern internal cells start in the pattern's default scope. This includes the
-current process cell model and future argument/internal cells. If a computation
+Pattern internal cells start in the pattern's default scope. This includes
+argument and internal cells reached from result-cell metadata. If a computation
 inside the pattern reads narrower scoped data, its output handling follows the
 computation rules below.
 
@@ -482,11 +482,11 @@ list's scope while individual item result links point at narrower scoped
 pattern-result cells. `filter` and `flatMap` change cardinality based on
 potentially narrower data, so the output list itself must narrow.
 
-## Source Links
+## Metadata Links
 
-The top-level `source` link on an entity document is system metadata used for
-rehydration, process/source-cell lineage, debugging, and graph reconstruction.
-It is not a normal user data read. Source/provenance traversal must always
+Top-level metadata links such as `pattern`, `argument`, `internal`, and `result`
+are system metadata used for rehydration, debugging, and graph reconstruction.
+They are not normal user data reads. Metadata/provenance traversal must always
 follow what is needed for rehydration and must not be blocked by data-scope
 filtering.
 

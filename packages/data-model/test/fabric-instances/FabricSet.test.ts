@@ -30,7 +30,7 @@ describe("FabricSet", () => {
     });
 
     describe("toNativeValue()", () => {
-      it("returns a `FrozenSet` when `frozen` is true", () => {
+      it("returns a `FrozenSet` when `frozen` is `true`", () => {
         const set = new Set<FabricValue>([1, 2]);
         const ss = new FabricSet(set);
         const result = ss.toNativeValue(true);
@@ -38,7 +38,7 @@ describe("FabricSet", () => {
         expect((result as FrozenSet<number>).has(1)).toBe(true);
       });
 
-      it("returns the original `Set` when `frozen` is false", () => {
+      it("returns the original `Set` when `frozen` is `false`", () => {
         const set = new Set<FabricValue>([1, 2]);
         const ss = new FabricSet(set);
         const result = ss.toNativeValue(false);

@@ -34,8 +34,8 @@ describe("ensurePieceRunning", () => {
     await storageManager?.close();
   });
 
-  it("should return false for cells without process cell structure", async () => {
-    // Create a cell that has no piece structure (no process cell, no pattern)
+  it("should return false for cells without result metadata", async () => {
+    // Create a cell that has no piece structure (no result metadata, no pattern)
     const orphanCell = runtime.getCell<{ $stream: true }>(
       space,
       "orphan-cell-test",
@@ -105,7 +105,7 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should start a piece with valid process cell structure", async () => {
+  it("should start a piece with valid result metadata", async () => {
     // Create a simple pattern
     let patternRan = false;
     const pattern: Pattern = {
@@ -440,7 +440,7 @@ describe("queueEvent with auto-start", () => {
     const internalCell = getMetaCell(resultCell, "internal", tx);
     const argumentCell = getMetaCell(resultCell, "argument", tx);
 
-    // Set up result cell - events points to internal/events in process cell
+    // Set up result cell - events points to internal/events through metadata
     resultCell.setRaw({
       doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
       events: internalCell.key("events").getAsWriteRedirectLink(),

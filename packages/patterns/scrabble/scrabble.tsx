@@ -8,7 +8,6 @@
 import {
   computed,
   Default,
-  derive,
   handler,
   NAME,
   nonPrivateRandom,
@@ -1112,10 +1111,8 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const joined = computed(() =>
       players.get().some((player) => player.name === trimmedName(myName.get()))
     );
-    const rackCount = computed(() => rack.get().length);
-    const bagCount = computed(() =>
-      Math.max(0, bag.get().length - bagIndex.get())
-    );
+    const rackCount = rack.get().length;
+    const bagCount = Math.max(0, bag.get().length - bagIndex.get());
     const rackTiles = computed<RackTileView[]>(() =>
       rack.get().map((letter, index) => ({ ...letter, index }))
     );
@@ -1167,7 +1164,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const clearPlaced = clearBoard({ rack, placed, message });
 
     return {
-      [NAME]: computed(() => `Scrabble: ${gameName}`),
+      [NAME]: `Scrabble: ${gameName}`,
       [UI]: (
         <div
           style={{
@@ -1277,10 +1274,8 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                     </div>
 
                     {board.map((tile) => {
-                      const leftPx = derive({ col: tile.col }, ({ col }) =>
-                        `${col * cellWithGap}px`);
-                      const topPx = derive({ row: tile.row }, ({ row }) =>
-                        `${row * cellWithGap}px`);
+                      const leftPx = `${tile.col * cellWithGap}px`;
+                      const topPx = `${tile.row * cellWithGap}px`;
                       return (
                         <div
                           style={{
@@ -1322,10 +1317,8 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                     })}
 
                     {placed.map((tile) => {
-                      const leftPx = derive({ col: tile.col }, ({ col }) =>
-                        `${col * cellWithGap}px`);
-                      const topPx = derive({ row: tile.row }, ({ row }) =>
-                        `${row * cellWithGap}px`);
+                      const leftPx = `${tile.col * cellWithGap}px`;
+                      const topPx = `${tile.row * cellWithGap}px`;
                       return (
                         <cf-drag-source
                           $cell={tile}
@@ -1547,15 +1540,15 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
           </aside>
         </div>
       ),
-      myName: computed(() => myName.get()),
-      board: computed(() => board.get()),
-      bag: computed(() => bag.get()),
-      bagIndex: computed(() => bagIndex.get()),
-      players: computed(() => players.get()),
-      gameEvents: computed(() => gameEvents.get()),
-      rack: computed(() => rack.get()),
-      placed: computed(() => placed.get()),
-      message: computed(() => message.get()),
+      myName,
+      board,
+      bag,
+      bagIndex,
+      players,
+      gameEvents,
+      rack,
+      placed,
+      message,
       joinGame,
       joinWithName,
       placeTile,

@@ -12,92 +12,92 @@ import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
 describe("deep-freeze", () => {
   describe("isDeepFrozen", () => {
     describe("primitives", () => {
-      it("returns true for null", () => {
+      it("returns `true` for `null`", () => {
         expect(isDeepFrozen(null)).toBe(true);
       });
 
-      it("returns true for undefined", () => {
+      it("returns `true` for `undefined`", () => {
         expect(isDeepFrozen(undefined)).toBe(true);
       });
 
-      it("returns true for a number", () => {
+      it("returns `true` for a number", () => {
         expect(isDeepFrozen(42)).toBe(true);
       });
 
-      it("returns true for a string", () => {
+      it("returns `true` for a string", () => {
         expect(isDeepFrozen("hello")).toBe(true);
       });
 
-      it("returns true for a boolean", () => {
+      it("returns `true` for a boolean", () => {
         expect(isDeepFrozen(true)).toBe(true);
       });
 
-      it("returns true for a bigint", () => {
+      it("returns `true` for a `bigint`", () => {
         expect(isDeepFrozen(42n)).toBe(true);
       });
 
-      it("returns true for a symbol", () => {
+      it("returns `true` for a symbol", () => {
         expect(isDeepFrozen(Symbol("test"))).toBe(true);
       });
     });
 
     describe("objects", () => {
-      it("returns false for an unfrozen empty object", () => {
+      it("returns `false` for an unfrozen empty object", () => {
         expect(isDeepFrozen({})).toBe(false);
       });
 
-      it("returns true for a frozen empty object", () => {
+      it("returns `true` for a frozen empty object", () => {
         expect(isDeepFrozen(Object.freeze({}))).toBe(true);
       });
 
-      it("returns true for a frozen object with primitive values", () => {
+      it("returns `true` for a frozen object with primitive values", () => {
         const obj = Object.freeze({ a: 1, b: "hello", c: true, d: null });
         expect(isDeepFrozen(obj)).toBe(true);
       });
 
-      it("returns false for a frozen object with an unfrozen child", () => {
+      it("returns `false` for a frozen object with an unfrozen child", () => {
         const obj = Object.freeze({ a: 1, child: { b: 2 } });
         expect(isDeepFrozen(obj)).toBe(false);
       });
 
-      it("returns true for a deep-frozen nested object", () => {
+      it("returns `true` for a deep-frozen nested object", () => {
         const obj = deepFreeze({ a: 1, child: { b: 2, inner: { c: 3 } } });
         expect(isDeepFrozen(obj)).toBe(true);
       });
 
-      it("returns true for a frozen object with a frozen array child", () => {
+      it("returns `true` for a frozen object with a frozen array child", () => {
         const obj = Object.freeze({ a: 1, items: Object.freeze([1, 2, 3]) });
         expect(isDeepFrozen(obj)).toBe(true);
       });
 
-      it("returns false for a frozen object with an unfrozen array child", () => {
+      it("returns `false` for a frozen object with an unfrozen array child", () => {
         const obj = Object.freeze({ a: 1, items: [1, 2, 3] });
         expect(isDeepFrozen(obj)).toBe(false);
       });
     });
 
     describe("arrays", () => {
-      it("returns false for an unfrozen array", () => {
+      it("returns `false` for an unfrozen array", () => {
         expect(isDeepFrozen([1, 2, 3])).toBe(false);
       });
 
-      it("returns true for a frozen array of primitives", () => {
+      it("returns `true` for a frozen array of primitives", () => {
         expect(isDeepFrozen(Object.freeze([1, "a", true, null]))).toBe(true);
       });
 
-      it("returns false for a frozen array with an unfrozen object", () => {
+      it("returns `false` for a frozen array with an unfrozen object", () => {
         const arr = Object.freeze([1, { x: 2 }]);
         expect(isDeepFrozen(arr)).toBe(false);
       });
 
-      it("returns true for a deep-frozen array", () => {
+      it("returns `true` for a deep-frozen array", () => {
         const arr = deepFreeze([1, { x: 2 }, [3, 4]]);
         expect(isDeepFrozen(arr)).toBe(true);
       });
     });
 
     describe("sparse arrays", () => {
-      it("returns true for a frozen sparse array", () => {
+      it("returns `true` for a frozen sparse array", () => {
         const arr = new Array(5);
         arr[0] = 1;
         arr[3] = "hello";
@@ -106,7 +106,7 @@ describe("deep-freeze", () => {
         expect(isDeepFrozen(arr)).toBe(true);
       });
 
-      it("returns false for a frozen sparse array with an unfrozen object", () => {
+      it("returns `false` for a frozen sparse array with an unfrozen object", () => {
         const arr = new Array(5);
         arr[0] = 1;
         arr[2] = { x: 2 }; // unfrozen object
@@ -116,7 +116,7 @@ describe("deep-freeze", () => {
     });
 
     describe("circular references", () => {
-      it("returns true for a circular frozen structure", () => {
+      it("returns `true` for a circular frozen structure", () => {
         const a: Record<string, unknown> = { value: 1 };
         const b: Record<string, unknown> = { value: 2, ref: a };
         a.ref = b;
@@ -125,7 +125,7 @@ describe("deep-freeze", () => {
         expect(isDeepFrozen(a)).toBe(true);
       });
 
-      it("returns false for a circular structure with an unfrozen node", () => {
+      it("returns `false` for a circular structure with an unfrozen node", () => {
         const a: Record<string, unknown> = { value: 1 };
         const b: Record<string, unknown> = { value: 2, ref: a };
         a.ref = b;
@@ -143,7 +143,7 @@ describe("deep-freeze", () => {
         expect(isDeepFrozen(obj)).toBe(true); // should hit cache again
       });
 
-      it("returns true after an object is frozen (no stale negative cache)", () => {
+      it("returns `true` after an object is frozen (no stale negative cache)", () => {
         // Regression test: isDeepFrozen must not cache `false` results, because
         // an object that is unfrozen now may be deep-frozen later.
         const obj = { a: 1, b: { c: 2 } };
@@ -209,18 +209,18 @@ describe("deep-freeze", () => {
     // recursively inspected; this is distinct from `isDeepFrozenFabricValue`'s
     // protocol-aware type-guard semantics, which has its own coverage in the
     // sibling `isDeepFrozenFabricValue with FabricInstance` describe below.
-    describe("FabricInstance and FabricPrimitive", () => {
-      it("returns true for a FabricPrimitive (self-frozen at construction)", () => {
+    describe("`FabricInstance` and `FabricPrimitive`", () => {
+      it("returns `true` for a `FabricPrimitive` (self-frozen at construction)", () => {
         const epoch = new FabricEpochNsec(1234567890n);
         expect(isDeepFrozen(epoch)).toBe(true);
       });
 
-      it("returns false for a pre-freeze FabricInstance (wrapper unfrozen)", () => {
+      it("returns `false` for a pre-freeze `FabricInstance` (wrapper unfrozen)", () => {
         const fe = FabricError.fromNativeError(new Error("not-yet-frozen"));
         expect(isDeepFrozen(fe)).toBe(false);
       });
 
-      it("returns true for a post-deepFreeze FabricInstance (wrapper + wrapped recursively frozen)", () => {
+      it("returns `true` for a `FabricInstance` after `deepFreeze()` (wrapper + wrapped recursively frozen)", () => {
         const inner = new Error("cause");
         const outer = new Error("outer", { cause: inner });
         const fe = FabricError.fromNativeError(outer);
@@ -228,7 +228,7 @@ describe("deep-freeze", () => {
         expect(isDeepFrozen(fe)).toBe(true);
       });
 
-      it("returns false for a partially-frozen FabricInstance (wrapper frozen but cause not)", () => {
+      it("returns `false` for a partially-frozen `FabricInstance` (wrapper frozen but cause not)", () => {
         // FabricError no longer has a wrapped-native-Error slot; the only
         // recursing slot is `cause` (and any extras). Construct one whose
         // `cause` is a mutable plain object, freeze only the wrapper.
@@ -239,7 +239,7 @@ describe("deep-freeze", () => {
         expect(isDeepFrozen(fe)).toBe(false);
       });
 
-      it("terminates and returns true post-deepFreeze for a FabricInstance in a circular reference", () => {
+      it("terminates and returns `true` post-`deepFreeze()` for a `FabricInstance` in a circular reference", () => {
         // Build a cycle: a plain-object wrapper holds the FabricError, and
         // the FabricError's `cause` points back at the wrapper. After
         // `deepFreeze(wrapper)` (which threads `inProgress` cycle-state
@@ -261,15 +261,15 @@ describe("deep-freeze", () => {
     });
   });
 
-  describe("deepFreeze [DEEP_FREEZE] protocol dispatch", () => {
-    it("arm 2: FabricPrimitive short-circuits unchanged", () => {
+  describe("`deepFreeze()` protocol dispatch via `[DEEP_FREEZE]`", () => {
+    it("arm 2: `FabricPrimitive` short-circuits unchanged", () => {
       const epoch = new FabricEpochNsec(1234567890n);
       // `FabricPrimitive`s self-freeze at construction; `deepFreeze` must
       // return them unchanged without entering the object-walk.
       expect(deepFreeze(epoch)).toBe(epoch);
     });
 
-    it("arm 3: delegates to [DEEP_FREEZE] and freezes in place", () => {
+    it("arm 3: delegates to `[DEEP_FREEZE]` and freezes in place", () => {
       const inner = new Error("cause");
       const outer = new Error("outer", { cause: inner });
       const fe = FabricError.fromNativeError(outer);
@@ -286,7 +286,7 @@ describe("deep-freeze", () => {
       expect(Object.isFrozen(inner)).toBe(true);
     });
 
-    it("arm 3: recurses [DEEP_FREEZE] into nested FabricValues", () => {
+    it("arm 3: recurses `[DEEP_FREEZE]` into nested `FabricValue`s", () => {
       const fe = FabricError.fromNativeError(new Error("e"));
       const container = { wrapped: fe as unknown as FabricValue, n: 1 };
       deepFreeze(container);
@@ -297,8 +297,8 @@ describe("deep-freeze", () => {
     });
   });
 
-  describe("isDeepFrozenFabricValue with FabricInstance (R6)", () => {
-    it("no longer throws on a FabricInstance; classifies via protocol", () => {
+  describe("`isDeepFrozenFabricValue()` with `FabricInstance` (R6)", () => {
+    it("no longer throws on a `FabricInstance`; classifies via protocol", () => {
       const fe = FabricError.fromNativeError(new Error("test"));
       // Pre-freeze: not deep-frozen, but must NOT throw (the #3604
       // `FabricInstance`-arm throw is retired).
@@ -306,19 +306,19 @@ describe("deep-freeze", () => {
       expect(isDeepFrozenFabricValue(fe)).toBe(false);
     });
 
-    it("returns true for a deep-frozen FabricInstance", () => {
+    it("returns `true` for a deep-frozen `FabricInstance`", () => {
       const fe = FabricError.fromNativeError(new Error("test"));
       deepFreeze(fe);
       expect(isDeepFrozenFabricValue(fe)).toBe(true);
     });
 
-    it("returns true for a deep-frozen FabricInstance nested in a tree", () => {
+    it("returns `true` for a deep-frozen `FabricInstance` nested in a tree", () => {
       const fe = FabricError.fromNativeError(new Error("nested"));
       const tree = deepFreeze({ a: 1, e: fe as unknown as FabricValue });
       expect(isDeepFrozenFabricValue(tree)).toBe(true);
     });
 
-    it("returns false (no throw) for a non-canonical-form instance", () => {
+    it("returns `false` (no throw) for a non-canonical-form instance", () => {
       // Wrapper frozen but `cause` left unfrozen -> not deep-frozen.
       const err = new Error("partial", { cause: { mutable: true } });
       const fe = FabricError.fromNativeError(err);
@@ -345,7 +345,7 @@ describe("deep-freeze", () => {
   // assertion for "this call terminates."
   // ===========================================================================
 
-  describe("deepFreeze cycle behavior (Arm 4: plain object / array)", () => {
+  describe("`deepFreeze()` cycle behavior (Arm 4: plain object / array)", () => {
     it("terminates on a self-referential plain object", () => {
       const a: Record<string, unknown> = { x: 1 };
       a.self = a;

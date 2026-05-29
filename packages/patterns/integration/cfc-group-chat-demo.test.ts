@@ -77,7 +77,7 @@ describe("cfc group chat demo integration test", () => {
     });
     await waitForRuntimeIdle(page);
 
-    await waitForText(page, "#group-chat-manager-chip", "Manager off");
+    await waitForText(page, "#group-chat-manager-chip", "No profile");
     await waitForDisabled(page, "#trusted-send-button", true);
 
     await scrollIntoView(page, "#trusted-profile-name");
@@ -91,18 +91,13 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(page, "#trusted-profile-status", "Alice");
     await waitForText(
       page,
-      "#trusted-admin-manager-status",
-      "Can manage admins",
-    );
-    await waitForText(
-      page,
       "#group-chat-manager-chip",
-      "Can manage admins",
+      "Everyone is admin",
     );
     await waitForText(
       page,
       "#trusted-admin-manager-panel-status",
-      "Admin registry editing enabled",
+      "Everyone can add rooms",
     );
     await waitForRuntimeIdle(page);
 
@@ -112,35 +107,18 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-room-name",
       "Ops",
     );
-    await waitForDisabled(page, "#trusted-room-add-button", true);
+    await waitForDisabled(page, "#trusted-room-add-button", false);
     await scrollIntoView(page, "#trusted-admin-panel");
     await waitForText(
       page,
-      '[data-ui-action="TrustedGroupChatSetAdmin"]',
-      "Make admin",
+      '[data-ui-control="admin-user-toggle"]',
+      "Admin via everyone",
     );
     await waitForDisabled(
       page,
-      '[data-ui-action="TrustedGroupChatSetAdmin"]',
-      false,
+      '[data-ui-control="admin-user-toggle"]',
+      true,
     );
-    await clickCfButton(
-      page,
-      '[data-ui-action="TrustedGroupChatSetAdmin"]',
-    );
-    await waitForText(page, "#trusted-admin-user-list", "Admin");
-    await waitForText(
-      page,
-      '[data-ui-action="TrustedGroupChatSetAdmin"]',
-      "Remove admin",
-    );
-    await waitForRuntimeIdle(page);
-    await fillCfInput(
-      page,
-      "#trusted-room-name",
-      "Ops",
-    );
-    await waitForDisabled(page, "#trusted-room-add-button", false);
     await waitForRuntimeIdle(page);
     await clickCfButton(page, "#trusted-room-add-button");
     await waitForRuntimeIdle(page);

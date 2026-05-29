@@ -128,6 +128,7 @@ type BranchId = string;
 type SessionId = string;
 type ReadPath = readonly string[];
 type Reference = string & { readonly __brand: unique symbol };
+type FabricValue = unknown; // Abbreviated here; see 01-data-model.md.
 
 interface SetOperation {
   op: "set";
@@ -204,13 +205,26 @@ interface Commit {
   createdAt: string;
 }
 
-interface EntityDocument {
-  value: JSONValue;
-  source?: SourceLink;
-}
-
 interface SourceLink {
   "/": string;
+}
+
+interface SigilLink {
+  "/": { "link@1": { id?: string; path?: string[]; space?: string } };
+}
+
+type EntityDocumentField = FabricValue | SourceLink | SigilLink | undefined;
+
+interface EntityDocument {
+  value?: FabricValue;
+  source?: SourceLink;
+  pattern?: SigilLink;
+  argument?: SigilLink;
+  internal?: SigilLink;
+  result?: SigilLink;
+  schema?: FabricValue;
+  slug?: string;
+  [key: string]: EntityDocumentField;
 }
 
 interface WatchSpec {

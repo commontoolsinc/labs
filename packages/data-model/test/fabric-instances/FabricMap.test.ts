@@ -37,7 +37,7 @@ describe("FabricMap", () => {
     });
 
     describe("toNativeValue()", () => {
-      it("returns a `FrozenMap` when `frozen` is true", () => {
+      it("returns a `FrozenMap` when `frozen` is `true`", () => {
         const map = new Map<FabricValue, FabricValue>([["a", 1]]);
         const sm = new FabricMap(map);
         const result = sm.toNativeValue(true);
@@ -45,7 +45,7 @@ describe("FabricMap", () => {
         expect((result as FrozenMap<string, number>).get("a")).toBe(1);
       });
 
-      it("returns the original `Map` when `frozen` is false", () => {
+      it("returns the original `Map` when `frozen` is `false`", () => {
         const map = new Map<FabricValue, FabricValue>([["a", 1]]);
         const sm = new FabricMap(map);
         const result = sm.toNativeValue(false);

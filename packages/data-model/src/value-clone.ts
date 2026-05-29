@@ -627,7 +627,7 @@ export function cloneWithValueAtPath(
  * index, or a non-plain-container (primitive / `FabricInstance` /
  * `FabricPrimitive`) anywhere along the way -- there is nothing to remove, so
  * a deep-frozen clone of `root` is returned (identity when `root` is already
- * deep-frozen). An `undefined` `root` or empty `path` returns `undefined`
+ * deep-frozen). A `root` of `undefined` or empty `path` returns `undefined`
  * (whole-value removal). Cyclic values are not yet supported (see
  * `cloneIfNecessary`).
  */

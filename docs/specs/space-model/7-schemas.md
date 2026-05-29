@@ -85,7 +85,7 @@ Schemas influence runtime behavior:
 
 Schemas can be:
 - Explicitly provided when creating cells
-- Inherited from source cells
+- Inherited from result-cell metadata links
 - Inferred from values (limited)
 
 ---

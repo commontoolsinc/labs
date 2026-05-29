@@ -18,15 +18,7 @@
  * - Community suggestions show dimmed with usage counts
  * - Events are posted to the aggregator in real-time
  */
-import {
-  type Default,
-  derive,
-  NAME,
-  pattern,
-  UI,
-  wish,
-  Writable,
-} from "commonfabric";
+import { type Default, NAME, pattern, UI, wish, Writable } from "commonfabric";
 
 // Import the FolksonomyTags sub-pattern
 import { FolksonomyTags } from "./folksonomy-tags.tsx";
@@ -59,17 +51,12 @@ export default pattern<Input, Output>(
       query: "#folksonomy-aggregator",
       scope: ["~", "."],
     });
-    const hasAggregator = derive(
-      aggregatorWish.result,
-      (agg: unknown) => agg != null,
-    );
+    const hasAggregator = aggregatorWish.result != null;
 
     // Shared scope for A and B
-    const sharedScope = derive(
-      customScope,
-      (cs: string) =>
-        `https://github.com/commontools/folksonomy-demo/${cs || "demo-shared"}`,
-    );
+    const sharedScope = `https://github.com/commontools/folksonomy-demo/${
+      customScope || "demo-shared"
+    }`;
 
     // Isolated scope for C
     const isolatedScope = new Writable(

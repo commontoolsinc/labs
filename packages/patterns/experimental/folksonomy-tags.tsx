@@ -28,8 +28,8 @@
  * cf-render boundaries, we use $value binding instead of oncf-select handlers.
  */
 import {
+  computed,
   type Default,
-  derive,
   handler,
   lift,
   NAME,
@@ -140,7 +140,7 @@ const _postTelemetryEvent = handler<
     timestamp: safeDateNow(),
   };
 
-  // Stream from derive() is a Cell containing the stream - call .send() directly
+  // Stream projected from the aggregator is a Cell containing the stream - call .send() directly
   try {
     aggregatorStream.send(tagEvent);
   } catch (e) {
@@ -290,54 +290,37 @@ export const FolksonomyTags = pattern<
     });
 
     // Use injected aggregator if available, otherwise use wish result
-    const aggregator = derive(
-      [injectedAggregator, aggregatorWish.result],
-      (
-        [injected, wished]: [
-          AggregatorCharm | undefined,
-          AggregatorCharm | null,
-        ],
-      ) => injected ?? wished ?? null,
-    );
+    const aggregator = injectedAggregator ?? aggregatorWish.result ?? null;
 
     // Get the aggregator's postEvent stream for telemetry
-    const aggregatorStream = derive(
-      aggregator,
-      (agg: AggregatorCharm | null) =>
-        (agg?.postEvent as Stream<TagEvent>) ?? null,
-    );
+    const aggregatorStream = (aggregator?.postEvent as Stream<TagEvent>) ??
+      null;
 
     // Track previous tags for change detection
     const previousTags = new Writable<string[]>([]).for("previousTags");
 
     // Get community suggestions for this scope
-    const communitySuggestions = derive(
-      [aggregator, scope],
-      ([agg, scopeValue]: [AggregatorCharm | null, string]) => {
-        if (!agg || !scopeValue) return [];
-        const suggs = agg.suggestions || {};
-        return suggs[scopeValue] || [];
-      },
-    );
+    const communitySuggestions = computed(() => {
+      const scopeValue = scope.get();
+      if (!aggregator || !scopeValue) return [];
+      const suggs = aggregator.suggestions || {};
+      return suggs[scopeValue] || [];
+    });
 
-    // For now, local tags are just the current tags (same scope within same charm)
-    const localTags = derive(tags, (t: string[]) => t || []);
-
-    // Build autocomplete items combining local and community
+    // Build autocomplete items combining local and community.
+    // Local tags are just the current tags (same scope within same charm).
     const autocompleteItems = buildAutocompleteItems({
-      localTags,
+      localTags: tags,
       communitySuggestions,
       currentTags: tags,
     });
 
     // Check if aggregator is connected
-    const hasAggregator = derive(
-      aggregator,
-      (agg: AggregatorCharm | null) => agg != null,
-    );
+    const hasAggregator = aggregator != null;
 
     // Computed name for display
-    const displayName = derive(tags, (tagList: string[]) => {
+    const displayName = computed(() => {
+      const tagList = tags.get();
       if (!tagList || tagList.length === 0) return "🏷️ Tags";
       return `🏷️ Tags (${tagList.length})`;
     });

@@ -124,7 +124,13 @@ full diagnosis checklist.
 ))}
 ```
 
-**Solution:** Pre-compute grouped data
+**Solution:** Pre-compute grouped data — but watch the receiver shape inside
+the inner `.map(...)`. ⚠️ `(reactiveCall() ?? plain).map(...)` nested in
+another `.map((row) => ...)` aborts pattern construction by hiding the cell
+from the ts-transformer; see
+[gotchas/closure-capture-in-nested-map.md](gotchas/closure-capture-in-nested-map.md).
+The safe pre-bake is a top-level computed of plain data — the `?? []`
+fallback below is a plain-array fallback, NOT a reactive-call wrapper:
 
 ```typescript
 const groupedItems = computed(() => {
@@ -138,12 +144,19 @@ const groupedItems = computed(() => {
 
 {categories.map((category) => (
   <div>
+    {/* Safe: `groupedItems[category]` is plain JS by the time the outer
+        `categories.map` reaches it. */}
     {(groupedItems[category] ?? []).map(item => (
       <div>{item.title}</div>
     ))}
   </div>
 ))}
 ```
+
+If `groupedItems` were itself something you'd read with `.get()`, hoist the
+per-category list to its own top-level computed and map *that* directly —
+don't write `(groupedItems.get() ?? {})[category]?.map(...)` inside the row
+callback.
 
 **Related issue with lift():**
 
