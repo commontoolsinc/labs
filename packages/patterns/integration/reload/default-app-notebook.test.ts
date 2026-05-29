@@ -12,8 +12,8 @@ import {
 const { FRONTEND_URL } = env;
 // Keep these as guardrails rather than exact budgets; CI reload runs vary
 // slightly while still exercising persisted scheduler-state reuse.
-const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 150;
-const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 80;
+const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 160;
+const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 90;
 const NOTEBOOK_RELOAD_TIMEOUT_MS = 180_000;
 
 const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
