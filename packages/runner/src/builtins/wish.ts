@@ -265,6 +265,21 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
   return ctx.runtime.getHomeSpaceCell(ctx.tx);
 }
 
+/**
+ * Resolves the cell backing the user's profile default pattern, reached through
+ * `homeSpaceCell.defaultPattern.profile`.
+ *
+ * The profile link is owner-protected and created through a writeonly
+ * (`WriteAuthorizedBy`) binding. When the runtime materializes that binding it
+ * stores the concrete child link under a `value` wrapper rather than as a
+ * readable parent link, so `profile` itself reads back as `{ value: <link> }`
+ * instead of the link directly. We therefore probe both shapes:
+ *   - the materialized case: `profile.value` resolves to a cell in another
+ *     space (the profile space) with an empty path, and
+ *   - the plain case: `profile` is itself a direct link to the profile pattern.
+ * If neither yields a cross-space link with an empty path, the profile is not
+ * set yet and we throw so callers can fall back to the create surface.
+ */
 function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
   const homeSpaceCell = getHomeSpaceCell(ctx);
   const profileField = homeSpaceCell.key("defaultPattern").key(
@@ -300,6 +315,8 @@ function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
       error,
     ]);
   });
+  // Read initialNameApplied so this wish subscribes to it and re-runs once the
+  // freshly-created profile's name materializes across the space boundary.
   profileDefault.key("initialNameApplied").get();
   return profileDefault;
 }
@@ -1071,6 +1088,10 @@ function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("cf-cell-link", { $cell: cell });
 }
@@ -1369,6 +1390,19 @@ export function wish(
     return suggestionPatternResultCell;
   }
 
+  // Renders an error message into a pattern result cell in its own committed
+  // transaction. Used when a deferred system-pattern run fails after the
+  // originating wish transaction has already gone.
+  function commitPatternErrorUI(
+    resultCell: Cell<any>,
+    message: string,
+  ): void {
+    const errorTx = runtime.edit();
+    resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
+    runtime.prepareTxForCommit(errorTx);
+    errorTx.commit();
+  }
+
   function launchProfileCreatePattern(
     ctx: WishContext,
     providedTx?: IExtendedStorageTransaction,
@@ -1446,44 +1480,25 @@ export function wish(
       }
       void profileCreatePatternFetchPromise.then((pattern) => {
         if (!cancelled && pattern && profileCreatePatternResultCell) {
+          const resultCell = profileCreatePatternResultCell;
           try {
             const runTx = runtime.edit();
-            const resultCell = profileCreatePatternResultCell.withTx(runTx);
             runtime.run(
               runTx,
               pattern,
               profileCreateInputForTx(runTx),
-              resultCell,
+              resultCell.withTx(runTx),
             );
             runtime.prepareTxForCommit(runTx);
             runTx.commit().then(({ error }) => {
               if (error) {
-                const errorTx = runtime.edit();
-                profileCreatePatternResultCell!.withTx(errorTx).set({
-                  [UI]: errorUI(toCompactDebugString(error)),
-                });
-                runtime.prepareTxForCommit(errorTx);
-                errorTx.commit();
+                commitPatternErrorUI(resultCell, toCompactDebugString(error));
               }
             }).catch((error) => {
-              const errorTx = runtime.edit();
-              profileCreatePatternResultCell!.withTx(errorTx).set({
-                [UI]: errorUI(
-                  error instanceof Error ? error.message : String(error),
-                ),
-              });
-              runtime.prepareTxForCommit(errorTx);
-              errorTx.commit();
+              commitPatternErrorUI(resultCell, errorMessage(error));
             });
           } catch (error) {
-            const errorTx = runtime.edit();
-            profileCreatePatternResultCell.withTx(errorTx).set({
-              [UI]: errorUI(
-                error instanceof Error ? error.message : String(error),
-              ),
-            });
-            runtime.prepareTxForCommit(errorTx);
-            errorTx.commit();
+            commitPatternErrorUI(resultCell, errorMessage(error));
           }
         }
       });

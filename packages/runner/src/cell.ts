@@ -457,8 +457,6 @@ interface CauseContainer {
   cause: unknown | undefined;
 }
 
-const inSpaceAnnotations = new WeakMap<OpaqueCell<unknown>, unknown>();
-
 /**
  * CellImpl - Unified cell implementation that handles both regular cells and
  * streams.
@@ -587,57 +585,18 @@ export class CellImpl<T extends FabricValue>
     return this as unknown as Cell<T>;
   }
 
-  setInSpaceAnnotation(space: unknown): void {
-    const top = this._causeContainer.cell;
-    inSpaceAnnotations.set(top, space);
-    if (typeof space === "string" && isMemorySpaceDID(space)) {
-      this.setUnlinkedSpace(space as MemorySpace);
-    } else {
-      const spaceCell = asCellImpl(space);
-      if (spaceCell) {
-        this.setUnlinkedSpace(spaceCell.getAsNormalizedFullLink().space);
-      }
-    }
-  }
-
-  getInSpaceAnnotation(): unknown {
-    return inSpaceAnnotations.get(this._causeContainer.cell);
-  }
-
-  replaceInSpaceAnnotation(space: unknown): void {
-    inSpaceAnnotations.set(this._causeContainer.cell, space);
-  }
-
+  /**
+   * Pins this (not-yet-linked) cell to a space before its id exists, and routes
+   * any pattern nodes attached to it into that target space. Used by the pattern
+   * builder to implement `PatternFactory.inSpace(...)`. Throws if the cell has
+   * already been linked.
+   */
   setUnlinkedSpace(space: MemorySpace): void {
     if (this._causeContainer.id || this._link.id) {
       throw new Error(
         "Cannot set space: cell already has a link.",
       );
     }
-    this._causeContainer.space = space;
-    this._link = { ...this._link, space };
-    for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
-      (node.module as Module).targetSpace = space;
-    }
-  }
-
-  getFullLinkIfAvailable(): NormalizedFullLink | undefined {
-    const id = this._causeContainer.id ?? this._link.id;
-    const space = this._causeContainer.space ?? this._link.space;
-    if (id === undefined || space === undefined) {
-      return undefined;
-    }
-    return {
-      ...this._link,
-      id,
-      space,
-      scope: normalizeCellScope(
-        this._link.scope === "inherit" ? undefined : this._link.scope,
-      ),
-    };
-  }
-
-  retargetLinkedSpace(space: MemorySpace): void {
     this._causeContainer.space = space;
     this._link = { ...this._link, space };
     for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
@@ -1986,46 +1945,11 @@ export class CellImpl<T extends FabricValue>
   }
 }
 
-function isMemorySpaceDID(value: string): boolean {
-  return /^did:[^:]+:.+/.test(value);
-}
-
-export function setCellInSpaceAnnotation(
-  cell: unknown,
-  space: unknown,
-): void {
-  asCellImpl(cell)?.setInSpaceAnnotation(space);
-}
-
-export function getCellInSpaceAnnotation(cell: unknown): unknown {
-  return asCellImpl(cell)?.getInSpaceAnnotation();
-}
-
-export function replaceCellInSpaceAnnotation(
-  cell: unknown,
-  space: unknown,
-): void {
-  asCellImpl(cell)?.replaceInSpaceAnnotation(space);
-}
-
 export function setCellUnlinkedSpace(
   cell: unknown,
   space: MemorySpace,
 ): void {
   asCellImpl(cell)?.setUnlinkedSpace(space);
-}
-
-export function getCellFullLinkIfAvailable(
-  cell: unknown,
-): NormalizedFullLink | undefined {
-  return asCellImpl(cell)?.getFullLinkIfAvailable();
-}
-
-export function retargetCellSpace(
-  cell: unknown,
-  space: MemorySpace,
-): void {
-  asCellImpl(cell)?.retargetLinkedSpace(space);
 }
 
 function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {

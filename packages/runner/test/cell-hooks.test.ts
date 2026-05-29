@@ -11,12 +11,7 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  getCellFullLinkIfAvailable,
-  getCellInSpaceAnnotation,
-  isCell,
-  setCellInSpaceAnnotation,
-} from "../src/cell.ts";
+import { isCell } from "../src/cell.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import { JSONSchema } from "../src/builder/types.ts";
@@ -48,14 +43,6 @@ describe("toCell and toOpaqueRef hooks", () => {
   });
 
   describe("Basic hook functionality", () => {
-    it("cell annotation helpers ignore nullish inputs", () => {
-      expect(getCellInSpaceAnnotation(null)).toBeUndefined();
-      expect(getCellInSpaceAnnotation(undefined)).toBeUndefined();
-      expect(getCellFullLinkIfAvailable(null)).toBeUndefined();
-      expect(() => setCellInSpaceAnnotation(undefined, "profile")).not
-        .toThrow();
-    });
-
     it("should add toCell and toOpaqueRef symbols to objects returned from Cell.get()", () => {
       const schema = {
         type: "object",

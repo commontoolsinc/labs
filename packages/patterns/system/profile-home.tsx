@@ -34,6 +34,9 @@ type ProfileElementCell = {
   [NAME]?: string;
 };
 
+// NOTE(CT-1628): `cell: any` here/below and the `(Pattern(...) as any).for(...)`
+// casts later in this file are required until the CFC wrapper / pattern-factory
+// types expose a typed cell ref and `.for()`. Tracked for a proper type fix.
 export type ProfileElement = {
   cell: any;
   tag: string;

@@ -129,6 +129,9 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
+  // NOTE(CT-1628): the `as any` casts around `profile` below are required
+  // because the CFC wrapper types (TrustedProfileLink) don't yet compose with
+  // Writable/the pattern factory output type. Tracked for a proper type fix.
   const profile = new Writable<TrustedProfileLink>(undefined).for("profile");
   const profileName = new Writable("").for("profileName");
   const createProfileStream = submitProfileCreation({
@@ -181,6 +184,35 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                 ),
                 profileCreate,
               )}
+
+              {
+                /*
+                Free-form summary lives on learned.summary, independent of the
+                shared profile space. It is intentionally not resolved by the
+                #profile wish (which targets the profile pattern).
+              */
+              }
+              <cf-vstack gap="1">
+                <h3 style={{ margin: 0, fontSize: "14px" }}>Profile Summary</h3>
+                <cf-textarea
+                  $value={learned.key("summary")}
+                  placeholder="Write a short profile summary about yourself..."
+                  rows={6}
+                  style={{
+                    width: "100%",
+                    fontFamily: "system-ui, sans-serif",
+                    fontSize: "14px",
+                    lineHeight: "1.5",
+                    padding: "12px",
+                    border: "1px solid #e5e5e7",
+                    borderRadius: "8px",
+                    resize: "vertical",
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "#888" }}>
+                  Edit your profile summary above.
+                </span>
+              </cf-vstack>
             </cf-vstack>
           </cf-tab-panel>
           <cf-tab-panel value="spaces">

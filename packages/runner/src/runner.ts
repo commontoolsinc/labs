@@ -2,7 +2,6 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { createSession, Identity } from "@commonfabric/identity";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
@@ -30,17 +29,9 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import {
-  type Cell,
-  createCell,
-  getCellFullLinkIfAvailable,
-  getCellInSpaceAnnotation,
-  isCell,
-  replaceCellInSpaceAnnotation,
-  retargetCellSpace,
-  setCellUnlinkedSpace,
-} from "./cell.ts";
+import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
+import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
   unsafe_noteParentOnPatterns,
@@ -78,7 +69,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
-import { isCellScope, narrowestScope, normalizeCellScope } from "./scope.ts";
+import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
@@ -2491,154 +2482,23 @@ export class Runner {
     return result;
   }
 
-  private async resolveFrameInSpaceAnnotations(frame: Frame): Promise<void> {
-    const refs = [...frame.opaqueRefs];
-    await Promise.all(refs.map(async (ref) => {
-      const annotation = getCellInSpaceAnnotation(ref);
-      if (annotation === undefined) return;
-      const before = getCellFullLinkIfAvailable(ref);
-      const space = await this.resolveInSpaceAnnotation(annotation);
-      replaceCellInSpaceAnnotation(ref, space);
-      try {
-        setCellUnlinkedSpace(ref, space);
-        const after = getCellFullLinkIfAvailable(ref);
-        if (after !== undefined && frame.tx !== undefined) {
-          this.rewriteResolvedInSpaceLinks(frame.tx, before, after, annotation);
-        }
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message.includes("cell already has a link")
-        ) {
-          retargetCellSpace(ref, space);
-          const after = getCellFullLinkIfAvailable(ref) ??
-            (before ? { ...before, space } : undefined);
-          if (after !== undefined && frame.tx !== undefined) {
-            this.rewriteResolvedInSpaceLinks(
-              frame.tx,
-              before,
-              after,
-              annotation,
-            );
-          }
-          return;
-        }
-        throw error;
-      }
-    }));
-  }
-
-  private rewriteResolvedInSpaceLinks(
-    tx: IExtendedStorageTransaction,
-    before: NormalizedFullLink | undefined,
-    after: NormalizedFullLink,
-    unresolvedSpace?: unknown,
-  ): void {
-    const log = tx.getReactivityLog?.();
-    const spaces = new Set<MemorySpace>([
-      after.space,
-      ...(before ? [before.space] : []),
-      ...(log?.writes ?? []).map((write) => write.space),
-      ...(log?.attemptedWrites ?? []).map((write) => write.space),
-    ]);
-    for (const space of spaces) {
-      const details = [...(tx.getWriteDetails?.(space) ?? [])];
-      for (const detail of details) {
-        const next = this.replaceLinkInValue(
-          detail.value,
-          before,
-          after,
-          unresolvedSpace,
-        );
-        if (next !== detail.value && !deepEqual(next, detail.value)) {
-          tx.writeValueOrThrow({
-            ...detail.address,
-            scope: normalizeCellScope(detail.address.scope),
-          }, next);
-        }
-      }
-    }
-  }
-
-  private replaceLinkInValue(
-    value: unknown,
-    before: NormalizedFullLink | undefined,
-    after: NormalizedFullLink,
-    unresolvedSpace?: unknown,
-  ): FabricValue | undefined {
-    if (value === undefined) {
-      return undefined;
-    }
-    if (isCellLink(value) || isSigilLink(value) || isWriteRedirectLink(value)) {
-      const parsed = parseLink(value);
-      if (
-        parsed &&
-        (before
-          ? areNormalizedLinksSame(parsed, before)
-          : parsed.id === after.id &&
-            (parsed.space === undefined ||
-              (typeof unresolvedSpace === "string" &&
-                parsed.space === unresolvedSpace)) &&
-            normalizeCellScope(
-                parsed.scope === "inherit" ? undefined : parsed.scope,
-              ) === normalizeCellScope(after.scope) &&
-            deepEqual(parsed.path, after.path))
-      ) {
-        return createSigilLinkFromParsedLink(after);
-      }
-      return value as FabricValue;
-    }
-    if (Array.isArray(value)) {
-      let changed = false;
-      const next = value.map((entry) => {
-        const replaced = this.replaceLinkInValue(
-          entry,
-          before,
-          after,
-          unresolvedSpace,
-        );
-        changed ||= replaced !== entry;
-        return replaced;
-      });
-      return changed ? next as FabricValue : value as FabricValue;
-    }
-    if (!isRecord(value)) {
-      return value as FabricValue;
-    }
-    let changed = false;
-    const next: Record<string, FabricValue | undefined> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      const replaced = this.replaceLinkInValue(
-        entry,
-        before,
-        after,
-        unresolvedSpace,
-      );
-      changed ||= replaced !== entry;
-      next[key] = replaced;
-    }
-    return changed ? next as FabricValue : value as FabricValue;
-  }
-
-  private async resolveInSpaceAnnotation(
-    annotation: unknown,
-  ): Promise<MemorySpace> {
-    if (typeof annotation === "string") {
-      if (isMemorySpaceDID(annotation)) return annotation as MemorySpace;
-      if (annotation.length === 0) {
-        return (await Identity.generate()).did() as MemorySpace;
-      }
-      const session = await createSession({
-        identity: this.runtime.storageManager.as as unknown as Identity,
-        spaceName: annotation,
-      });
-      return session.space as MemorySpace;
-    }
-    if (isCell(annotation)) {
-      return annotation.getAsNormalizedFullLink().space;
-    }
-    throw new Error(
-      `Unsupported PatternFactory.inSpace annotation: ${typeof annotation}`,
+  /**
+   * Resolves any `PatternFactory.inSpace("name")` targets that the just-finished
+   * handler/action referenced but whose space DID was not yet cached, then
+   * throws {@link RetryImmediately} so the scheduler re-runs the handler/action.
+   * On the re-run the names resolve synchronously from the runtime cache (see
+   * the pattern builder's resolveInSpaceTargetSpace), so the child results are
+   * routed into the correct spaces from the start — no link rewriting required.
+   */
+  private async resolvePendingSpaceNamesAndRetry(
+    frame: Frame,
+  ): Promise<never> {
+    const names = [...(frame.pendingSpaceNames ?? [])];
+    await Promise.all(
+      names.map((name) => this.runtime.resolveSpaceName(name)),
+    );
+    throw new RetryImmediately(
+      `Resolving in-space target spaces: ${names.join(", ")}`,
     );
   }
 
@@ -2980,10 +2840,12 @@ export class Runner {
             throw error;
           }
         }
-        const postRun = async (result: any) => {
+        const postRun = (result: any) => {
           logger.timeStart("stream", "postRun");
           try {
-            await this.resolveFrameInSpaceAnnotations(frame);
+            if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
+              return this.resolvePendingSpaceNamesAndRetry(frame);
+            }
             return this.handleJavaScriptHandlerResult(
               tx,
               result,
@@ -3008,6 +2870,17 @@ export class Runner {
         }
         return postRunResult;
       } catch (error) {
+        // The handler body may throw while materializing a not-yet-resolved
+        // inSpace("name") child (e.g. set into a cell). If so, resolve the
+        // pending names and retry instead of surfacing the error.
+        if (
+          !(error instanceof RetryImmediately) &&
+          frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
+        ) {
+          popFrameAfterReturn = false;
+          return this.resolvePendingSpaceNamesAndRetry(frame)
+            .finally(() => popFrame(frame));
+        }
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
       } finally {
@@ -3137,6 +3010,10 @@ export class Runner {
       const resultCell = patternResultCell;
 
       const handleErrorOutput = (error: unknown) => {
+        // RetryImmediately is an internal control-flow signal: re-throw it
+        // untouched so the scheduler re-runs the action instead of writing an
+        // error result into the binding.
+        if (error instanceof RetryImmediately) throw error;
         if (
           error !== null &&
           (typeof error === "object" || typeof error === "function")
@@ -3231,10 +3108,12 @@ export class Runner {
             throw error;
           }
         }
-        const postRun = async (result: any) => {
+        const postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
-            await this.resolveFrameInSpaceAnnotations(frame);
+            if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
+              return this.resolvePendingSpaceNamesAndRetry(frame);
+            }
             return this.writeJavaScriptActionResult(
               tx,
               module.resultSchema,
@@ -3262,6 +3141,17 @@ export class Runner {
         }
         return postRunResult;
       } catch (error) {
+        // The action body may throw while materializing a not-yet-resolved
+        // inSpace("name") child. If so, resolve the pending names and retry
+        // instead of surfacing the error.
+        if (
+          !(error instanceof RetryImmediately) &&
+          frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
+        ) {
+          popFrameAfterReturn = false;
+          return this.resolvePendingSpaceNamesAndRetry(frame)
+            .finally(() => popFrame(frame));
+        }
         handleErrorOutput(error);
       } finally {
         if (popFrameAfterReturn) popFrame(frame);
@@ -3841,8 +3731,4 @@ function getTxDebugActionId(
  */
 function getPatternId(resultCell: Cell<unknown>): URI | undefined {
   return getMetaLink(resultCell, "pattern")?.id;
-}
-
-function isMemorySpaceDID(value: string): boolean {
-  return /^did:[^:]+:.+/.test(value);
 }

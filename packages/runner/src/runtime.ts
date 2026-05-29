@@ -12,7 +12,6 @@ import type {
   NodeFactory,
   Pattern,
   Schema,
-  Stream,
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
@@ -38,6 +37,7 @@ import type {
 } from "./storage/interface.ts";
 import { type Cell, createCell, schemaCellScope } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
+import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
 import { Engine } from "./harness/index.ts";
 import {
@@ -256,69 +256,16 @@ export const spaceCellSchema = internSchema(
         },
         asCell: ["cell"],
       },
-      profileSpace: {
-        type: "object",
-        properties: {
-          defaultPattern: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              avatar: { type: "string" },
-              elements: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    cell: { asCell: ["cell"] },
-                    tag: { type: "string" },
-                    userTags: {
-                      type: "array",
-                      items: { type: "string" },
-                    },
-                    title: { type: "string" },
-                    source: { type: "string" },
-                  },
-                },
-              },
-              addElement: { asCell: ["stream"] },
-              removeElement: { asCell: ["stream"] },
-            },
-            asCell: ["cell"],
-          },
-        },
-        asCell: ["cell"],
-      },
     },
   },
 );
 
-export type ProfileElement = {
-  cell: Cell<unknown>;
-  tag: string;
-  userTags: string[];
-  title?: string;
-  source?: "catalog" | "url";
-};
-
-export type AddProfileElementEvent =
-  | { catalogId: string }
-  | { patternUrl: string; title?: string; tag?: string };
-
-export type ProfileDefaultPattern = {
-  name: string;
-  avatar: string;
-  elements: ProfileElement[];
-  addElement: Stream<AddProfileElementEvent>;
-  removeElement: Stream<{ cell: Cell<unknown> }>;
-};
-
-export interface ProfileSpaceCell {
-  defaultPattern: Cell<ProfileDefaultPattern>;
-}
-
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
-  profileSpace?: Cell<ProfileSpaceCell>;
+}
+
+function isMemorySpaceDID(value: string): boolean {
+  return /^did:[^:]+:.+/.test(value);
 }
 
 /**
@@ -361,6 +308,8 @@ export class Runtime {
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
+  /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
+  private readonly spaceNameToDid = new Map<string, MemorySpace>();
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
@@ -973,6 +922,41 @@ export class Runtime {
       spaceCellSchema,
       tx,
     ) as Cell<SpaceCellContents>;
+  }
+
+  /**
+   * Returns the DID for a named `PatternFactory.inSpace("name")` target if it
+   * has already been resolved (or is itself a DID), otherwise `undefined`.
+   *
+   * Synchronous so the pattern builder can route a child result into the target
+   * space at graph-construction time. On a miss, the caller records the name as
+   * pending and the runner resolves it via {@link resolveSpaceName} before
+   * re-running the handler/action (see RetryImmediately).
+   */
+  resolveSpaceNameSync(name: string): MemorySpace | undefined {
+    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    return this.spaceNameToDid.get(name);
+  }
+
+  /**
+   * Resolves a named `inSpace` target to a DID, caching the result.
+   *
+   * NOTE(#1): The derivation is intentionally name-based for now — `createSession`
+   * derives the space key from the name alone (the identity is ignored on the
+   * `spaceName` path), so equal names map to the same shared space across users.
+   * This is the deliberate "shared profile space" behaviour today; revisit once
+   * we can derive unique space DIDs from a string.
+   */
+  async resolveSpaceName(name: string): Promise<MemorySpace> {
+    const cached = this.resolveSpaceNameSync(name);
+    if (cached !== undefined) return cached;
+    const session = await createSession({
+      identity: this.storageManager.as as unknown as Identity,
+      spaceName: name,
+    });
+    const did = session.space as MemorySpace;
+    this.spaceNameToDid.set(name, did);
+    return did;
   }
 
   // Convenience methods that delegate to the runner

@@ -18,6 +18,7 @@ import {
   type DiagnosisRecord,
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
+import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
@@ -375,6 +376,14 @@ function finalizeSchedulerAction(
   state.pullDemandedFirstRunComputations.delete(args.action);
   state.pullDemandedContinuationComputations.delete(args.action);
 
+  // A RetryImmediately signal means the action referenced an inSpace("name")
+  // target that has now been resolved into the runtime cache. Abort this run's
+  // transaction and re-run the action so it resolves the name synchronously.
+  if (args.error instanceof RetryImmediately) {
+    rescheduleActionForImmediateRetry(state, args);
+    return;
+  }
+
   try {
     if (args.error) {
       logger.error("schedule-error", () => [
@@ -386,6 +395,34 @@ function finalizeSchedulerAction(
   } finally {
     finalizeReactiveActionCommit(state, args, elapsed);
   }
+}
+
+function rescheduleActionForImmediateRetry(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+    readonly tx: IExtendedStorageTransaction;
+    readonly error?: unknown;
+    readonly resolve: (value: unknown) => void;
+  },
+): void {
+  if (args.tx.status().status === "ready") args.tx.abort(args.error);
+  removeInFlightSource(state.inFlightSourceState, args.action, args.tx.tx);
+  const retries = (state.retries.get(args.action) ?? 0) + 1;
+  state.retries.set(args.action, retries);
+  if (retries < MAX_RETRIES_FOR_REACTIVE) {
+    state.markDirectDirty(args.action);
+    state.pending.add(args.action);
+    state.queueExecution();
+  } else {
+    state.retries.delete(args.action);
+    logger.error(
+      "schedule-error",
+      `Action ${args.actionId} exhausted retries resolving inSpace names`,
+    );
+  }
+  args.resolve(undefined);
 }
 
 function normalizeThrownError(error: unknown): Error {

@@ -112,7 +112,7 @@ describe("Runtime.getSpaceCell", () => {
   });
 
   describe("schema handling", () => {
-    it("should expose defaultPattern and profileSpace in spaceCellSchema by default", () => {
+    it("should expose defaultPattern in spaceCellSchema by default", () => {
       // Verify the default schema structure
       const schema = spaceCellSchema as {
         type: string;
@@ -120,11 +120,7 @@ describe("Runtime.getSpaceCell", () => {
       };
       expect(schema.type).toBe("object");
       expect(schema.properties).toHaveProperty("defaultPattern");
-      expect(schema.properties).toHaveProperty("profileSpace");
       expect(schema.properties.defaultPattern).toHaveProperty("asCell", [
-        "cell",
-      ]);
-      expect(schema.properties.profileSpace).toHaveProperty("asCell", [
         "cell",
       ]);
     });

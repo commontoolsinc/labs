@@ -8,11 +8,7 @@ import {
   toMemorySpaceAddress,
 } from "../src/link-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import {
-  type Cell,
-  createCell,
-  getCellInSpaceAnnotation,
-} from "../src/cell.ts";
+import { type Cell, createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -649,7 +645,7 @@ Deno.test("pattern factory .inSpace() handler side effect can write linked child
   }
 });
 
-Deno.test("pattern factory .inSpace() replaces named annotations with resolved DIDs", async () => {
+Deno.test("pattern factory .inSpace() resolves named handler children to DIDs", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -665,7 +661,6 @@ Deno.test("pattern factory .inSpace() replaces named annotations with resolved D
 
   try {
     const { handler, pattern } = createTrustedBuilder(runtime).commonfabric;
-    let capturedChild: unknown;
 
     const Child = pattern<{ value: string }>(({ value }) => ({ value }));
     const createChild = handler<
@@ -680,9 +675,7 @@ Deno.test("pattern factory .inSpace() replaces named annotations with resolved D
       properties: { target: { asCell: true } },
       required: ["target"],
     }, ({ value }, { target }) => {
-      const child = Child.inSpace(spaceName)({ value });
-      capturedChild = child;
-      target.set(child);
+      target.set(Child.inSpace(spaceName)({ value }));
     });
     const Root = pattern<{ target: Cell<unknown> }>(
       ({ target }) => ({
@@ -724,14 +717,12 @@ Deno.test("pattern factory .inSpace() replaces named annotations with resolved D
     await result.pull();
     await target.pull();
 
-    assertEquals(getCellInSpaceAnnotation(capturedChild), expectedSpace);
-    const childLink = parseLink(
-      (target.getRaw() as { value?: unknown }).value,
-      target,
-    );
+    // The child space is resolved before the handler write lands, so the
+    // target holds a direct link to the child in the resolved space.
+    const childLink = parseLink(target.getRaw(), target);
     assertEquals(childLink?.space, expectedSpace);
     assertEquals(
-      await target.key("value", "value").pull(),
+      await target.key("value").pull(),
       "annotated child" as any,
     );
   } finally {
@@ -818,13 +809,12 @@ Deno.test("pattern factory .inSpace() rewrites named child links through writeon
     await result.pull();
     await target.pull();
 
-    const childLink = parseLink(
-      (target.getRaw() as { value?: unknown }).value,
-      target,
-    );
+    // The child space is resolved before the writeonly handler write lands, so
+    // the target holds a direct link to the child in the resolved space.
+    const childLink = parseLink(target.getRaw(), target);
     assertEquals(childLink?.space, expectedSpace);
     assertEquals(
-      await target.key("value", "value").pull(),
+      await target.key("value").pull(),
       "writeonly child" as any,
     );
   } finally {
