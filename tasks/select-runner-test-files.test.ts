@@ -55,3 +55,36 @@ Deno.test("selectRunnerTestFiles honors explicit weights for slow small files", 
     "slow-small.test.ts",
   ]);
 });
+
+Deno.test("selectRunnerTestFiles spreads slow runner anchors across four shards", () => {
+  const files = [
+    { name: "engine.test.ts", size: 50_000 },
+    { name: "piece-helpers.test.ts", size: 4_000 },
+    { name: "json-utils.test.ts", size: 27_000 },
+    { name: "reactive-dependencies.test.ts", size: 68_000 },
+    { name: "pattern-manager.test.ts", size: 17_000 },
+    { name: "runner.test.ts", size: 56_000 },
+    { name: "wish.test.ts", size: 95_000 },
+    { name: "pattern-scope.test.ts", size: 72_000 },
+    { name: "small-a.test.ts", size: 20_000 },
+    { name: "small-b.test.ts", size: 20_000 },
+    { name: "small-c.test.ts", size: 20_000 },
+    { name: "small-d.test.ts", size: 20_000 },
+  ];
+
+  const shards = [1, 2, 3, 4].map((index) =>
+    selectRunnerTestFiles(files, { index, total: 4 })
+  );
+
+  assertEquals(shards[0].includes("engine.test.ts"), true);
+  assertEquals(shards[1].includes("piece-helpers.test.ts"), true);
+  assertEquals(shards[2].includes("json-utils.test.ts"), true);
+  assertEquals(shards[3].includes("reactive-dependencies.test.ts"), true);
+  assertEquals(
+    shards.some((shard) =>
+      shard.includes("piece-helpers.test.ts") &&
+      shard.includes("json-utils.test.ts")
+    ),
+    false,
+  );
+});
