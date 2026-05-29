@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { type JSONSchema } from "../src/builder/types.ts";
+import { createCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
@@ -253,6 +254,60 @@ describe("link-resolution", () => {
           email: { type: "string" },
         },
       });
+    });
+
+    it("should preserve schema scope caps through intermediate link schemas", () => {
+      const sessionTargetBase = runtime.getCell<string>(
+        space,
+        "intermediate-schema-scope-session-target",
+        { type: "string" },
+        tx,
+      );
+      const sessionTarget = createCell<string>(
+        runtime,
+        {
+          ...sessionTargetBase.getAsNormalizedFullLink(),
+          schema: { type: "string" },
+          scope: "session",
+        },
+        tx,
+      );
+      sessionTarget.set("session private");
+
+      const targetCell = runtime.getCell<any>(
+        space,
+        "intermediate-schema-scope-target",
+        undefined,
+        tx,
+      );
+      targetCell.setRaw({ nested: sessionTarget.getAsLink() });
+
+      const scopedLinkSchema = {
+        type: "object",
+        scope: "user",
+        properties: {
+          nested: { type: "string" },
+        },
+      } as const satisfies JSONSchema;
+      const linkValue = targetCell.getAsLink({ includeSchema: true });
+      linkValue["/"]["link@1"].schema = scopedLinkSchema;
+
+      const sourceCell = runtime.getCell<any>(
+        space,
+        "intermediate-schema-scope-source",
+        undefined,
+        tx,
+      );
+      sourceCell.setRaw({ link: linkValue });
+      tx.commit();
+      tx = runtime.edit();
+
+      const resolved = resolveLink(runtime, tx, {
+        ...sourceCell.getAsNormalizedFullLink(),
+        path: ["link", "nested"],
+      });
+
+      expect(tx.readValueOrThrow(resolved)).toBeUndefined();
     });
 
     it("should preserve schema through write redirects", () => {
