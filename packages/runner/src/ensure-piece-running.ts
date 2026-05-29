@@ -1,14 +1,54 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { TYPE } from "./builder/types.ts";
 import type { Cell } from "./cell.ts";
-import { type NormalizedFullLink, parseLink } from "./link-utils.ts";
+import { getMetaLink, type NormalizedFullLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
-import { syncSourceCellChain } from "./source-cell.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 const logger = getLogger("ensure-piece-running", {
   enabled: false,
   level: "debug",
 });
+
+const MAX_RESULT_LINK_DEPTH = 10;
+
+function cellTraversalKey(cell: Cell<any>): string {
+  const { space, id, path } = cell.getAsNormalizedFullLink();
+  return JSON.stringify([space, id, path]);
+}
+
+function followResultCellChain(
+  runtime: Runtime,
+  rootCell: Cell<any>,
+  tx: IExtendedStorageTransaction,
+): Cell<any> | undefined {
+  let currentCell = rootCell;
+  const visited = new Set<string>();
+  let depth = 0;
+
+  while (true) {
+    const key = cellTraversalKey(currentCell);
+    if (visited.has(key)) {
+      logger.debug("ensure-piece", () => [
+        `Cycle found while following result metadata at ${currentCell.getAsNormalizedFullLink().id}`,
+      ]);
+      return undefined;
+    }
+    visited.add(key);
+
+    const resultLink = getMetaLink(currentCell, "result");
+    if (resultLink === undefined) return currentCell;
+
+    if (depth >= MAX_RESULT_LINK_DEPTH) {
+      logger.debug("ensure-piece", () => [
+        `Exceeded result metadata traversal depth from ${rootCell.getAsNormalizedFullLink().id}`,
+      ]);
+      return undefined;
+    }
+
+    currentCell = runtime.getCellFromLink(resultLink, undefined, tx);
+    depth++;
+  }
+}
 
 /**
  * Ensures the piece responsible for a given storage location is running.
@@ -17,16 +57,14 @@ const logger = getLogger("ensure-piece-running", {
  * runtime.runSynced() on an already-running piece is idempotent - it simply
  * returns without doing anything. This keeps the code simple and stateless.
  *
- * This function traverses the source cell chain to find the root process cell,
- * then starts the piece if it's not already running.
+ * This function follows result metadata from argument/internal cells back to
+ * the root result cell, then starts the piece if it's not already running.
  *
  * The traversal logic:
  * 1. Start with the cell at the cellLink location
- * 2. While getSourceCell() returns something, follow it (this traverses
- *    through linked cells to find the process cell)
- * 3. Once there's no source cell, look at resultRef in the resulting document
- * 4. If resultRef is a link, that's the result cell - call runtime.runSynced()
- *    on it to start the piece
+ * 2. Follow result metadata until it reaches the owning result cell
+ * 3. Read the owning result cell's pattern metadata
+ * 4. Start the existing owning result cell
  *
  * @param runtime - The runtime instance
  * @param cellLink - The location that received an event or should be current
@@ -44,60 +82,33 @@ export async function ensurePieceRunning(
       // Get the cell at the event link location
       const rootCell: Cell<any> = runtime.getCellFromLink(
         // We'll find the piece information at the root of what could be the
-        // process cell already, hence remove the path:
+        // owning result cell already, hence remove the path:
         { ...cellLink, path: [] },
         undefined,
         tx,
       );
-      const currentCell = await syncSourceCellChain(rootCell) ?? rootCell;
 
-      // currentCell is now the process cell (or the original cell if no sources)
-      // Check if it has a resultRef and a TYPE (indicating it's a process cell)
-      const processData = currentCell.getRaw();
+      // If this is an internal/argument/derived cell, find the result cell that
+      // owns the chain.
+      const resultCell = followResultCellChain(runtime, rootCell, tx);
+      if (resultCell === undefined) return false;
 
-      if (!processData || typeof processData !== "object") {
-        logger.debug("ensure-piece", () => [
-          `No process data found at ${currentCell.getAsNormalizedFullLink().id}`,
-        ]);
-        return false;
-      }
-
-      const patternId = (processData as Record<string, unknown>)[TYPE];
-      const resultRef = (processData as Record<string, unknown>).resultRef;
-
+      // If rootCell is a result cell, it will have a pattern
+      const patternId = getMetaLink(resultCell, "pattern")?.id;
       if (!patternId) {
         logger.debug("ensure-piece", () => [
-          `No pattern ID (TYPE) found in process cell`,
+          `No pattern ID (pattern) found in result metadata`,
         ]);
         return false;
       }
-
-      if (!resultRef) {
-        logger.debug("ensure-piece", () => [
-          `No resultRef found in process cell`,
-        ]);
-        return false;
-      }
-
-      // resultRef should be a link to the result cell
-      // Parse it and get the result cell
-      const resultLink = parseLink(resultRef, currentCell);
-      if (!resultLink) {
-        logger.debug("ensure-piece", () => [
-          `Invalid resultRef: ${resultRef}`,
-        ]);
-        return false;
-      }
-
-      const resultCell = runtime.getCellFromLink(resultLink, undefined, tx);
 
       // Commit the read transaction before starting the piece
       runtime.prepareTxForCommit(tx);
       await tx.commit();
 
-      // Load the pattern
+      // Load the pattern from persisted result metadata.
       const pattern = await runtime.patternManager.loadPattern(
-        patternId as string,
+        patternId,
         cellLink.space,
       );
 
@@ -113,7 +124,7 @@ export async function ensurePieceRunning(
       ]);
 
       // Start the existing piece - this registers event handlers without
-      // re-running setup and potentially allocating a different process cell.
+      // re-running setup and potentially allocating different metadata cells.
       await runtime.start(resultCell);
 
       logger.debug("ensure-piece", () => [

@@ -14,6 +14,7 @@ import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getMetaLink } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -25,7 +26,6 @@ describe("Pattern Runner - Lift", () => {
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
-  let TYPE: ReturnType<typeof createBuilder>["commonfabric"]["TYPE"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -41,7 +41,6 @@ describe("Pattern Runner - Lift", () => {
       lift,
       pattern,
       Cell,
-      TYPE,
     } = commonfabric);
   });
 
@@ -153,7 +152,7 @@ describe("Pattern Runner - Lift", () => {
       result2: 6,
     });
 
-    // We mark the process cell dirty, run, then mark the process cell dirty again.
+    // We mark the owning result cell dirty, run, then mark it dirty again.
     expect(runCounts).toMatchObject({
       multiply: 2,
       multiplyGenerator: 1,
@@ -242,7 +241,7 @@ describe("Pattern Runner - Lift", () => {
     expect(errors).toBe(1);
     expect(value.result).toBeUndefined();
 
-    const patternId = piece.getSourceCell()?.get()?.[TYPE];
+    const patternId = getMetaLink(piece, "pattern")?.id;
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
     expect(lastError?.space).toBe(space);
@@ -256,9 +255,6 @@ describe("Pattern Runner - Lift", () => {
     tx = runtime.edit();
 
     value = await piece.pull();
-    expect((piece.getRaw() as any).result.$alias.cell).toEqual(
-      piece.getSourceCell()?.entityId,
-    );
     expect(value).toMatchObject({ result: 5 });
   });
 

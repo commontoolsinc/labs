@@ -44,6 +44,7 @@ const envSchema = z.object({
   // env var to the string `"false"` would incorrectly enable the flag. The
   // other boolean env vars in this file have the same latent bug.
   EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
+  EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(
   //  "did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88",

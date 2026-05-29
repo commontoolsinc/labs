@@ -2,7 +2,6 @@ import {
   Cell,
   computed,
   Default,
-  derive,
   generateText,
   handler,
   NAME,
@@ -69,41 +68,35 @@ Write content personalized to the user when appropriate.`;
         </div>
 
         <cf-cell-context $cell={topic}>
-          {derive(topic, (t) =>
-            t
-              ? (
-                <div style="margin-top: 16px;">
-                  <h3>Topic:</h3>
-                  <blockquote>
-                    {t}
-                  </blockquote>
-                </div>
-              )
-              : null)}
+          {topic.get()
+            ? (
+              <div style="margin-top: 16px;">
+                <h3>Topic:</h3>
+                <blockquote>
+                  {topic.get()}
+                </blockquote>
+              </div>
+            )
+            : null}
         </cf-cell-context>
 
         <cf-cell-context $cell={result}>
-          {derive(
-            [result.pending, result.result],
-            ([pending, r]) =>
-              pending
-                ? (
-                  <div style="margin-top: 16px;">
-                    <cf-loader show-elapsed />{" "}
-                    Generating personalized content...
-                  </div>
-                )
-                : r
-                ? (
-                  <div style="margin-top: 16px;">
-                    <h3>Generated Text:</h3>
-                    <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
-                      {r}
-                    </div>
-                  </div>
-                )
-                : null,
-          )}
+          {result.pending
+            ? (
+              <div style="margin-top: 16px;">
+                <cf-loader show-elapsed /> Generating personalized content...
+              </div>
+            )
+            : result.result
+            ? (
+              <div style="margin-top: 16px;">
+                <h3>Generated Text:</h3>
+                <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
+                  {result.result}
+                </div>
+              </div>
+            )
+            : null}
         </cf-cell-context>
       </div>
     ),

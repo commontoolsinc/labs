@@ -285,6 +285,29 @@ export interface IReadable<T> {
 }
 
 /**
+ * The `pattern` field links a result cell to its pattern
+ * The `argument` field links a result cell to its argument cell
+ * The `internal` field links a result cell to its internal cell for state
+ * The `schema` field stores the schema for a result cell
+ * The `result` field lets a result cell link to its parent result cell,
+ * and also lets the argument and internal cells link back to the result cell.
+ * The cfc code accesses the `cfc` field directly, but I include it here too.
+ */
+export type MetaField =
+  | "pattern"
+  | "argument"
+  | "internal"
+  | "schema"
+  | "result" // this lets us get from internal/argument back to result
+  | "slug"
+  | "cfc";
+
+export interface IMetaCell {
+  getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
+  setMetaRaw(metaField: MetaField, value: FabricValue): void;
+}
+
+/**
  * Writable cells can update their value.
  *
  * **Frozenness contract (modern data model only):** Values passed into
@@ -1042,6 +1065,7 @@ export interface ICell<T>
     IEquatable,
     IKeyable<T, AsCell>,
     IDerivable<T>,
+    IMetaCell,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
@@ -1437,9 +1461,6 @@ export type AsCellType = AsCellEntry;
 // See https://json-schema.org/draft/2020-12/json-schema-validation
 // There is a lot of potential validation that is not handled, but this object
 // is defined to support them, so that generated schemas will still be usable.
-// TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
-// This is particularly useful for specifying the schema of a property.
-// That will require reworking some things, so for now, I'm not doing it
 export type JSONSchema = JSONSchemaObj | boolean;
 
 export type JSONSchemaObj = {
@@ -1934,6 +1955,17 @@ export interface LiftFunction {
   <T extends (...args: any[]) => any>(
     implementation: T,
   ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
+
+  // Two-arg form: lift(argumentSchema, fn). Listed before the all-optional
+  // catch-all so `lift(false, fn)` resolves here (fn in slot 2) instead of
+  // matching the catch-all and rejecting fn as a resultSchema. The transformer
+  // emits no-input (computed-origin) lifts as `lift(false, fn)()`:
+  // argumentSchema:false keeps the no-input application valid (the runner's
+  // isValidArgument check passes on `argumentSchema === false`).
+  <T, R>(
+    argumentSchema: JSONSchema,
+    implementation: (input: T) => R,
+  ): ModuleFactory<StripCell<T>, StripCell<R>>;
 
   <T, R>(
     argumentSchema?: JSONSchema,

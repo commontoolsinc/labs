@@ -37,7 +37,7 @@ describe("FabricError", () => {
   });
 
   describe("constructor()", () => {
-    it("wraps the Error's `FabricValue`-shaped state", () => {
+    it("wraps the `Error`'s `FabricValue`-shaped state", () => {
       const err = new TypeError("bad");
       const se = FabricError.fromNativeError(err);
       expect(se.type).toBe("TypeError");
@@ -72,7 +72,7 @@ describe("FabricError", () => {
 
   describe("instance members", () => {
     describe("[DECONSTRUCT]", () => {
-      it("returns type, name=null (common case), message, stack", () => {
+      it("returns `type`, `name=null` (common case), `message`, `stack`", () => {
         const se = FabricError.fromNativeError(new Error("hello"));
         const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
         expect(state.type).toBe("Error");
@@ -81,14 +81,14 @@ describe("FabricError", () => {
         expect(typeof state.stack).toBe("string");
       });
 
-      it("sets name to null when type === name (TypeError)", () => {
+      it("sets `name` to `null` when `type === name` (`TypeError`)", () => {
         const se = FabricError.fromNativeError(new TypeError("bad"));
         const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
         expect(state.type).toBe("TypeError");
         expect(state.name).toBe(null);
       });
 
-      it("sets name non-null when type !== name", () => {
+      it("sets `name` non-null when `type !== name`", () => {
         const err = new TypeError("bad");
         err.name = "CustomName";
         const se = FabricError.fromNativeError(err);
@@ -148,7 +148,7 @@ describe("FabricError", () => {
         expect("stack" in state).toBe(false);
       });
 
-      it("round-trips through [DECONSTRUCT]/[RECONSTRUCT]", () => {
+      it("round-trips through `[DECONSTRUCT]`/`[RECONSTRUCT]`", () => {
         const original = new Error("round trip");
         original.name = "CustomError";
         (original as unknown as Record<string, unknown>).code = 42;
@@ -162,7 +162,7 @@ describe("FabricError", () => {
         expect(restored.getExtra("code")).toBe(42);
       });
 
-      it("round-trips a TypeError with overridden name", () => {
+      it("round-trips a `TypeError` with overridden `name`", () => {
         const original = new TypeError("bad value");
         original.name = "SpecialType";
         const se = FabricError.fromNativeError(original);
@@ -181,7 +181,7 @@ describe("FabricError", () => {
     });
 
     describe("toNativeValue()", () => {
-      it("returns a frozen Error projection when `frozen` is true", () => {
+      it("returns a frozen `Error` projection when `frozen` is `true`", () => {
         const err = new Error("native");
         const se = FabricError.fromNativeError(err);
         const result = se.toNativeValue(true);
@@ -204,7 +204,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(a)).toBe(true);
       });
 
-      it("returns a fresh unfrozen Error projection when `frozen` is false", () => {
+      it("returns a fresh unfrozen `Error` projection when `frozen` is `false`", () => {
         const se = FabricError.fromNativeError(new Error("native"));
         const result = se.toNativeValue(false);
         expect(result).toBeInstanceOf(Error);
@@ -212,7 +212,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("returns a fresh copy each call when `frozen` is false", () => {
+      it("returns a fresh copy each call when `frozen` is `false`", () => {
         const se = FabricError.fromNativeError(new Error("native"));
         const a = se.toNativeValue(false);
         const b = se.toNativeValue(false);
@@ -222,7 +222,7 @@ describe("FabricError", () => {
     });
 
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: [DEEP_FREEZE] freezes wrapper + recurses cause", () => {
+      it("via dispatch: `[DEEP_FREEZE]` freezes wrapper + recurses cause", () => {
         const inner = FabricError.fromNativeError(new Error("cause"));
         const fe = FabricError.fromNativeError(
           new Error("outer", { cause: inner }),
@@ -233,7 +233,7 @@ describe("FabricError", () => {
         expect(isDeepFrozen(inner)).toBe(true);
       });
 
-      it("via dispatch: [DEEP_FREEZE] recurses enumerable custom props (preserved via extras)", () => {
+      it("via dispatch: `[DEEP_FREEZE]` recurses enumerable custom props (preserved via extras)", () => {
         const err = new Error("e");
         const childObj = { nested: 1 };
         (err as unknown as Record<string, unknown>).custom = childObj;
@@ -244,7 +244,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(childObj)).toBe(true);
       });
 
-      it("via dispatch: [IS_DEEP_FROZEN] true only when wrapper + cause are frozen", () => {
+      it("via dispatch: `[IS_DEEP_FROZEN]` is `true` only when wrapper + cause are frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(isDeepFrozenFabricValue(fe)).toBe(false);
         Object.freeze(fe); // wrapper only; some descendants still mutable
@@ -254,7 +254,7 @@ describe("FabricError", () => {
         expect(isDeepFrozenFabricValue(fe)).toBe(true);
       });
 
-      it("via direct member invocation: [DEEP_FREEZE] freezes wrapper + recurses cause", () => {
+      it("via direct member invocation: `[DEEP_FREEZE]` freezes wrapper + recurses cause", () => {
         const inner = FabricError.fromNativeError(new Error("cause"));
         const fe = FabricError.fromNativeError(
           new Error("outer", { cause: inner }),
@@ -265,7 +265,7 @@ describe("FabricError", () => {
         expect(isDeepFrozen(inner)).toBe(true);
       });
 
-      it("via direct member invocation: [DEEP_FREEZE] recurses enumerable custom props (preserved via extras)", () => {
+      it("via direct member invocation: `[DEEP_FREEZE]` recurses enumerable custom props (preserved via extras)", () => {
         const err = new Error("e");
         const childObj = { nested: 1 };
         (err as unknown as Record<string, unknown>).custom = childObj;
@@ -276,7 +276,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(childObj)).toBe(true);
       });
 
-      it("via direct member invocation: [IS_DEEP_FROZEN] true only when wrapper is frozen", () => {
+      it("via direct member invocation: `[IS_DEEP_FROZEN]` is `true` only when wrapper is frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fe[DEEP_FREEZE](subFreeze);
@@ -287,7 +287,7 @@ describe("FabricError", () => {
 
   describe("static members", () => {
     describe("[RECONSTRUCT]", () => {
-      it("creates a FabricError from state (null name = same as type)", () => {
+      it("creates a `FabricError` from state (null `name` = same as `type`)", () => {
         const state = {
           type: "Error",
           name: null,
@@ -300,7 +300,7 @@ describe("FabricError", () => {
         expect(result.message).toBe("hello");
       });
 
-      it("creates the correct Error subclass from type (null name)", () => {
+      it("creates the correct `Error` subclass from `type` (null `name`)", () => {
         const cases: [string, ErrorConstructor][] = [
           ["TypeError", TypeError],
           ["RangeError", RangeError],
@@ -317,7 +317,7 @@ describe("FabricError", () => {
         }
       });
 
-      it("handles type != name (e.g. TypeError with custom name)", () => {
+      it("handles `type != name` (e.g. `TypeError` with custom `name`)", () => {
         const state = {
           type: "TypeError",
           name: "CustomTypeName",
@@ -328,7 +328,7 @@ describe("FabricError", () => {
         expect(result.name).toBe("CustomTypeName");
       });
 
-      it("falls back to name when type is absent (back-compat)", () => {
+      it("falls back to `name` when `type` is absent (back-compat)", () => {
         const state = {
           name: "TypeError",
           message: "old format",
@@ -337,7 +337,7 @@ describe("FabricError", () => {
         expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
       });
 
-      it("handles a custom name", () => {
+      it("handles a custom `name`", () => {
         const state = {
           type: "Error",
           name: "MyCustomError",

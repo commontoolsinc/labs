@@ -230,26 +230,35 @@ entity), it:
 
 This mirrors the `followPointer` function from `traverse.ts`.
 
-#### Source / Provenance Resolution
+#### Metadata / Provenance Resolution
 
-In addition to schema-directed references, traversal MUST load provenance
-documents via the `source` sibling on an entity document.
+In addition to schema-directed references, traversal MUST load provenance and
+runtime metadata documents via top-level metadata links on an entity document.
 
 When the server loads any document during query evaluation, it MUST inspect the
-top-level document object for:
+top-level document object for metadata links such as:
 
 ```json
-{ "source": { "/": "<short-id>" } }
+{
+  "pattern": { "/": { "link@1": { "id": "of:pattern-abc", "path": [] } } },
+  "argument": { "/": { "link@1": { "id": "of:argument-def", "path": [] } } },
+  "internal": { "/": { "link@1": { "id": "of:internal-ghi", "path": [] } } },
+  "result": { "/": { "link@1": { "id": "of:result-jkl", "path": [] } } }
+}
 ```
 
-If present, the server resolves that short link to `of:<short-id>` in the same
-space, loads that document, adds it to the query result and watch tracker, and
-then repeats the same `source` check on the loaded document. This continues
-until a document without `source` is reached or a cycle is detected.
+The `pattern`, `argument`, `internal`, and `result` fields use the same sigil
+link form as ordinary cell references. The `cfc` metadata field is the exception:
+it uses a compact metadata object, and traversal converts its `schemaHash` into a
+CID sigil link before loading the referenced document. If present, the server
+resolves each metadata link, loads that document, adds it to the query result and
+watch tracker, and then repeats the same metadata-link check on the loaded
+document. This continues until a document without metadata links is reached or a
+cycle is detected.
 
 This behavior is not optional provenance decoration. It is part of the query
-result shape, mirroring `loadSource()` in `traverse.ts`, and is required for
-piece/process/source-cell flows to reconstruct the full lineage of a result
+result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts`, and is required
+for piece execution metadata to reconstruct the full lineage of a result
 document.
 
 ### 5.3.3 Cycle Detection
@@ -380,8 +389,8 @@ Given a `SchemaQuery`, the server:
    rules as simple queries).
 3. For each root entity: a. Loads the entity's current value. b. Runs the schema
    traversal algorithm (5.3.2), which recursively loads and filters linked
-   entities. c. For every loaded document, recursively loads any `source`
-   lineage documents (5.3.2 Source / Provenance Resolution). d. Records all
+   entities. c. For every loaded document, recursively loads any metadata-linked
+   lineage documents (5.3.2 Metadata / Provenance Resolution). d. Records all
    visited entities in the schema tracker.
 4. Collects all visited entities and their values into the result `FactSet`.
 5. Returns the `FactSet` along with the schema tracker (for watch setup).
@@ -711,14 +720,17 @@ Example:
 }
 ```
 
-`EntityDocument.source` uses a separate short-link format:
+`EntityDocument.source`, where older documents still use it, has a separate
+short-link format:
 
 ```json
 { "source": { "/": "bafy...shortId" } }
 ```
 
-This is resolved as `of:<shortId>` in the same space (see `traverse.ts`
-`loadSource()`).
+This is not the form used by current piece metadata fields such as `pattern`,
+`argument`, `internal`, and `result`; those fields use sigil links, and current
+metadata traversal follows `cfc`, `result`, `pattern`, `argument`, and
+`internal`.
 
 ### 5.10.2 Link Resolution
 
@@ -730,10 +742,9 @@ Given a sigil link, the traverser:
 4. Applies `path` on the target and continues traversal with narrowed schema
    context (see 5.3.4 Schema Narrowing).
 
-Given a source short-link, traversal resolves `{"/":"<short-id>"}` to
-`of:<short-id>` in the current space, includes that document in the result, and
-then continues following `source` on the loaded document until the chain ends or
-a cycle is detected.
+Current metadata traversal handles the top-level metadata fields described in
+5.3.2. Source short-links are a separate compatibility shape and should not be
+used as the example format for piece metadata ownership links.
 
 ### 5.10.3 Entity ID References
 

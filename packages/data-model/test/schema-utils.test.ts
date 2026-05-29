@@ -23,18 +23,18 @@ import { internSchema, isInternedSchema } from "../src/schema-hash.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
-    it("boolean true is returned as-is", () => {
+    it("boolean `true` is returned as-is", () => {
       const result = toDeepFrozenSchema(true, false);
       expect(result).toBe(true);
     });
 
-    it("boolean false is returned as-is", () => {
+    it("boolean `false` is returned as-is", () => {
       const result = toDeepFrozenSchema(false, true);
       expect(result).toBe(false);
     });
   });
 
-  describe("canShare=true", () => {
+  describe("`canShare=true`", () => {
     it("freezes input in place", () => {
       const originalProperties = {
         name: { type: "string" } as JSONSchemaObj,
@@ -71,7 +71,7 @@ describe("toDeepFrozenSchema", () => {
     });
   });
 
-  describe("canShare=false", () => {
+  describe("`canShare=false`", () => {
     it("clones before freezing", () => {
       const schema: JSONSchemaObj = {
         type: "object",
@@ -222,7 +222,7 @@ describe("toDeepFrozenSchema", () => {
       expect(result).toBe(schema);
     });
 
-    it("returns an interned schema as-is even with canShare=false", () => {
+    it("returns an interned schema as-is even with `canShare=false`", () => {
       const schema = internSchema({
         type: "object",
         properties: { x: { type: "number" } },
@@ -240,7 +240,7 @@ describe("toDeepFrozenSchema", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("already-deep-frozen returns same reference (canShare=true)", () => {
+    it("already-deep-frozen returns same reference (`canShare=true`)", () => {
       const schema: JSONSchemaObj = deepFreeze({
         type: "object",
         properties: { name: { type: "string" } },
@@ -250,7 +250,7 @@ describe("toDeepFrozenSchema", () => {
       expect(result).toBe(schema);
     });
 
-    it("already-deep-frozen returns same reference (canShare=false)", () => {
+    it("already-deep-frozen returns same reference (`canShare=false`)", () => {
       const schema: JSONSchemaObj = deepFreeze({
         type: "object",
         properties: { age: { type: "number" } },
@@ -260,7 +260,7 @@ describe("toDeepFrozenSchema", () => {
       expect(result).toBe(schema);
     });
 
-    it("frozen but not deep-frozen schema is shallow-cloned even with canShare=true", () => {
+    it("frozen but not deep-frozen schema is shallow-cloned even with `canShare=true`", () => {
       const inner = { type: "string" } as JSONSchemaObj;
       const schema: JSONSchemaObj = Object.freeze({
         type: "object",
@@ -313,37 +313,37 @@ describe("toDeepFrozenSchema", () => {
 
 describe("isNontrivialSchema", () => {
   describe("nullish inputs", () => {
-    it("returns false for undefined", () => {
+    it("returns `false` for `undefined`", () => {
       expect(isNontrivialSchema(undefined)).toBe(false);
     });
 
-    it("returns false for null", () => {
+    it("returns `false` for `null`", () => {
       expect(isNontrivialSchema(null)).toBe(false);
     });
   });
 
   describe("boolean schemas", () => {
-    it("returns false for true", () => {
+    it("returns `false` for `true`", () => {
       expect(isNontrivialSchema(true)).toBe(false);
     });
 
-    it("returns false for false", () => {
+    it("returns `false` for `false`", () => {
       expect(isNontrivialSchema(false)).toBe(false);
     });
   });
 
   describe("empty object schema", () => {
-    it("returns false for {}", () => {
+    it("returns `false` for `{}`", () => {
       expect(isNontrivialSchema({})).toBe(false);
     });
   });
 
   describe("non-trivial schemas", () => {
-    it("returns true for a schema with type", () => {
+    it("returns `true` for a schema with `type`", () => {
       expect(isNontrivialSchema({ type: "string" })).toBe(true);
     });
 
-    it("returns true for a schema with properties", () => {
+    it("returns `true` for a schema with `properties`", () => {
       const schema: JSONSchemaObj = {
         type: "object",
         properties: { name: { type: "string" } },
@@ -351,22 +351,22 @@ describe("isNontrivialSchema", () => {
       expect(isNontrivialSchema(schema)).toBe(true);
     });
 
-    it("returns true for a schema with only $ref", () => {
+    it("returns `true` for a schema with only `$ref`", () => {
       expect(isNontrivialSchema({ $ref: "#/definitions/Foo" })).toBe(true);
     });
 
-    it("returns true for a schema with anyOf", () => {
+    it("returns `true` for a schema with `anyOf`", () => {
       expect(
         isNontrivialSchema({ anyOf: [{ type: "string" }, { type: "number" }] }),
       ).toBe(true);
     });
 
-    it("returns true for a frozen non-empty schema", () => {
+    it("returns `true` for a frozen non-empty schema", () => {
       const schema = Object.freeze({ type: "number" as const });
       expect(isNontrivialSchema(schema)).toBe(true);
     });
 
-    it("returns true for a deep-frozen schema", () => {
+    it("returns `true` for a deep-frozen schema", () => {
       const schema: JSONSchemaObj = deepFreeze({
         type: "object",
         properties: { x: { type: "number" } },
@@ -376,7 +376,7 @@ describe("isNontrivialSchema", () => {
   });
 
   describe("type narrowing", () => {
-    it("narrows to JSONSchemaObj (allows property access)", () => {
+    it("narrows to `JSONSchemaObj` (allows property access)", () => {
       const schema: JSONSchemaObj | undefined = {
         type: "object",
         properties: { a: { type: "string" } },
@@ -392,15 +392,15 @@ describe("isNontrivialSchema", () => {
 });
 
 describe("cloneSchemaMutable", () => {
-  it("returns {} for boolean true", () => {
+  it("returns `{}` for boolean `true`", () => {
     expect(cloneSchemaMutable(true)).toEqual({});
   });
 
-  it("returns { not: true } for boolean false", () => {
+  it("returns `{ not: true }` for boolean `false`", () => {
     expect(cloneSchemaMutable(false)).toEqual({ not: true });
   });
 
-  it("returns {} for undefined", () => {
+  it("returns `{}` for `undefined`", () => {
     const result = cloneSchemaMutable(undefined);
     expect(result).toEqual({});
   });
@@ -423,7 +423,7 @@ describe("cloneSchemaMutable", () => {
     expect(result.properties).toBe(schema.properties);
   });
 
-  it("returns a deep copy when deep=true", () => {
+  it("returns a deep copy when `deep=true`", () => {
     const inner: JSONSchemaObj = { type: "string" };
     const schema: JSONSchemaObj = {
       type: "object",
@@ -441,7 +441,7 @@ describe("cloneSchemaMutable", () => {
     expect(result.properties).not.toBe(schema.properties);
   });
 
-  it("result is deeply mutable when deep=true", () => {
+  it("result is deeply mutable when `deep=true`", () => {
     const schema: JSONSchemaObj = {
       type: "object",
       properties: { x: { type: "number" } },
@@ -488,7 +488,7 @@ describe("cloneSchemaMutable", () => {
     expect(Object.isFrozen(result.properties)).toBe(false);
   });
 
-  it("handles schema with arrays (anyOf) when deep=true", () => {
+  it("handles schema with arrays (`anyOf`) when `deep=true`", () => {
     const schema: JSONSchemaObj = {
       anyOf: [{ type: "string" }, { type: "number" }],
     };
@@ -528,7 +528,7 @@ describe("schemaWithProperties", () => {
     expect(schema.type).toBe("string");
   });
 
-  it("can set properties to undefined (key remains present)", () => {
+  it("can set properties to `undefined` (key remains present)", () => {
     const schema = { type: "object", asStream: true } as JSONSchemaObj;
     const result = schemaWithProperties(schema, {
       asStream: undefined,
@@ -579,7 +579,7 @@ describe("schemaWithProperties", () => {
     expect(Object.isFrozen(result.properties)).toBe(true);
   });
 
-  it("distinguishes undefined-valued key from absent key", () => {
+  it("distinguishes `undefined`-valued key from absent key", () => {
     // A schema with no `description` key at all.
     const schema: JSONSchemaObj = { type: "string" };
     expect("description" in schema).toBe(false);
@@ -642,7 +642,7 @@ describe("schemaWithProperties", () => {
     });
   });
 
-  describe("for `schema = false\`", () => {
+  describe("for `schema = false`", () => {
     for (const overrides of [false, true, { type: "string" } as JSONSchema]) {
       const label = (typeof overrides === "boolean")
         ? `\`overrides = ${overrides}\``
@@ -654,7 +654,7 @@ describe("schemaWithProperties", () => {
     }
   });
 
-  describe("for `overrides = false\`", () => {
+  describe("for `overrides = false`", () => {
     for (const schema of [false, true, { type: "string" } as JSONSchema]) {
       const label = (typeof schema === "boolean")
         ? `\`schema = ${schema}\``
@@ -746,15 +746,15 @@ describe("schemaWithoutProperties", () => {
     expect(result).toBe(schema);
   });
 
-  it("treats undefined as true (accept everything)", () => {
+  it("treats `undefined` as `true` (accept everything)", () => {
     expect(schemaWithoutProperties(undefined, "asCell")).toBe(true);
   });
 
-  it("returns boolean true as-is", () => {
+  it("returns boolean `true` as-is", () => {
     expect(schemaWithoutProperties(true, "asCell")).toBe(true);
   });
 
-  it("returns boolean false as-is", () => {
+  it("returns boolean `false` as-is", () => {
     expect(schemaWithoutProperties(false, "asCell")).toBe(false);
   });
 
@@ -814,14 +814,14 @@ describe("schemaForValueType", () => {
   testType("array", [1, 2, 3]);
   testType("object", { a: 1 });
 
-  describe("undefined", () => {
-    it("returns undefined", () => {
+  describe("`undefined`", () => {
+    it("returns `undefined`", () => {
       expect(schemaForValueType(undefined)).toBe(undefined);
     });
   });
 
-  describe("bigint", () => {
-    it("returns undefined", () => {
+  describe("`bigint`", () => {
+    it("returns `undefined`", () => {
       expect(schemaForValueType(BigInt(42))).toBe(undefined);
     });
   });

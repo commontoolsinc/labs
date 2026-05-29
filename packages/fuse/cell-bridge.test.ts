@@ -776,6 +776,87 @@ Deno.test("CellBridge.prepareLookup hydrates result.json on direct lookup", asyn
   );
 });
 
+Deno.test("CellBridge.hydratePieceProp renders link-backed handlers only at discovered callable entries", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const handlerLink = {
+    "/": {
+      "link@1": {
+        path: ["recordMessage"],
+        id: "of:handler-target",
+        space: "did:key:zTest",
+      },
+    },
+  };
+  const nestedValue = { recordMessage: { text: "not callable" } };
+  const handlerCell: FakeCell = {
+    schema: { type: "object" },
+    get: () => handlerLink,
+    getRaw: () => ({ $stream: true }),
+    asSchemaFromLinks() {
+      return this;
+    },
+    key: () => makeCell(undefined, undefined),
+    sink: () => () => {},
+    isStream: () => true,
+  };
+  const resultCell = makeCell(
+    { recordMessage: handlerLink, nested: nestedValue },
+    {
+      type: "object",
+      properties: {
+        recordMessage: { type: "object" },
+        nested: { type: "object" },
+      },
+    },
+    {
+      recordMessage: handlerCell,
+      nested: makeCell(nestedValue, { type: "object" }),
+    },
+  );
+
+  const piece = {
+    id: "of:entity-link-handler",
+    name: () => "Link Handler",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell),
+      get: () =>
+        Promise.resolve({
+          recordMessage: handlerLink,
+          nested: nestedValue,
+        }),
+    },
+  };
+
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Link-Handler", "home");
+  const hydrated = await (bridge as unknown as {
+    hydratePieceProp: HydratePieceProp;
+  }).hydratePieceProp(pieceIno, "result");
+
+  assertEquals(hydrated, true);
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(
+    tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
+    true,
+  );
+
+  const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
+  assertEquals(resultJson.recordMessage, { "/handler": "recordMessage" });
+  assertEquals(resultJson.nested.recordMessage, { text: "not callable" });
+  assertEquals(
+    JSON.parse(getFileContent(tree, resultIno!, "nested.json")).recordMessage,
+    { text: "not callable" },
+  );
+});
+
 Deno.test("CellBridge.hydratePieceProp materializes input and result on demand", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");

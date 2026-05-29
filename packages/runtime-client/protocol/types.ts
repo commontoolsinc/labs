@@ -15,6 +15,7 @@ import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
+import type { MetaField } from "@commonfabric/api";
 export type { JSONSchema, JSONValue, Program };
 
 export type { CfcLabelView };
@@ -131,6 +132,7 @@ export interface InitializationData {
   // Experimental space-model feature flags.
   experimental?: {
     modernDataModel?: boolean;
+    persistentSchedulerState?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -162,6 +164,7 @@ export interface DisposeRequest extends BaseRequest {
 export interface CellGetRequest extends BaseRequest {
   type: RequestType.CellGet;
   cell: CellRef;
+  meta?: MetaField;
 }
 
 export interface CellSetRequest extends BaseRequest {

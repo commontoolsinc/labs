@@ -18,6 +18,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import {
+  buildKnownSchedulingWrites,
   deriveDeclaredAncestorWrites,
   deriveDynamicCollectionParentWrites,
 } from "../src/scheduler/scheduling-writes.ts";
@@ -218,6 +219,36 @@ describe("push-triggered filtering", () => {
     expect(runtime.scheduler.getMightWrite(action)).toEqual([
       toMemorySpaceAddress(declaredWrite),
     ]);
+  });
+
+  it("should keep declared writes when a run only writes metadata", () => {
+    const declaredWrite = scopedAddress("user", [
+      "value",
+      "currentUserIsAdmin",
+    ]);
+    const metadataWrite = scopedAddress("user", ["cfc"]);
+
+    const { newCurrentKnownWrites } = buildKnownSchedulingWrites({
+      writes: [metadataWrite],
+      declaredWrites: [declaredWrite],
+      existingCurrentWrites: [],
+      existingHistoricalWrites: [],
+    });
+
+    expect(
+      newCurrentKnownWrites.some((write) =>
+        write.scope === declaredWrite.scope &&
+        write.id === declaredWrite.id &&
+        write.path.join("/") === declaredWrite.path.join("/")
+      ),
+    ).toBe(true);
+    expect(
+      newCurrentKnownWrites.some((write) =>
+        write.scope === metadataWrite.scope &&
+        write.id === metadataWrite.id &&
+        write.path.join("/") === metadataWrite.path.join("/")
+      ),
+    ).toBe(true);
   });
 
   it("should not broaden current-known writes to structural parent paths", async () => {

@@ -106,6 +106,10 @@ export class ShellIntegration {
     await login(this.page(), identity);
   }
 
+  async disposeRuntime(): Promise<void> {
+    await this.#disposePageRuntime();
+  }
+
   // Wait for the app state to match all properties
   // provided here. Throws if timeout is reached.
   //
@@ -187,7 +191,9 @@ export class ShellIntegration {
 
   #afterEach = () => {
     if (this.#exceptions.length > 0) {
-      throw new Error(`Exceptions recorded: \n${this.#exceptions.join("\n")}`);
+      throw new Error(
+        `Exceptions recorded: \n${this.#exceptions.join("\n")}`,
+      );
     }
     if (this.#config.failOnConsoleError && this.#errorLogs.length > 0) {
       throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
@@ -195,12 +201,28 @@ export class ShellIntegration {
   };
 
   #afterAll = async () => {
+    await this.#disposePageRuntime();
     await this.#page?.close();
     await this.#browser?.close();
   };
 
   private checkIsOk() {
     if (!this.#page) throw new Error("Page not initialized.");
+  }
+
+  async #disposePageRuntime(): Promise<void> {
+    const page = this.#page;
+    if (!page) return;
+    try {
+      await page.evaluate(async () => {
+        await globalThis.commonfabric?.rt?.dispose();
+        if (globalThis.commonfabric) {
+          globalThis.commonfabric.rt = undefined;
+        }
+      });
+    } catch (error) {
+      console.warn("Failed to dispose shell page runtime:", error);
+    }
   }
 
   #attachPage(page: Page) {

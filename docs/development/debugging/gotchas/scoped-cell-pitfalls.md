@@ -93,7 +93,57 @@ by always running an action before the first assertion. Follow the same
 pattern: structure the test as a sequence of `{ action }, { assertion }` pairs
 and skip the pre-action sanity check.
 
-## 5. `Math.random()` throws under SES
+## 5. `scopedCell.get().map()` in a render computed throws until first sync — guard with `?? []`
+
+**Symptom:** On a fresh space/session, a console **storm** of
+`TypeError: Cannot read properties of undefined (reading 'map')` (often 100s,
+re-thrown on every settle wave), and a whole section of UI silently fails to
+render — including controls (Edit/Remove buttons, pickers) that should be there.
+No single clear culprit; the error points at minified runtime frames.
+
+**Cause:** A scoped cell's `.get()` returns `undefined` **until its first sync
+settles** (the render-path counterpart of pitfall #4). A render-path `computed`
+that chains an array method straight off it then throws:
+
+```typescript
+// WRONG — throws while pendingVehicles (perSession) / people (perSpace) is
+// still undefined before the first sync; the throw repeats every settle wave.
+const rows = computed(() => pendingVehicles.get().map((v) => …));
+const sorted = computed(() => [...people.get()].sort(…));      // "not iterable"
+const active = computed(() => spots.get().filter((s) => s.active)); // "reading filter"
+```
+
+This bites **perSession** cells hardest (they reliably read `undefined` before
+sync) but also **perSpace** on a cold space. A throwing **per-row** computed
+inside a `.map()` (e.g. `activeSpotOpts = computed(() => spots.get().filter(…))`)
+crashes that row's card, which is why its inline controls never appear.
+
+```typescript
+// CORRECT — guard every render-path scoped read.
+const rows = computed(() => (pendingVehicles.get() ?? []).map((v) => …));
+const sorted = computed(() => [...(people.get() ?? [])].sort(…));
+const active = computed(() => (spots.get() ?? []).filter((s) => s.active));
+```
+
+Note `Default<[]>` on the input type is **not** sufficient — the default hasn't
+hydrated yet at the moment the computed first runs, so the `?? []` guard is still
+required (this is why pitfall #4's "run an action first" trick works for tests
+but render code can't). Handlers/actions run in a settled context, so the same
+chained reads there are usually safe; the danger is the always-evaluating render
+computeds. Fixed across `packages/patterns/factory-outputs/parking-coordinator/main.tsx`.
+
+⚠️ **Don't take this `?? []` recipe into a NESTED `.map()`.** Inside an outer
+`rows.map((row) => …)`, an inner `(cellCall() ?? []).map((el) => …)` whose
+inner closure references any pattern-scope cell aborts pattern construction —
+this is a *different* gotcha (the ts-transformer doesn't recognize binary-
+expression receivers wrapping a reactive call, so no `mapWithPattern`
+rewrite happens). The very guard that's correct at the top level is the thing
+that breaks it nested. See
+[closure-capture-in-nested-map.md](./closure-capture-in-nested-map.md) for
+the three idiomatic alternatives (map the cell directly; pre-bake into a
+top-level `computed`; explicit `derive({deps}, …)` per row).
+
+## 6. `Math.random()` throws under SES
 
 **Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
 handler runs.

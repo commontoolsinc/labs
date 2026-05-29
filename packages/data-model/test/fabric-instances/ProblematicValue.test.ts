@@ -30,7 +30,7 @@ describe("ProblematicValue", () => {
 
   describe("instance members", () => {
     describe("[DECONSTRUCT]", () => {
-      it("returns the type-tagged state and error", () => {
+      it("returns the type-tagged `state` and `error`", () => {
         const ps = new ProblematicValue("T@1", "s", "e");
         expect(ps[DECONSTRUCT]()).toEqual({
           type: "T@1",

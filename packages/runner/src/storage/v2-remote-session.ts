@@ -57,11 +57,17 @@ class WebSocketTransport implements MemoryClient.Transport {
     if (!socket || socket.readyState === WebSocket.CLOSED) {
       return;
     }
-    socket.close();
-    await new Promise<void>((resolve) => {
+    const closed = new Promise<void>((resolve) => {
       socket.addEventListener("close", () => resolve(), { once: true });
       socket.addEventListener("error", () => resolve(), { once: true });
     });
+    if (
+      socket.readyState === WebSocket.CONNECTING ||
+      socket.readyState === WebSocket.OPEN
+    ) {
+      socket.close();
+    }
+    await closed;
   }
 
   private async open(): Promise<WebSocket> {
@@ -72,10 +78,12 @@ class WebSocketTransport implements MemoryClient.Transport {
       return await this.#opening;
     }
     const address = toWebSocketAddress(this.address);
-    this.#opening = new Promise<WebSocket>((resolve, reject) => {
+    const opening = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(address);
+      this.#socket = socket;
+      let opened = false;
       socket.addEventListener("open", () => {
-        this.#socket = socket;
+        opened = true;
         resolve(socket);
       }, { once: true });
       socket.addEventListener("message", (event) => {
@@ -84,13 +92,24 @@ class WebSocketTransport implements MemoryClient.Transport {
         }
       });
       socket.addEventListener("close", () => {
-        this.#socket = null;
-        this.#opening = null;
+        if (this.#socket === socket) {
+          this.#socket = null;
+        }
+        if (this.#opening === opening) {
+          this.#opening = null;
+        }
         this.#closeReceiver();
+        if (!opened) {
+          reject(new Error("memory websocket transport closed before opening"));
+        }
       });
       socket.addEventListener("error", (event) => {
-        this.#socket = null;
-        this.#opening = null;
+        if (this.#socket === socket) {
+          this.#socket = null;
+        }
+        if (this.#opening === opening) {
+          this.#opening = null;
+        }
         this.#closeReceiver(
           event instanceof ErrorEvent && event.error instanceof Error
             ? event.error
@@ -99,6 +118,7 @@ class WebSocketTransport implements MemoryClient.Transport {
         reject(event);
       }, { once: true });
     });
+    this.#opening = opening;
     return await this.#opening;
   }
 }

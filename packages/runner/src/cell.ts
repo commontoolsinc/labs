@@ -10,9 +10,9 @@ import {
   FabricInstance,
   type FabricValue,
   getDataModelConfig,
-  isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
@@ -45,7 +45,6 @@ import {
   SELF,
   type Stream,
   type StripDefaultBrand,
-  TYPE,
 } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
 import { isOpaqueRefMarker } from "./builder/types.ts";
@@ -56,7 +55,7 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   type Action,
   ignoreReadForScheduling,
@@ -100,6 +99,7 @@ import { isCellScope, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
+  IMemorySpaceAddress,
   IReadOptions,
 } from "./storage/interface.ts";
 import {
@@ -121,12 +121,23 @@ import { flowPrecisionSchemaForBuiltin } from "./cfc/flow-precision.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { MetaField } from "@commonfabric/api";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
+};
+
+export type RawCellReadOptions = IReadOptions & {
+  /**
+   * Controls whether `getRaw()` follows a final link at the cell's target.
+   *
+   * Defaults to `"value"`, which preserves the historical raw-read behavior:
+   * resolve links on the way to the target, but return a final link as data.
+   */
+  lastNode?: LastNode;
 };
 
 // Shared factory instances for all cells
@@ -255,6 +266,11 @@ declare module "@commonfabric/api" {
       callback: (value: Readonly<T>) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
+    sinkMeta(
+      metaField: MetaField,
+      callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+      options?: SinkOptions,
+    ): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
     pull(): Promise<Readonly<T>>;
     getAsQueryResult<Path extends PropertyKey[]>(
@@ -277,7 +293,7 @@ declare module "@commonfabric/api" {
         includeSchema?: boolean;
       },
     ): SigilWriteRedirectLink;
-    getRaw(options?: IReadOptions): Immutable<T> | undefined;
+    getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
     /**
      * Reads the cell's raw fabric value as `FabricValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
@@ -290,12 +306,12 @@ declare module "@commonfabric/api" {
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
     getRawUntyped(
-      options?: IReadOptions & { frozen?: true },
+      options?: RawCellReadOptions & { frozen?: true },
     ): Immutable<FabricValue>;
     getRawUntyped(
-      options: IReadOptions & { frozen: false },
+      options: RawCellReadOptions & { frozen: false },
     ): FabricValue;
-    getRawUntyped(options?: IReadOptions): FabricValue;
+    getRawUntyped(options?: RawCellReadOptions): FabricValue;
     setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
     /**
      * Sets the raw cell value to any `FabricValue`, bypassing the cell's
@@ -306,25 +322,6 @@ declare module "@commonfabric/api" {
      * Prefer `setRaw()` when the value matches `T`.
      */
     setRawUntyped(value: FabricValue): void;
-    getSourceCell<T>(
-      schema?: JSONSchema,
-    ):
-      | Cell<
-        & T
-        & { [TYPE]: string | undefined }
-        & ("argument" extends keyof T ? unknown : { argument: any })
-      >
-      | undefined;
-    getSourceCell<S extends JSONSchema = JSONSchema>(
-      schema: S,
-    ):
-      | Cell<
-        & Schema<S>
-        & { [TYPE]: string | undefined }
-        & ("argument" extends keyof Schema<S> ? unknown : { argument: any })
-      >
-      | undefined;
-    setSourceCell(sourceCell: Cell<any>): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
@@ -413,8 +410,6 @@ const cellMethods = new Set<
   "getRawUntyped",
   "setRaw",
   "setRawUntyped",
-  "getSourceCell",
-  "setSourceCell",
   "getArgumentCell",
   "freeze",
   "isFrozen",
@@ -1243,25 +1238,11 @@ export class CellImpl<T extends FabricValue>
   asSchemaFromLinks<T = unknown>(): Cell<T> {
     if (!this.synced) this.sync(); // Auto-sync like .get() - matches framework pattern
 
-    let { schema } = resolveLink(
+    const { schema } = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
     );
-
-    if (!schema) {
-      const sourceCell = this.getSourceCell<{ resultRef: Cell<unknown> }>({
-        type: "object",
-        properties: { resultRef: { asCell: ["cell"] } },
-      });
-      const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
-      if (sourceCellSchema !== undefined) {
-        schema = this.runtime.cfc.schemaAtPath(
-          sourceCellSchema,
-          this._link.path,
-        );
-      }
-    }
 
     return new CellImpl(
       this.runtime,
@@ -1321,6 +1302,29 @@ export class CellImpl<T extends FabricValue>
     this.synced = true;
     logger.info("sync", this.link);
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
+  }
+
+  sinkMeta(
+    metaField: MetaField,
+    callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+    options: SinkOptions = {},
+  ): Cancel {
+    if (!this.synced) this.sync();
+
+    const sink: SinkAction = {
+      cleanup: undefined,
+      action: (tx) => {
+        if (isCancel(sink.cleanup)) sink.cleanup();
+
+        const value = this.withTx(tx).getMetaRaw(metaField);
+        sink.cleanup = callback(value);
+      },
+    };
+
+    return sinkHelper(sink, this.runtime, {
+      ...this.link,
+      path: [String(metaField)],
+    }, options);
   }
 
   resolveAsCell(): Cell<T> {
@@ -1414,7 +1418,7 @@ export class CellImpl<T extends FabricValue>
    * variant returns a fresh mutable deep copy and never aliases storage
    * state.
    */
-  getRaw(options?: IReadOptions): Immutable<T> | undefined {
+  getRaw(options?: RawCellReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
   }
 
@@ -1422,22 +1426,22 @@ export class CellImpl<T extends FabricValue>
    * Untyped variant of `getRaw()`; same frozenness contract.
    */
   getRawUntyped(
-    options?: IReadOptions & { frozen?: true },
+    options?: RawCellReadOptions & { frozen?: true },
   ): Immutable<FabricValue>;
   getRawUntyped(
-    options: IReadOptions & { frozen: false },
+    options: RawCellReadOptions & { frozen: false },
   ): FabricValue;
   getRawUntyped(
-    options?: IReadOptions & { frozen?: boolean },
+    options?: RawCellReadOptions & { frozen?: boolean },
   ): FabricValue {
-    const frozen = options?.frozen ?? true;
+    const { frozen = true, lastNode = "top", ...readOptions } = options ?? {};
     if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
     const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, "top"),
-      options,
+      resolveLink(this.runtime, tx, this.link, lastNode),
+      readOptions,
     );
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
@@ -1467,89 +1471,15 @@ export class CellImpl<T extends FabricValue>
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 
-  getSourceCell<T>(
-    schema?: JSONSchema,
-  ):
-    | Cell<
-      & T
-      // Add default types for TYPE and `argument`. A more specific type in T will
-      // take precedence.
-      & { [TYPE]: string | undefined }
-      & ("argument" extends keyof T ? unknown : { argument: any })
-    >
-    | undefined;
-  getSourceCell<S extends JSONSchema = JSONSchema>(
-    schema: S,
-  ):
-    | Cell<
-      & Schema<S>
-      // Add default types for TYPE and `argument`. A more specific type in
-      // `schema` will take precedence.
-      & { [TYPE]: string | undefined }
-      & ("argument" extends keyof Schema<S> ? unknown
-        : { argument: any })
-    >
-    | undefined;
-  getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
-    if (!this.synced) this.sync(); // No await, just kicking this off
-    const sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
-      { ...toMemorySpaceAddress(this.link), path: ["source"] },
-      {
-        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-      },
-    );
-    if (!sourceCellId) return undefined;
-    if (!isRecord(sourceCellId)) {
-      throw new Error(
-        `Source cell ID expected to be a record link, got: ${typeof sourceCellId}`,
-      );
-    }
-    const sourceLink = parseLink(sourceCellId, this.link);
-    if (sourceLink) {
-      return createCell(this.runtime, {
-        ...sourceLink,
-        schema,
-      }, this.tx) as Cell<any>;
-    }
-    const sourceCellIdString = toURI(sourceCellId);
-
-    return createCell(this.runtime, {
-      space: this.link.space,
-      path: [],
-      id: sourceCellIdString,
-      scope: this.link.scope,
-      schema: schema,
-    }, this.tx) as Cell<any>;
-  }
-
-  setSourceCell(sourceCell: Cell<any>): void {
-    if (!this.tx) throw new Error("Transaction required for setSourceCell");
-
-    // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.synced) this.sync();
-
-    const sourceLink = sourceCell.getAsNormalizedFullLink();
-    if (sourceLink.path.length > 0) {
-      throw new Error("Source cell must have empty path for now");
-    }
-    // System-owned provenance metadata, not user-surface value data.
-    this.tx.writeOrThrow(
-      { ...toMemorySpaceAddress(this.link), path: ["source"] },
-      createSigilLinkFromParsedLink(sourceLink, { base: this.link }),
-    );
-  }
-
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
-    const sourceCell = this.getSourceCell();
-    if (!sourceCell) return undefined;
-    // Kick off sync, since when used in a pattern, this wasn't automatically
-    // subscribed to yet. So we might still get a conflict on first write, but will
-    // get the correct version on retry.
-    sourceCell.sync();
-    // TODO(seefeld): Ideally we intersect this schema with the actual argument
-    // schema, so that get isn't for any.
-    return sourceCell.key("argument").asSchema<U>(schema);
+    const metaReadOptions = {
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+    };
+    const linkObj = this.getMetaRaw("argument", metaReadOptions);
+    if (linkObj === undefined) return undefined;
+    const link = parseLink(linkObj, this._link);
+    if (link === undefined) return undefined;
+    return this.runtime.getCellFromLink(link).asSchema<U>(schema);
   }
 
   freeze(reason: string): void {
@@ -1558,6 +1488,34 @@ export class CellImpl<T extends FabricValue>
 
   isFrozen(): boolean {
     return !!this.readOnlyReason;
+  }
+
+  getMetaRaw(
+    metaField: MetaField,
+    options?: IReadOptions,
+  ): FabricValue | undefined {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+    const metaAddr = {
+      space: this.link.space,
+      id: this.link.id,
+      path: [metaField],
+      ...(this.link.scope !== undefined && { scope: this.link.scope }),
+    };
+    return this.runtime.readTx(this.tx).readOrThrow(metaAddr, options);
+  }
+
+  setMetaRaw(metaField: MetaField, value: FabricValue): void {
+    if (!this.tx) throw new Error("Transaction required for setMetaRaw");
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+    const metaAddr = {
+      space: this.link.space,
+      id: this.link.id,
+      path: [metaField],
+      ...(this.link.scope !== undefined && { scope: this.link.scope }),
+    };
+    this.tx.writeOrThrow(metaAddr, value as FabricValue);
   }
 
   /**
@@ -1974,46 +1932,68 @@ function subscribeToReferencedDocs<T>(
   ref: CellViewRef,
   options: SinkOptions = {},
 ): Cancel {
-  let cleanup: Cancel | undefined | void;
   const link = ref.link;
+  const sink: SinkAction = {
+    cleanup: undefined,
+    action: (tx) => {
+      if (isCancel(sink.cleanup)) sink.cleanup();
 
-  const action: Action = (tx) => {
-    if (isCancel(cleanup)) cleanup();
+      // Using a new transaction for child cells, as we're only interested in
+      // dependencies for the initial get, not further cells the callback might
+      // read. The callback is responsible for calling sink on those cells if it
+      // wants to stay updated.
+      const extraTx = runtime.edit();
+      const wrappedTx = createChildCellTransaction(tx, extraTx);
+      const schema = link.schema;
+      const needsTraversal = schema === undefined ||
+        ContextualFlowControl.isTrueSchema(schema);
+      const newValue = validateAndTransform(runtime, wrappedTx, ref);
+      if (needsTraversal && newValue !== undefined && newValue !== null) {
+        deepTraverse(newValue);
+      }
+      sink.cleanup = callback(newValue);
 
-    // Using a new transaction for child cells, as we're only interested in
-    // dependencies for the initial get, not further cells the callback might
-    // read. The callback is responsible for calling sink on those cells if it
-    // wants to stay updated.
-    const extraTx = runtime.edit();
-    const wrappedTx = createChildCellTransaction(tx, extraTx);
-    const schema = link.schema;
-    const needsTraversal = schema === undefined ||
-      ContextualFlowControl.isTrueSchema(schema);
-    const newValue = validateAndTransform(runtime, wrappedTx, ref);
-    if (needsTraversal && newValue !== undefined && newValue !== null) {
-      deepTraverse(newValue);
-    }
-    cleanup = callback(newValue);
-
-    // no async await here, but that also means no retry. TODO(seefeld): Should
-    // we add a retry? So far all sinks are read-only, so they get re-triggered
-    // on changes already.
-    runtime.prepareTxForCommit(extraTx);
-    extraTx.commit();
+      // no async await here, but that also means no retry. TODO(seefeld): Should
+      // we add a retry? So far all sinks are read-only, so they get re-triggered
+      // on changes already.
+      runtime.prepareTxForCommit(extraTx);
+      extraTx.commit();
+    },
   };
-  // Name the action for debugging
-  const sinkName = `sink:${link.space}/${link.id}/${link.path.join("/")}`;
-  Object.defineProperty(action, "name", {
+  return sinkHelper(
+    sink,
+    runtime,
+    toMemorySpaceAddress(link),
+    options,
+  );
+}
+
+type SinkAction = {
+  action: Action;
+  cleanup: Cancel | undefined | void;
+};
+
+function sinkHelper(
+  sink: SinkAction,
+  runtime: Runtime,
+  address: IMemorySpaceAddress,
+  options: SinkOptions = {},
+) {
+  // Attach a name to the sink action
+  const sinkName = `sink:${address.space}/${address.id}/${
+    address.path.join("/")
+  }`;
+  Object.defineProperty(sink.action, "name", {
     value: sinkName,
     configurable: true,
   });
-  (action as Action & { src?: string }).src = sinkName;
+  (sink.action as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to. Wrap with withExecutingAction so that any child sinks
   // created during the callback see this action as their parent.
   const tx = runtime.edit();
-  runtime.scheduler.withExecutingAction(action, () => action(tx));
+  runtime.scheduler.withExecutingAction(sink.action, () => sink.action(tx));
   const log = txToReactivityLog(tx);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
@@ -2030,11 +2010,12 @@ function subscribeToReferencedDocs<T>(
       changeGroup: options.changeGroup,
     }),
   };
-  runtime.scheduler.resubscribe(action, log, resubscribeOptions);
+  runtime.scheduler.resubscribe(sink.action, log, resubscribeOptions);
 
   return () => {
-    runtime.scheduler.unsubscribe(action);
-    if (isCancel(cleanup)) cleanup();
+    runtime.scheduler.unsubscribe(sink.action);
+    if (isCancel(sink.cleanup)) sink.cleanup();
+    sink.cleanup = undefined;
   };
 }
 

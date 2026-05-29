@@ -419,6 +419,208 @@ export async function clickCfButton(
   }
 }
 
+export async function waitForRuntimeSynced(
+  page: Page,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  await waitFor(async () => {
+    return await page.evaluate(async () => {
+      const rt = (globalThis as typeof globalThis & {
+        commonfabric?: { rt?: { synced?: () => Promise<void> } };
+      }).commonfabric?.rt;
+      if (!rt?.synced) return false;
+      await rt.synced();
+      return true;
+    });
+  }, { timeout, delay: 250 });
+}
+
+export type SchedulerLoadSummary = {
+  graph: {
+    nodes: number;
+    edges: number;
+    computations: number;
+    effects: number;
+    inputs: number;
+    inactive: number;
+    actionsWithStats: number;
+    actionRuns: number;
+    actionRunsThroughActionBody: number;
+    actionRunsFromStats: number;
+    actionTotalTimeFromStats: number;
+    computationRunsFromStats: number;
+    computationTotalTimeFromStats: number;
+    effectRunsFromStats: number;
+    effectTotalTimeFromStats: number;
+  };
+  topSchedulerTiming: Array<{
+    key: string;
+    count: number;
+    totalTime: number;
+    average: number;
+    p50: number;
+    p95: number;
+    max: number;
+  }>;
+  topActions: Array<{
+    actionId: string;
+    actionType: "effect" | "computation";
+    runCount: number;
+    totalTime: number;
+    averageTime: number;
+  }>;
+};
+
+export async function collectSchedulerLoadSummary(
+  page: Page,
+): Promise<SchedulerLoadSummary | null> {
+  return await page.evaluate(async () => {
+    const rt = (globalThis as typeof globalThis & {
+      commonfabric?: {
+        rt?: {
+          getLoggerCounts?: () => Promise<{
+            timing: Record<string, Record<string, TimingRow>>;
+          }>;
+          getGraphSnapshot?: () => Promise<{
+            nodes: GraphNode[];
+            edges: unknown[];
+          }>;
+          idle?: () => Promise<void>;
+        };
+      };
+    }).commonfabric?.rt;
+    if (!rt?.getLoggerCounts || !rt?.getGraphSnapshot || !rt?.idle) {
+      return null;
+    }
+    await rt.idle();
+
+    const { timing } = await rt.getLoggerCounts();
+    const graph = await rt.getGraphSnapshot();
+    const schedulerTiming = timing["scheduler"] ?? {};
+    const schedulerRunCount = schedulerTiming["scheduler/run"]?.count ?? 0;
+    const schedulerRunActionCount =
+      schedulerTiming["scheduler/run/action"]?.count ?? 0;
+
+    const typedNodes = graph.nodes;
+    const actionNodes = typedNodes.filter((node) =>
+      (node.type === "effect" || node.type === "computation") && node.stats
+    );
+    const byActionId = new Map<string, {
+      actionId: string;
+      actionType: "effect" | "computation";
+      runCount: number;
+      totalTime: number;
+      averageTime: number;
+    }>();
+
+    for (const node of actionNodes) {
+      const stats = node.stats;
+      if (!stats) continue;
+      const actionType = node.type === "effect" ? "effect" : "computation";
+      const existing = byActionId.get(node.id);
+      if (!existing || stats.runCount > existing.runCount) {
+        byActionId.set(node.id, {
+          actionId: node.id,
+          actionType,
+          runCount: stats.runCount,
+          totalTime: stats.totalTime,
+          averageTime: stats.averageTime,
+        });
+      }
+    }
+
+    const actionRows = [...byActionId.values()];
+    const computationRows = actionRows.filter((row) =>
+      row.actionType === "computation"
+    );
+    const effectRows = actionRows.filter((row) => row.actionType === "effect");
+    const round = (value: number) => Number(value.toFixed(3));
+
+    return {
+      graph: {
+        nodes: graph.nodes.length,
+        edges: graph.edges.length,
+        computations: typedNodes.filter((node) =>
+          node.type === "computation"
+        ).length,
+        effects: typedNodes.filter((node) => node.type === "effect").length,
+        inputs: typedNodes.filter((node) => node.type === "input").length,
+        inactive: typedNodes.filter((node) => node.type === "inactive").length,
+        actionsWithStats: actionNodes.length,
+        actionRuns: schedulerRunCount,
+        actionRunsThroughActionBody: schedulerRunActionCount,
+        actionRunsFromStats: actionRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        actionTotalTimeFromStats: round(
+          actionRows.reduce((sum, row) => sum + row.totalTime, 0),
+        ),
+        computationRunsFromStats: computationRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        computationTotalTimeFromStats: round(
+          computationRows.reduce((sum, row) => sum + row.totalTime, 0),
+        ),
+        effectRunsFromStats: effectRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        effectTotalTimeFromStats: round(
+          effectRows.reduce((sum, row) => sum + row.totalTime, 0),
+        ),
+      },
+      topSchedulerTiming: Object.entries(schedulerTiming)
+        .sort((a, b) => (b[1].totalTime ?? 0) - (a[1].totalTime ?? 0))
+        .slice(0, 16)
+        .map(([key, value]) => ({
+          key,
+          count: value.count ?? 0,
+          totalTime: round(value.totalTime ?? 0),
+          average: round(value.average ?? 0),
+          p50: round(value.p50 ?? 0),
+          p95: round(value.p95 ?? 0),
+          max: round(value.max ?? 0),
+        })),
+      topActions: actionRows
+        .sort((a, b) =>
+          b.runCount - a.runCount ||
+          b.totalTime - a.totalTime ||
+          a.actionId.localeCompare(b.actionId)
+        )
+        .slice(0, 20)
+        .map((row) => ({
+          actionId: row.actionId,
+          actionType: row.actionType,
+          runCount: row.runCount,
+          totalTime: round(row.totalTime),
+          averageTime: round(row.averageTime),
+        })),
+    };
+  });
+}
+
+type TimingRow = {
+  count: number;
+  totalTime: number;
+  average: number;
+  p50: number;
+  p95: number;
+  max: number;
+};
+
+type GraphNode = {
+  id: string;
+  type: "effect" | "computation" | "input" | "inactive";
+  stats?: {
+    runCount: number;
+    totalTime: number;
+    averageTime: number;
+    lastRunTime: number;
+  };
+};
+
 async function textIsPresent(
   page: Page,
   selector: string,

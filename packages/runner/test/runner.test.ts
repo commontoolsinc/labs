@@ -14,6 +14,11 @@ import {
   type URI,
 } from "../src/storage/interface.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
+import {
+  createSigilLinkFromParsedLink,
+  getMetaLink,
+  parseLink,
+} from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -79,14 +84,16 @@ describe("runPattern", () => {
         description: "passthrough",
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     } as Pattern;
@@ -103,22 +110,126 @@ describe("runPattern", () => {
       resultCell,
     );
 
-    const sourceCell = result.getSourceCell();
-    const sourceCellValue = await sourceCell!.pull();
-    expect(sourceCellValue).toMatchObject({
-      argument: { input: 1 },
-      internal: { output: 1 },
-    });
+    await resultCell.pull();
+    const argumentCellValue = resultCell.getArgumentCell()?.get();
+    const internalLink = parseLink(
+      resultCell.getMetaRaw("internal"),
+      resultCell,
+    );
+    expect(internalLink).toBeDefined();
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    const internalCellValue = await internalCell.get();
+    expect(argumentCellValue).toEqual({ input: 1 });
+    expect(internalCellValue).toEqual({ output: 1 });
+
     expect(result.getRaw()).toEqual({
-      output: {
-        $alias: {
-          path: ["internal", "output"],
-          cell: result.getSourceCell()?.entityId,
-        },
-      },
+      output: createSigilLinkFromParsedLink({
+        ...internalLink,
+        path: ["output"],
+      }, { overwrite: "redirect" }),
     });
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ output: 1 });
+  });
+
+  it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        input: { type: "number" },
+      },
+      required: ["input"],
+    } as const;
+    const internalSchema = {
+      type: "object",
+      properties: {
+        output: { type: "number" },
+      },
+      required: ["output"],
+    } as const;
+    const resultSchema = {
+      type: "object",
+      scope: "user",
+      properties: {
+        output: { type: "number" },
+      },
+      required: ["output"],
+    } as const;
+    const pattern = {
+      argumentSchema,
+      internalSchema,
+      resultSchema,
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "passthrough",
+          },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "sets scoped write-redirect metadata links",
+      resultSchema,
+      undefined,
+      "user",
+    );
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      { input: 7 },
+      resultCell,
+    );
+
+    await resultCell.pull();
+
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
+    const argumentLink = getMetaLink(resultCell, "argument");
+    const internalLink = getMetaLink(resultCell, "internal");
+
+    expect(resultCellLink.scope).toBe("user");
+    expect(resultCell.getMetaRaw("schema")).toEqual(resultSchema);
+    expect(argumentLink).toBeDefined();
+    expect(internalLink).toBeDefined();
+    expect(argumentLink!.path).toEqual([]);
+    expect(argumentLink!.space).toBe(space);
+    expect(argumentLink!.scope).toBe("user");
+    expect(argumentLink!.schema).toEqual(argumentSchema);
+    expect(argumentLink!.overwrite).toBe("redirect");
+    expect(internalLink!.path).toEqual([]);
+    expect(internalLink!.space).toBe(space);
+    expect(internalLink!.scope).toBe("user");
+    expect(internalLink!.schema).toEqual(internalSchema);
+    expect(internalLink!.overwrite).toBe("redirect");
+
+    const argumentCell = runtime.getCellFromLink(argumentLink!);
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    expect(argumentCell.get()).toEqual({ input: 7 });
+    expect(internalCell.get()).toEqual({ output: 7 });
+    expect(getMetaLink(argumentCell, "result")).toEqual({
+      ...resultCellLink,
+      schema: resultSchema,
+      overwrite: "redirect",
+    });
+    expect(getMetaLink(internalCell, "result")).toEqual({
+      ...resultCellLink,
+      schema: resultSchema,
+      overwrite: "redirect",
+    });
+    expect(parseLink((result.getRaw() as { output: unknown }).output, result))
+      .toEqual({
+        ...internalLink!,
+        path: ["output"],
+        schema: { type: "number" },
+        overwrite: "redirect",
+      });
   });
 
   it("should work with nested patterns", async () => {
@@ -131,17 +242,17 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { $alias: { cell: 1, path: ["internal", "output"] } },
+      result: { $alias: { cell: [null, "internal"], path: ["output"] } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
           inputs: {
-            value: { $alias: { cell: 1, path: ["argument", "input"] } },
+            value: { $alias: { cell: [null, "argument"], path: ["input"] } },
           },
           outputs: {
-            value: { $alias: { cell: 1, path: ["internal", "output"] } },
+            value: { $alias: { cell: [null, "internal"], path: ["output"] } },
           },
         },
       ],
@@ -156,12 +267,12 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "output"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: innerPattern },
-          inputs: { input: { $alias: { path: ["argument", "value"] } } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
+          outputs: { $alias: { cell: "internal", path: ["output"] } },
         },
       ],
     } as Pattern;
@@ -186,15 +297,15 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -227,7 +338,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -236,7 +347,7 @@ describe("runPattern", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
           outputs: {},
         },
       ],
@@ -264,7 +375,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -273,7 +384,7 @@ describe("runPattern", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["argument", "other"] } },
+          inputs: { $alias: { cell: "argument", path: ["other"] } },
           outputs: {},
         },
       ],
@@ -300,15 +411,15 @@ describe("runPattern", () => {
     const nestedPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { $alias: { cell: 1, path: ["internal", "result"] } },
+      result: { $alias: { cell: [null, "internal"], path: ["result"] } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { cell: 1, path: ["argument", "input"] } },
-          outputs: { $alias: { cell: 1, path: ["internal", "result"] } },
+          inputs: { $alias: { cell: [null, "argument"], path: ["input"] } },
+          outputs: { $alias: { cell: [null, "internal"], path: ["result"] } },
         },
       ],
     };
@@ -316,12 +427,12 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: nestedPattern },
-          inputs: { input: { $alias: { path: ["argument", "value"] } } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -345,15 +456,15 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -402,15 +513,15 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -479,7 +590,7 @@ describe("runPattern", () => {
         required: ["input"],
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -487,8 +598,8 @@ describe("runPattern", () => {
             implementation: (args: { input: number; multiplier: number }) =>
               args.input * args.multiplier,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -542,7 +653,7 @@ describe("runPattern", () => {
         required: ["config"],
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -565,8 +676,8 @@ describe("runPattern", () => {
               }
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -607,8 +718,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        result: { $alias: { path: ["internal", "result"] } },
-        options: { $alias: { path: ["argument", "options"] } },
+        result: { $alias: { cell: "internal", path: ["result"] } },
+        options: { $alias: { cell: "argument", path: ["options"] } },
       },
       nodes: [
         {
@@ -618,8 +729,8 @@ describe("runPattern", () => {
               return args.options.enabled ? args.input * args.options.value : 0;
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -650,7 +761,7 @@ describe("runPattern", () => {
       initial: { internal: { counter: 0 } },
       result: {
         [NAME]: "counter",
-        counter: { $alias: { path: ["internal", "counter"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
       },
       nodes: [
         {
@@ -660,8 +771,8 @@ describe("runPattern", () => {
               return input.value;
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
         },
       ],
     };
@@ -696,7 +807,7 @@ describe("runPattern", () => {
       initial: { internal: { counter: 0 } },
       result: {
         [NAME]: "counter",
-        counter: { $alias: { path: ["internal", "counter"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
       },
       nodes: [
         {
@@ -704,8 +815,8 @@ describe("runPattern", () => {
             type: "javascript",
             implementation: (input: any) => input.value,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
         },
       ],
     };
@@ -714,7 +825,7 @@ describe("runPattern", () => {
       ...pattern,
       result: {
         [NAME]: "renamed counter",
-        counter: { $alias: { path: ["internal", "counter"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
       },
     };
 
@@ -735,6 +846,103 @@ describe("runPattern", () => {
   });
 
   it("should create separate copies of initial values for each pattern instance", async () => {
+    // Use a local runtime with modernDataModel OFF and mutable raw copies
+    // to verify legacy-mode initial values are independent.
+    const sm = StorageManager.emulate({ as: signer });
+    const localRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: false },
+    });
+
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          input: { type: "number" },
+        },
+      },
+      initial: {
+        internal: {
+          counter: 10,
+          nested: { value: "initial" },
+        },
+      },
+      resultSchema: {},
+      result: {
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
+        nested: { $alias: { cell: "internal", path: ["nested"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number }) => {
+              return {
+                counter: args.input,
+              };
+            },
+          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
+        },
+      ],
+    };
+
+    // Create first instance
+    const result1Cell = localRuntime.getCell(
+      space,
+      "should create separate copies of initial values 1",
+    );
+    const result1 = runTrusted(
+      localRuntime,
+      undefined,
+      pattern,
+      { input: 5 },
+      result1Cell,
+    );
+    await result1.pull();
+
+    // Create second instance
+    const result2Cell = localRuntime.getCell(
+      space,
+      "should create separate copies of initial values 2",
+    );
+    const result2 = runTrusted(
+      localRuntime,
+      undefined,
+      pattern,
+      { input: 10 },
+      result2Cell,
+    );
+    await result2.pull();
+
+    // Use getRawUntyped({ frozen: false }) for mutable copies
+    const internal1 = localRuntime.getCellFromLink(
+      getMetaLink(result1, "internal")!,
+    ).getRawUntyped({ frozen: false }) as any;
+    const internal2 = localRuntime.getCellFromLink(
+      getMetaLink(result2, "internal")!,
+    ).getRawUntyped({ frozen: false }) as any;
+
+    // Verify they are different objects
+    expect(internal1).not.toBe(internal2);
+    expect(internal1.nested).not.toBe(internal2.nested);
+
+    // Modify nested object in first instance
+    internal1.nested.value = "modified";
+
+    // Verify second instance is unaffected
+    expect(internal2.nested.value).toBe("initial");
+    const result2Value = await result2.pull() as any;
+    expect(result2Value.nested.value).toBe("initial");
+
+    await localRuntime.storageManager.synced();
+    await localRuntime.dispose();
+    await sm.close();
+  });
+
+  it("should create separate copies of initial values (modern, frozen)", async () => {
     // `getRaw()` returns frozen objects; verify independence via
     // `getRawUntyped({ frozen: false })` for mutable access.
     const sm = StorageManager.emulate({ as: signer });
@@ -759,8 +967,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        counter: { $alias: { path: ["internal", "counter"] } },
-        nested: { $alias: { path: ["internal", "nested"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
+        nested: { $alias: { cell: "internal", path: ["nested"] } },
       },
       nodes: [
         {
@@ -772,8 +980,8 @@ describe("runPattern", () => {
               };
             },
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
         },
       ],
     };
@@ -807,22 +1015,22 @@ describe("runPattern", () => {
     await result2.pull();
 
     // Use getRawUntyped({ frozen: false }) for mutable copies
-    const raw1 = result1.getSourceCell()?.getRawUntyped({
-      frozen: false,
-    }) as any;
-    const raw2 = result2.getSourceCell()?.getRawUntyped({
-      frozen: false,
-    }) as any;
+    const internal1 = localRuntime.getCellFromLink(
+      getMetaLink(result1, "internal")!,
+    ).getRawUntyped({ frozen: false }) as any;
+    const internal2 = localRuntime.getCellFromLink(
+      getMetaLink(result2, "internal")!,
+    ).getRawUntyped({ frozen: false }) as any;
 
     // Verify they are different objects
-    expect(raw1.internal).not.toBe(raw2.internal);
-    expect(raw1.internal.nested).not.toBe(raw2.internal.nested);
+    expect(internal1).not.toBe(internal2);
+    expect(internal1.nested).not.toBe(internal2.nested);
 
     // Modify nested object in first instance's mutable copy
-    raw1.internal.nested.value = "modified";
+    internal1.nested.value = "modified";
 
     // Verify second instance is unaffected
-    expect(raw2.internal.nested.value).toBe("initial");
+    expect(internal2.nested.value).toBe("initial");
 
     await localRuntime.storageManager.synced();
     await localRuntime.dispose();
@@ -905,12 +1113,14 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     };
@@ -937,7 +1147,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [],
     };
 
@@ -967,7 +1177,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [],
     };
 
@@ -998,12 +1208,14 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     };
@@ -1027,15 +1239,15 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (v: { input: number }) => v.input,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["output"] } },
         },
       ],
     };
@@ -1061,15 +1273,15 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (v: { input: number }) => v.input,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["output"] } },
         },
       ],
     };
@@ -1126,12 +1338,14 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     };
@@ -1154,17 +1368,19 @@ describe("setup/start", () => {
     // Not started yet; result still aliases internal and shows previous value
     const rawValue = resultCell.get();
     expect(rawValue).toMatchObjectIgnoringSymbols({
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     });
 
-    // Verify a pattern id is present after setup without passing pattern
-    const source = resultCell.getSourceCell()!;
-    const typeValue = source.key("$TYPE").get();
-    expect(typeof typeValue).toEqual("string");
+    // Verify a pattern link is present after setup without passing the pattern
+    const patternValue = resultCell.getMetaRaw("pattern");
+    expect(patternValue).toBeDefined();
 
-    // Also verify the argument was updated in the process cell
-    const sourceValue = await source.pull();
-    expect((sourceValue as any).argument.input).toEqual(10);
+    // Also verify the argument metadata cell was updated
+    await resultCell.pull();
+    const argumentValue = runtime.getCellFromLink<{ input: number }>(
+      getMetaLink(resultCell, "argument")!,
+    ).get();
+    expect(argumentValue.input).toEqual(10);
 
     // Start again (scheduling) just to ensure no errors
     runtime.start(resultCell);
@@ -1178,15 +1394,15 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -1329,15 +1545,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1358,15 +1574,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1381,6 +1597,128 @@ describe("runner utils", () => {
       expect(result).toBe(true);
     });
 
+    it("does not register duplicate handlers while resumed dependencies sync", async () => {
+      const valueAlias = {
+        $alias: {
+          cell: "argument",
+          path: ["value"],
+          scope: "space",
+          schema: { type: "number", default: 0 },
+        },
+      };
+      const streamAlias = {
+        $alias: {
+          cell: "internal",
+          path: ["stream:increment"],
+          scope: "space",
+          schema: true,
+        },
+      };
+      const pattern: Pattern = {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: {
+              type: "number",
+              default: 0,
+              asCell: ["cell"],
+            },
+          },
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: "number" },
+            increment: { asCell: ["stream", "opaque"] },
+          },
+        },
+        internalSchema: {
+          type: "object",
+          properties: {
+            "stream:increment": true,
+          },
+        },
+        initial: {
+          internal: {
+            "stream:increment": { $stream: true },
+          },
+        },
+        result: {
+          value: valueAlias,
+          increment: streamAlias,
+        },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              wrapper: "handler",
+              argumentSchema: {
+                type: "object",
+                properties: {
+                  $event: false,
+                  $ctx: {
+                    type: "object",
+                    properties: {
+                      value: {
+                        type: "number",
+                        asCell: ["cell"],
+                      },
+                    },
+                    required: ["value"],
+                  },
+                },
+                required: ["$ctx"],
+              },
+              implementation: (_event: unknown, { value }: any) => {
+                value.set(value.get() + 1);
+              },
+            },
+            inputs: {
+              $ctx: { value: valueAlias },
+              $event: streamAlias,
+            },
+            outputs: {},
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell<any>(
+        space,
+        "concurrent start dedupe",
+      );
+      await setupTrusted(runtime, undefined, pattern, { value: 0 }, resultCell);
+
+      // Simulate a persisted piece being resumed. In that path start() syncs
+      // dependencies before registering handlers, which is where this race
+      // used to allow duplicate starts for the same result cell.
+      (runtime.runner as any).locallyPreparedResults.clear();
+      (resultCell as any).synced = true;
+
+      const runner = runtime.runner as any;
+      const originalSync = runner.syncCellsForRunningPattern.bind(runner);
+      runner.syncCellsForRunningPattern = async (...args: any[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return originalSync(...args);
+      };
+
+      try {
+        const [first, second] = await Promise.all([
+          runtime.start(resultCell),
+          runtime.start(resultCell),
+        ]);
+        expect(first).toBe(true);
+        expect(second).toBe(true);
+
+        resultCell.key("increment").send();
+        await runtime.idle();
+        await resultCell.pull();
+
+        expect(resultCell.key("value").get()).toBe(1);
+      } finally {
+        runner.syncCellsForRunningPattern = originalSync;
+      }
+    });
+
     it("start() runs synchronously when data is available", async () => {
       const pattern: Pattern = {
         argumentSchema: {
@@ -1388,15 +1726,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 3,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1427,7 +1765,7 @@ describe("runner utils", () => {
         resultSchema: {},
         result: {
           nested: {
-            value: { $alias: { path: ["internal", "output"] } },
+            value: { $alias: { cell: "internal", path: ["output"] } },
           },
         },
         nodes: [
@@ -1436,8 +1774,8 @@ describe("runner utils", () => {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1462,22 +1800,22 @@ describe("runner utils", () => {
       ).toBe(true);
     });
 
-    it("restarts with new pattern when $TYPE changes via setup()", async () => {
+    it("restarts with new pattern when the pattern changes via setup()", async () => {
       const pattern1: Pattern = {
         argumentSchema: {
           type: "object",
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1488,15 +1826,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 10,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1508,7 +1846,7 @@ describe("runner utils", () => {
       expect(await resultCell.pull()).toEqual({ output: 10 }); // 5 * 2
 
       // Change pattern via setup (not run or start)
-      // The $TYPE sink should detect the change and restart once the result is pulled.
+      // The pattern sink should detect the change and restart once the result is pulled.
       await setupTrusted(
         runtime,
         undefined,

@@ -43,7 +43,7 @@ export interface SchedulerGraphNode {
   debounceMs?: number; // Current debounce delay in ms (if set)
   throttleMs?: number; // Current throttle period in ms (if set)
   // Pattern association
-  patternId?: string; // ID of the pattern this action belongs to
+  patternId?: string; // ID of the pattern this action belongs to -- without `of:`
 }
 
 export interface SchedulerGraphEdge {
@@ -156,6 +156,16 @@ export type RuntimeTelemetryMarker = {
   type: "scheduler.invocation";
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;
+  error?: string;
+} | {
+  type: "scheduler.event.commit";
+  handlerId: string;
+  handlerInfo?: SchedulerActionInfo;
+  readCount: number;
+  writeCount: number;
+  changedWriteCount: number;
+  writes: string[];
+  writesTruncated?: boolean;
   error?: string;
 } | {
   type: "scheduler.event.preflight";

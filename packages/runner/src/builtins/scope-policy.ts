@@ -5,7 +5,11 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { narrowestScope, scopeRank } from "../scope.ts";
-import { parseLink } from "../link-utils.ts";
+import {
+  createSigilLinkFromParsedLink,
+  getMetaLink,
+  parseLink,
+} from "../link-utils.ts";
 
 export function resolvedCellScope(
   runtime: Runtime,
@@ -54,13 +58,30 @@ export function narrowestCellScope(
   );
 }
 
+/**
+ * If the cell contains a top level link, and its scope is narrower than the
+ * cell's scope, create a copy of the cell.
+ *
+ * Copy over the value and the "result" meta link.
+ */
 export function exposedResultCell<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   cell: Cell<T>,
 ): Cell<T> {
-  const raw = cell.withTx(tx).getRaw();
-  const link = parseLink(raw, cell);
+  // Ideally, we'd just call getRaw on the cell, but since that may be a link,
+  // we need to know the base to use to parse that link.
+  const target = resolveLink(
+    runtime,
+    tx,
+    cell.getAsNormalizedFullLink(),
+    "writeRedirect",
+  );
+  const initialCell = cell.withTx(tx);
+  const raw = initialCell.getRaw({ lastNode: "writeRedirect" });
+  // If the last writeRedirect target is a link, use that, but otherwise use
+  // the last writeRedirect target.
+  const link = parseLink(raw, target) ?? target;
   if (
     link === undefined ||
     scopeRank(link.scope) <= scopeRank(cell.getAsNormalizedFullLink().scope)
@@ -69,11 +90,18 @@ export function exposedResultCell<T>(
   }
 
   const exposed = scopedCell(runtime, tx, cell, link.scope);
-  const sourceCell = cell.withTx(tx).getSourceCell();
-  if (sourceCell !== undefined) {
-    exposed.withTx(tx).setSourceCell(sourceCell);
+  // Copy the value and result linkage into the new exposed cell
+  const resultLink = getMetaLink(initialCell, "result");
+  if (resultLink !== undefined) {
+    exposed.setMetaRaw(
+      "result",
+      createSigilLinkFromParsedLink(resultLink, {
+        base: exposed,
+        includeSchema: true,
+      }),
+    );
   }
-  const value = cell.withTx(tx).get();
+  const value = initialCell.get();
   if (value !== undefined) {
     exposed.withTx(tx).set(value);
   }

@@ -17,6 +17,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
   narrowestCellScope,
@@ -94,7 +95,10 @@ export function flatMap(
       );
       result = scopedCell(runtime, tx, baseResult, outputScope);
       result.send([]);
-      result.setSourceCell(parentCell);
+      // Link this cell to the parent cell
+      setResultCell(result, parentCell);
+      // Link the new result cells to the pattern cell too
+      setPatternCell(result, parentCell.key("pattern"));
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
@@ -158,7 +162,8 @@ export function flatMap(
           resultCell,
           { doNotUpdateOnPatternChange: true },
         );
-        resultCell.getSourceCell()!.setSourceCell(parentCell);
+        // Link the new result cells to the pattern cell too
+        setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
       }

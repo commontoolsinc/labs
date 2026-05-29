@@ -120,7 +120,7 @@ for (const pullMode of [false, true]) {
   );
 }
 
-Deno.test("navigateTo is idempotent for one result process cell", async () => {
+Deno.test("navigateTo is idempotent for one result cell", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const navigations: string[] = [];
   const runtime = new Runtime({
@@ -136,7 +136,7 @@ Deno.test("navigateTo is idempotent for one result process cell", async () => {
   try {
     const processCell = runtime.getCell(
       space,
-      "navigateTo idempotent process cell",
+      "navigateTo idempotent result cell",
       undefined,
       tx,
     );
@@ -227,7 +227,7 @@ Deno.test(
       const setupTx: IExtendedStorageTransaction = runtime.edit();
       const processCell = runtime.getCell(
         space,
-        "navigateTo retry process cell",
+        "navigateTo retry result cell",
         undefined,
         setupTx,
       );

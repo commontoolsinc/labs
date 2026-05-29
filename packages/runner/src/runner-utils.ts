@@ -1,6 +1,8 @@
-import { type FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { isRecord, type Mutable } from "@commonfabric/utils/types";
+import {
+  type FabricValue,
+  shallowMutableClone,
+} from "@commonfabric/data-model/fabric-value";
+import { isRecord } from "@commonfabric/utils/types";
 import {
   isModule,
   isOpaqueRef,
@@ -9,7 +11,7 @@ import {
   type Pattern,
 } from "./builder/types.ts";
 import { isCellLink } from "./link-utils.ts";
-import { LINK_V1_TAG, type SigilLink } from "./sigil-types.ts";
+import { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
 
 export function setRunnableName<T extends object & { src?: string }>(
   target: T,
@@ -31,9 +33,8 @@ export function sanitizeDebugLabel(label?: string): string | undefined {
   return label.replace(/^async\s+/, "").trim() || undefined;
 }
 
-export function getSpellLink(patternId: string): SigilLink {
-  const id = hashOf({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
-  return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
+export function getSigilLink(id: URI): SigilLink {
+  return { "/": { [LINK_V1_TAG]: { id } } };
 }
 
 export function describePatternOrModule(
@@ -147,21 +148,6 @@ export function validateAndCheckOpaqueRefs(
   );
 }
 
-export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
-  if (isCellLink(value)) return value as Mutable<T>;
-  if (isRecord(value)) {
-    return Array.isArray(value)
-      ? value.map(cellAwareDeepCopy) as unknown as Mutable<T>
-      : Object.fromEntries(
-        Object.entries(value).map((
-          [key, nestedValue],
-        ) => [key, cellAwareDeepCopy(nestedValue)]),
-      ) as unknown as Mutable<T>;
-  }
-
-  return value as Mutable<T>;
-}
-
 /**
  * Extracts default values from a JSON schema object.
  * @param schema - The JSON schema to extract defaults from
@@ -175,17 +161,28 @@ export function extractDefaultValues(
   if (
     schema.type === "object" && schema.properties && isRecord(schema.properties)
   ) {
-    const obj = cellAwareDeepCopy(
-      isRecord(schema.default) ? schema.default : {},
-    );
+    // Shallow mutable copy of the schema default, so injecting top-level
+    // property defaults below doesn't mutate the schema's own default object.
+    // A shallow copy suffices: only top-level keys are written here, and the
+    // result is normalized downstream by `fabricFromNativeValue` (which
+    // rebuilds a fresh tree), so sharing nested references is safe.
+    const obj = shallowMutableClone(
+      (isRecord(schema.default) ? schema.default : {}) as FabricValue,
+    ) as Record<string, FabricValue>;
     for (const [propKey, propSchema] of Object.entries(schema.properties)) {
       const value = extractDefaultValues(propSchema);
       if (value !== undefined) {
-        (obj as Record<string, unknown>)[propKey] = value;
+        obj[propKey] = value;
       }
     }
 
-    return Object.entries(obj).length > 0 ? obj : undefined;
+    // Freeze the assembled defaults. Safe (consumers only read the result) and
+    // nearly free, and it feeds the system's deep-freeze discipline: this
+    // function is recursive, so the per-level freeze composes into a
+    // deep-frozen result wherever the schema's own defaults are already frozen
+    // -- which a downstream `cloneIfNecessary(_, { frozen: true })` can then
+    // reuse by identity instead of re-cloning.
+    return Object.keys(obj).length > 0 ? Object.freeze(obj) : undefined;
   }
 
   return schema.default;

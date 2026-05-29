@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import {
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
@@ -13,6 +13,7 @@ import type {
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
+import type { HarnessChatSessionStore } from "../src/session-store.ts";
 
 const nextIsoNow = () => {
   let counter = 0;
@@ -103,6 +104,21 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
   );
   assertEquals(service.status("session-1").sessions[0].status, "idle");
   assertEquals(service.status("session-1").sessions[0].turnCount, 1);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns.map((turn) =>
+      turn.turn.status
+    ),
+    ["completed"],
+  );
+  assertEquals(
+    service.listEvents({ sessionId: "session-1", afterSequence: 2 }).events
+      .map((event) => event.event.kind),
+    ["assistant_delta", "assistant_completed", "turn_completed"],
+  );
+  assertEquals(
+    service.listEvents({ sessionId: "session-1" }).latestSequence,
+    5,
+  );
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
     cwd: "/workspace/project",
@@ -406,6 +422,10 @@ Deno.test("interactive service aborts canceled turns without closing the session
   assertEquals(firstSignal?.aborted, true);
   assertEquals(service.status("session-1").sessions[0].status, "canceling");
   assertEquals(service.status("session-1").sessions[0].reusable, false);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "canceling",
+  );
   const earlySecondTurn = await service.startTurn("req-early", {
     sessionId: "session-1",
     turnId: "turn-early",
@@ -421,6 +441,10 @@ Deno.test("interactive service aborts canceled turns without closing the session
   await service.waitForTurn("session-1", "turn-1");
   assertEquals(service.status("session-1").sessions[0].status, "idle");
   assertEquals(service.status("session-1").sessions[0].reusable, true);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "canceled",
+  );
   assertEquals(
     service.events("session-1").map((event) => event.event.kind),
     ["session_started", "turn_started", "turn_canceled", "status_changed"],
@@ -489,11 +513,21 @@ Deno.test("interactive service aborts active turns when closing a session", asyn
   assertEquals(activeSignal?.aborted, true);
   assertEquals(service.status("session-1").sessions[0].status, "closed");
   assertEquals(service.status("session-1").sessions[0].reusable, false);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "canceled",
+  );
 
   await service.waitForTurn("session-1", "turn-1");
   assertEquals(
     service.events("session-1").map((event) => event.event.kind),
-    ["session_started", "turn_started", "session_closed"],
+    [
+      "session_started",
+      "turn_started",
+      "turn_canceled",
+      "status_changed",
+      "session_closed",
+    ],
   );
 });
 
@@ -561,6 +595,258 @@ Deno.test("interactive service rejects duplicate session ids", async () => {
   );
 });
 
+Deno.test("interactive service rejects concurrent duplicate session creation after durable checks", async () => {
+  let releaseDurableCheck: (() => void) | undefined;
+  const durableCheck = new Promise<undefined>((resolve) => {
+    releaseDurableCheck = () => resolve(undefined);
+  });
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => durableCheck,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: () => {},
+    saveSessionTurnAndAppendEvent: () => true,
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  const first = service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  const duplicate = service.startSession("req-2", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/other-workspace" },
+  });
+  releaseDurableCheck?.();
+  const [firstResult, duplicateResult] = await Promise.all([
+    first,
+    duplicate,
+  ]);
+
+  assertEquals(firstResult.ok, true);
+  assertEquals(duplicateResult.ok, false);
+  assertEquals(
+    duplicateResult.ok === false ? duplicateResult.error.code : "",
+    "session_exists",
+  );
+  assertEquals(service.status().sessions.length, 1);
+  assertEquals(
+    service.status("session-1").sessions[0].workspace?.hostPath,
+    "/workspace",
+  );
+});
+
+Deno.test("interactive service serializes concurrent emitted event sequences", async () => {
+  const persistedSequences: number[] = [];
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: async (_snapshot, event) => {
+      await Promise.resolve();
+      persistedSequences.push(event.sequence);
+    },
+    saveSessionTurnAndAppendEvent: async (mutation) => {
+      await Promise.resolve();
+      persistedSequences.push(mutation.event.sequence);
+      return true;
+    },
+    appendEvent: async (event) => {
+      await Promise.resolve();
+      persistedSequences.push(event.sequence);
+    },
+    listEvents: () => [],
+    latestSequence: () => 0,
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+  };
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: async (options) => {
+      const first = { role: "assistant" as const, content: "First." };
+      const second = { role: "assistant" as const, content: "Second." };
+      const firstTranscript = [...options.transcript, first];
+      const secondTranscript = [...firstTranscript, second];
+      const firstEvent = options.onTranscriptEvent?.({
+        message: first,
+        transcript: firstTranscript,
+      }) ?? Promise.resolve();
+      const secondEvent = options.onTranscriptEvent?.({
+        message: second,
+        transcript: secondTranscript,
+      }) ?? Promise.resolve();
+      await Promise.all([firstEvent, secondEvent]);
+      return {
+        model: "gpt-test",
+        finalAssistantText: "Second.",
+        transcript: secondTranscript,
+        modelTurns: 1,
+        runState: {} as HarnessPromptLoopResult["runState"],
+      };
+    },
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(
+    service.events("session-1").map((event) => event.sequence),
+    [1, 2, 3, 4, 5, 6, 7],
+  );
+  assertEquals(persistedSequences, [1, 2, 3, 4, 5, 6, 7]);
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    [
+      "session_started",
+      "turn_started",
+      "assistant_delta",
+      "assistant_delta",
+      "assistant_completed",
+      "assistant_completed",
+      "turn_completed",
+    ],
+  );
+});
+
+Deno.test("interactive service rolls back in-memory turn state when start persistence fails", async () => {
+  let failTurnPersistence = true;
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: () => {},
+    saveSessionTurnAndAppendEvent: () => {
+      if (failTurnPersistence) {
+        throw new Error("turn persistence failed");
+      }
+      return true;
+    },
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: () => [],
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await assertRejects(
+    () =>
+      service.startTurn("req-2", {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        input: { text: "First attempt" },
+      }),
+    Error,
+    "turn persistence failed",
+  );
+
+  assertEquals(service.listTurns({ sessionId: "session-1" }).turns, []);
+  assertEquals(service.status("session-1").sessions[0].status, "idle");
+
+  failTurnPersistence = false;
+  const retry = await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Retry" },
+  });
+  assertEquals(retry.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns.map((turn) =>
+      turn.turn.status
+    ),
+    ["completed"],
+  );
+});
+
+Deno.test("interactive service reserves turn start before durable duplicate checks", async () => {
+  let releaseDurableTurnCheck: (() => void) | undefined;
+  const durableTurnCheck = new Promise<undefined>((resolve) => {
+    releaseDurableTurnCheck = () => resolve(undefined);
+  });
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: () => {},
+    saveSessionTurnAndAppendEvent: () => true,
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+    saveTurn: () => {},
+    getTurn: () => durableTurnCheck,
+    listTurns: () => [],
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  const first = service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "First" },
+  });
+  const second = await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Second" },
+  });
+  assertEquals(second.ok, false);
+  assertEquals(
+    second.ok === false ? second.error.code : "",
+    "turn_already_running",
+  );
+
+  releaseDurableTurnCheck?.();
+  const firstResult = await first;
+  assertEquals(firstResult.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+});
+
 Deno.test("interactive service rejects missing sessions and concurrent turns", async () => {
   const service = new HarnessInteractiveChatService({
     createPromptLoop: () => ({
@@ -618,4 +904,101 @@ Deno.test("interactive service rejects missing sessions and concurrent turns", a
   );
   release?.();
   await busyService.waitForTurn("session-1", "turn-1");
+});
+
+Deno.test("interactive service terminalizes failed turns without closing the session", async () => {
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: () => Promise.reject(new Error("gateway unavailable")),
+    }),
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Start" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(service.status("session-1").sessions[0].status, "idle");
+  assertEquals(service.status("session-1").sessions[0].reusable, true);
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    ["session_started", "turn_started", "turn_failed"],
+  );
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn,
+    {
+      turnId: "turn-1",
+      status: "failed",
+      startedAt: "2026-05-22T00:00:03.000Z",
+      updatedAt: "2026-05-22T00:00:05.000Z",
+      endedAt: "2026-05-22T00:00:05.000Z",
+      error: {
+        code: "internal_error",
+        message: "gateway unavailable",
+      },
+    },
+  );
+
+  const nextTurn = await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Retry" },
+  });
+  assertEquals(nextTurn.ok, true);
+  await service.waitForTurn("session-1", "turn-2");
+});
+
+Deno.test("interactive service terminalizes prompt-loop setup failures", async () => {
+  let createCount = 0;
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => {
+      createCount += 1;
+      if (createCount === 1) {
+        throw new Error("prompt loop setup failed");
+      }
+      return {
+        runTranscript: (options) => Promise.resolve(makeResult(options, "OK.")),
+      };
+    },
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  const first = await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Start" },
+  });
+  assertEquals(first.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(service.status("session-1").sessions[0].status, "idle");
+  assertEquals(service.status("session-1").sessions[0].reusable, true);
+  assertEquals(
+    service.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+    "failed",
+  );
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    ["session_started", "turn_started", "turn_failed"],
+  );
+
+  const second = await service.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Retry" },
+  });
+  assertEquals(second.ok, true);
+  await service.waitForTurn("session-1", "turn-2");
+  assertEquals(service.status("session-1").sessions[0].status, "idle");
 });

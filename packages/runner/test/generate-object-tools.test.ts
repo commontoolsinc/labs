@@ -27,7 +27,7 @@ import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { getMetaLink, parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -2271,14 +2271,18 @@ describe("generateObject with tools", () => {
 });
 
 function patternOutputCell(resultCell: Cell<any>, testPattern: any): Cell<any> {
-  const sourceCell = resultCell.withTx().getSourceCell();
+  const liveResultCell = resultCell.withTx();
+  const resultLink = getMetaLink(liveResultCell, "result");
+  const parentResultCell = resultLink === undefined
+    ? undefined
+    : liveResultCell.runtime.getCellFromLink(resultLink);
   const path = testPattern.result?.$alias?.path;
-  if (!sourceCell || !Array.isArray(path)) {
-    return resultCell.withTx();
+  if (parentResultCell === undefined || !Array.isArray(path)) {
+    return liveResultCell;
   }
   return path.reduce(
     (cell: Cell<any>, segment: PropertyKey) => cell.key(segment as any),
-    sourceCell.withTx(),
+    parentResultCell.withTx(),
   );
 }
 

@@ -129,6 +129,29 @@ function getFirstParameterCapabilitySummary(
   return summary.params.find((param) => param.name === parameterName);
 }
 
+function createDeriveSchedulerOptions(
+  inputParamSummary: CapabilityParamSummary | undefined,
+  factory: ts.NodeFactory,
+): ts.ObjectLiteralExpression | undefined {
+  const writePaths = inputParamSummary?.writePaths ?? [];
+  if (writePaths.length === 0) return undefined;
+
+  return factory.createObjectLiteralExpression([
+    factory.createPropertyAssignment(
+      "materializerWriteInputPaths",
+      factory.createArrayLiteralExpression(
+        writePaths.map((path) =>
+          factory.createArrayLiteralExpression(
+            path.map((segment) => factory.createStringLiteral(segment)),
+            false,
+          )
+        ),
+        false,
+      ),
+    ),
+  ], false);
+}
+
 /**
  * Resolve capture name collisions with the original input parameter name.
  * If a capture has the same name as originalInputParamName, rename it (e.g., multiplier -> multiplier_1).
@@ -362,7 +385,7 @@ export function transformLiftAppliedCall(
     callback.body,
     captureExpressions,
     checker,
-    options.typeRegistry,
+    options.state?.typeRegistry,
   );
 
   // Recursively transform the callback body first
@@ -407,7 +430,7 @@ export function transformLiftAppliedCall(
     captureExpressions,
     factory,
     checker,
-    options.typeRegistry,
+    options.state?.typeRegistry,
   );
 
   // Initialize PatternBuilder
@@ -454,8 +477,8 @@ export function transformLiftAppliedCall(
       );
 
       // Register the result Type in typeRegistry
-      if (resultTypeNode && options.typeRegistry) {
-        options.typeRegistry.set(resultTypeNode, resultType);
+      if (resultTypeNode && options.state?.typeRegistry) {
+        options.state?.typeRegistry.set(resultTypeNode, resultType);
       }
     }
   }
@@ -508,7 +531,7 @@ export function transformLiftAppliedCall(
       getTypeFromTypeNodeWithFallback(
         inputTypeNode,
         checker,
-        options.typeRegistry,
+        options.state?.typeRegistry,
       ),
       false,
       checker,
@@ -520,6 +543,10 @@ export function transformLiftAppliedCall(
       newCallback,
     );
   }
+  const schedulerOptions = createDeriveSchedulerOptions(
+    inputParamSummary,
+    factory,
+  );
 
   // Build the lift-applied call expression:
   //   __cfHelpers.lift<inputTypeNode, resultTypeNode>(newCallback)(mergedInput)
@@ -532,7 +559,7 @@ export function transformLiftAppliedCall(
     hasTypeParameter
       ? undefined
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
-    [newCallback],
+    [newCallback, ...(schedulerOptions ? [schedulerOptions] : [])],
   );
   const rebuiltCall = factory.createCallExpression(
     innerLiftCall,
@@ -541,13 +568,13 @@ export function transformLiftAppliedCall(
   );
 
   // Register the type of the call expression itself
-  if (options.typeRegistry) {
+  if (options.state?.typeRegistry) {
     registerLiftAppliedCallType(
       rebuiltCall,
       resultTypeNode,
       resultType,
       checker,
-      options.typeRegistry,
+      options.state?.typeRegistry,
     );
   }
 

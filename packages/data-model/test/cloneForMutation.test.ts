@@ -45,7 +45,7 @@ describe("cloneForMutation", () => {
           expect(value).toEqual({ a: 1, b: 2 });
         });
 
-        it("returns input identity when already mutable + force=false", () => {
+        it("returns input identity when already mutable + `force=false`", () => {
           const root = { a: 1 } as FabricValue;
           const { value, pathValue } = cloneForMutation(root, [], {
             force: false,
@@ -54,7 +54,7 @@ describe("cloneForMutation", () => {
           expect(pathValue).toBe(root);
         });
 
-        it("does not touch the input on default options (force defaults to true)", () => {
+        it("does not touch the input on default options (`force` defaults to `true`)", () => {
           // Default `force` is true, matching `cloneIfNecessary`'s default
           // when `frozen: false`. Even with mutable input, the result is a
           // fresh copy.
@@ -66,7 +66,7 @@ describe("cloneForMutation", () => {
           expect(Object.isFrozen(value)).toBe(false);
         });
 
-        it("always shallow-clones the root when force=true", () => {
+        it("always shallow-clones the root when `force=true`", () => {
           const root = { a: 1 } as FabricValue;
           const { value, pathValue } = cloneForMutation(root, [], {
             force: true,
@@ -77,7 +77,7 @@ describe("cloneForMutation", () => {
           expect(Object.isFrozen(value)).toBe(false);
         });
 
-        it("handles an empty-path FabricInstance via shallowClone(false)", () => {
+        it("handles an empty-path `FabricInstance` via `shallowClone(false)`", () => {
           const err = FabricError.fromNativeError(new Error("test"));
           Object.freeze(err);
           const { value, pathValue } = cloneForMutation(
@@ -146,7 +146,7 @@ describe("cloneForMutation", () => {
           );
         });
 
-        it("returns input root identity when already mutable + force=false", () => {
+        it("returns input root identity when already mutable + `force=false`", () => {
           const inner = { x: 1 };
           const root = { a: inner } as FabricValue;
 
@@ -172,7 +172,7 @@ describe("cloneForMutation", () => {
           // Sibling identity still preserved (would be `b` if present).
         });
 
-        it("always copies the root and leaf when force=true", () => {
+        it("always copies the root and leaf when `force=true`", () => {
           const inner = { x: 1 };
           const root = { a: inner } as FabricValue;
 
@@ -294,8 +294,8 @@ describe("cloneForMutation", () => {
       // FabricInstance as the leaf at `path`
       // ----------------------------------------------------------------------
 
-      describe("FabricInstance at leaf", () => {
-        it("clones via shallowClone(false), not as a plain object", () => {
+      describe("`FabricInstance` at leaf", () => {
+        it("clones via `shallowClone(false)`, not as a plain object", () => {
           const err = FabricError.fromNativeError(new Error("boom"));
           Object.freeze(err);
           const root = Object.freeze({ payload: err }) as FabricValue;
@@ -353,7 +353,7 @@ describe("cloneForMutation", () => {
           expect((root as unknown as Record<string, unknown>).drop).toBe(2);
         });
 
-        it("force=true does not touch the input even with mutable input", () => {
+        it("`force=true` does not touch the input even with mutable input", () => {
           const inner = { x: 1, y: 2 };
           const root = { inner };
 
@@ -427,7 +427,7 @@ describe("cloneForMutation", () => {
           expect(Array.isArray(pathValue)).toBe(true);
         });
 
-        it("defaults to an object when nextKeyAfterPath is omitted", () => {
+        it("defaults to an object when `nextKeyAfterPath` is omitted", () => {
           const root = Object.freeze({}) as FabricValue;
           const { pathValue } = cloneForMutation(
             root,
@@ -505,7 +505,7 @@ describe("cloneForMutation", () => {
           expect(pathValue).toEqual({ c: 42 });
         });
 
-        it("interacts correctly with force=false (identity on existing path)", () => {
+        it("interacts correctly with `force=false` (identity on existing path)", () => {
           // If `createMissing: true` but every step exists AND `force:
           // false` AND input is already mutable, identity is preserved.
           const inner = { existing: 1 };
@@ -519,7 +519,7 @@ describe("cloneForMutation", () => {
           expect(pathValue).toBe(inner);
         });
 
-        it("respects force=true on the spine-thaw even when creating", () => {
+        it("respects `force=true` on the spine-thaw even when creating", () => {
           // When force=true (default), already-mutable spine containers
           // are still copied. `createMissing` doesn't change that.
           const root = { existing: 1 } as FabricValue;
@@ -611,7 +611,7 @@ describe("cloneForMutation", () => {
           }
         });
 
-        it("error.name is `CloneForMutationError`", () => {
+        it("`error.name` is `CloneForMutationError`", () => {
           try {
             cloneForMutation(42 as FabricValue, []);
             throw new Error("expected throw");
@@ -646,7 +646,7 @@ describe("cloneForMutation", () => {
             .toThrow("cannot descend into");
         });
 
-        it("throws when descending through a FabricInstance", () => {
+        it("throws when descending through a `FabricInstance`", () => {
           const err = FabricError.fromNativeError(new Error("inside"));
           const root = Object.freeze({ err }) as FabricValue;
           // `path = ["err", "something"]` tries to descend INTO the
@@ -656,7 +656,7 @@ describe("cloneForMutation", () => {
           );
         });
 
-        it("throws when descending through a FabricPrimitive", () => {
+        it("throws when descending through a `FabricPrimitive`", () => {
           const epoch = new FabricEpochNsec(123n);
           const root = Object.freeze({
             epoch: epoch as unknown as FabricValue,
@@ -671,7 +671,7 @@ describe("cloneForMutation", () => {
             .toThrow("cannot mutate");
         });
 
-        it("throws when the leaf is a FabricPrimitive (not mutable)", () => {
+        it("throws when the leaf is a `FabricPrimitive` (not mutable)", () => {
           const epoch = new FabricEpochNsec(123n);
           const root = Object.freeze({
             epoch: epoch as unknown as FabricValue,
@@ -690,7 +690,7 @@ describe("cloneForMutation", () => {
             .toThrow("cannot descend into");
         });
 
-        it("throws on non-empty path against a FabricInstance root", () => {
+        it("throws on non-empty path against a `FabricInstance` root", () => {
           // A FabricInstance is OK at the leaf but not as the root of a
           // non-empty path (we don't descend into FabricInstance internals).
           const err = FabricError.fromNativeError(new Error("test"));

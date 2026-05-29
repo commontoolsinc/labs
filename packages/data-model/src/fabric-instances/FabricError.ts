@@ -373,7 +373,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   ): FabricError {
     const s = state as Record<string, FabricValue>;
     const type = (s.type as string) ?? (s.name as string) ?? "Error";
-    // null name means "same as type" (the wire-level optimization).
+    // `null` `name` means "same as `type`" (the wire-level optimization).
     const name = (s.name as string | null | undefined) ?? type;
     const message = (s.message as string) ?? "";
     const stack = s.stack as string | undefined;

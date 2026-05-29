@@ -21,8 +21,8 @@ function transform(context: TransformationContext): ts.SourceFile {
     if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
       const rewritten = rewriteUiHelperElement(node, context, visit);
       if (rewritten) {
-        if (rewritten.hint && context.options.schemaHints) {
-          context.options.schemaHints.set(rewritten.node, rewritten.hint);
+        if (rewritten.hint) {
+          context.recordSchemaHint(rewritten.node, rewritten.hint);
         }
         return rewritten.node;
       }

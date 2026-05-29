@@ -197,6 +197,8 @@ declare module "@commonfabric/api" {
     throttle?: number;
     /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
+    /** Input paths whose writable cells should become materializer envelopes */
+    materializerWriteInputPaths?: readonly (readonly string[])[];
   }
 }
 
@@ -218,7 +220,6 @@ export type Node = {
 export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
 export const unsafe_verifiedLoadId = Symbol("unsafe_verifiedLoadId");
 export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
-export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
 
 declare module "@commonfabric/api" {
   interface Pattern {
@@ -232,9 +233,6 @@ declare module "@commonfabric/api" {
     [unsafe_originalPattern]?: Pattern;
     [unsafe_verifiedLoadId]?: string;
     [unsafe_parentPattern]?: Pattern;
-    [unsafe_materializeFactory]?: (
-      tx: IExtendedStorageTransaction,
-    ) => (path: readonly PropertyKey[]) => unknown;
   }
 }
 

@@ -1,3 +1,4 @@
+import { resolve, toFileUrl } from "@std/path";
 import {
   createHarnessChatErrorResponse,
   HARNESS_CHAT_PROTOCOL_VERSION,
@@ -18,7 +19,9 @@ import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
 import {
   createHarnessInteractiveChatService,
   type HarnessInteractiveChatService,
+  type HarnessInteractivePromptLoopFactory,
 } from "./interactive-chat-service.ts";
+import type { HarnessChatSessionStore } from "./session-store.ts";
 
 export type HarnessInteractiveChatOutputEnvelope =
   | HarnessChatEventEnvelope
@@ -29,8 +32,28 @@ export interface RunHarnessInteractiveChatNdjsonTransportOptions {
   writeLine: (line: string) => void | Promise<void>;
   createService?: (
     onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
-  ) => HarnessInteractiveChatService;
+  ) => HarnessInteractiveChatService | Promise<HarnessInteractiveChatService>;
+  closeService?: (
+    service: HarnessInteractiveChatService,
+  ) => void | Promise<void>;
 }
+
+export interface RunHarnessInteractiveChatStdioOptions {
+  input?: ReadableStream<Uint8Array>;
+  output?: WritableStream<Uint8Array>;
+  sessionDbPath?: string;
+  createPromptLoop?: HarnessInteractivePromptLoopFactory;
+  createService?: (
+    onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
+  ) => HarnessInteractiveChatService | Promise<HarnessInteractiveChatService>;
+}
+
+export interface HarnessInteractiveChatStdioCliOptions {
+  sessionDbPath?: string;
+  help: boolean;
+}
+
+const CHAT_SESSION_DB_ENV = "CF_HARNESS_CHAT_SESSION_DB";
 
 const invalidRequestResponse = (
   message: string,
@@ -41,14 +64,88 @@ const invalidRequestResponse = (
     message,
   });
 
+const usageText = `Usage: deno run -A src/interactive-chat-stdio.ts [options]
+
+Options:
+  --chat-session-db <path>  Persist chat sessions, turns, and events in SQLite
+  --help                   Print this help text to stderr
+
+Environment:
+  ${CHAT_SESSION_DB_ENV}    Default SQLite chat session DB path
+`;
+
+const nonEmptyOptionValue = (
+  name: string,
+  value: string | undefined,
+): string => {
+  if (value === undefined || value.trim() === "") {
+    throw new Error(`${name} requires a non-empty value`);
+  }
+  return value;
+};
+
+export const parseHarnessInteractiveChatStdioCliOptions = (
+  args: readonly string[],
+  env: Record<string, string | undefined> = Deno.env.toObject(),
+): HarnessInteractiveChatStdioCliOptions => {
+  let sessionDbPath = env[CHAT_SESSION_DB_ENV];
+  let help = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--help" || arg === "-h") {
+      help = true;
+      continue;
+    }
+    if (arg === "--chat-session-db") {
+      index += 1;
+      sessionDbPath = nonEmptyOptionValue(arg, args[index]);
+      continue;
+    }
+    if (arg.startsWith("--chat-session-db=")) {
+      sessionDbPath = nonEmptyOptionValue(
+        "--chat-session-db",
+        arg.slice("--chat-session-db=".length),
+      );
+      continue;
+    }
+    throw new Error(`unsupported interactive chat stdio argument: ${arg}`);
+  }
+  return {
+    ...(sessionDbPath !== undefined && sessionDbPath.trim() !== ""
+      ? { sessionDbPath }
+      : {}),
+    help,
+  };
+};
+
+const openSessionStore = async (
+  sessionDbPath: string,
+): Promise<HarnessChatSessionStore> => {
+  const { openSqliteHarnessChatSessionStore } = await import(
+    "./sqlite-session-store.ts"
+  );
+  return await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(resolve(sessionDbPath)),
+  });
+};
+
 const SUPPORTED_REQUEST_METHODS = new Set<HarnessChatRequestMethod>([
   "start_session",
   "start_turn",
   "cancel_turn",
   "close_session",
   "status",
+  "list_events",
+  "list_turns",
 ]);
 const SUPPORTED_POLICY_TOOL_MODES = new Set(["workspace-write", "read-only"]);
+const SUPPORTED_TURN_STATUSES = new Set([
+  "running",
+  "canceling",
+  "canceled",
+  "completed",
+  "failed",
+]);
 const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>([
   "bash",
   "bash-no-sandbox",
@@ -77,6 +174,20 @@ const hasOptionalString = (
   value: Record<string, unknown>,
   key: string,
 ): boolean => value[key] === undefined || typeof value[key] === "string";
+
+const hasOptionalNonNegativeInteger = (
+  value: Record<string, unknown>,
+  key: string,
+): boolean =>
+  value[key] === undefined ||
+  (Number.isInteger(value[key]) && Number(value[key]) >= 0);
+
+const hasOptionalPositiveInteger = (
+  value: Record<string, unknown>,
+  key: string,
+): boolean =>
+  value[key] === undefined ||
+  (Number.isInteger(value[key]) && Number(value[key]) > 0);
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
@@ -169,6 +280,15 @@ const isValidRequestParams = (
         hasOptionalString(params, "reason");
     case "status":
       return hasOptionalString(params, "sessionId");
+    case "list_events":
+      return hasOptionalString(params, "sessionId") &&
+        hasOptionalNonNegativeInteger(params, "afterSequence") &&
+        hasOptionalPositiveInteger(params, "limit");
+    case "list_turns":
+      return hasOptionalString(params, "sessionId") &&
+        (params.status === undefined ||
+          (typeof params.status === "string" &&
+            SUPPORTED_TURN_STATUSES.has(params.status)));
   }
 };
 
@@ -236,25 +356,48 @@ export const runHarnessInteractiveChatNdjsonTransport = async (
     createHarnessInteractiveChatService({
       onEvent: writeEnvelope,
     });
+  const resolvedService = await service;
 
-  for await (const rawLine of options.lines) {
-    const line = rawLine.trim();
-    if (line.length === 0) {
-      continue;
+  let transportError: unknown;
+  let cleanupError: unknown;
+  try {
+    for await (const rawLine of options.lines) {
+      const line = rawLine.trim();
+      if (line.length === 0) {
+        continue;
+      }
+      let response: HarnessChatResponse;
+      try {
+        response = await resolvedService.handleRequest(parseRequestLine(line));
+      } catch (error) {
+        response = isTransportErrorResponse(error)
+          ? error
+          : invalidRequestResponse(
+            error instanceof Error ? error.message : String(error),
+          );
+      }
+      await writeEnvelope(response);
     }
-    let response: HarnessChatResponse;
+  } catch (error) {
+    transportError = error;
+  } finally {
     try {
-      response = await service.handleRequest(parseRequestLine(line));
+      await resolvedService.waitForIdle();
     } catch (error) {
-      response = isTransportErrorResponse(error)
-        ? error
-        : invalidRequestResponse(
-          error instanceof Error ? error.message : String(error),
-        );
+      cleanupError = error;
     }
-    await writeEnvelope(response);
+    try {
+      await options.closeService?.(resolvedService);
+    } catch (error) {
+      cleanupError ??= error;
+    }
   }
-  await service.waitForIdle();
+  if (transportError !== undefined) {
+    throw transportError;
+  }
+  if (cleanupError !== undefined) {
+    throw cleanupError;
+  }
 };
 
 const isTransportErrorResponse = (
@@ -301,21 +444,46 @@ const decodeUtf8Lines = async function* (
 };
 
 export const runHarnessInteractiveChatStdio = async (
-  options: {
-    input?: ReadableStream<Uint8Array>;
-    output?: WritableStream<Uint8Array>;
-    createService?: (
-      onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
-    ) => HarnessInteractiveChatService;
-  } = {},
+  options: RunHarnessInteractiveChatStdioOptions = {},
 ): Promise<void> => {
   const encoder = new TextEncoder();
   const output = options.output ?? Deno.stdout.writable;
   const writer = output.getWriter();
+  let sessionStore: HarnessChatSessionStore | undefined;
+  const createService = options.createService ??
+    (async (
+      onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
+    ) => {
+      let openedStore: HarnessChatSessionStore | undefined;
+      try {
+        if (options.sessionDbPath !== undefined) {
+          openedStore = await openSessionStore(options.sessionDbPath);
+          sessionStore = openedStore;
+        }
+        const service = createHarnessInteractiveChatService({
+          onEvent,
+          ...(options.createPromptLoop !== undefined
+            ? { createPromptLoop: options.createPromptLoop }
+            : {}),
+          ...(sessionStore !== undefined ? { sessionStore } : {}),
+        });
+        await service.initializeFromStore();
+        return service;
+      } catch (error) {
+        await openedStore?.close?.();
+        if (sessionStore === openedStore) {
+          sessionStore = undefined;
+        }
+        throw error;
+      }
+    });
   try {
     await runHarnessInteractiveChatNdjsonTransport({
       lines: decodeUtf8Lines(options.input ?? Deno.stdin.readable),
-      createService: options.createService,
+      createService,
+      closeService: async () => {
+        await sessionStore?.close?.();
+      },
       writeLine: async (line) => {
         await writer.write(encoder.encode(`${line}\n`));
       },
@@ -325,6 +493,22 @@ export const runHarnessInteractiveChatStdio = async (
   }
 };
 
+export const runHarnessInteractiveChatStdioCli = async (
+  args: readonly string[] = Deno.args,
+): Promise<void> => {
+  const options = parseHarnessInteractiveChatStdioCliOptions(args);
+  if (options.help) {
+    await Deno.stderr.write(new TextEncoder().encode(usageText));
+    return;
+  }
+  await runHarnessInteractiveChatStdio(options);
+};
+
 if (import.meta.main) {
-  await runHarnessInteractiveChatStdio();
+  try {
+    await runHarnessInteractiveChatStdioCli();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    Deno.exit(1);
+  }
 }
