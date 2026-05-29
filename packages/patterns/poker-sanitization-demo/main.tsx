@@ -152,6 +152,12 @@ const FOLDED_BOX = {
   border: "1px dashed #94a3b8",
   fontStyle: "italic",
 };
+const YOU_BOX = {
+  ...LOCK_BOX,
+  background: "#dcfce7",
+  color: "#166534",
+  border: "1px solid #86efac",
+};
 const ROW = { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "10px" };
 const HAND_ROW = {
   display: "flex",
@@ -204,11 +210,16 @@ function badge(kind: Badge) {
     <span
       style={{
         display: "inline-block",
+        alignSelf: "center", // don't stretch when placed in a flex row next to a tall button
+        flexShrink: "0",
         background: s.bg,
         color: s.fg,
-        borderRadius: "999px",
-        padding: "2px 8px",
+        borderRadius: "6px",
+        padding: "0 8px",
         fontSize: "10px",
+        lineHeight: "18px",
+        height: "18px",
+        boxSizing: "border-box",
         fontWeight: "700",
         letterSpacing: "0.3px",
         whiteSpace: "nowrap",
@@ -382,13 +393,6 @@ function rowStyle(folded: boolean, shown: boolean) {
   };
 }
 
-function noteFor(folded: boolean, shown: boolean) {
-  if (folded) {
-    return <div style={FOLDED_BOX}>folded — stays confidential at showdown</div>;
-  }
-  return shown ? "" : <div style={LOCK_BOX}>🔒 blocked by render boundary</div>;
-}
-
 function phaseStepper(current: string) {
   return (
     <div style={{ ...ROW, gap: "6px" }}>
@@ -476,6 +480,34 @@ const setBool = handler<unknown, { cell: Writable<boolean>; next: boolean }>(
   },
 );
 
+// Simulated per-reader materialization: which player's runtime are we acting as? (Not real
+// authenticated identity — the materialization layer the memo proposes is simulated by this.)
+const setViewer = handler<unknown, { viewer: Writable<string>; next: string }>(
+  (_, s) => {
+    s.viewer.set(s.next);
+  },
+);
+
+// What a given hand projects FOR THE CURRENT VIEWER: you always see your own hand; the showdown
+// reveals everyone's non-folded hands to all. (declassify the render boundary accordingly.)
+function seesHand(viewer: string, owner: string, folded: boolean, shown: boolean): boolean {
+  if (viewer === owner) return true; // your own cards
+  return shown && !folded; // showdown reveals others' live hands
+}
+
+function handNoteFor(
+  viewer: string,
+  owner: string,
+  folded: boolean,
+  shown: boolean,
+) {
+  if (viewer === owner) {
+    return <div style={YOU_BOX}>👁 your hand</div>;
+  }
+  if (folded) return <div style={FOLDED_BOX}>folded — stays secret</div>;
+  return shown ? "" : <div style={LOCK_BOX}>🔒 secret from you</div>;
+}
+
 // ===========================================================================
 // Pattern
 // ===========================================================================
@@ -512,6 +544,7 @@ export default pattern<unknown, PokerOutput>(() => {
   const revealed = new Writable<boolean>(false);
   const countReleased = new Writable<boolean>(false);
   const phase = new Writable<string>("predeal");
+  const viewer = new Writable<string>("Spectator"); // simulated per-reader materialization
 
   // Confidential views of the three hands (real ifc.confidentiality labels).
   const aliceConf: Writable<ConfHand> = makeHand({ id: "poker-hand-alice", cards: alice }) as never;
@@ -541,40 +574,53 @@ export default pattern<unknown, PokerOutput>(() => {
   const conceal = setBool({ cell: revealed, next: false });
   const releaseCount = setBool({ cell: countReleased, next: true });
   const hideCount = setBool({ cell: countReleased, next: false });
+  const viewAlice = setViewer({ viewer, next: "Alice" });
+  const viewBob = setViewer({ viewer, next: "Bob" });
+  const viewCharlie = setViewer({ viewer, next: "Charlie" });
+  const viewSpectator = setViewer({ viewer, next: "Spectator" });
+  const lblAlice = computed(() => (viewer.get() === "Alice" ? "✓ Alice" : "Alice"));
+  const lblBob = computed(() => (viewer.get() === "Bob" ? "✓ Bob" : "Bob"));
+  const lblCharlie = computed(() => (viewer.get() === "Charlie" ? "✓ Charlie" : "Charlie"));
+  const lblSpectator = computed(() => (viewer.get() === "Spectator" ? "✓ Spectator (anyone at the table)" : "Spectator (anyone at the table)"));
 
-  // Each hand's render boundary, rebuilt when the deal changes or the showdown flips. Folded
-  // hands are never declassified — they stay behind the boundary even at showdown.
+  // Each hand's render boundary, rebuilt when the deal/viewer/showdown change. You see your own
+  // hand; the showdown reveals everyone's non-folded hands to all.
   const aliceCell = computed(() => {
     dealIndex.get();
-    return handBoundary(aliceConf, alice, revealed.get() && !aliceFolded.get());
+    return handBoundary(aliceConf, alice, seesHand(viewer.get(), "Alice", aliceFolded.get(), revealed.get()));
   });
   const bobCell = computed(() => {
     dealIndex.get();
-    return handBoundary(bobConf, bob, revealed.get() && !bobFolded.get());
+    return handBoundary(bobConf, bob, seesHand(viewer.get(), "Bob", bobFolded.get(), revealed.get()));
   });
   const charlieCell = computed(() => {
     dealIndex.get();
-    return handBoundary(charlieConf, charlie, revealed.get() && !charlieFolded.get());
+    return handBoundary(charlieConf, charlie, seesHand(viewer.get(), "Charlie", charlieFolded.get(), revealed.get()));
   });
 
-  const aliceNote = computed(() => noteFor(aliceFolded.get(), revealed.get()));
-  const bobNote = computed(() => noteFor(bobFolded.get(), revealed.get()));
-  const charlieNote = computed(() => noteFor(charlieFolded.get(), revealed.get()));
+  const aliceNote = computed(() => handNoteFor(viewer.get(), "Alice", aliceFolded.get(), revealed.get()));
+  const bobNote = computed(() => handNoteFor(viewer.get(), "Bob", bobFolded.get(), revealed.get()));
+  const charlieNote = computed(() => handNoteFor(viewer.get(), "Charlie", charlieFolded.get(), revealed.get()));
 
-  const aliceRowStyle = computed(() => rowStyle(aliceFolded.get(), revealed.get()));
-  const bobRowStyle = computed(() => rowStyle(bobFolded.get(), revealed.get()));
-  const charlieRowStyle = computed(() => rowStyle(charlieFolded.get(), revealed.get()));
+  const aliceRowStyle = computed(() => rowStyle(aliceFolded.get(), seesHand(viewer.get(), "Alice", aliceFolded.get(), revealed.get())));
+  const bobRowStyle = computed(() => rowStyle(bobFolded.get(), seesHand(viewer.get(), "Bob", bobFolded.get(), revealed.get())));
+  const charlieRowStyle = computed(() => rowStyle(charlieFolded.get(), seesHand(viewer.get(), "Charlie", charlieFolded.get(), revealed.get())));
 
-  // Hero status banner + a click cue shown only while hidden.
-  const heroBanner = computed(() =>
-    revealed.get()
-      ? <div style={BANNER_SHOWN}>✅ Showdown! A trusted action just revealed the hands.</div>
-      : <div style={BANNER_HIDDEN}>🔒 The hands are SECRET. The system is refusing to show them.</div>
-  );
+  // Hero status banner — reflects the current viewer and showdown state.
+  const heroBanner = computed(() => {
+    if (revealed.get()) {
+      return <div style={BANNER_SHOWN}>✅ Showdown! A trusted action revealed every hand to everyone.</div>;
+    }
+    const v = viewer.get();
+    if (v === "Spectator") {
+      return <div style={BANNER_HIDDEN}>🔒 Viewing as a spectator — every hand is secret. Pick a player to see their view, or run Showdown.</div>;
+    }
+    return <div style={BANNER_SHOWN}>👁 Viewing as {v}: you see your own cards; opponents stay secret.</div>;
+  });
   const clickCue = computed(() =>
     revealed.get()
       ? ""
-      : <div style={{ fontSize: "13px", color: "#2563eb", fontWeight: "600" }}>👇 Click “Showdown” to reveal the hands</div>
+      : <div style={{ fontSize: "13px", color: "#2563eb", fontWeight: "600" }}>👇 Pick a player above to see their view, or click “Showdown” to reveal to all</div>
   );
 
   // The two DYNAMIC boundaries are their own top-level computeds rendered as direct children
@@ -623,6 +669,23 @@ export default pattern<unknown, PokerOutput>(() => {
               </cf-vstack>
 
               {tryThis()}
+
+              {/* Simulated per-reader materialization: act as a specific player */}
+              <cf-vstack gap="1">
+                <cf-hstack gap="2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "13px", fontWeight: "700" }}>View as:</span>
+                  <cf-button onClick={viewAlice} color="neutral" variant="outline" size="sm">{lblAlice}</cf-button>
+                  <cf-button onClick={viewBob} color="neutral" variant="outline" size="sm">{lblBob}</cf-button>
+                  <cf-button onClick={viewCharlie} color="neutral" variant="outline" size="sm">{lblCharlie}</cf-button>
+                  <cf-button onClick={viewSpectator} color="neutral" variant="outline" size="sm">{lblSpectator}</cf-button>
+                  {badge("SIMULATED")}
+                </cf-hstack>
+                <cf-label style={{ fontSize: "12px", color: "#94a3b8" }}>
+                  Switching reader is the <b>per-recipient materialization</b> the memo proposes —
+                  simulated here (one host; not real authenticated identity).
+                </cf-label>
+              </cf-vstack>
+
               {heroBanner}
 
               <div style={aliceRowStyle}>
