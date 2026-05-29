@@ -38,17 +38,19 @@ describe("PiecesController profile default patterns", () => {
     controllers = [];
     fetchedPaths = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL | Request) => {
+    globalThis.fetch = ((input: string | URL | Request) => {
       const url = new URL(input instanceof Request ? input.url : input);
       fetchedPaths.push(url.pathname);
       const source = sourcesByPath.get(url.pathname);
       if (source === undefined) {
-        return new Response("not found", { status: 404 });
+        return Promise.resolve(new Response("not found", { status: 404 }));
       }
-      return new Response(source, {
-        status: 200,
-        headers: { "content-type": "text/typescript" },
-      });
+      return Promise.resolve(
+        new Response(source, {
+          status: 200,
+          headers: { "content-type": "text/typescript" },
+        }),
+      );
     }) as typeof globalThis.fetch;
   });
 

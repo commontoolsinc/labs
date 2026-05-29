@@ -23,7 +23,6 @@ import {
   navigateToPattern,
   readWebpage,
   searchWeb,
-  updateProfile,
 } from "./common-fabric.tsx";
 import { MentionablePiece } from "./backlinks-index.tsx";
 import {
@@ -124,7 +123,7 @@ export default pattern<OmniboxFABInput>(
       `omnibot-${nonPrivateRandom().toString(36).slice(2, 10)}`,
     );
 
-    const profile = wish<string>({ query: "#profile" });
+    const profileName = wish<string>({ query: "#profileName" });
 
     const patternIndexUrl = wish<{ url: Writable<string> }>({
       query: "#pattern-index",
@@ -146,10 +145,8 @@ export default pattern<OmniboxFABInput>(
     });
 
     const profileContext = computed(() => {
-      const profileText = profile.result;
-      return profileText
-        ? `\n\n--- User Context ---\n${profileText}\n---\n`
-        : "";
+      const name = profileName.result;
+      return name ? `\n\n--- User Context ---\nName: ${name}\n---\n` : "";
     });
 
     const systemPrompt = computed(() => {
@@ -186,7 +183,6 @@ Be matter-of-fact. Prefer action to explanation.`;
       wishAndNavigate: patternTool(wishTool),
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
-      updateProfile: patternTool(updateProfile),
       bash: patternTool(bash, { sandboxId }),
       searchSpace: patternTool(summarySearchPattern, {
         entries: summaryEntries,

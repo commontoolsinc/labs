@@ -322,12 +322,6 @@ describe("profile owner CFC policy", () => {
     try {
       const homePattern = await compileHomePattern(runtime);
       const tx = runtime.edit();
-      const homeDefault = runtime.getCell(
-        alice.did(),
-        "home-profile-link-untrusted",
-        homePattern.resultSchema,
-        tx,
-      );
       const profileDefault = runtime.getCell(
         alice.did(),
         "home-profile-link-untrusted-target",

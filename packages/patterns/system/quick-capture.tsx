@@ -129,13 +129,13 @@ export default pattern<QuickCaptureInput, QuickCaptureOutput>(
     }).result!;
 
     // TODO(#1269): Add wish<{ text: string }>({ query: "#system" }) once #system wish resolution is stable.
-    const profileWish = wish<string>({ query: "#profile" });
-    const profileText = computed(() => profileWish.result ?? "");
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileName = computed(() => profileNameWish.result ?? "");
 
     const systemPrompt = computed(() => {
-      const profile = profileText;
-      const profileSection = profile
-        ? `\n\n--- User Context ---\n${profile}\n---`
+      const name = profileName;
+      const profileSection = name
+        ? `\n\n--- User Context ---\nName: ${name}\n---`
         : "";
 
       return `You are a quick capture assistant. The user will paste freeform text — voice memo transcripts, meeting notes, ideas, research, brain dumps. Your job is to turn this into well-linked notes in their knowledge base.

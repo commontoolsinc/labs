@@ -65,13 +65,13 @@ export default pattern<SpaceOverviewInput, SpaceOverviewOutput>(() => {
   const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
     query: "#summaryIndex",
   }).result!;
-  const profileWish = wish<string>({ query: "#profile" });
-  const profileText = computed(() => profileWish.result ?? "");
+  const profileNameWish = wish<string>({ query: "#profileName" });
+  const profileName = computed(() => profileNameWish.result ?? "");
 
   const systemPrompt = computed(() => {
-    const profile = profileText;
-    const profileSection = profile
-      ? `\n\n--- User Context ---\n${profile}\n---`
+    const name = profileName;
+    const profileSection = name
+      ? `\n\n--- User Context ---\nName: ${name}\n---`
       : "";
 
     return `You are a space orientation assistant. When activated, you explore the user's knowledge space using your tools and produce a clear, insightful overview of what's going on.

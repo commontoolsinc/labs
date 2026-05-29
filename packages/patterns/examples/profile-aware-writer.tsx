@@ -1,5 +1,4 @@
 import {
-  Cell,
   computed,
   Default,
   derive,
@@ -29,12 +28,12 @@ const handleSend = handler<
 export default pattern<Input>(({ title }) => {
   const topic = new Writable("");
 
-  const profile = wish<Cell<string>>({ query: "#profile" });
+  const profileName = wish<string>({ query: "#profileName" });
 
   const systemPrompt = computed(() => {
-    const profileText = profile.result!.get();
-    const profileSection = profileText
-      ? `\n\n--- About the User ---\n${profileText}\n---\n`
+    const name = profileName.result;
+    const profileSection = name
+      ? `\n\n--- About the User ---\nName: ${name}\n---\n`
       : "";
     return `You are a helpful writing assistant.${profileSection}
 Write content personalized to the user when appropriate.`;
@@ -53,10 +52,11 @@ Write content personalized to the user when appropriate.`;
 
         <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
-          <cf-code-editor
-            $value={profile.result}
-            style={{ maxHeight: "256px" }}
-          />
+          <p>
+            {profileName.result
+              ? `Name: ${profileName.result}`
+              : "No profile name available."}
+          </p>
         </cf-card>
 
         <div>

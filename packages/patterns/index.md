@@ -900,9 +900,9 @@ type ImageChatOutput = {
 
 ## `examples/profile-aware-writer.tsx`
 
-Example pattern demonstrating how to use the `#profile` wish to personalize LLM
-output. Fetches the user's profile summary and injects it into the system prompt
-for personalized text generation.
+Example pattern demonstrating how to use the shared profile name to personalize
+LLM output. Fetches the user's profile name and injects it into the system
+prompt for personalized text generation.
 
 **Keywords:** profile, wish, generateText, llm, personalization
 

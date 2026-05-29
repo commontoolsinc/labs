@@ -108,7 +108,7 @@ export default pattern<
   });
 
   // --- LLM state (freeform query path) ---
-  const profile = wish<string>({ query: "#profile" });
+  const profileName = wish<string>({ query: "#profileName" });
 
   const mentionable = wish<MentionablePiece[]>({
     query: "#mentionable",
@@ -140,8 +140,8 @@ export default pattern<
   });
 
   const profileContext = computed(() => {
-    const profileText = profile.result;
-    return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
+    const name = profileName.result;
+    return name ? `\n\n--- User Context ---\nName: ${name}\n---` : "";
   });
 
   const sandboxId = new Writable(

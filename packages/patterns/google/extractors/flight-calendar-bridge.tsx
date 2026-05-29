@@ -7,7 +7,7 @@
  *
  * Features:
  * - Discovers flights via wish({ query: "#unitedFlights" })
- * - Discovers home/work addresses via wish({ query: "#profile" })
+ * - Generates default travel-time blocks for Bay Area airports
  * - Generates travel-to-airport events (with security buffer)
  * - Generates travel-from-airport events (with baggage buffer)
  * - Bay Area airport intelligence (SFO, OAK, SJC)
@@ -15,10 +15,9 @@
  * - Color-coded linked events (flight + travel same color family)
  *
  * Usage:
- * 1. Deploy a profile pattern with home address
- * 2. Deploy a united-flight-tracker with linked gmail auth
- * 3. Deploy this bridge pattern
- * 4. Link output events to a weekly calendar
+ * 1. Deploy a united-flight-tracker with linked gmail auth
+ * 2. Deploy this bridge pattern
+ * 3. Link output events to a weekly calendar
  */
 import {
   computed,
@@ -31,21 +30,10 @@ import {
   wish,
   Writable,
 } from "commonfabric";
-import type { Output as ProfileOutput } from "../../profile.tsx";
 
 // =============================================================================
 // TYPES
 // =============================================================================
-
-/** Address type from profile - duplicated here to avoid import issues */
-interface Address {
-  label: string;
-  street: string;
-  city: string;
-  state: string;
-  zip: string;
-  country: string;
-}
 
 /** Flight data from united-flight-tracker */
 interface TrackedFlight {
@@ -465,12 +453,8 @@ export default pattern<PatternInput, PatternOutput>(() => {
     query: "#unitedFlights",
   });
 
-  // Discover profile via wish
-  const profileWish = wish<ProfileOutput>({ query: "#profile" });
-
   // Access the result from wish (WishState has a result property)
   const flightTrackerResult = flightTrackerWish.result;
-  const profileResult = profileWish.result;
 
   // Use derive to extract upcomingFlights from the piece result
   const upcomingFlights = derive(
@@ -478,18 +462,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
     (tracker) => tracker?.upcomingFlights ?? [],
   );
 
-  // Extract home address from profile using derive
-  const homeAddress = derive(
-    profileResult,
-    (prof: ProfileOutput | undefined) => {
-      const addrs = prof?.addresses ?? [];
-      const home = addrs.find((a: Address) => a.label === "Home");
-      if (home && home.street) {
-        return `${home.street}, ${home.city}, ${home.state} ${home.zip}`.trim();
-      }
-      return null;
-    },
-  );
+  const homeAddress = computed((): string | null => null);
 
   // Check if we have flight data
   const isConnected = computed(() => {
@@ -593,17 +566,13 @@ export default pattern<PatternInput, PatternOutput>(() => {
               </div>
             </div>
 
-            {/* Profile Status */}
+            {/* Travel Timing */}
             <div
               style={{
                 padding: "12px 16px",
-                backgroundColor: computed(() =>
-                  homeAddress ? "#eff6ff" : "#f3f4f6"
-                ),
+                backgroundColor: "#f3f4f6",
                 borderRadius: "8px",
-                border: computed(() =>
-                  homeAddress ? "1px solid #3b82f6" : "1px solid #d1d5db"
-                ),
+                border: "1px solid #d1d5db",
               }}
             >
               <div
@@ -614,18 +583,8 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 }}
               >
                 <span style={{ fontSize: "16px" }}>
-                  {ifElse(homeAddress, "Home address found", "No home address")}
+                  Travel blocks use default Bay Area airport estimates
                 </span>
-              </div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "#6b7280",
-                  marginTop: "4px",
-                  display: computed(() => (homeAddress ? "block" : "none")),
-                }}
-              >
-                {homeAddress}
               </div>
             </div>
 
@@ -926,9 +885,6 @@ export default pattern<PatternInput, PatternOutput>(() => {
                   margin: 0,
                 }}
               >
-                <li style={{ marginBottom: "4px" }}>
-                  Deploy a profile pattern and add your home address
-                </li>
                 <li style={{ marginBottom: "4px" }}>
                   Deploy a United flight tracker with Gmail auth linked
                 </li>

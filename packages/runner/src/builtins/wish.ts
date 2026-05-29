@@ -132,8 +132,6 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#now":
       return "space-target";
     case "#favorites":
-    case "#journal":
-    case "#learned":
     case "#profile":
     case "#profileName":
     case "#profileAvatar":
@@ -626,28 +624,6 @@ function resolveHomeSpaceTarget(
       }];
     }
 
-    case "#journal": {
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError("User identity DID not available for #journal");
-      }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "journal"],
-      }];
-    }
-
-    case "#learned": {
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError("User identity DID not available for #learned");
-      }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "learned"],
-      }];
-    }
-
     case "#profile": {
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
@@ -763,7 +739,7 @@ function resolveSpaceTarget(
  *
  * Resolution paths:
  * 1. Well-known space targets (/, #default, #mentionable, #allPieces, #recent, #now)
- * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
+ * 2. Well-known home space targets (#favorites, #profile, #profileName, #profileAvatar, #profileSpace)
  * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
 function resolveBase(

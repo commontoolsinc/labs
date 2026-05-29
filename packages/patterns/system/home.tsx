@@ -14,7 +14,6 @@ import {
 import FavoritesManager from "./favorites-manager.tsx";
 import ProfileCreate, { type CreateProfileEvent } from "./profile-create.tsx";
 import ProfileHome, { type ProfileHomeOutput } from "./profile-home.tsx";
-import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
 // Types from favorites-manager.tsx
 type Favorite = {
@@ -23,17 +22,6 @@ type Favorite = {
   userTags: string[];
   spaceName?: string;
   spaceDid?: string;
-};
-
-type JournalEntry = {
-  timestamp?: number;
-  eventType?: string;
-  subject?: Writable<unknown>;
-  snapshot?: { name?: string; schemaTag?: string; valueExcerpt?: string };
-  narrative?: string;
-  narrativePending?: boolean;
-  tags?: string[];
-  space?: string;
 };
 
 type SpaceEntry = {
@@ -45,8 +33,6 @@ type HomeOutput = {
   [NAME]: string;
   [UI]: unknown;
   favorites: Writable<Favorite[]>;
-  journal: Writable<JournalEntry[]>;
-  learned: Writable<LearnedSection>;
   spaces: Writable<SpaceEntry[]>;
   defaultAppUrl: Writable<string>;
   profile?: TrustedProfileLink;
@@ -89,14 +75,6 @@ const removeFavorite = handler<
   if (favorite) {
     favorites.remove(favorite);
   }
-});
-
-// Handler to add a journal entry (kept for schema compatibility)
-const addJournalEntry = handler<
-  { entry: JournalEntry },
-  { journal: Writable<JournalEntry[]> }
->(({ entry }, { journal }) => {
-  journal.push(entry);
 });
 
 // Handler to add a space to the managed list
@@ -157,8 +135,6 @@ type TrustedProfileLink = Cfc<
 export default pattern<Record<string, never>, HomeOutput>((_) => {
   // OWN the data cells (.for for id stability)
   const favorites = new Writable<Favorite[]>([]).for("favorites");
-  const journal = new Writable<JournalEntry[]>([]).for("journal");
-  const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
   const requestedProfileName = new Writable("").for(
@@ -295,8 +271,6 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
 
     // Exported data
     favorites,
-    journal,
-    learned,
     spaces,
     defaultAppUrl,
     profile,
@@ -305,7 +279,6 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
     removeFavorite: removeFavorite({ favorites }),
-    addJournalEntry: addJournalEntry({ journal }),
     createProfile: createProfileStream,
   };
 });
