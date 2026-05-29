@@ -1,4 +1,4 @@
-import { Cell, Default, derive, handler, pattern } from "commonfabric";
+import { Cell, Default, handler, pattern } from "commonfabric";
 
 interface ToggleArgs {
   active: Default<boolean, false>;
@@ -13,10 +13,7 @@ const toggleState = handler(
 
 export const toggleWithLabel = pattern<ToggleArgs>(
   ({ active }) => {
-    const status = derive(
-      active,
-      (isActive) => (isActive ? "enabled" : "disabled"),
-    );
+    const status = active ? "enabled" : "disabled";
 
     return {
       active,

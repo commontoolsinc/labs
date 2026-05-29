@@ -1,7 +1,7 @@
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   NAME,
@@ -167,7 +167,7 @@ const css = `
 
 export default pattern<InputSchema, ResultSchema>(
   ({ charms }) => {
-    derive(charms, (charms) => {
+    computed(() => {
       console.log("bg charm list:", charms);
     });
     return {
@@ -190,7 +190,8 @@ export default pattern<InputSchema, ResultSchema>(
                       onClick={toggleCharm({ charm })}
                       type="button"
                     >
-                      {derive(charm, ({ status, disabledAt }) => {
+                      {computed(() => {
+                        const { status, disabledAt } = charm;
                         const SUCCESS = `#4CAF50`;
                         const UNKNOWN = `#FFC107`;
                         const DISABLED = `#9E9E9E`;

@@ -2,7 +2,6 @@ import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -211,10 +210,9 @@ export const counterWithAlternateInitialStates = pattern<
     active: activeStateId,
   });
 
-  const selectionCount = derive(
-    selectionLog,
-    (entries) => Array.isArray(entries.get()) ? entries.get().length : 0,
-  );
+  const selectionCount = Array.isArray(selectionLog.get())
+    ? selectionLog.get().length
+    : 0;
 
   const label = str`State ${activeState.label}=${valueCell} (step ${stepCell})`;
 

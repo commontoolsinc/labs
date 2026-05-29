@@ -1,12 +1,4 @@
-import {
-  Cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commonfabric";
+import { Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface FilteredProjectionArgs {
   counters: Default<number[], []>;
@@ -107,9 +99,9 @@ export const counterWithFilteredProjection = pattern<FilteredProjectionArgs>(
       threshold: thresholdValue,
     });
 
-    const totalCount = derive(sanitizedCounters, (values) => values.length);
-    const filteredCount = derive(filtered, (values) => values.length);
-    const excludedCount = derive(excluded, (values) => values.length);
+    const totalCount = sanitizedCounters.length;
+    const filteredCount = filtered.length;
+    const excludedCount = excluded.length;
 
     const filteredLabel = liftJoinedValues(filtered);
     const excludedLabel = liftJoinedValues(excluded);

@@ -1,8 +1,8 @@
 import {
   Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -144,60 +144,54 @@ export const emailInboxThreading = pattern<EmailInboxArgs>(
 
     const sanitizedMessages = liftSanitizedMessages(messages);
 
-    const threads = derive(
-      sanitizedMessages,
-      (collection): ThreadSummary[] => {
-        const groups = new Map<string, ThreadSummary>();
-        for (const entry of collection) {
-          const existing = groups.get(entry.threadId);
-          if (existing) {
-            const updatedMessages = [...existing.messages, entry];
-            const latestTimestamp = entry.timestamp > existing.latestTimestamp
-              ? entry.timestamp
-              : existing.latestTimestamp;
-            groups.set(entry.threadId, {
-              threadId: entry.threadId,
-              subject: entry.timestamp >= existing.latestTimestamp
-                ? entry.subject
-                : existing.subject,
-              snippet: entry.timestamp >= existing.latestTimestamp
-                ? entry.snippet
-                : existing.snippet,
-              latestTimestamp,
-              messageCount: updatedMessages.length,
-              senders: Array.from(new Set([...existing.senders, entry.sender])),
-              messages: updatedMessages.sort(
-                (a, b) => a.timestamp - b.timestamp,
-              ),
-            });
-          } else {
-            groups.set(entry.threadId, {
-              threadId: entry.threadId,
-              subject: entry.subject,
-              snippet: entry.snippet,
-              latestTimestamp: entry.timestamp,
-              messageCount: 1,
-              senders: [entry.sender],
-              messages: [entry],
-            });
-          }
+    const threads = computed((): ThreadSummary[] => {
+      const collection = sanitizedMessages;
+      const groups = new Map<string, ThreadSummary>();
+      for (const entry of collection) {
+        const existing = groups.get(entry.threadId);
+        if (existing) {
+          const updatedMessages = [...existing.messages, entry];
+          const latestTimestamp = entry.timestamp > existing.latestTimestamp
+            ? entry.timestamp
+            : existing.latestTimestamp;
+          groups.set(entry.threadId, {
+            threadId: entry.threadId,
+            subject: entry.timestamp >= existing.latestTimestamp
+              ? entry.subject
+              : existing.subject,
+            snippet: entry.timestamp >= existing.latestTimestamp
+              ? entry.snippet
+              : existing.snippet,
+            latestTimestamp,
+            messageCount: updatedMessages.length,
+            senders: Array.from(new Set([...existing.senders, entry.sender])),
+            messages: updatedMessages.sort(
+              (a, b) => a.timestamp - b.timestamp,
+            ),
+          });
+        } else {
+          groups.set(entry.threadId, {
+            threadId: entry.threadId,
+            subject: entry.subject,
+            snippet: entry.snippet,
+            latestTimestamp: entry.timestamp,
+            messageCount: 1,
+            senders: [entry.sender],
+            messages: [entry],
+          });
         }
+      }
 
-        return Array.from(groups.values()).sort(
-          (a, b) => b.latestTimestamp - a.latestTimestamp,
-        );
-      },
-    );
+      return Array.from(groups.values()).sort(
+        (a, b) => b.latestTimestamp - a.latestTimestamp,
+      );
+    });
 
     const threadCount = liftThreadCount(threads);
-    const orderedThreadIds = derive(
-      threads,
-      (items) => items.map((item) => item.threadId),
+    const orderedThreadIds = computed(() =>
+      threads.map((item) => item.threadId)
     );
-    const topThread = derive(
-      threads,
-      (items) => items.length > 0 ? items[0] : null,
-    );
+    const topThread = computed(() => threads.length > 0 ? threads[0] : null);
     const topThreadLabel = liftTopThreadLabel(topThread);
     const activeThreadView = liftActiveThreadView(activeThreadId);
     const activeThreadSummary = liftActiveThreadSummary({
