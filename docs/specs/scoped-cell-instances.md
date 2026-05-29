@@ -278,6 +278,42 @@ scope-dependent.
 This behavior applies equally when a broader scoped output contains a link to a
 narrower scoped computation result.
 
+### Navigation Does Not Carry Scope
+
+Path navigation (for example `cell.key(...)`) only extends the link's path and
+walks the schema to the child schema. It must not change the link's scope, and
+it must not read storage. Scope lives in the schema: it is resolved lazily as a
+follow cap on reads and as the target scope on writes. The link's own `scope`
+remains the base scope established when the cell was created (from an explicit
+scope, a top-level schema scope, or `space`).
+
+Stamping a child schema's scope onto the navigated link is incorrect: the link
+addresses the containing instance, so stamping a narrower scope would read or
+write the wrong scoped instance of the container.
+
+### Scoped Write Placement
+
+A write places content in the instance whose scope the content's schema
+declares, at every nesting level, not only at the top of the write:
+
+- When a field's schema declares a scope narrower than the instance being
+  written, the field's content is written into the narrower-scope instance (same
+  id, same path, narrower scope key) and the broader-scope slot holds a link to
+  it. Readers at the broader scope follow that link to the narrower instance.
+- For arrays whose items declare a narrower scope, each element is an
+  independent link to its narrower-scope element instance. The array container —
+  including its length — stays in the broader scope; there is no single redirect
+  for the whole array. This mirrors the `map` rule: an input-list-scoped array of
+  links to narrower scoped element instances.
+- Writing a link or cell reference is exempt: a reference already carries its own
+  target scope, so it is stored as-is at the broader slot.
+
+The narrower-scope instance is a different scoped instance of the same id, so
+its container structure (the value root and any intermediate objects/arrays
+along the written path) is created as needed; the broader instance keeps the
+non-scoped data and the links. Writes to different scope instances of one id are
+applied as separate operations, never merged into a single document write.
+
 ## Schema Semantics
 
 `JSONSchemaObj` gains an optional Common Fabric extension:

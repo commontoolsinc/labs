@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -8,6 +8,74 @@ import { type Cell, createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+Deno.test("bulk write routes nested scoped fields to their scope instances", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const cell = runtime.getCell(
+      space,
+      "bulk nested scope",
+      {
+        type: "object",
+        properties: {
+          theme: { type: "string" },
+          draft: { type: "string", scope: "session" },
+          tags: {
+            type: "array",
+            items: { type: "string", scope: "session" },
+          },
+        },
+      },
+      tx,
+    );
+
+    // One bulk write containing a space field, a nested session field, and an
+    // array whose items are session-scoped.
+    cell.set({ theme: "dark", draft: "hello", tags: ["x", "y"] });
+
+    const id = cell.getAsNormalizedFullLink().id;
+    const at = (scope: "space" | "session", ...path: string[]) =>
+      tx.read({
+        space,
+        id,
+        scope,
+        type: "application/json",
+        path: ["value", ...path],
+      }).ok?.value;
+
+    // Object field: content in the session instance, a link at the space slot.
+    assertEquals(at("session", "draft"), "hello");
+    const draftBroad = at("space", "draft");
+    const draftLink = parseLink(draftBroad, cell.key("draft") as any);
+    assert(draftLink !== undefined, "space draft slot should hold a link");
+    assertEquals(draftLink!.scope, "session");
+
+    // Space field stays in the space instance.
+    assertEquals(at("space", "theme"), "dark");
+
+    // Array: container stays in space (length is space-scoped), each element is
+    // a link to the session-scoped element instance (no whole-array redirect).
+    assertEquals(at("space", "tags", "length"), 2);
+    assertEquals(at("session", "tags", "0"), "x");
+    const tag0Broad = at("space", "tags", "0");
+    const tag0Link = parseLink(tag0Broad, cell.key("tags", "0") as any);
+    assert(tag0Link !== undefined, "space tags[0] slot should hold a link");
+    assertEquals(tag0Link!.scope, "session");
+
+    // Reads resolve through the links.
+    assertEquals(cell.key("draft").get() as unknown, "hello");
+    assertEquals(cell.key("tags").get() as unknown, ["x", "y"]);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
 
 Deno.test("getCell seeds base scope from a top-level schema scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });

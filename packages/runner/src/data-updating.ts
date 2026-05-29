@@ -36,6 +36,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import {
   getCellOrThrow,
@@ -288,6 +289,55 @@ function declaredCellScope(
   return undefined;
 }
 
+const ARRAY_INDEX_RE = /^(?:0|[1-9][0-9]*)$/;
+
+/**
+ * Ensure the narrower-scope instance has the container structure (objects /
+ * arrays) along the ancestors of `scopedLink.path`, so a nested content write
+ * has a place to live. Storage does not auto-create parents, and the narrow
+ * instance is a different scoped instance than the broad one whose structure the
+ * normal recursion builds.
+ *
+ * Missing ancestors are written immediately (not via the returned change set) so
+ * that sibling narrowed writes in the same transaction observe them and don't
+ * re-initialize a shared ancestor, which would clobber an earlier sibling's
+ * value. Ancestors that already exist (from this transaction or a prior commit)
+ * are left untouched so existing narrow data is preserved.
+ *
+ * TODO: this side-effects inside the diff computation; fold into the planned
+ * normalizeAndDiff refactor so the narrow instance is built by a normal
+ * root-descending pass instead.
+ */
+function ensureNarrowAncestorContainers(
+  tx: IExtendedStorageTransaction,
+  scopedLink: NormalizedFullLink,
+  options: IReadOptions | undefined,
+): ChangeSet {
+  const changes: ChangeSet = [];
+  for (let i = 0; i < scopedLink.path.length; i++) {
+    const ancestorLink: NormalizedFullLink = {
+      ...scopedLink,
+      path: scopedLink.path.slice(0, i),
+      schema: undefined,
+    };
+    const current = tx.read(toMemorySpaceAddress(ancestorLink), options);
+    if (
+      current.ok &&
+      (isRecord(current.ok.value) || Array.isArray(current.ok.value))
+    ) {
+      continue;
+    }
+    // The child segment along this path decides whether the container that must
+    // hold it is an array (numeric index) or an object.
+    const isArrayParent = ARRAY_INDEX_RE.test(scopedLink.path[i]);
+    changes.push({
+      location: ancestorLink,
+      value: (isArrayParent ? [] : {}) as FabricValue,
+    });
+  }
+  return changes;
+}
+
 export function diffAndUpdate(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
@@ -296,31 +346,6 @@ export function diffAndUpdate(
   context?: unknown,
   options?: IReadOptions,
 ): boolean {
-  // Never write content into a scope broader than the data's own declared
-  // scope. If the target cell's schema declares a narrower scope than the
-  // link's base scope, write the content into the narrower-scope instance and
-  // leave a redirect link in the broader-scope location, so readers at the
-  // broader scope follow it to the narrower instance. This does not apply when
-  // writing a link value (a reference carries its own target scope) — only when
-  // writing the cell's own content. The check lives here, at the top-level
-  // write entry, so it only narrows the write target and not every nested path
-  // (recursion goes through `normalizeAndDiff`).
-  const declared = declaredCellScope(link.schema);
-  if (
-    declared !== undefined &&
-    scopeRank(declared) > scopeRank(link.scope) &&
-    !isCellLink(newValue) &&
-    !isCell(newValue)
-  ) {
-    const scopedLink: NormalizedFullLink = { ...link, scope: declared };
-    diffAndUpdate(runtime, tx, scopedLink, newValue, context, options);
-    tx.writeValueOrThrow(
-      link,
-      createSigilLinkFromParsedLink(scopedLink, { base: link }) as FabricValue,
-    );
-    return true;
-  }
-
   const readOptions: IReadOptions = {
     ...options,
     meta: {
@@ -403,6 +428,53 @@ export function normalizeAndDiff(
         `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`,
     );
     newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
+  }
+
+  // Scope narrowing: if this slot's schema declares a scope narrower than the
+  // link's base scope, the content belongs in the narrower-scope instance and
+  // the broader-scope slot holds a link to it, so readers at the broader scope
+  // follow it to the narrower instance. A reference value (link/cell) is exempt:
+  // it already carries its own target scope. Both writes recurse back through
+  // normalizeAndDiff so they get the usual diffing, no-op detection, and CFC
+  // label/policy handling. Applying this at the top of normalizeAndDiff makes it
+  // compose to arbitrary depth (every nested descent re-enters here); for arrays
+  // it yields one link per element rather than a redirect of the whole array.
+  const declaredScope = declaredCellScope(link.schema);
+  if (
+    declaredScope !== undefined &&
+    scopeRank(declaredScope) > scopeRank(link.scope) &&
+    !isCellLink(newValue) &&
+    !isCell(newValue)
+  ) {
+    const scopedLink: NormalizedFullLink = { ...link, scope: declaredScope };
+    // Apply the narrower-scope instance's writes immediately, as their own
+    // single-scope batch. Writes to different scope instances of the same id
+    // must not share one batch, and applying now means sibling narrowed writes
+    // observe the ancestors this created (so they don't re-init and clobber).
+    // Only the broad-scope redirect joins the caller's (broad) change set.
+    applyChangeSet(tx, [
+      ...(scopedLink.path.length > 0
+        ? ensureNarrowAncestorContainers(tx, scopedLink, options)
+        : []),
+      ...normalizeAndDiff(
+        runtime,
+        tx,
+        scopedLink,
+        newValue,
+        context,
+        options,
+        seen,
+      ),
+    ]);
+    return normalizeAndDiff(
+      runtime,
+      tx,
+      link,
+      createSigilLinkFromParsedLink(scopedLink, { base: link }) as unknown,
+      context,
+      options,
+      seen,
+    );
   }
 
   // ID_FIELD redirects to an existing field and we do something like DOM
