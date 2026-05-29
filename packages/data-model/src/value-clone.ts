@@ -113,6 +113,45 @@ export function shallowMutableClone<T extends FabricValue>(value: T): T {
 }
 
 /**
+ * Returns a fresh **mutable top-level** copy of a `FabricValue` whose every
+ * bound child is guaranteed **deep-frozen**. This is the shape wanted by the
+ * "mutate the top, then deep-freeze the whole" pattern: a caller can freely
+ * write top-level properties/elements and then perform a single
+ * `Object.freeze()` (or `deepFreeze()`) on the result to obtain a
+ * fully-deep-frozen value, with no leftover mutable bits hiding underneath.
+ *
+ * Children are made safe via `cloneIfNecessary()` with its default (deep-frozen)
+ * options, so already-deep-frozen children are identity-passed (zero-copy) while
+ * mutable children are deep-cloned-and-frozen. The input is never mutated:
+ * mutable children are cloned, not frozen in place.
+ *
+ * This differs from `shallowMutableClone()`, which leaves children
+ * identity-shared with the input exactly as they are (mutable stays mutable).
+ * Use that one when you need to preserve child identity / structural sharing
+ * (e.g. persistent-structure updates); use this one when you intend to seal the
+ * result with a single deep-freeze.
+ *
+ * Inherently-immutable inputs (primitives, `FabricPrimitive`s) are returned
+ * as-is, since there is no mutable top level to produce.
+ *
+ * @param value - An already-valid `FabricValue`.
+ */
+export function shallowMutableDeepFrozenClone<T extends FabricValue>(
+  value: T,
+): T {
+  // Deep-freeze-clone first (cloning only where needed, never mutating the
+  // input, identity-passing already-deep-frozen subtrees), which makes every
+  // child safely shareable; then shallow-thaw just the top container so the
+  // immediate result is mutable while its children stay deep-frozen.
+  const deepFrozen = cloneIfNecessary(value, { frozen: true });
+  return cloneIfNecessary(deepFrozen, {
+    frozen: false,
+    deep: false,
+    force: true,
+  }) as T;
+}
+
+/**
  * Performs the unified clone for both shallow and deep modes.
  *
  * When `deep` is true, recursively clones containers and detects circular

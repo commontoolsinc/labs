@@ -28,6 +28,7 @@ export {
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
   shallowMutableClone,
+  shallowMutableDeepFrozenClone,
 } from "./value-clone.ts";
 
 import type {
