@@ -393,21 +393,19 @@ function rowStyle(folded: boolean, shown: boolean) {
   };
 }
 
+// Status breadcrumb (NOT buttons): "PHASE  predeal › preflop › flop › ...", current highlighted.
 function phaseStepper(current: string) {
   return (
-    <div style={{ ...ROW, gap: "6px" }}>
-      {PHASES.map((p) => (
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px", fontSize: "12px" }}>
+      <span style={{ color: "#94a3b8", fontWeight: "700", letterSpacing: "0.5px" }}>PHASE</span>
+      {PHASES.map((p, i) => (
         <span
           style={{
-            padding: "4px 10px",
-            borderRadius: "6px",
-            fontSize: "12px",
             fontWeight: p === current ? "700" : "500",
-            background: p === current ? "#6366f1" : "#f1f5f9",
-            color: p === current ? "#ffffff" : "#64748b",
+            color: p === current ? "#2563eb" : "#94a3b8",
           }}
         >
-          {p}
+          {i > 0 ? "›  " : ""}{p}
         </span>
       ))}
     </div>
@@ -640,6 +638,14 @@ export default pattern<unknown, PokerOutput>(() => {
   );
 
   const stepper = computed(() => phaseStepper(phase.get()));
+  // Phase-gating: streets must be dealt in order; folds only while a hand is in play.
+  const flopDisabled = computed(() => phase.get() !== "preflop");
+  const turnDisabled = computed(() => phase.get() !== "flop");
+  const riverDisabled = computed(() => phase.get() !== "turn");
+  const foldDisabled = computed(() => {
+    const p = phase.get();
+    return !(p === "preflop" || p === "flop" || p === "turn" || p === "river");
+  });
   const boardDisplay = computed(() => {
     const b = (board.get() || []).filter((c) => c && c.rank);
     return b.length ? "" : "(no community cards yet — deal the flop)";
@@ -796,24 +802,29 @@ export default pattern<unknown, PokerOutput>(() => {
           <cf-card>
             <cf-vstack slot="content" gap="2">
               {dualHeading("🃏 Play the hand", "community cards are public; hole cards stay confidential")}
+              {/* status (not clickable) */}
               {stepper}
               <div style={ROW}>
                 {board.map(cardChip)}
                 <span style={{ color: "#64748b", fontSize: "13px" }}>{boardDisplay}</span>
               </div>
-              <cf-hstack gap="2">
-                <cf-button onClick={start} color="neutral" variant="outline">🆕 New game</cf-button>
-                <cf-button onClick={flop} color="neutral" variant="outline">Flop</cf-button>
-                <cf-button onClick={turn} color="neutral" variant="outline">Turn</cf-button>
-                <cf-button onClick={river} color="neutral" variant="outline">River</cf-button>
-              </cf-hstack>
-              <cf-label style={{ fontSize: "12px", color: "#94a3b8" }}>
-                Folding mucks a hand — it stays secret even at showdown.
+              {/* controls (clickable) — streets must be dealt in order, so out-of-phase ones disable */}
+              <cf-label style={{ fontSize: "11px", fontWeight: "700", color: "#94a3b8", letterSpacing: "0.5px" }}>
+                DEAL (in order)
               </cf-label>
               <cf-hstack gap="2">
-                <cf-button onClick={foldAlice} color="neutral" variant="ghost" size="sm">Alice folds</cf-button>
-                <cf-button onClick={foldBob} color="neutral" variant="ghost" size="sm">Bob folds</cf-button>
-                <cf-button onClick={foldCharlie} color="neutral" variant="ghost" size="sm">Charlie folds</cf-button>
+                <cf-button onClick={start} color="primary" variant="solid" size="sm">🆕 New game</cf-button>
+                <cf-button onClick={flop} color="neutral" variant="solid" size="sm" disabled={flopDisabled}>Flop</cf-button>
+                <cf-button onClick={turn} color="neutral" variant="solid" size="sm" disabled={turnDisabled}>Turn</cf-button>
+                <cf-button onClick={river} color="neutral" variant="solid" size="sm" disabled={riverDisabled}>River</cf-button>
+              </cf-hstack>
+              <cf-label style={{ fontSize: "11px", fontWeight: "700", color: "#94a3b8", letterSpacing: "0.5px" }}>
+                PLAYERS — fold mucks a hand (it stays secret even at showdown)
+              </cf-label>
+              <cf-hstack gap="2">
+                <cf-button onClick={foldAlice} color="neutral" variant="outline" size="sm" disabled={foldDisabled}>Alice folds</cf-button>
+                <cf-button onClick={foldBob} color="neutral" variant="outline" size="sm" disabled={foldDisabled}>Bob folds</cf-button>
+                <cf-button onClick={foldCharlie} color="neutral" variant="outline" size="sm" disabled={foldDisabled}>Charlie folds</cf-button>
               </cf-hstack>
             </cf-vstack>
           </cf-card>
