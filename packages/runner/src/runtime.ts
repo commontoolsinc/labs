@@ -30,7 +30,7 @@ import type {
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
-import { type Cell, createCell } from "./cell.ts";
+import { type Cell, createCell, schemaCellScope } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import { Engine } from "./harness/index.ts";
@@ -708,14 +708,19 @@ export class Runtime {
     cause: any,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
-    scope: NormalizedFullLink["scope"] = "space",
+    scope?: NormalizedFullLink["scope"],
   ): Cell<any> {
+    // Creating a cell uses the schema to seed the initial link scope: an
+    // explicit scope wins, otherwise a top-level schema scope, otherwise space.
+    // (Per-property/asCell scopes are not a top-level concern here; they are
+    // resolved during read/write, see data-updating.ts and link-resolution.ts.)
+    const effectiveScope = scope ?? schemaCellScope(schema) ?? "space";
     return this.getCellFromLink(
       {
         id: toURI(createRef({}, cause)),
         path: [],
         space,
-        scope,
+        scope: effectiveScope,
       },
       schema,
       tx,

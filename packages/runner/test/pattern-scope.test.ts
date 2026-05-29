@@ -9,6 +9,48 @@ import { type Cell, createCell } from "../src/cell.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+Deno.test("getCell seeds base scope from a top-level schema scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    // No top-level scope -> space.
+    const spaceCell = runtime.getCell(
+      space,
+      "getcell-scope-default",
+      { type: "object", properties: { v: { type: "string" } } },
+      tx,
+    );
+    assertEquals(spaceCell.getAsNormalizedFullLink().scope, "space");
+
+    // Top-level schema scope seeds the created cell's base scope.
+    const userCell = runtime.getCell(
+      space,
+      "getcell-scope-user",
+      { type: "object", scope: "user", properties: { v: { type: "string" } } },
+      tx,
+    );
+    assertEquals(userCell.getAsNormalizedFullLink().scope, "user");
+
+    // An explicit scope argument still wins over the schema.
+    const explicitCell = runtime.getCell(
+      space,
+      "getcell-scope-explicit",
+      { type: "object", scope: "user", properties: { v: { type: "string" } } },
+      tx,
+      "session",
+    );
+    assertEquals(explicitCell.getAsNormalizedFullLink().scope, "session");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

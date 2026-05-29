@@ -2561,7 +2561,7 @@ function schemaWithDefaultAndScope<T>(
   return scopedSchema;
 }
 
-function schemaCellScope(
+export function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
   return isRecord(schema) && isCellScope(schema.scope)
