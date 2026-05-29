@@ -842,10 +842,6 @@ describe("fabric-value", () => {
     });
   });
 
-  // --------------------------------------------------------------------------
-  // freeze parameter (modern path only)
-  // --------------------------------------------------------------------------
-
   describe("`freeze` parameter (modern path)", () => {
     beforeEach(() => {
       setDataModelConfig(true);
@@ -883,7 +879,7 @@ describe("fabric-value", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("primitives are unaffected by `freeze` parameter", () => {
+      it("leaves primitives unaffected by the `freeze` parameter", () => {
         expect(shallowFabricFromNativeValue(42, false)).toBe(42);
         expect(shallowFabricFromNativeValue("hello", false)).toBe("hello");
         expect(shallowFabricFromNativeValue(true, false)).toBe(true);
@@ -1048,7 +1044,7 @@ describe("fabric-value", () => {
         expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("`FabricBytes` is always frozen (`freeze` parameter ignored)", () => {
+      it("always freezes `FabricBytes` (`freeze` parameter ignored)", () => {
         const bytes = new Uint8Array([10, 20]);
         const result = shallowFabricFromNativeValue(bytes, false);
         expect(result).toBeInstanceOf(FabricBytes);
@@ -1120,7 +1116,7 @@ describe("fabric-value", () => {
         expect(() => fabricFromNativeValue(Symbol("bad"), false)).toThrow();
       });
 
-      it("primitives are unaffected by `freeze` parameter", () => {
+      it("leaves primitives unaffected by the `freeze` parameter", () => {
         expect(fabricFromNativeValue(42, false)).toBe(42);
         expect(fabricFromNativeValue("hello", false)).toBe("hello");
         expect(fabricFromNativeValue(null, false)).toBe(null);
@@ -1161,11 +1157,8 @@ describe("fabric-value", () => {
     });
   });
 
-  // =========================================================================
-  // Error internals conversion (modern path): cause and custom properties must
-  // be recursively converted to FabricValue before wrapping in FabricError
-  // =========================================================================
-
+  // Cause and custom properties must be recursively converted to
+  // `FabricValue` before wrapping in `FabricError`.
   describe("`Error` internals deep conversion (modern path)", () => {
     beforeEach(() => {
       setDataModelConfig(true);
@@ -1275,14 +1268,9 @@ describe("fabric-value", () => {
     });
   });
 
-  // =========================================================================
-  // Special numbers (modern path)
-  //
   // The modern path embraces -0, NaN, +Infinity, and -Infinity as valid
-  // FabricValue members. The legacy path continues to reject and normalize
+  // `FabricValue` members. The legacy path continues to reject and normalize
   // (covered above).
-  // =========================================================================
-
   describe("special numbers (modern path)", () => {
     beforeEach(() => {
       setDataModelConfig(true);
@@ -1350,15 +1338,10 @@ describe("fabric-value", () => {
     });
   });
 
-  // =========================================================================
-  // Interned symbols (modern path)
-  //
   // Modern mode admits registry-interned symbols (`Symbol.for(key)`, where
   // `Symbol.keyFor(s)` returns a string) as fabric primitives. Unique
   // symbols (`Symbol(desc)`) have no portable representation and continue
   // to be rejected. The legacy path is unchanged (covered above).
-  // =========================================================================
-
   describe("interned symbols (modern path)", () => {
     beforeEach(() => {
       setDataModelConfig(true);
@@ -1375,24 +1358,24 @@ describe("fabric-value", () => {
       expect(isFabricValue(Symbol("k"))).toBe(false);
     });
 
-    it("`shallowFabricFromNativeValue()` passes an interned symbol through", () => {
+    it("passes an interned symbol through `shallowFabricFromNativeValue()`", () => {
       const sym = Symbol.for("k");
       // Interned symbols are primitives -- pass-through, no wrapping.
       expect(shallowFabricFromNativeValue(sym)).toBe(sym);
     });
 
-    it("`shallowFabricFromNativeValue()` throws on a unique symbol", () => {
+    it("throws on a unique symbol via `shallowFabricFromNativeValue()`", () => {
       expect(() => shallowFabricFromNativeValue(Symbol("nope"))).toThrow(
         "Cannot store unique (uninterned) symbol",
       );
     });
 
-    it("`fabricFromNativeValue()` passes an interned symbol through", () => {
+    it("passes an interned symbol through `fabricFromNativeValue()`", () => {
       const sym = Symbol.for("top-level");
       expect(fabricFromNativeValue(sym)).toBe(sym);
     });
 
-    it("`fabricFromNativeValue()` preserves interned symbols in objects", () => {
+    it("preserves interned symbols in objects via `fabricFromNativeValue()`", () => {
       const result = fabricFromNativeValue({
         kind: Symbol.for("event"),
         flag: Symbol.for("ready"),
@@ -1401,7 +1384,7 @@ describe("fabric-value", () => {
       expect(result.flag).toBe(Symbol.for("ready"));
     });
 
-    it("`fabricFromNativeValue()` preserves interned symbols in arrays", () => {
+    it("preserves interned symbols in arrays via `fabricFromNativeValue()`", () => {
       const result = fabricFromNativeValue(
         [Symbol.for("a"), 1, Symbol.for("b")],
       ) as unknown[];
@@ -1410,13 +1393,13 @@ describe("fabric-value", () => {
       expect(result[2]).toBe(Symbol.for("b"));
     });
 
-    it("`fabricFromNativeValue()` throws on a nested unique symbol", () => {
+    it("throws on a nested unique symbol via `fabricFromNativeValue()`", () => {
       expect(() => fabricFromNativeValue({ k: Symbol("nope") })).toThrow(
         "Cannot store unique (uninterned) symbol",
       );
     });
 
-    it("interned symbols round-trip with stable identity", () => {
+    it("round-trips interned symbols with stable identity", () => {
       // Same registry key in any realm yields the same symbol instance
       // -- so the result equals the constructed sentinel by identity.
       const out = fabricFromNativeValue(Symbol.for("identity-check"));
@@ -1424,10 +1407,7 @@ describe("fabric-value", () => {
     });
   });
 
-  // =========================================================================
-  // isFabricCompatible: deep storability check (modern path)
-  // =========================================================================
-
+  // Deep storability check (modern path).
   describe("isFabricCompatible", () => {
     beforeEach(() => {
       setDataModelConfig(true);
