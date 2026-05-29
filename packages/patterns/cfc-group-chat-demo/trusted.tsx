@@ -16,9 +16,8 @@ import {
 } from "commonfabric";
 import {
   activeAdminRoleForSubject,
-  type AdminManagerCredential,
-  adminManagerCredentialIsActive,
   adminRegistryEntries,
+  adminRegistryEveryoneIsAdmin,
   type EmptyAdminRegistryValue,
   subjectHasAdminRole,
 } from "../cfc/admin/mod.ts";
@@ -45,8 +44,6 @@ export const TRUSTED_GROUP_CHAT_SEND_ACTION = "TrustedGroupChatSendMessage";
 export const TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION = "TrustedGroupChatAddRoom";
 export const TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION = "TrustedGroupChatSetAdmin";
 export const GROUP_CHAT_ADMIN_INTEGRITY = "group-chat-admin" as const;
-export const GROUP_CHAT_ADMIN_MANAGER_INTEGRITY =
-  "group-chat-admin-manager" as const;
 
 export type TrustedProfile = RepresentsCurrentUser<
   TrustedActionWrite<
@@ -67,13 +64,6 @@ export type ChatAdminRole = AddIntegrity<
   ChatAdminRoleAssignment,
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
-export type ChatAdminManagerCredential = AdminManagerCredential<
-  typeof GROUP_CHAT_ADMIN_MANAGER_INTEGRITY
->;
-export type AdminManagerCredentialCell = Writable<
-  ChatAdminManagerCredential | null
->;
-export type AdminManagerDraftCell = Writable<boolean | Default<true>>;
 
 export interface MyProfileValue {
   readonly profile?: ProfileCell;
@@ -126,11 +116,38 @@ export type ChatAdminList = RequiresIntegrity<
     typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
     typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
   >,
-  readonly [typeof GROUP_CHAT_ADMIN_MANAGER_INTEGRITY]
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
+
+export type ChatAdminBootstrapRole = AddIntegrity<
+  ChatAdminRoleAssignment,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
+
+export type ChatEveryoneAdminFlag =
+  | RequiresIntegrity<
+    AddIntegrity<
+      TrustedActionWrite<
+        true,
+        typeof commitTrustedAdminToggle,
+        typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+        typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+      >,
+      readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+    >,
+    readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+  >
+  | TrustedActionWrite<
+    false,
+    typeof commitTrustedAdminToggle,
+    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+  >;
 
 export interface ChatAdminRegistryStoredValue {
   readonly admins?: ChatAdminList;
+  readonly bootstrapAdmin?: ChatAdminBootstrapRole;
+  readonly everyoneIsAdmin?: ChatEveryoneAdminFlag;
 }
 
 export type ChatAdminRegistryValue =
@@ -161,6 +178,11 @@ export type RoomDraftCell = Writable<string | Default<"">>;
 
 const draftText = (draft: Writable<string | Default<"">>): string =>
   (draft.get() as string | undefined) ?? "";
+
+const nonEmptyEventName = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+};
 
 export const messagesValue = (
   messages: SharedMessagesCell,
@@ -202,16 +224,56 @@ export const currentProfileSnapshot = (
 
 export const chatAdminRolesValue = (
   adminRegistry: ChatAdminRegistryCell,
-): ChatAdminRole[] => adminRegistryEntries<ChatAdminRole>(adminRegistry);
+): ChatAdminRole[] => {
+  const explicitAdmins = adminRegistryEntries<ChatAdminRole>(adminRegistry);
+  if (explicitAdmins.length > 0) {
+    return explicitAdmins;
+  }
+  const bootstrapAdmin = (
+    adminRegistry.get() as ChatAdminRegistryStoredValue | undefined
+  )?.bootstrapAdmin;
+  if (bootstrapAdmin === undefined) {
+    return [];
+  }
+  return [{
+    ...bootstrapAdmin,
+    subject: adminRegistry.key("bootstrapAdmin").key("subject")
+      .resolveAsCell() as ProfileCell,
+  } as ChatAdminRole];
+};
+
+export const chatAdminEveryoneIsAdmin = (
+  adminRegistry: ChatAdminRegistryCell,
+): boolean => adminRegistryEveryoneIsAdmin<ChatAdminRole>(adminRegistry);
 
 export const currentUserAdminRole = (
   myProfile: MyProfileCell,
   adminRegistry: ChatAdminRegistryCell,
-): ChatAdminRole | undefined =>
-  activeAdminRoleForSubject(
+): ChatAdminRole | undefined => {
+  if (myProfileValue(myProfile).profile === undefined) {
+    return undefined;
+  }
+  const profile = myProfile.key("profile").resolveAsCell();
+  const explicitRole = activeAdminRoleForSubject(
     chatAdminRolesValue(adminRegistry),
-    currentProfileCell(myProfile),
+    profile,
   );
+  if (explicitRole !== undefined) {
+    return explicitRole;
+  }
+  const profileValue = currentProfileSnapshot(myProfile);
+  if (
+    !profileValue?.name ||
+    !chatAdminEveryoneIsAdmin(adminRegistry)
+  ) {
+    return undefined;
+  }
+
+  return {
+    subject: profile,
+    displayName: profileValue.name,
+  } as ChatAdminRole;
+};
 
 export const currentUserIsAdmin = (
   myProfile: MyProfileCell,
@@ -219,8 +281,9 @@ export const currentUserIsAdmin = (
 ): boolean => currentUserAdminRole(myProfile, adminRegistry) !== undefined;
 
 export const currentUserCanManageAdmins = (
-  adminManagerCredential: AdminManagerCredentialCell,
-): boolean => adminManagerCredentialIsActive(adminManagerCredential.get());
+  myProfile: MyProfileCell,
+  adminRegistry: ChatAdminRegistryCell,
+): boolean => currentUserIsAdmin(myProfile, adminRegistry);
 
 export const participantClaimsValue = (
   profiles: SharedProfilesCell,
@@ -290,6 +353,7 @@ export interface AdminParticipantRow {
   readonly accentColor: string;
   readonly profile?: AuthorProfileCell;
   readonly isAdmin: boolean;
+  readonly everyoneIsAdmin: boolean;
   readonly canManageAdmins: boolean;
 }
 
@@ -298,17 +362,19 @@ export const adminParticipantRowsValue = (
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
   adminRegistry: ChatAdminRegistryCell,
-  adminManagerCredential: AdminManagerCredentialCell,
 ): AdminParticipantRow[] => {
   const adminRoles = chatAdminRolesValue(adminRegistry);
-  const canManageAdmins = currentUserCanManageAdmins(adminManagerCredential);
+  const everyoneIsAdmin = chatAdminEveryoneIsAdmin(adminRegistry);
+  const canManageAdmins = currentUserCanManageAdmins(myProfile, adminRegistry);
   return participantClaimsValue(profiles, myProfile, messages)
     .filter((participant) => participant.profile !== undefined)
     .map((participant) => ({
       name: participant.name,
       accentColor: participant.accentColor,
       profile: participant.profile,
-      isAdmin: subjectHasAdminRole(adminRoles, participant.profile),
+      isAdmin: everyoneIsAdmin ||
+        subjectHasAdminRole(adminRoles, participant.profile),
+      everyoneIsAdmin,
       canManageAdmins,
     }));
 };
@@ -330,20 +396,14 @@ export const registerProfile = (
 export const applyTrustedProfileSave = (
   myProfile: MyProfileCell,
   profiles: SharedProfilesCell,
-  adminManagerCredential: AdminManagerCredentialCell,
   rawName: string,
-  canManageAdmins: boolean,
 ): {
   trimmedName: string | null;
   profile?: ProfileCell;
-  canManageAdmins: boolean;
 } => {
   const trimmedName = rawName.trim();
   if (!trimmedName) {
-    return {
-      trimmedName: null,
-      canManageAdmins: currentUserCanManageAdmins(adminManagerCredential),
-    };
+    return { trimmedName: null };
   }
 
   const existingProfile = currentProfileSnapshot(myProfile);
@@ -354,14 +414,7 @@ export const applyTrustedProfileSave = (
   );
   myProfile.set({ profile });
   registerProfile(profiles, profile);
-  if (canManageAdmins) {
-    adminManagerCredential.set({
-      canManageAdmins: true,
-    } as ChatAdminManagerCredential);
-    return { trimmedName, profile, canManageAdmins: true };
-  }
-  adminManagerCredential.set(null);
-  return { trimmedName, profile, canManageAdmins: false };
+  return { trimmedName, profile };
 };
 
 export const prepareTrustedMessageSend = (
@@ -455,20 +508,16 @@ export const commitTrustedProfileSave = handler<
   {
     myProfile: MyProfileCell;
     profiles: SharedProfilesCell;
-    adminManagerCredential: AdminManagerCredentialCell;
     nameDraft: Writable<string | Default<"">>;
-    adminManagerDraft: AdminManagerDraftCell;
   }
 >((
   _,
-  { myProfile, profiles, adminManagerCredential, nameDraft, adminManagerDraft },
+  { myProfile, profiles, nameDraft },
 ) => {
   const { trimmedName } = applyTrustedProfileSave(
     myProfile,
     profiles,
-    adminManagerCredential,
     draftText(nameDraft),
-    adminManagerDraft.get() !== false,
   );
   if (trimmedName) {
     nameDraft.set(trimmedName);
@@ -497,12 +546,75 @@ export const commitTrustedMessageSend = handler<
 });
 type TrustedMessageSendInput = Parameters<typeof commitTrustedMessageSend>[0];
 
+export interface TrustedAdminPolicyEvent {
+  readonly type?: string;
+  readonly name?: string;
+  readonly target?: {
+    readonly name?: string;
+    readonly value?: string;
+    readonly dataset?: {
+      readonly adminName?: string;
+    };
+  };
+  readonly everyoneIsAdmin?: boolean;
+  readonly detail?: {
+    readonly checked?: boolean;
+  };
+}
+
+interface TrustedAdminPolicyChange {
+  readonly admins?: ChatAdminRole[];
+  readonly bootstrapAdmin?: ChatAdminRole;
+  readonly everyoneIsAdmin?: boolean;
+}
+
 export const prepareTrustedAdminToggle = (
-  adminManagerCredential: ChatAdminManagerCredential | null | undefined,
+  currentAdminRole: ChatAdminRole | undefined,
   adminRegistry: ChatAdminRegistryCell,
   participant: AdminParticipantRow | undefined,
   myProfile?: MyProfileCell,
-): ChatAdminRole[] | null => {
+  nextEveryoneIsAdmin?: boolean,
+): TrustedAdminPolicyChange | null => {
+  if (currentAdminRole === undefined) {
+    return null;
+  }
+
+  const adminRoles = chatAdminRolesValue(adminRegistry);
+  if (nextEveryoneIsAdmin !== undefined) {
+    if (nextEveryoneIsAdmin) {
+      return {
+        everyoneIsAdmin: true,
+      };
+    }
+
+    const currentProfile = myProfile === undefined
+      ? undefined
+      : currentProfileCell(myProfile);
+    const currentName = myProfile === undefined
+      ? undefined
+      : currentProfileSnapshot(myProfile)?.name;
+    const bootstrapAdmin =
+      adminRoles.length === 0 && currentProfile !== undefined &&
+        currentName
+        ? {
+          subject: currentProfile,
+          displayName: currentName,
+        } as ChatAdminRole
+        : undefined;
+    if (adminRoles.length === 0 && bootstrapAdmin === undefined) {
+      return null;
+    }
+    return {
+      ...(adminRoles.length > 0 ? { admins: adminRoles } : {}),
+      ...(bootstrapAdmin !== undefined ? { bootstrapAdmin } : {}),
+      everyoneIsAdmin: false,
+    };
+  }
+
+  if (chatAdminEveryoneIsAdmin(adminRegistry)) {
+    return null;
+  }
+
   const targetProfile = participant?.profile ?? (
     myProfile === undefined ? undefined : currentProfileCell(myProfile)
   );
@@ -510,50 +622,114 @@ export const prepareTrustedAdminToggle = (
     (myProfile === undefined ? undefined : currentProfileSnapshot(myProfile)
       ?.name);
   if (
-    !adminManagerCredentialIsActive(adminManagerCredential) ||
     targetProfile === undefined ||
     !targetName
   ) {
     return null;
   }
 
-  const adminRoles = chatAdminRolesValue(adminRegistry);
   const withoutParticipant = adminRoles.filter((role) =>
     !equals(role.subject, targetProfile)
   );
   if (withoutParticipant.length !== adminRoles.length) {
-    return withoutParticipant;
+    if (withoutParticipant.length === 0) {
+      return null;
+    }
+    return {
+      admins: withoutParticipant,
+    };
   }
 
-  return [
-    ...withoutParticipant,
-    {
-      subject: targetProfile,
-      displayName: targetName,
-    } as ChatAdminRole,
-  ];
+  return {
+    admins: [
+      ...withoutParticipant,
+      {
+        subject: targetProfile,
+        displayName: targetName,
+      } as ChatAdminRole,
+    ],
+  };
 };
 
 export const commitTrustedAdminToggle = handler<
-  void,
+  TrustedAdminPolicyEvent,
   {
-    adminManagerCredential: AdminManagerCredentialCell;
+    profiles: SharedProfilesCell;
+    myProfile: MyProfileCell;
+    messages: SharedMessagesCell;
     adminRegistry: ChatAdminRegistryCell;
-    participant: AdminParticipantRow | undefined;
-    myProfile?: MyProfileCell;
+    participant?: AdminParticipantRow;
   }
->((_, { adminManagerCredential, adminRegistry, participant, myProfile }) => {
-  const nextAdmins = prepareTrustedAdminToggle(
-    adminManagerCredential.get(),
+>((
+  event,
+  { profiles, myProfile, messages, adminRegistry, participant },
+) => {
+  const eventName = nonEmptyEventName(event?.name) ??
+    nonEmptyEventName(event?.target?.dataset?.adminName) ??
+    nonEmptyEventName(event?.target?.name);
+  const eventParticipant = eventName === undefined
+    ? undefined
+    : adminParticipantRowsValue(
+      profiles,
+      myProfile,
+      messages,
+      adminRegistry,
+    ).find((row) => row.name === eventName);
+  const nextEveryoneIsAdmin = event?.everyoneIsAdmin ??
+    event?.detail?.checked ??
+    (participant === undefined &&
+        eventName === undefined &&
+        (event as { type?: string } | undefined)?.type === "click"
+      ? !chatAdminEveryoneIsAdmin(adminRegistry)
+      : undefined);
+  const nextPolicy = prepareTrustedAdminToggle(
+    currentUserAdminRole(myProfile, adminRegistry),
     adminRegistry,
-    participant,
+    participant ?? eventParticipant,
     myProfile,
+    nextEveryoneIsAdmin,
   );
-  if (nextAdmins === null) {
+  if (nextPolicy === null) {
     return;
   }
 
-  adminRegistry.set({ admins: nextAdmins as ChatAdminList });
+  if (
+    nextPolicy.bootstrapAdmin !== undefined ||
+    nextPolicy.everyoneIsAdmin !== undefined
+  ) {
+    const currentRegistry = adminRegistry.get() as
+      | ChatAdminRegistryStoredValue
+      | undefined;
+    adminRegistry.set({
+      ...(currentRegistry?.admins !== undefined
+        ? { admins: currentRegistry.admins }
+        : {}),
+      ...(currentRegistry?.bootstrapAdmin !== undefined
+        ? { bootstrapAdmin: currentRegistry.bootstrapAdmin }
+        : {}),
+      ...(currentRegistry?.everyoneIsAdmin !== undefined
+        ? { everyoneIsAdmin: currentRegistry.everyoneIsAdmin }
+        : {}),
+      ...(nextPolicy.admins !== undefined
+        ? { admins: nextPolicy.admins as ChatAdminList }
+        : {}),
+      ...(nextPolicy.bootstrapAdmin !== undefined
+        ? {
+          bootstrapAdmin: nextPolicy.bootstrapAdmin as ChatAdminBootstrapRole,
+        }
+        : {}),
+      ...(nextPolicy.everyoneIsAdmin !== undefined
+        ? {
+          everyoneIsAdmin: nextPolicy.everyoneIsAdmin as ChatEveryoneAdminFlag,
+        }
+        : {}),
+    });
+    return;
+  }
+
+  if (nextPolicy.admins !== undefined) {
+    adminRegistry.key("admins").set(nextPolicy.admins as ChatAdminList);
+  }
 });
 type TrustedAdminToggleInput = Parameters<typeof commitTrustedAdminToggle>[0];
 
@@ -612,18 +788,14 @@ type TrustedParticipantsPanelInputArg = Parameters<
 export interface TrustedProfileSaveSurfaceInput {
   myProfile: MyProfileCell;
   profiles: SharedProfilesCell;
-  adminManagerCredential: AdminManagerCredentialCell;
   nameDraft: Writable<string | Default<"">>;
-  adminManagerDraft: AdminManagerDraftCell;
 }
 
 export interface TrustedProfileSaveSurfaceOutput {
   [NAME]: string;
   [UI]: any;
   myProfile: MyProfileCell;
-  adminManagerCredential: AdminManagerCredentialCell;
   currentProfileName: string;
-  currentUserCanManageAdmins: boolean;
   saveProfile: Stream<void>;
 }
 
@@ -634,25 +806,16 @@ export const TrustedProfileSaveSurface = pattern<
   {
     myProfile,
     profiles,
-    adminManagerCredential,
     nameDraft,
-    adminManagerDraft,
   }: TrustedProfileSaveSurfaceInput,
 ): TrustedProfileSaveSurfaceOutput => {
   const saveProfile = commitTrustedProfileSave({
     myProfile,
     profiles,
-    adminManagerCredential,
     nameDraft,
-    adminManagerDraft,
   } as TrustedProfileSaveInput);
   const currentSavedName = computed(() =>
     currentProfileSnapshot(myProfile)?.name ?? "Name not set"
-  );
-  const managerStatus = computed(() =>
-    currentUserCanManageAdmins(adminManagerCredential)
-      ? "Can manage admins"
-      : "Cannot manage admins"
   );
   const saveDisabled = computed(() => draftText(nameDraft).trim().length === 0);
 
@@ -673,12 +836,6 @@ export const TrustedProfileSaveSurface = pattern<
               placeholder="Set your name"
             />
           </cf-vgroup>
-          <cf-checkbox
-            id="trusted-admin-manager-checkbox"
-            $checked={adminManagerDraft}
-          >
-            Can manage admins (demo)
-          </cf-checkbox>
           <cf-button
             id="trusted-profile-save"
             data-ui-action={TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION}
@@ -691,16 +848,11 @@ export const TrustedProfileSaveSurface = pattern<
           <cf-label id="trusted-profile-status">
             {currentSavedName}
           </cf-label>
-          <cf-chip id="trusted-admin-manager-status" label={managerStatus} />
         </cf-hstack>
       </cf-card>
     ),
     myProfile,
-    adminManagerCredential,
     currentProfileName: currentSavedName,
-    currentUserCanManageAdmins: computed(() =>
-      currentUserCanManageAdmins(adminManagerCredential)
-    ),
     saveProfile,
   };
 });
@@ -710,14 +862,15 @@ export interface TrustedAdminPanelInput {
   myProfile: MyProfileCell;
   messages: SharedMessagesCell;
   adminRegistry: ChatAdminRegistryCell;
-  adminManagerCredential: AdminManagerCredentialCell;
 }
 
 export interface TrustedAdminPanelOutput {
   [NAME]: string;
   [UI]: any;
   adminRegistry: ChatAdminRegistryCell;
-  toggleCurrentUserAdmin: Stream<void>;
+  toggleCurrentUserAdmin: Stream<TrustedAdminPolicyEvent>;
+  toggleParticipantAdmin: Stream<TrustedAdminPolicyEvent>;
+  toggleEveryoneAdmin: Stream<TrustedAdminPolicyEvent>;
 }
 
 export const TrustedAdminPanel = pattern<
@@ -729,28 +882,25 @@ export const TrustedAdminPanel = pattern<
     myProfile,
     messages,
     adminRegistry,
-    adminManagerCredential,
   }: TrustedAdminPanelInput,
 ): TrustedAdminPanelOutput => {
-  const adminRows = computed(() =>
-    adminParticipantRowsValue(
-      profiles,
-      myProfile,
-      messages,
-      adminRegistry,
-      adminManagerCredential,
-    )
-  );
-  const toggleCurrentUserAdmin = commitTrustedAdminToggle({
-    adminManagerCredential,
-    adminRegistry,
-    participant: undefined,
+  const toggleAdminPolicy = commitTrustedAdminToggle({
+    profiles,
     myProfile,
+    messages,
+    adminRegistry,
   } as TrustedAdminToggleInput);
   const managerStatus = computed(() =>
-    currentUserCanManageAdmins(adminManagerCredential)
+    currentProfileSnapshot(myProfile) === undefined
+      ? "Save a profile to manage admins"
+      : chatAdminEveryoneIsAdmin(adminRegistry)
+      ? "Everyone can add rooms"
+      : currentUserCanManageAdmins(myProfile, adminRegistry)
       ? "Admin registry editing enabled"
-      : "Save profile with admin-manager enabled to edit"
+      : "Only admins can edit"
+  );
+  const everyoneIsAdmin = computed(() =>
+    chatAdminEveryoneIsAdmin(adminRegistry)
   );
 
   return {
@@ -766,7 +916,7 @@ export const TrustedAdminPanel = pattern<
             <cf-vstack gap="1">
               <cf-heading level={3}>Users</cf-heading>
               <cf-label>
-                Admin registry. Managers can change who may add rooms.
+                Admin registry. Current admins can change who may add rooms.
               </cf-label>
             </cf-vstack>
             <cf-chip
@@ -774,14 +924,55 @@ export const TrustedAdminPanel = pattern<
               label={managerStatus}
             />
           </cf-hstack>
+          <cf-checkbox
+            id="trusted-everyone-admin-checkbox"
+            data-ui-action={TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION}
+            checked={everyoneIsAdmin}
+            disabled={computed(() =>
+              !currentUserCanManageAdmins(myProfile, adminRegistry)
+            )}
+            onClick={toggleAdminPolicy}
+          >
+            Everyone is admin
+          </cf-checkbox>
 
           <cf-vstack id="trusted-admin-user-list" gap="2">
-            {adminRows.map((participant) => {
-              const toggleAdmin = commitTrustedAdminToggle({
-                adminManagerCredential,
-                adminRegistry,
-                participant,
-              } as TrustedAdminToggleInput);
+            {profiles.map((entry) => {
+              const profile = entry.profile;
+              const name = computed(() =>
+                profile.get()?.name ?? "Unnamed user"
+              );
+              const accentColor = computed(() =>
+                profile.get()?.accentColor ?? "#64748b"
+              );
+              const everyoneForProfile = computed(() =>
+                chatAdminEveryoneIsAdmin(adminRegistry)
+              );
+              const isAdmin = computed(() =>
+                everyoneForProfile ||
+                subjectHasAdminRole(chatAdminRolesValue(adminRegistry), profile)
+              );
+              const canManageAdmins = computed(() =>
+                currentUserCanManageAdmins(myProfile, adminRegistry)
+              );
+              const participant = {
+                name,
+                accentColor,
+                profile,
+                isAdmin,
+                everyoneIsAdmin: everyoneForProfile,
+                canManageAdmins,
+              } as AdminParticipantRow;
+              const toggleDisabled = computed(() =>
+                !participant.canManageAdmins || participant.everyoneIsAdmin
+              );
+              const toggleLabel = computed(() =>
+                participant.everyoneIsAdmin
+                  ? "Admin via everyone"
+                  : participant.isAdmin
+                  ? "Remove admin"
+                  : "Make admin"
+              );
               return (
                 <cf-hstack
                   align="center"
@@ -810,12 +1001,14 @@ export const TrustedAdminPanel = pattern<
                     />
                   </cf-hstack>
                   <cf-button
+                    data-ui-control="admin-user-toggle"
                     data-ui-action={TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION}
+                    data-admin-name={participant.name}
                     size="sm"
-                    disabled={!participant.canManageAdmins}
-                    onClick={toggleAdmin}
+                    disabled={toggleDisabled}
+                    onClick={toggleAdminPolicy}
                   >
-                    {participant.isAdmin ? "Remove admin" : "Make admin"}
+                    {toggleLabel}
                   </cf-button>
                 </cf-hstack>
               );
@@ -825,7 +1018,9 @@ export const TrustedAdminPanel = pattern<
       </cf-card>
     ),
     adminRegistry,
-    toggleCurrentUserAdmin,
+    toggleCurrentUserAdmin: toggleAdminPolicy,
+    toggleParticipantAdmin: toggleAdminPolicy,
+    toggleEveryoneAdmin: toggleAdminPolicy,
   };
 });
 
