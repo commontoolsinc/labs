@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -17,7 +17,7 @@ interface Config {
 }
 // FIXTURE: derive-union-undefined
 // Verifies: captured properties with `number | undefined` union types produce correct schemas
-//   derive(value, fn) → derive(schema, schema, { value, config: { required, unionUndefined } }, fn)
+//   computed(() => ...) → lift(...)({ value, config: { required, unionUndefined } })
 // Context: `unionUndefined` schema is `type: ["number", "undefined"]`; `required` is plain `number`
 export default pattern((config: Config) => {
     const value = new Writable(10, {
@@ -52,8 +52,8 @@ export default pattern((config: Config) => {
         required: ["value", "config"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0))({
-        value: value.for(["result", "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() + config.required + (config.unionUndefined ?? 0))({
+        value: value,
         config: {
             required: config.key("required"),
             unionUndefined: config.key("unionUndefined")

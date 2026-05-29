@@ -1,18 +1,15 @@
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: derive-collision-shorthand
-// Verifies: shorthand property `{ multiplier }` expands correctly when the capture is renamed
-//   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)
-//   shorthand `{ multiplier }` → `{ multiplier: multiplier_1 }`
-// Context: shorthand must expand to keep the property name while using the renamed capture binding
+// Verifies: a shorthand property `{ multiplier }` over a captured cell expands correctly
+//   computed(() => ({ value, data: { multiplier } })) → lift(...)({ multiplier })
+// Context: shorthand must keep the property name while binding to the captured value
 export default pattern(() => {
   const multiplier = new Writable(2);
 
-  // Input name 'multiplier' collides with captured variable 'multiplier'
-  // The callback uses shorthand property { multiplier }
-  // This should expand to { multiplier: multiplier_1 } after renaming
-  const result = derive(multiplier, (m) => ({
-    value: m.get() * 3,
+  // The callback uses shorthand property { multiplier } over the captured cell.
+  const result = computed(() => ({
+    value: multiplier.get() * 3,
     data: { multiplier },
   }));
 

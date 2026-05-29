@@ -1,13 +1,13 @@
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: derive-template-literal
-// Verifies: a captured cell used inside a template literal expression is extracted
-//   derive(value, fn) → derive(schema, schema, { value, prefix }, fn)
+// Verifies: captured cells used inside a template literal expression are extracted
+//   computed(() => `${prefix.get()}${value.get()}`) → lift(...)({ value, prefix })
 export default pattern(() => {
   const value = new Writable(10);
   const prefix = new Writable("Value: ");
 
-  const result = derive(value, (v) => `${prefix.get()}${v}`);
+  const result = computed(() => `${prefix.get()}${value.get()}`);
 
   return result;
 });

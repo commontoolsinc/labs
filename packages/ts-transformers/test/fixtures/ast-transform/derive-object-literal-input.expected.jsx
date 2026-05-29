@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { cell, derive, lift } from "commonfabric";
+import { cell, computed, lift } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -24,11 +24,11 @@ const rejectedCount = __cfHelpers.__cf_data(cell<number>(0, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema).for("rejectedCount", true));
 // FIXTURE: derive-object-literal-input
-// Verifies: cell(), lift(), and derive() all get schemas injected from type annotations
+// Verifies: cell(), lift(), and computed() all get schemas injected from type annotations
 //   cell<string>("initial")             → cell<string>("initial", { type: "string" })
 //   lift((value: string) => value)      → lift(inputSchema, outputSchema, fn)
-//   derive({ stage, ... }, fn)          → derive(inputSchema, outputSchema, { stage, ... }, fn)
-// Context: No export default; first export-relevant statement is the cells/lifts/derive at top level
+//   computed(() => `...`)               → captures lift outputs into lift(inputSchema, outputSchema, { ... }, fn)
+// Context: No export default; first export-relevant statement is the cells/lifts/computed at top level
 const normalizedStage = __cfHelpers.__cf_data(lift({
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -49,32 +49,8 @@ const rejected = __cfHelpers.__cf_data(lift({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, (count: number) => count)(rejectedCount).for("rejected", true));
-const _summary = __cfHelpers.__cf_data(__cfHelpers.lift({
-    type: "object",
-    properties: {
-        stage: {
-            type: "string"
-        },
-        attempts: {
-            type: "number"
-        },
-        accepted: {
-            type: "number"
-        },
-        rejected: {
-            type: "number"
-        }
-    },
-    required: ["stage", "attempts", "accepted", "rejected"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema, (snapshot) => `stage:${snapshot.stage} attempts:${snapshot.attempts}` +
-    ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`)({
-    stage: normalizedStage,
-    attempts: attempts,
-    accepted: accepted,
-    rejected: rejected,
-}).for("_summary", true));
+const _summary = __cfHelpers.__cf_data(__cfHelpers.lift(false, () => `stage:${normalizedStage} attempts:${attempts}` +
+    ` accepted:${accepted} rejected:${rejected}`)().for("_summary", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

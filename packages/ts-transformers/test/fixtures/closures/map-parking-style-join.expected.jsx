@@ -299,7 +299,7 @@ export default pattern((state) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, ({ activeSpotOpts }) => activeSpotOpts.length > 0)({ activeSpotOpts: {
-                        length: activeSpotOpts.key("length")
+                        length: activeSpotOpts.length
                     } }), <span>spots</span>, null)}
               {__cfHelpers.ifElse({
                     type: "boolean"

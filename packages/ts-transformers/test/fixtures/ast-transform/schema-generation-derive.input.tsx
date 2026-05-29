@@ -1,4 +1,4 @@
-import { derive } from "commonfabric";
+import { computed } from "commonfabric";
 
 type DeriveInput = {
   count: number;
@@ -11,11 +11,9 @@ type DeriveResult = {
 declare const source: DeriveInput;
 
 // FIXTURE: schema-generation-derive
-// Verifies: derive() with generic type args generates input and output schemas
-//   derive<DeriveInput, DeriveResult>(source, fn) → derive(inputSchema, outputSchema, source, fn)
-export const doubledValue = derive<DeriveInput, DeriveResult>(
-  source,
-  (input) => ({
-    doubled: input.count * 2,
-  }),
-);
+// Verifies: computed() closure-extracts a captured value into a lift() with input
+// (capture) and output schemas generated from type info
+//   computed(() => ({ doubled: source.count * 2 })) → lift(captureSchema, outputSchema, { source }, fn)
+export const doubledValue = computed((): DeriveResult => ({
+  doubled: source.count * 2,
+}));

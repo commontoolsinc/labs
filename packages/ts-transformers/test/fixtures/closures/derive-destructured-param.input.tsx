@@ -1,4 +1,4 @@
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 interface Point {
   x: number;
@@ -6,16 +6,16 @@ interface Point {
 }
 
 // FIXTURE: derive-destructured-param
-// Verifies: a captured cell works alongside destructuring inside the callback body
-//   derive(point, fn) → derive(schema, schema, { point, multiplier }, fn)
-// Context: `const { x, y } = p.get()` destructures inside the body, not the parameter
+// Verifies: a captured cell works alongside destructuring inside the computed body
+//   computed(() => { const { x, y } = point.get(); ... }) → lift(...)({ point, multiplier })
+// Context: `const { x, y } = point.get()` destructures inside the body, not a parameter
 export default pattern(() => {
   const point = new Writable({ x: 10, y: 20 } as Point);
   const multiplier = new Writable(2);
 
-  // Destructuring requires .get() first since derive doesn't unwrap Cell
-  const result = derive(point, (p) => {
-    const { x, y } = p.get();
+  // Destructuring requires .get() first since the captured cell is not unwrapped
+  const result = computed(() => {
+    const { x, y } = point.get();
     return (x + y) * multiplier.get();
   });
 

@@ -7,18 +7,18 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-reserved-names
 // Verifies: variables with __cf_ prefixed names are captured without special treatment
-//   derive(value, fn) → derive(schema, schema, { value, __cf_reserved }, fn)
+//   computed(() => value.get() * __cf_reserved.get()) → lift(...)({ value, __cf_reserved })
 export default pattern(() => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    // Reserved JavaScript keyword as variable name (valid in TS with quotes)
+    // A __cf_-prefixed variable name should be captured like any other
     const __cf_reserved = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
@@ -40,8 +40,8 @@ export default pattern(() => {
         required: ["value", "__cf_reserved"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, __cf_reserved }) => v.get() * __cf_reserved.get())({
-        value: value.for(["result", "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, __cf_reserved }) => value.get() * __cf_reserved.get())({
+        value: value,
         __cf_reserved: __cf_reserved
     }).for("result", true);
     return result;

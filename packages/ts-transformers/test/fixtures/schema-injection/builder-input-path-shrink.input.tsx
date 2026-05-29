@@ -1,4 +1,4 @@
-import { action, derive, handler, lift, pattern, type Writable } from "commonfabric";
+import { action, computed, handler, lift, pattern, type Writable } from "commonfabric";
 
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
@@ -9,15 +9,7 @@ const liftOptional = lift((input: Writable<{ foo: string | undefined; bar: strin
 );
 
 const deriveInput = {} as Writable<{ foo: string; bar: string }>;
-const deriveObserved = derive(
-  deriveInput,
-  (input: Writable<{ foo: string; bar: string }>) => input.key("foo").get(),
-);
-
-const deriveExplicit = derive<Writable<{ foo: string; bar: string }>, string>(
-  deriveInput,
-  (value) => value.key("foo").get(),
-);
+const computedObserved = computed(() => deriveInput.key("foo").get());
 
 const handlerObserved = handler(
   (_event: { id: string }, state: Writable<{ foo: string; bar: string }>) => {
@@ -56,8 +48,7 @@ const actionPattern = pattern((input: Writable<{ foo: string; bar: string }>) =>
 
 export default {
   liftOptional,
-  deriveObserved,
-  deriveExplicit,
+  computedObserved,
   handlerObserved,
   handlerExplicit,
   liftInterprocedural,

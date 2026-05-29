@@ -1,4 +1,4 @@
-import { derive, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
+import { computed, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 
 const multiplier = new Writable(2);
 const prefix = new Writable("Result: ");
@@ -16,7 +16,7 @@ type Output = {
 //   injects them into the extraParams object and the callback's destructured input.
 export default pattern<Record<string, never>, Output>(() => {
   const tool = patternTool(({ value }: { value: number }) => {
-    return derive({ value }, ({ value }) => {
+    return computed(() => {
       return prefix.get() + String(value * multiplier.get());
     });
   });

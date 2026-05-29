@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Cell, derive, pattern, UI } from "commonfabric";
+import { Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -35,12 +35,14 @@ interface Assignment {
 // FIXTURE: derived-property-access-with-derived-key
 // Verifies: .map() chains with derived keys and element access are fully transformed
 //   aisleNames.map(...)            → aisleNames.mapWithPattern(pattern(...), {captures})
-//   groupedByAisle[aisleName].map  → derive({groupedByAisle, aisleName}, ...).mapWithPattern(...)
+//   groupedByAisle[aisleName].map  → lift over {groupedByAisle, aisleName} then .mapWithPattern(...)
 // Context: CT-1036 -- nested map with derived object indexed by derived key, two levels deep
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    // Create assignments with aisle data
-    const itemsWithAisles = __cfHelpers.lift({
+    // Create assignments with aisle data (whole-array map kept inside computed)
+    const itemsWithAisles = __cfHelpers.lift<{
+        items: Item[];
+    }, { aisle: string; item: Item; }[]>({
         type: "object",
         properties: {
             items: {
@@ -98,9 +100,11 @@ export default pattern((__cf_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((item, idx) => ({
         aisle: `Aisle ${(idx % 3) + 1}`,
         item: item,
-    })))({ items }).for("itemsWithAisles", true);
+    })))({ items: items }).for("itemsWithAisles", true);
     // Group by aisle - returns Record<string, Assignment[]>
-    const groupedByAisle = __cfHelpers.lift({
+    const groupedByAisle = __cfHelpers.lift<{
+        itemsWithAisles: { aisle: string; item: Item; }[];
+    }, Record<string, Assignment[]>>({
         type: "object",
         properties: {
             itemsWithAisles: {
@@ -171,23 +175,58 @@ export default pattern((__cf_pattern_input) => {
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ itemsWithAisles }).for("groupedByAisle", true);
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ itemsWithAisles: itemsWithAisles }).for("groupedByAisle", true);
     // Derive sorted aisle names from grouped object
-    const aisleNames = __cfHelpers.lift({
+    const aisleNames = __cfHelpers.lift<{
+        groupedByAisle: Record<string, Assignment[]>;
+    }, string[]>({
         type: "object",
         properties: {
             groupedByAisle: {
                 type: "object",
-                properties: {}
+                properties: {},
+                additionalProperties: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Assignment"
+                    }
+                }
             }
         },
-        required: ["groupedByAisle"]
+        required: ["groupedByAisle"],
+        $defs: {
+            Assignment: {
+                type: "object",
+                properties: {
+                    aisle: {
+                        type: "string"
+                    },
+                    item: {
+                        $ref: "#/$defs/Item"
+                    }
+                },
+                required: ["aisle", "item"]
+            },
+            Item: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    done: {
+                        type: "boolean",
+                        asCell: ["cell"]
+                    }
+                },
+                required: ["name", "done"]
+            }
+        }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort())({ groupedByAisle }).for("aisleNames", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort())({ groupedByAisle: groupedByAisle }).for("aisleNames", true);
     // The pattern from CT-1036:
     // - Map over derived keys (aisleNames)
     // - Access derived object with derived key (groupedByAisle[aisleName])
@@ -196,7 +235,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
           {aisleNames.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const aisleName = __cf_pattern_input.key("element");
-                const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
+                const groupedByAisle = __cf_pattern_input.params.groupedByAisle;
                 return (<div>
               <h3>{aisleName}</h3>
               {__cfHelpers.lift<{

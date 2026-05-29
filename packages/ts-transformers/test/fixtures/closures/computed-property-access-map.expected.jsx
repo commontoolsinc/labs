@@ -144,7 +144,7 @@ export default pattern((__cf_pattern_input) => {
             } as const satisfies __cfHelpers.JSONSchema, ({ result }) => {
                 return result.tasks.map((task) => <li>{task.name}</li>);
             })({ result: {
-                    tasks: result.key("tasks")
+                    tasks: result.tasks
                 } })}
       </div>),
     };

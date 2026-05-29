@@ -1,14 +1,14 @@
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: derive-reserved-names
 // Verifies: variables with __cf_ prefixed names are captured without special treatment
-//   derive(value, fn) → derive(schema, schema, { value, __cf_reserved }, fn)
+//   computed(() => value.get() * __cf_reserved.get()) → lift(...)({ value, __cf_reserved })
 export default pattern(() => {
   const value = new Writable(10);
-  // Reserved JavaScript keyword as variable name (valid in TS with quotes)
+  // A __cf_-prefixed variable name should be captured like any other
   const __cf_reserved = new Writable(2);
 
-  const result = derive(value, (v) => v.get() * __cf_reserved.get());
+  const result = computed(() => value.get() * __cf_reserved.get());
 
   return result;
 });

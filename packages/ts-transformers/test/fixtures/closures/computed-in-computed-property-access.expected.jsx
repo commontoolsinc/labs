@@ -21,7 +21,7 @@ const __cfAmdHooks = undefined;
 export default pattern(() => {
     const outer = __cfHelpers.lift(false, () => {
         const foo = __cfHelpers.lift(false, () => ({ bar: 1 }))().for("foo", true);
-        return foo.key("bar");
+        return foo.bar;
     })().for("outer", true);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {

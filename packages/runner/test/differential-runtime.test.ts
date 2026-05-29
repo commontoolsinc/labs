@@ -122,7 +122,7 @@ Deno.test("SES runtime matches legacy pattern outputs for hoisted lift and local
   );
 });
 
-Deno.test("SES runtime matches legacy pattern behavior for hoisted handler and inline derive/computed flows", async () => {
+Deno.test("SES runtime matches legacy pattern behavior for hoisted handler and inline lift/computed flows", async () => {
   await comparePatternScenario(
     {
       main: "/main.tsx",
@@ -130,7 +130,7 @@ Deno.test("SES runtime matches legacy pattern behavior for hoisted handler and i
         {
           name: "/main.tsx",
           contents: [
-            "import { Cell, computed, derive, handler, lift, pattern } from 'commonfabric';",
+            "import { Cell, computed, handler, lift, pattern } from 'commonfabric';",
             "const scale = 2;",
             "const double = lift((value: number) => value * scale);",
             "const increment = handler((event: { amount?: number } | undefined, context: { value: Cell<number> }) => {",
@@ -139,7 +139,7 @@ Deno.test("SES runtime matches legacy pattern behavior for hoisted handler and i
             "});",
             "export default pattern<{ value: number }>(({ value }) => {",
             "  const doubled = double(value);",
-            "  const label = derive(doubled, (current) => `value:${current}`);",
+            "  const label = computed(() => `value:${doubled}`);",
             "  const isEven = computed(() => ((value ?? 0) % 2) === 0);",
             "  return { value, doubled, label, isEven, increment: increment({ value }) };",
             "});",

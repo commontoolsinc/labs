@@ -7,21 +7,17 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { derive } from "commonfabric";
+import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 declare const value: number;
 // FIXTURE: schema-generation-derive-inside-jsx
-// Verifies: derive() inside a JSX expression still gets schemas injected
-//   derive(value, (v) => v * 2) → derive(inputSchema, outputSchema, value, fn)
-// Context: derive() appears as a JSX child expression, not a standalone statement
+// Verifies: a reactive builder inside a JSX expression still gets schemas injected
+//   computed(() => value * 2) → captures `value` and lowers to lift(inputSchema, outputSchema, ...)
+// Context: computed() appears as a JSX child expression, not a standalone statement
 export const result = (<div>
-    {__cfHelpers.lift({
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, (v) => v * 2)(value)}
+    {__cfHelpers.lift(false, () => value * 2)()}
   </div>);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

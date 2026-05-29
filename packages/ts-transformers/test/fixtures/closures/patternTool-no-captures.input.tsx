@@ -1,4 +1,4 @@
-import { derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
 
 type Output = {
   tool: PatternToolResult<Record<string, never>>;
@@ -13,7 +13,7 @@ type Output = {
 //   transformer should not inject any extraParams.
 export default pattern<Record<string, never>, Output>(() => {
   const tool = patternTool(({ query, content }: { query: string; content: string }) => {
-    return derive({ query, content }, ({ query, content }) => {
+    return computed(() => {
       return content.split("\n").filter((c: string) => c.includes(query));
     });
   });

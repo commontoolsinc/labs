@@ -853,7 +853,7 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
   const tx = runtime.edit();
 
   try {
-    const { derive, handler, pattern } =
+    const { handler, lift, pattern } =
       createTrustedBuilder(runtime).commonfabric;
 
     const selectedRoomBase = runtime.getCell<string>(
@@ -906,14 +906,13 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
       conversation: Conversation;
       selectedRoom: string;
     }>(({ conversation, selectedRoom }) => {
-      const messages = derive(
-        { conversation, selectedRoom },
+      const messages = lift(
         (
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
-      );
+      )({ conversation, selectedRoom });
       const bodies = messages.map((message) =>
-        derive(message, (current: Message) => current.body)
+        lift((current: Message) => current.body)(message)
       );
       return {
         messages,
@@ -977,7 +976,7 @@ Deno.test("map materializes initially populated list selected by session input",
   const tx = runtime.edit();
 
   try {
-    const { derive, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
 
     const selectedRoomBase = runtime.getCell<string>(
       space,
@@ -1004,14 +1003,13 @@ Deno.test("map materializes initially populated list selected by session input",
       conversation: Conversation;
       selectedRoom: string;
     }>(({ conversation, selectedRoom }) => {
-      const messages = derive(
-        { conversation, selectedRoom },
+      const messages = lift(
         (
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
-      );
+      )({ conversation, selectedRoom });
       const bodies = messages.map((message) =>
-        derive(message, (current: Message) => current.body)
+        lift((current: Message) => current.body)(message)
       );
       return { messages, bodies };
     });
@@ -1056,7 +1054,7 @@ Deno.test("ifElse selected branch materializes map over session-derived list", a
   const tx = runtime.edit();
 
   try {
-    const { derive, ifElse, pattern } =
+    const { ifElse, lift, pattern } =
       createTrustedBuilder(runtime).commonfabric;
 
     const selectedRoomBase = runtime.getCell<string>(
@@ -1084,21 +1082,19 @@ Deno.test("ifElse selected branch materializes map over session-derived list", a
       conversation: Conversation;
       selectedRoom: string;
     }>(({ conversation, selectedRoom }) => {
-      const messages = derive(
-        { conversation, selectedRoom },
+      const messages = lift(
         (
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
-      );
-      const isEmpty = derive(
-        messages,
+      )({ conversation, selectedRoom });
+      const isEmpty = lift(
         (current: Message[]) => current.length === 0,
-      );
+      )(messages);
       const rendered = ifElse(
         isEmpty,
         [],
         messages.map((message) =>
-          derive(message, (current: Message) => current.body)
+          lift((current: Message) => current.body)(message)
         ),
       );
       return { rendered };
@@ -1144,7 +1140,7 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
   const tx = runtime.edit();
 
   try {
-    const { derive, h, ifElse, pattern } =
+    const { h, ifElse, lift, pattern } =
       createTrustedBuilder(runtime).commonfabric;
 
     const selectedRoomBase = runtime.getCell<string>(
@@ -1172,16 +1168,14 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
       conversation: Conversation;
       selectedRoom: string;
     }>(({ conversation, selectedRoom }) => {
-      const messages = derive(
-        { conversation, selectedRoom },
+      const messages = lift(
         (
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
-      );
-      const isEmpty = derive(
-        messages,
+      )({ conversation, selectedRoom });
+      const isEmpty = lift(
         (current: Message[]) => current.length === 0,
-      );
+      )(messages);
       const ui = ifElse(
         isEmpty,
         h("span", null, "empty"),
@@ -1189,7 +1183,11 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
           "div",
           null,
           messages.map((message) =>
-            h("span", null, derive(message, (current: Message) => current.body))
+            h(
+              "span",
+              null,
+              lift((current: Message) => current.body)(message),
+            )
           ),
         ),
       );
@@ -1249,7 +1247,7 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
   const tx = runtime.edit();
 
   try {
-    const { derive, h, ifElse, pattern } =
+    const { h, ifElse, lift, pattern } =
       createTrustedBuilder(runtime).commonfabric;
 
     interface Message {
@@ -1329,34 +1327,31 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
           },
           required: ["selectedRoomRef"],
         } as const;
-        const messageCount = derive(
+        const messageCount = lift(
           selectedRoomRefInputSchema,
           { type: "number" } as const,
-          { selectedRoomRef },
           (current: any) =>
             current.selectedRoomRef.get()?.messages?.length ?? 0,
-        );
-        const isEmpty = derive(
-          messageCount,
+        )({ selectedRoomRef });
+        const isEmpty = lift(
           (current: number) => current === 0,
-        );
+        )(messageCount);
         const ui = ifElse(
           isEmpty,
           h("span", null, "empty"),
           h(
             "div",
             null,
-            derive(
+            lift(
               selectedRoomRefInputSchema,
               { type: "unknown" } as const,
-              { selectedRoomRef },
               (current: any) =>
                 current.selectedRoomRef.get()?.messages as Message[],
-            ).map((message: any) =>
+            )({ selectedRoomRef }).map((message: any) =>
               h(
                 "span",
                 null,
-                derive(message, (current: Message) => current.body),
+                lift((current: Message) => current.body)(message),
               )
             ),
           ),

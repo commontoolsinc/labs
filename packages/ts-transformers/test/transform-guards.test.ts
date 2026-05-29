@@ -45,8 +45,8 @@ const p = pattern((input: { ok: boolean }) => {
 Deno.test(
   "Transform guards: rewritten mapWithPattern callback uses key(...) canonicalization",
   async () => {
-    const source = `import { pattern, derive } from "commonfabric";
-const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <div>{derive(input.list, (v) => v).map(({ name }) => <span>{name}</span>)}</div>);
+    const source = `import { pattern } from "commonfabric";
+const p = pattern((input: { list: Array<{ name: string; age: number }> }) => <div>{input.list.map(({ name }) => <span>{name}</span>)}</div>);
 `;
 
     const output = await transformSource(source);

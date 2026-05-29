@@ -1,11 +1,11 @@
-import { derive, NAME, pattern, str, UI } from "commonfabric";
+import { NAME, pattern, str, UI } from "commonfabric";
 import "commonfabric/schema";
 import { decrement, increment, model } from "./utils.ts";
 
 export const customPatternExport = pattern(
   (cell) => {
     return {
-      [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
+      [NAME]: str`Simple counter: ${String(cell.value)}`,
       [UI]: (
         <div>
           <cf-button onClick={decrement(cell)}>-</cf-button>

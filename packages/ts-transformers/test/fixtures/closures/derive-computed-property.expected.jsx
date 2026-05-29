@@ -7,13 +7,13 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-computed-property
 // Verifies: computed property access with a dynamic key captures both the object and the key
-//   derive(value, fn) → derive(schema, schema, { value, config, key }, fn)
+//   computed(() => expr) → lift(schema, schema)({ value, config, key })
 // Context: `config[key]` requires both `config` and `key` to be captured as plain values
 export default pattern(() => {
     const value = new Writable(10, {
@@ -51,8 +51,8 @@ export default pattern(() => {
         required: ["value", "config", "key"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, config, key }) => v.get() * config[key])({
-        value: value.for(["result", "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, config, key }) => value.get() * config[key])({
+        value: value,
         config: config,
         key: key
     }).for("result", true);

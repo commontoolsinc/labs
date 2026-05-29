@@ -1,7 +1,7 @@
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   NAME,
   pattern,
@@ -57,9 +57,9 @@ function previous(value: number) {
 }
 
 export default pattern<PatternState, PatternOutput>((state) => {
-  const array = derive(state.value, (value: number) => {
+  const array = computed(() => {
     // Clamp to prevent negative array length
-    const length = Math.max(0, value);
+    const length = Math.max(0, state.value);
     return new Array(length).fill(0);
   });
   return {

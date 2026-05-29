@@ -20,7 +20,7 @@ describe("Pattern Runner - Regressions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let derive: ReturnType<typeof createBuilder>["commonfabric"]["derive"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let ifElse: ReturnType<typeof createBuilder>["commonfabric"]["ifElse"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
@@ -28,7 +28,7 @@ describe("Pattern Runner - Regressions", () => {
   const bindBuilder = () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
-      derive,
+      lift,
       pattern,
       ifElse,
       handler,
@@ -76,8 +76,8 @@ describe("Pattern Runner - Regressions", () => {
         // Map over items, returning item name if visible, null otherwise
         const mapped = items.map((item) =>
           ifElse(
-            derive(item, (i) => i.visible),
-            derive(item, (i) => i.name),
+            lift((i: { name: string; visible: boolean }) => i.visible)(item),
+            lift((i: { name: string; visible: boolean }) => i.name)(item),
             null,
           )
         );
@@ -148,7 +148,7 @@ describe("Pattern Runner - Regressions", () => {
 
     const notePattern = pattern<{ title: string }>(({ title }) => ({
       title,
-      [NAME]: derive(title, (value: string) => `📝 ${value}`),
+      [NAME]: lift((value: string) => `📝 ${value}`)(title),
     }));
 
     const createNote = handler<
@@ -166,15 +166,13 @@ describe("Pattern Runner - Regressions", () => {
       title: string;
       notes: Array<ReturnType<typeof notePattern>>;
     }>(({ title, notes }) => {
-      const noteCount = derive(
-        notes,
+      const noteCount = lift(
         (items: Array<{ title: string }>) => items.length,
-      );
-      const displayName = derive(
-        { title, noteCount },
+      )(notes);
+      const displayName = lift(
         ({ title, noteCount }: { title: string; noteCount: number }) =>
           `📓 ${title} (${noteCount})`,
-      );
+      )({ title, noteCount });
       return {
         title,
         notes,
