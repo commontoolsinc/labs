@@ -392,6 +392,54 @@ namespace Local {
       expect(schema.required).toEqual(["name"]);
       expect(schema.additionalProperties).toEqual({ type: "number" });
     });
+
+    it("prefers a string index signature even when a number signature appears first", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const numberIndexSignature = ts.factory.createIndexSignature(
+        undefined,
+        [ts.factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          ts.factory.createIdentifier("n"),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+        )],
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+      );
+      const stringIndexSignature = ts.factory.createIndexSignature(
+        undefined,
+        [ts.factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          ts.factory.createIdentifier("s"),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        )],
+        ts.factory.createUnionTypeNode([
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+        ]),
+      );
+      const typeNode = ts.factory.createTypeLiteralNode([
+        numberIndexSignature,
+        stringIndexSignature,
+      ]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      ) as Record<string, unknown>;
+
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toEqual({});
+      expect(schema.additionalProperties).toEqual({
+        anyOf: [{ type: "string" }, { type: "number" }],
+      });
+    });
   });
 
   describe("union members", () => {

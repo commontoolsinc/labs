@@ -756,7 +756,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (ts.isTypeLiteralNode(typeNode)) {
       const properties: Record<string, JSONSchemaMutable> = {};
       const required: string[] = [];
-      let additionalProperties: JSONSchemaMutable | undefined;
+      let stringIndexAdditionalProperties: JSONSchemaMutable | undefined;
+      let numberIndexAdditionalProperties: JSONSchemaMutable | undefined;
+      let fallbackIndexAdditionalProperties: JSONSchemaMutable | undefined;
 
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
@@ -814,10 +816,21 @@ export class SchemaGenerator implements ISchemaGenerator {
             member.type,
           );
           // If multiple index signatures are present (e.g. both string and
-          // number key), the first non-undefined wins — matching
-          // ObjectFormatter's `stringIndex ?? numberIndex` precedence.
-          if (additionalProperties === undefined) {
-            additionalProperties = valueSchema;
+          // number key), match ObjectFormatter's `stringIndex ?? numberIndex`
+          // precedence regardless of declaration order.
+          const keyTypeNode = member.parameters[0]?.type;
+          if (
+            keyTypeNode &&
+            keyTypeNode.kind === ts.SyntaxKind.StringKeyword
+          ) {
+            stringIndexAdditionalProperties = valueSchema;
+          } else if (
+            keyTypeNode &&
+            keyTypeNode.kind === ts.SyntaxKind.NumberKeyword
+          ) {
+            numberIndexAdditionalProperties = valueSchema;
+          } else if (fallbackIndexAdditionalProperties === undefined) {
+            fallbackIndexAdditionalProperties = valueSchema;
           }
         }
       }
@@ -831,6 +844,8 @@ export class SchemaGenerator implements ISchemaGenerator {
         schema.required = required;
       }
 
+      const additionalProperties = stringIndexAdditionalProperties ??
+        numberIndexAdditionalProperties ?? fallbackIndexAdditionalProperties;
       if (additionalProperties !== undefined) {
         (schema as Record<string, unknown>).additionalProperties =
           additionalProperties;
