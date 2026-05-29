@@ -30,7 +30,6 @@ import {
 import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
-import { isRecord } from "@commonfabric/utils/types";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
@@ -270,34 +269,21 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
  * `homeSpaceCell.defaultPattern.profile`.
  *
  * The profile link is owner-protected and created through a writeonly
- * (`WriteAuthorizedBy`) binding. When the runtime materializes that binding it
- * stores the concrete child link under a `value` wrapper rather than as a
- * readable parent link, so `profile` itself reads back as `{ value: <link> }`
- * instead of the link directly. We therefore probe both shapes:
- *   - the materialized case: `profile.value` resolves to a cell in another
- *     space (the profile space) with an empty path, and
- *   - the plain case: `profile` is itself a direct link to the profile pattern.
- * If neither yields a cross-space link with an empty path, the profile is not
- * set yet and we throw so callers can fall back to the create surface.
+ * (`WriteAuthorizedBy`) binding that stores a direct cross-space link to the
+ * profile pattern. A valid profile link therefore resolves to a cell in another
+ * space (the profile space) with an empty path; if it is unset or still points
+ * into the home space, the profile does not exist yet and we throw so callers
+ * can fall back to the create surface.
  */
 function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
   const homeSpaceCell = getHomeSpaceCell(ctx);
   const profileField = homeSpaceCell.key("defaultPattern").key(
     "profile",
   );
-  const profileRaw = profileField.getRaw();
-  const profileValueDefault = profileField.key("value").resolveAsCell();
-  const profileValueLink = profileValueDefault.getAsNormalizedFullLink();
-  const hasMaterializedProfileValueLink =
-    profileValueLink.space !== homeSpaceCell.space &&
-    profileValueLink.path.length === 0;
-  const profileDefault = hasMaterializedProfileValueLink ||
-      (isRecord(profileRaw) && "value" in profileRaw)
-    ? profileValueDefault
-    : profileField.resolveAsCell();
+  const profileDefault = profileField.resolveAsCell();
   const profileLink = profileDefault.getAsNormalizedFullLink();
   if (
-    (!hasMaterializedProfileValueLink && profileRaw === undefined) ||
+    profileField.getRaw() === undefined ||
     profileLink.space === homeSpaceCell.space ||
     profileLink.path.length > 0
   ) {
