@@ -245,9 +245,6 @@ const normalizeLongFlag = (arg: string): string => {
   return equalsIndex === -1 ? arg : arg.slice(0, equalsIndex);
 };
 
-const isDisallowedAgentBrowserShortFlag = (arg: string): boolean =>
-  arg === "-p" || arg.startsWith("-p=") || /^-p[^-]/.test(arg);
-
 const findAgentBrowserSubcommand = (
   args: readonly string[],
 ): { name: string; index: number } | undefined => {
