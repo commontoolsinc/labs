@@ -11,14 +11,9 @@ import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
 import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
 
-// ============================================================================
-// `cloneForMutation` tests
-// ============================================================================
-//
 // Both legacy and modern flag states use modern clone semantics. Test cases are
 // parameterized across both modes to ensure the contract is durable under
 // either flag setting.
-
 describe("cloneForMutation", () => {
   afterEach(() => {
     resetDataModelConfig();
@@ -29,10 +24,6 @@ describe("cloneForMutation", () => {
 
     describe(`(${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
-
-      // ----------------------------------------------------------------------
-      // Empty path: root-only thaw
-      // ----------------------------------------------------------------------
 
       describe("empty path", () => {
         it("returns the root as mutable, plus identical `pathValue`", () => {
@@ -95,10 +86,6 @@ describe("cloneForMutation", () => {
           expect(cloned.message).toBe(err.message);
         });
       });
-
-      // ----------------------------------------------------------------------
-      // Single-step paths
-      // ----------------------------------------------------------------------
 
       describe("single-step path", () => {
         it("clones only the spine and exposes the leaf container", () => {
@@ -187,10 +174,6 @@ describe("cloneForMutation", () => {
         });
       });
 
-      // ----------------------------------------------------------------------
-      // Deep paths
-      // ----------------------------------------------------------------------
-
       describe("deep paths", () => {
         it("clones every spine container, preserves off-spine identity", () => {
           // Tree shape:
@@ -266,10 +249,6 @@ describe("cloneForMutation", () => {
         });
       });
 
-      // ----------------------------------------------------------------------
-      // Deep-frozen cache preservation off-spine
-      // ----------------------------------------------------------------------
-
       describe("deep-frozen cache preservation", () => {
         it("preserves off-spine deep-frozen subtrees in the cache", () => {
           // A deeply-nested off-spine subtree:
@@ -289,10 +268,6 @@ describe("cloneForMutation", () => {
           expect(isDeepFrozen(sibling)).toBe(true);
         });
       });
-
-      // ----------------------------------------------------------------------
-      // FabricInstance as the leaf at `path`
-      // ----------------------------------------------------------------------
 
       describe("`FabricInstance` at leaf", () => {
         it("clones via `shallowClone(false)`, not as a plain object", () => {
@@ -315,10 +290,6 @@ describe("cloneForMutation", () => {
           );
         });
       });
-
-      // ----------------------------------------------------------------------
-      // Caller mutates `pathValue`, observes effects on `value` only
-      // ----------------------------------------------------------------------
 
       describe("mutation through pathValue", () => {
         it("supports array push without touching the input", () => {
@@ -353,7 +324,7 @@ describe("cloneForMutation", () => {
           expect((root as unknown as Record<string, unknown>).drop).toBe(2);
         });
 
-        it("`force=true` does not touch the input even with mutable input", () => {
+        it("does not touch the input on `force=true` even with mutable input", () => {
           const inner = { x: 1, y: 2 };
           const root = { inner };
 
@@ -373,10 +344,6 @@ describe("cloneForMutation", () => {
           expect(root.inner).toBe(inner);
         });
       });
-
-      // ----------------------------------------------------------------------
-      // createMissing
-      // ----------------------------------------------------------------------
 
       describe("createMissing", () => {
         it("creates a missing intermediate object", () => {
@@ -538,10 +505,6 @@ describe("cloneForMutation", () => {
         });
       });
 
-      // ----------------------------------------------------------------------
-      // Structured error
-      // ----------------------------------------------------------------------
-
       describe("CloneForMutationError", () => {
         it("uses kind `missing-segment` for a missing intermediate", () => {
           const root = Object.freeze({ a: { b: 1 } }) as FabricValue;
@@ -611,7 +574,7 @@ describe("cloneForMutation", () => {
           }
         });
 
-        it("`error.name` is `CloneForMutationError`", () => {
+        it("sets `error.name` to `CloneForMutationError`", () => {
           try {
             cloneForMutation(42 as FabricValue, []);
             throw new Error("expected throw");
@@ -620,10 +583,6 @@ describe("cloneForMutation", () => {
           }
         });
       });
-
-      // ----------------------------------------------------------------------
-      // Error cases (message-level coverage; structured-error checks above)
-      // ----------------------------------------------------------------------
 
       describe("errors", () => {
         it("throws on a missing path segment", () => {

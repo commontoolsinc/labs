@@ -34,16 +34,12 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
   expect(JSON.parse(json.slice(PREFIX.length))).toEqual(expected);
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 describe("json-encoding", () => {
-  it("round-trip preserves `undefined`", () => {
+  it("round-trips `undefined`", () => {
     expect(roundTrip(undefined)).toBe(undefined);
   });
 
-  it("round-trip preserves `bigint`", () => {
+  it("round-trips `bigint`", () => {
     expect(roundTrip(42n as FabricValue)).toBe(42n);
   });
 
@@ -65,17 +61,17 @@ describe("json-encoding", () => {
     expect(valueFromJson(json, mockRuntime)).toBe(42n);
   });
 
-  it("round-trip preserves plain objects", () => {
+  it("round-trips plain objects", () => {
     const value = { a: 1, b: "two" } as FabricValue;
     expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
   });
 
-  it("round-trip preserves arrays", () => {
+  it("round-trips arrays", () => {
     const value = [1, "two", null] as FabricValue;
     expect(roundTrip(value)).toEqual([1, "two", null]);
   });
 
-  it("round-trip preserves `null`", () => {
+  it("round-trips `null`", () => {
     expect(roundTrip(null)).toBe(null);
   });
 
@@ -87,7 +83,7 @@ describe("json-encoding", () => {
   });
 
   describe("edge case", () => {
-    it("round-trip preserves object with slash-prefixed key", () => {
+    it("round-trips object with slash-prefixed key", () => {
       const value = { "/foo": "bar" } as FabricValue;
       expect(roundTrip(value)).toEqual({ "/foo": "bar" });
     });
@@ -102,7 +98,7 @@ describe("json-encoding", () => {
       expect(Object.isFrozen(roundTrip(value))).toBe(true);
     });
 
-    it("round-trip preserves nested object with special types", () => {
+    it("round-trips nested object with special types", () => {
       const value = {
         name: "test",
         count: 42n,

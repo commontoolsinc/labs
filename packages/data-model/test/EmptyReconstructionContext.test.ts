@@ -23,7 +23,7 @@ describe("EmptyReconstructionContext", () => {
       ).toThrow();
     });
 
-    it("throw includes the requested ref id for debuggability", () => {
+    it("includes the requested ref id in the throw for debuggability", () => {
       expect(() =>
         EMPTY_RECONSTRUCTION_CONTEXT.getCell({
           id: "of:bafySPECIFIC",
@@ -37,13 +37,13 @@ describe("EmptyReconstructionContext", () => {
       expect(Object.isFrozen(EMPTY_RECONSTRUCTION_CONTEXT)).toBe(true);
     });
 
-    it("`shouldDeepFreeze` is `true` (the safe default, mirrors `cloneIfNecessary()` frozen)", () => {
+    it("reports `shouldDeepFreeze` as `true` (the safe default, mirrors `cloneIfNecessary()` frozen)", () => {
       expect(EMPTY_RECONSTRUCTION_CONTEXT.shouldDeepFreeze).toBe(true);
     });
   });
 
   describe("`EmptyReconstructionContext` (exported class)", () => {
-    it("default ctor: `shouldDeepFreeze` is `true` + the historical verbatim throw message", () => {
+    it("reports `shouldDeepFreeze` as `true` with the historical verbatim throw message (default ctor)", () => {
       const ctx = new EmptyReconstructionContext();
       expect(ctx.shouldDeepFreeze).toBe(true);
       expect(() =>
@@ -60,7 +60,7 @@ describe("EmptyReconstructionContext", () => {
       expect(new EmptyReconstructionContext(true).shouldDeepFreeze).toBe(true);
     });
 
-    it("`getCellMessage` arg parameterizes only the after-colon clause", () => {
+    it("parameterizes only the after-colon clause via the `getCellMessage` arg", () => {
       const ctx = new EmptyReconstructionContext(true, "custom");
       expect(() =>
         ctx.getCell({ id: "of:bafyCUSTOM", path: [], space: "did:key:z1" })

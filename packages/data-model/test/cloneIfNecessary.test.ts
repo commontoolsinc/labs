@@ -20,14 +20,9 @@ import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
 import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "../src/interface.ts";
 
-// ============================================================================
-// Tests
-// ============================================================================
-//
 // Both legacy and modern flag states use modern clone semantics. Test cases are
 // parameterized across both modes to ensure the contract is durable under
 // either flag setting.
-
 describe("cloneIfNecessary", () => {
   // Always reset after each test to avoid leaking flag state.
   afterEach(() => {
@@ -36,10 +31,6 @@ describe("cloneIfNecessary", () => {
 
   for (const modernMode of [false, true]) {
     const label = modernMode ? "modern" : "legacy";
-
-    // --------------------------------------------------------------------------
-    // Error cases (validation runs before flag dispatch)
-    // --------------------------------------------------------------------------
 
     describe(`error cases (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
@@ -56,10 +47,6 @@ describe("cloneIfNecessary", () => {
           .toThrow("frozen: false, force: false, deep: true");
       });
     });
-
-    // --------------------------------------------------------------------------
-    // Default options (frozen=true, deep=true, force=false)
-    // --------------------------------------------------------------------------
 
     describe(`default options (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
@@ -123,10 +110,6 @@ describe("cloneIfNecessary", () => {
       });
     });
 
-    // --------------------------------------------------------------------------
-    // frozen=false, force=true (default when frozen=false) -- deep
-    // --------------------------------------------------------------------------
-
     describe(`\`frozen=false\`, deep clone (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
@@ -177,10 +160,6 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(innerResult)).toBe(false);
       });
     });
-
-    // --------------------------------------------------------------------------
-    // shallow clone (deep=false)
-    // --------------------------------------------------------------------------
 
     describe(`shallow clone (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
@@ -248,10 +227,6 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
     });
-
-    // --------------------------------------------------------------------------
-    // FabricError (FabricInstance)
-    // --------------------------------------------------------------------------
 
     describe(`\`FabricInstance\` (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
@@ -326,10 +301,6 @@ describe("cloneIfNecessary", () => {
       });
     });
 
-    // --------------------------------------------------------------------------
-    // undefined preservation
-    // --------------------------------------------------------------------------
-
     describe(`\`undefined\` preservation (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
@@ -359,10 +330,6 @@ describe("cloneIfNecessary", () => {
         expect(cloneIfNecessary(undefined)).toBe(undefined);
       });
     });
-
-    // --------------------------------------------------------------------------
-    // null prototype preservation
-    // --------------------------------------------------------------------------
 
     describe(`\`null\` prototype preservation (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
@@ -417,10 +384,6 @@ describe("cloneIfNecessary", () => {
       });
     });
 
-    // --------------------------------------------------------------------------
-    // FabricPrimitive pass-through
-    // --------------------------------------------------------------------------
-
     describe(`\`FabricPrimitive\` (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
@@ -452,10 +415,6 @@ describe("cloneIfNecessary", () => {
         expect(result.label).toBe("test");
       });
     });
-
-    // --------------------------------------------------------------------------
-    // Circular reference detection
-    // --------------------------------------------------------------------------
 
     describe(`circular reference detection (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
@@ -496,12 +455,8 @@ describe("cloneIfNecessary", () => {
     });
   }
 
-  // --------------------------------------------------------------------------
-  // Config lifecycle
-  // --------------------------------------------------------------------------
-
   describe("config lifecycle", () => {
-    it("clone semantics are preserved across mode switches", () => {
+    it("preserves clone semantics across mode switches", () => {
       const value = { a: 1 } as FabricValue;
 
       setDataModelConfig(true);
@@ -518,9 +473,7 @@ describe("cloneIfNecessary", () => {
     });
   });
 
-  // ============================================================================
-  // Per-subclass coverage matrix
-  // ============================================================================
+  // Per-subclass coverage matrix.
   //
   // Systematically exercises every concrete `FabricInstance` and
   // `FabricPrimitive` subclass in this package across the full `cloneIfNecessary`
@@ -566,13 +519,13 @@ describe("cloneIfNecessary", () => {
   };
 
   const subclassCases: readonly SubclassCase[] = [
-    // ---------- `FabricInstance` with full protocol coverage ----------
+    // `FabricInstance` with full protocol coverage.
     {
       name: "FabricError",
       factory: () => FabricError.fromNativeError(new Error("test")),
       deepCloneImplemented: true,
     },
-    // ---------- `FabricInstance` with `deepClone` stub ----------
+    // `FabricInstance` with `deepClone` stub.
     {
       name: "FabricRegExp",
       factory: () => new FabricRegExp(/abc/g, "es2025"),
@@ -589,7 +542,7 @@ describe("cloneIfNecessary", () => {
       factory: () => new UnknownValue("Foo@1", "state-data" as FabricValue),
       deepCloneImplemented: false,
     },
-    // ---------- `FabricInstance` with all-protocol stubs (only shallow works) ----------
+    // `FabricInstance` with all-protocol stubs (only shallow works).
     {
       name: "FabricMap",
       factory: () =>
@@ -606,7 +559,7 @@ describe("cloneIfNecessary", () => {
       factory: () => new FabricSet(new Set<FabricValue>([1 as FabricValue])),
       deepCloneImplemented: false,
     },
-    // ---------- `FabricPrimitive` subclasses (intrinsically immutable) ----------
+    // `FabricPrimitive` subclasses (intrinsically immutable).
     {
       name: "FabricBytes",
       factory: () => new FabricBytes(new Uint8Array([1, 2, 3])),

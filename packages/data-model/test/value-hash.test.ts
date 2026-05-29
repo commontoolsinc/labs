@@ -36,1017 +36,975 @@ function hashBytesOf(value: FabricValue): Uint8Array {
   return hashOf(value).bytes;
 }
 
-// =========================================================================
-// Primitive types
-// =========================================================================
-
 describe("value-hash", () => {
   describe("hashOf()", () => {
-    // --- null ---
-
     it("produces `TAG_NULL` byte stream for `null`", () => {
       // Byte stream: [0x20]
       const expected = sha256([0x20]);
       expect(hashBytesOf(null)).toEqual(expected);
     });
 
-    // --- boolean ---
-
-    it("produces `TAG_BOOLEAN` + `0x01` for `true`", () => {
-      // [0x22, 0x01]
-      const expected = sha256([0x22, 0x01]);
-      expect(hashBytesOf(true)).toEqual(expected);
-    });
-
-    it("produces `TAG_BOOLEAN` + `0x00` for `false`", () => {
-      // [0x22, 0x00]
-      const expected = sha256([0x22, 0x00]);
-      expect(hashBytesOf(false)).toEqual(expected);
-    });
-
-    it("produces different hashes for `true` and `false`", () => {
-      expect(hex(hashBytesOf(true))).not.toBe(hex(hashBytesOf(false)));
-    });
-
-    // --- number ---
-
-    it("produces `TAG_NUMBER` + IEEE 754 float64 BE for `42`", () => {
-      const expected = sha256([
-        0x23,
-        0x40,
-        0x45,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-      ]);
-      expect(hashBytesOf(42)).toEqual(expected);
-    });
-
-    it("produces `TAG_NUMBER` + all zeros for `0`", () => {
-      const expected = sha256([
-        0x23,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-      ]);
-      expect(hashBytesOf(0)).toEqual(expected);
-    });
-
-    it("produces `TAG_NUMBER` + IEEE 754 negative-zero bit pattern for `-0`", () => {
-      // 80 00 00 00 00 00 00 00
-      const expected = sha256([
-        0x23,
-        0x80,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-      ]);
-      expect(hashBytesOf(-0)).toEqual(expected);
-    });
-
-    it("produces different hashes for `-0` and `+0`", () => {
-      expect(hex(hashBytesOf(-0))).not.toBe(hex(hashBytesOf(0)));
-    });
-
-    it("produces canonical `TAG_NUMBER` quiet-NaN bytes for `NaN`", () => {
-      // 7F F8 00 00 00 00 00 00
-      const expected = sha256([
-        0x23,
-        0x7f,
-        0xf8,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-      ]);
-      expect(hashBytesOf(NaN)).toEqual(expected);
-    });
-
-    it("hashes non-canonical `NaN` bit patterns to the canonical `NaN`", () => {
-      // Construct a NaN with a non-zero payload (still a valid quiet NaN) and
-      // confirm it canonicalizes. The hashed bytes must match the literal `NaN`.
-      const view = new DataView(new ArrayBuffer(8));
-      view.setBigUint64(0, 0x7ff8000000000001n, false);
-      const nonCanonicalNaN = view.getFloat64(0, false);
-      expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
-      expect(hex(hashBytesOf(nonCanonicalNaN))).toBe(hex(hashBytesOf(NaN)));
-    });
-
-    it("produces `TAG_NUMBER` + IEEE 754 `+Infinity` bit pattern for `Infinity`", () => {
-      // 7F F0 00 00 00 00 00 00
-      const expected = sha256([
-        0x23,
-        0x7f,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-      ]);
-      expect(hashBytesOf(Infinity)).toEqual(expected);
-    });
-
-    it("produces `TAG_NUMBER` + IEEE 754 `-Infinity` bit pattern for `-Infinity`", () => {
-      // FF F0 00 00 00 00 00 00
-      const expected = sha256([
-        0x23,
-        0xff,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-      ]);
-      expect(hashBytesOf(-Infinity)).toEqual(expected);
-    });
-
-    it("produces distinct hashes for `NaN`, `+Infinity`, and `-Infinity`", () => {
-      expect(hex(hashBytesOf(NaN))).not.toBe(hex(hashBytesOf(Infinity)));
-      expect(hex(hashBytesOf(NaN))).not.toBe(hex(hashBytesOf(-Infinity)));
-      expect(hex(hashBytesOf(Infinity))).not.toBe(hex(hashBytesOf(-Infinity)));
-    });
-
-    it("produces different hashes for different numbers", () => {
-      expect(hex(hashBytesOf(1))).not.toBe(hex(hashBytesOf(2)));
-      expect(hex(hashBytesOf(0))).not.toBe(hex(hashBytesOf(1)));
-      expect(hex(hashBytesOf(-1))).not.toBe(hex(hashBytesOf(1)));
-    });
-
-    it("produces `TAG_NUMBER` + all-nonzero IEEE 754 bytes for `Number.MAX_VALUE`", () => {
-      // IEEE 754 float64 big-endian for Number.MAX_VALUE:
-      // 7F EF FF FF FF FF FF FF  (all bytes non-zero)
-      const expected = sha256([
-        0x23,
-        0x7f,
-        0xef,
-        0xff,
-        0xff,
-        0xff,
-        0xff,
-        0xff,
-        0xff,
-      ]);
-      expect(hex(hashBytesOf(Number.MAX_VALUE))).toBe(hex(expected));
-    });
-
-    // --- string ---
-
-    it("produces `TAG_STRING` + LEB128 byte length + UTF-8 for `hello`", () => {
-      // UTF-8 for "hello": [0x68, 0x65, 0x6c, 0x6c, 0x6f], 5 bytes
-      // LEB128(5) = [0x05]
-      const expected = sha256([
-        0x24,
-        0x05,
-        0x68,
-        0x65,
-        0x6c,
-        0x6c,
-        0x6f,
-      ]);
-      expect(hashBytesOf("hello")).toEqual(expected);
-    });
-
-    it("produces `TAG_STRING` + zero length for the empty string", () => {
-      // LEB128(0) = [0x00]
-      const expected = sha256([0x24, 0x00]);
-      expect(hashBytesOf("")).toEqual(expected);
-    });
-
-    it("produces different hashes for different strings", () => {
-      expect(hex(hashBytesOf("a"))).not.toBe(hex(hashBytesOf("b")));
-      expect(hex(hashBytesOf(""))).not.toBe(hex(hashBytesOf("a")));
-    });
-
-    it("encodes multi-byte UTF-8 characters correctly", () => {
-      // Verify consistency (same value -> same hash)
-      expect(hashBytesOf("\u00e9")).toEqual(hashBytesOf("\u00e9"));
-      // e-acute is 2 bytes in UTF-8
-      expect(hex(hashBytesOf("e"))).not.toBe(hex(hashBytesOf("\u00e9")));
-    });
-
-    it("encodes surrogate pairs (emoji) correctly", () => {
-      // U+1F600 (grinning face) is 4 bytes in UTF-8
-      const emoji = "\u{1F600}";
-      const enc = new TextEncoder();
-      const utf8 = enc.encode(emoji);
-      expect(utf8.length).toBe(4); // 4 bytes in UTF-8
-      // LEB128(4) = [0x04]
-      const expected = sha256([
-        0x24,
-        0x04,
-        ...utf8,
-      ]);
-      expect(hashBytesOf(emoji)).toEqual(expected);
-    });
-
-    it("takes the TAG_STRING_HASH path for a long string", () => {
-      // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64), so the value is fed
-      // as [TAG_STRING_HASH][sha256(utf8)] -- a fixed-length compaction in
-      // place of the inline `[TAG_STRING][len][utf8]` form.
-      const value = "x".repeat(100);
-      const valueHash = sha256(new TextEncoder().encode(value));
-      const expected = sha256([0xf0, ...valueHash]);
-      expect(hashBytesOf(value)).toEqual(expected);
-    });
-
-    it("is deterministic and value-distinct on the long-string path", () => {
-      // Two different strings both > 64 utf8 bytes should hash differently;
-      // identical long strings should hash the same.
-      const a1 = "a".repeat(100);
-      const a2 = "a".repeat(100);
-      const b = "b".repeat(100);
-      expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
-      expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
-    });
-
-    // --- bigint ---
-
-    it("encodes `0n` as `TAG_BIGINT` + LEB128 length 1 + `[0x00]`", () => {
-      // LEB128(1) = [0x01]
-      const expected = sha256([0x26, 0x01, 0x00]);
-      expect(hashBytesOf(0n)).toEqual(expected);
-    });
-
-    it("encodes `127n` as 1 byte: `0x7F`", () => {
-      const expected = sha256([0x26, 0x01, 0x7f]);
-      expect(hashBytesOf(127n)).toEqual(expected);
-    });
-
-    it("encodes `128n` as 2 bytes: `0x00`, `0x80`", () => {
-      // 128 = 0x80, but high bit set means negative in two's complement,
-      // so we need a leading 0x00. LEB128(2) = [0x02].
-      const expected = sha256([0x26, 0x02, 0x00, 0x80]);
-      expect(hashBytesOf(128n)).toEqual(expected);
-    });
-
-    it("encodes `-1n` as 1 byte: `0xFF`", () => {
-      const expected = sha256([0x26, 0x01, 0xff]);
-      expect(hashBytesOf(-1n)).toEqual(expected);
-    });
-
-    it("encodes `-128n` as 1 byte: `0x80`", () => {
-      const expected = sha256([0x26, 0x01, 0x80]);
-      expect(hashBytesOf(-128n)).toEqual(expected);
-    });
-
-    it("encodes `-129n` as 2 bytes: `0xFF`, `0x7F`", () => {
-      const expected = sha256([0x26, 0x02, 0xff, 0x7f]);
-      expect(hashBytesOf(-129n)).toEqual(expected);
-    });
-
-    it("encodes a large `bigint` correctly", () => {
-      // 2^64 = 18446744073709551616n
-      // hex: 10000000000000000 -> 9 bytes: 01 00 00 00 00 00 00 00 00
-      const big = 2n ** 64n;
-      const hash = hashBytesOf(big);
-      expect(hash.length).toBe(32); // SHA-256 produces 32 bytes
-
-      // Verify it's consistent
-      expect(hashBytesOf(big)).toEqual(hash);
-    });
-
-    it("matches a hand-computed byte stream for `0x112233445566778899abcdefn`", () => {
-      // 12-byte positive bigint, high nibble 0x1 so no sign-extension needed.
-      // TAG_BIGINT(0x26) + LEB128(12)=0x0c + big-endian bytes
-      const expected = sha256([
-        0x26,
-        0x0c,
-        0x11,
-        0x22,
-        0x33,
-        0x44,
-        0x55,
-        0x66,
-        0x77,
-        0x88,
-        0x99,
-        0xab,
-        0xcd,
-        0xef,
-      ]);
-      expect(hex(hashBytesOf(0x112233445566778899abcdefn))).toBe(hex(expected));
-    });
-
-    it("matches a hand-computed byte stream for `-0x112233445566778899abcdefn`", () => {
-      // Negative two's complement of 11 22 33 44 55 66 77 88 99 AB CD EF:
-      //   Invert: EE DD CC BB AA 99 88 77 66 54 32 10
-      //   Add 1:  EE DD CC BB AA 99 88 77 66 54 32 11
-      // High byte 0xEE has bit 7 set -- correctly negative, 12 bytes.
-      // TAG_BIGINT(0x26) + LEB128(12)=0x0c + big-endian two's complement
-      const expected = sha256([
-        0x26,
-        0x0c,
-        0xee,
-        0xdd,
-        0xcc,
-        0xbb,
-        0xaa,
-        0x99,
-        0x88,
-        0x77,
-        0x66,
-        0x54,
-        0x32,
-        0x11,
-      ]);
-      expect(hex(hashBytesOf(-0x112233445566778899abcdefn))).toBe(
-        hex(expected),
-      );
-    });
-
-    // --- undefined ---
-
-    it("produces `TAG_UNDEFINED` for `undefined`", () => {
-      // [0x21]
-      const expected = sha256([0x21]);
-      expect(hashBytesOf(undefined)).toEqual(expected);
-    });
-
-    // --- cross-type distinctness ---
-
-    it("produces different hashes for `null`, `undefined`, and `false`", () => {
-      const nullH = hex(hashBytesOf(null));
-      const undefH = hex(hashBytesOf(undefined));
-      const falseH = hex(hashBytesOf(false));
-      expect(nullH).not.toBe(undefH);
-      expect(nullH).not.toBe(falseH);
-      expect(undefH).not.toBe(falseH);
-    });
-
-    it('number `0` vs `bigint` value `0n` vs string `"0"` are distinct', () => {
-      const numH = hex(hashBytesOf(0));
-      const bigH = hex(hashBytesOf(0n));
-      const strH = hex(hashBytesOf("0"));
-      expect(numH).not.toBe(bigH);
-      expect(numH).not.toBe(strH);
-      expect(bigH).not.toBe(strH);
-    });
-
-    // =========================================================================
-    // FabricBytes
-    // =========================================================================
-
-    it("produces `TAG_BYTES` + LEB128 length + raw bytes for a `FabricBytes`", () => {
-      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      // LEB128(3) = [0x03]
-      const expected = sha256([
-        0x25,
-        0x03,
-        0x01,
-        0x02,
-        0x03,
-      ]);
-      expect(hashBytesOf(bytes)).toEqual(expected);
-    });
-
-    it("produces `TAG_BYTES` + zero length for an empty `FabricBytes`", () => {
-      const bytes = new FabricBytes(new Uint8Array([]));
-      const expected = sha256([0x25, 0x00]);
-      expect(hashBytesOf(bytes)).toEqual(expected);
-    });
-
-    // =========================================================================
-    // FabricEpochNsec (dedicated TAG_EPOCH_NSEC primitive tag)
-    // =========================================================================
-
-    it("matches a hand-computed byte stream for `FabricEpochNsec(0n)`", () => {
-      // TAG_EPOCH_NSEC (0x27) + LEB128(1) + [0x00]
-      const expected = sha256([
-        0x27,
-        0x01,
-        0x00,
-      ]);
-      expect(hashBytesOf(new FabricEpochNsec(0n))).toEqual(expected);
-    });
-
-    it("produces different hashes for FabricEpochNsec values", () => {
-      const d1 = new FabricEpochNsec(0n);
-      const d2 = new FabricEpochNsec(1704067200000000000n);
-      expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
-    });
-
-    it("hashes a FabricEpochNsec with negative value (pre-epoch)", () => {
-      const nsec = new FabricEpochNsec(-1000000000n);
-      const hash = hashBytesOf(nsec);
-      expect(hash.length).toBe(32);
-    });
-
-    // =========================================================================
-    // FabricEpochDays (dedicated TAG_EPOCH_DAYS primitive tag)
-    // =========================================================================
-
-    it("matches a hand-computed byte stream for `FabricEpochDays(0n)`", () => {
-      // TAG_EPOCH_DAYS (0x28) + LEB128(1) + [0x00]
-      const expected = sha256([
-        0x28,
-        0x01,
-        0x00,
-      ]);
-      expect(hashBytesOf(new FabricEpochDays(0n))).toEqual(expected);
-    });
-
-    it("produces different hashes for FabricEpochDays values", () => {
-      const d1 = new FabricEpochDays(0n);
-      const d2 = new FabricEpochDays(19723n);
-      expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
-    });
-
-    it("hashes a FabricEpochDays with negative value (pre-epoch)", () => {
-      const days = new FabricEpochDays(-365n);
-      const hash = hashBytesOf(days);
-      expect(hash.length).toBe(32);
-    });
-
-    it("produces different hashes for `FabricEpochNsec` and `FabricEpochDays` with the same `bigint`", () => {
-      // Same underlying value, different tag -> different hash
-      const nsec = new FabricEpochNsec(100n);
-      const days = new FabricEpochDays(100n);
-      expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
-    });
-
-    // =========================================================================
-    // FabricError (FabricInstance via DECONSTRUCT)
-    // =========================================================================
-
-    it("matches a byte stream built from `[DECONSTRUCT]` output for `FabricError`", () => {
-      // Build the expected byte stream programmatically because the
-      // deconstructed state includes `stack` which is environment-dependent.
-      // We construct the stream the same way `hashOf()` does, then SHA-256 it.
-      const error = FabricError.fromNativeError(new Error("test"));
-      const enc = new TextEncoder();
-
-      // TAG_INSTANCE (0x12)
-      const stream: number[] = [0x12];
-
-      const pushShortString = (value: string) => {
-        const encoded = enc.encode(value);
-        stream.push(0x24, encoded.length, ...encoded);
-      };
-
-      const pushLongString = (value: string) => {
-        const hashed = sha256(enc.encode(value));
-        stream.push(0xf0, ...hashed);
-      };
-
-      // Type tag.
-      pushShortString("Error@1");
-
-      // Deconstructed state is an object with sorted keys.
-      // FabricError.DECONSTRUCT() returns:
-      //   { type: "Error", name: null, message: "test", stack: <string> }
-      // Keys sorted by UTF-8: message, name, stack, type
-      stream.push(0x11); // TAG_OBJECT
-
-      // Key "message" + value "test"
-      pushShortString("message");
-      pushShortString("test");
-
-      // Key "name" + value null (name === type for Error, so null)
-      pushShortString("name");
-      stream.push(0x20); // TAG_NULL
-
-      // Key "stack" + value (the actual stack string)
-      pushShortString("stack");
-      pushLongString(error.stack!);
-
-      // Key "type" + value "Error"
-      pushShortString("type");
-      pushShortString("Error");
-
-      // TAG_END for the object
-      stream.push(0x00);
-
-      const expected = sha256(stream);
-      expect(hashBytesOf(error)).toEqual(expected);
-    });
-
-    it("produces different hashes for different errors", () => {
-      const e1 = FabricError.fromNativeError(new Error("hello"));
-      const e2 = FabricError.fromNativeError(new Error("world"));
-      expect(hex(hashBytesOf(e1))).not.toBe(hex(hashBytesOf(e2)));
-    });
-
-    it("produces different hashes for `TypeError` vs. `Error`", () => {
-      const e1 = FabricError.fromNativeError(new Error("msg"));
-      const e2 = FabricError.fromNativeError(new TypeError("msg"));
-      expect(hex(hashBytesOf(e1))).not.toBe(hex(hashBytesOf(e2)));
-    });
-
-    // =========================================================================
-    // Arrays
-    // =========================================================================
-
-    it("produces TAG_ARRAY + TAG_END for an empty array", () => {
-      const expected = sha256([0x10, 0x00]);
-      expect(hashBytesOf([])).toEqual(expected);
-    });
-
-    it("uses hole run-length encoding for the sparse array [1, , 3]", () => {
-      // TAG_ARRAY
-      // + number 1 (TAG_NUMBER + IEEE754)
-      // + TAG_HOLE + LEB128(1)
-      // + number 3 (TAG_NUMBER + IEEE754)
-      // + TAG_END
-      const expected = sha256([
-        // TAG_ARRAY
-        0x10,
-        // Element 0: number 1
-        0x23,
-        0x3f,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // Element 1: hole run of 1
-        0x01,
-        0x01,
-        // Element 2: number 3
-        0x23,
-        0x40,
-        0x08,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // TAG_END
-        0x00,
-      ]);
-      // deno-lint-ignore no-sparse-arrays
-      expect(hashBytesOf([1, , 3])).toEqual(expected);
-    });
-
-    it("coalesces multiple consecutive holes into one run", () => {
-      // [1, , , , 5] -> hole run of 3
-      const arr = new Array(5);
-      arr[0] = 1;
-      arr[4] = 5;
-      const hash = hashBytesOf(arr);
-
-      // Verify by building the expected byte stream manually
-      const expected = sha256([
-        // TAG_ARRAY
-        0x10,
-        // Element 0: number 1
-        0x23,
-        0x3f,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // Elements 1-3: hole run of 3
-        0x01,
-        0x03,
-        // Element 4: number 5
-        0x23,
-        0x40,
-        0x14,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // TAG_END
-        0x00,
-      ]);
-      expect(hash).toEqual(expected);
-    });
-
-    it("produces distinct hashes for `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`", () => {
-      // deno-lint-ignore no-sparse-arrays
-      const sparseH = hex(hashBytesOf([1, , 3]));
-      const undefH = hex(hashBytesOf([1, undefined, 3]));
-      const nullH = hex(hashBytesOf([1, null, 3]));
-
-      expect(sparseH).not.toBe(undefH);
-      expect(sparseH).not.toBe(nullH);
-      expect(undefH).not.toBe(nullH);
-    });
-
-    it("recursively hashes nested arrays", () => {
-      const hash = hashBytesOf([[1, 2], [3]]);
-      expect(hash.length).toBe(32);
-      // Different from flat array
-      expect(hex(hash)).not.toBe(hex(hashBytesOf([1, 2, 3])));
-    });
-
-    // =========================================================================
-    // Objects
-    // =========================================================================
-
-    it("produces TAG_OBJECT + TAG_END for an empty object", () => {
-      const expected = sha256([0x11, 0x00]);
-      expect(hashBytesOf({})).toEqual(expected);
-    });
-
-    it("is deterministic in object key order (sorted by UTF-8)", () => {
-      // Keys inserted in different orders produce the same hash.
-      const h1 = hashBytesOf({ a: 1, b: 2 });
-      const h2 = hashBytesOf({ b: 2, a: 1 });
-      expect(h1).toEqual(h2);
-    });
-
-    it("matches a hand-computed byte stream for {a: 1, b: 2}", () => {
-      // Keys sorted: "a" (0x61) < "b" (0x62)
-      // LEB128 lengths are single bytes for small values.
-      const expected = sha256([
-        // TAG_OBJECT
-        0x11,
-        // Key "a": TAG_STRING + LEB128(1) + UTF-8
-        0x24,
-        0x01,
-        0x61,
-        // Value 1: TAG_NUMBER + IEEE754 for 1.0
-        0x23,
-        0x3f,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // Key "b": TAG_STRING + LEB128(1) + UTF-8
-        0x24,
-        0x01,
-        0x62,
-        // Value 2: TAG_NUMBER + IEEE754 for 2.0
-        0x23,
-        0x40,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // TAG_END
-        0x00,
-      ]);
-      expect(hashBytesOf({ a: 1, b: 2 })).toEqual(expected);
-    });
-
-    it("recursively hashes nested objects", () => {
-      const hash = hashBytesOf({ x: { y: 1 } });
-      expect(hash.length).toBe(32);
-      expect(hex(hash)).not.toBe(hex(hashBytesOf({ x: 1 })));
-    });
-
-    it("hashes an object with mixed value types", () => {
-      const hash = hashBytesOf({
-        str: "hello",
-        num: 42,
-        bool: true,
-        nil: null,
+    describe("boolean", () => {
+      it("produces `TAG_BOOLEAN` + `0x01` for `true`", () => {
+        // [0x22, 0x01]
+        const expected = sha256([0x22, 0x01]);
+        expect(hashBytesOf(true)).toEqual(expected);
       });
-      expect(hash.length).toBe(32);
-      // Consistency
-      expect(hash).toEqual(
-        hashBytesOf({ str: "hello", num: 42, bool: true, nil: null }),
-      );
+
+      it("produces `TAG_BOOLEAN` + `0x00` for `false`", () => {
+        // [0x22, 0x00]
+        const expected = sha256([0x22, 0x00]);
+        expect(hashBytesOf(false)).toEqual(expected);
+      });
+
+      it("produces different hashes for `true` and `false`", () => {
+        expect(hex(hashBytesOf(true))).not.toBe(hex(hashBytesOf(false)));
+      });
     });
+    describe("number", () => {
+      it("produces `TAG_NUMBER` + IEEE 754 float64 BE for `42`", () => {
+        const expected = sha256([
+          0x23,
+          0x40,
+          0x45,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+        ]);
+        expect(hashBytesOf(42)).toEqual(expected);
+      });
 
-    // =========================================================================
-    // Consistency and distinctness
-    // =========================================================================
+      it("produces `TAG_NUMBER` + all zeros for `0`", () => {
+        const expected = sha256([
+          0x23,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+        ]);
+        expect(hashBytesOf(0)).toEqual(expected);
+      });
 
-    it("produces the same hash for the same value every time", () => {
-      expect(hashBytesOf(42)).toEqual(hashBytesOf(42));
-      expect(hashBytesOf("hello")).toEqual(hashBytesOf("hello"));
-      expect(hashBytesOf([1, 2, 3])).toEqual(hashBytesOf([1, 2, 3]));
-      expect(hashBytesOf({ a: 1 })).toEqual(hashBytesOf({ a: 1 }));
+      it("produces `TAG_NUMBER` + IEEE 754 negative-zero bit pattern for `-0`", () => {
+        // 80 00 00 00 00 00 00 00
+        const expected = sha256([
+          0x23,
+          0x80,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+        ]);
+        expect(hashBytesOf(-0)).toEqual(expected);
+      });
+
+      it("produces different hashes for `-0` and `+0`", () => {
+        expect(hex(hashBytesOf(-0))).not.toBe(hex(hashBytesOf(0)));
+      });
+
+      it("produces canonical `TAG_NUMBER` quiet-NaN bytes for `NaN`", () => {
+        // 7F F8 00 00 00 00 00 00
+        const expected = sha256([
+          0x23,
+          0x7f,
+          0xf8,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+        ]);
+        expect(hashBytesOf(NaN)).toEqual(expected);
+      });
+
+      it("hashes non-canonical `NaN` bit patterns to the canonical `NaN`", () => {
+        // Construct a NaN with a non-zero payload (still a valid quiet NaN) and
+        // confirm it canonicalizes. The hashed bytes must match the literal `NaN`.
+        const view = new DataView(new ArrayBuffer(8));
+        view.setBigUint64(0, 0x7ff8000000000001n, false);
+        const nonCanonicalNaN = view.getFloat64(0, false);
+        expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
+        expect(hex(hashBytesOf(nonCanonicalNaN))).toBe(hex(hashBytesOf(NaN)));
+      });
+
+      it("produces `TAG_NUMBER` + IEEE 754 `+Infinity` bit pattern for `Infinity`", () => {
+        // 7F F0 00 00 00 00 00 00
+        const expected = sha256([
+          0x23,
+          0x7f,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+        ]);
+        expect(hashBytesOf(Infinity)).toEqual(expected);
+      });
+
+      it("produces `TAG_NUMBER` + IEEE 754 `-Infinity` bit pattern for `-Infinity`", () => {
+        // FF F0 00 00 00 00 00 00
+        const expected = sha256([
+          0x23,
+          0xff,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+        ]);
+        expect(hashBytesOf(-Infinity)).toEqual(expected);
+      });
+
+      it("produces distinct hashes for `NaN`, `+Infinity`, and `-Infinity`", () => {
+        expect(hex(hashBytesOf(NaN))).not.toBe(hex(hashBytesOf(Infinity)));
+        expect(hex(hashBytesOf(NaN))).not.toBe(hex(hashBytesOf(-Infinity)));
+        expect(hex(hashBytesOf(Infinity))).not.toBe(
+          hex(hashBytesOf(-Infinity)),
+        );
+      });
+
+      it("produces different hashes for different numbers", () => {
+        expect(hex(hashBytesOf(1))).not.toBe(hex(hashBytesOf(2)));
+        expect(hex(hashBytesOf(0))).not.toBe(hex(hashBytesOf(1)));
+        expect(hex(hashBytesOf(-1))).not.toBe(hex(hashBytesOf(1)));
+      });
+
+      it("produces `TAG_NUMBER` + all-nonzero IEEE 754 bytes for `Number.MAX_VALUE`", () => {
+        // IEEE 754 float64 big-endian for Number.MAX_VALUE:
+        // 7F EF FF FF FF FF FF FF  (all bytes non-zero)
+        const expected = sha256([
+          0x23,
+          0x7f,
+          0xef,
+          0xff,
+          0xff,
+          0xff,
+          0xff,
+          0xff,
+          0xff,
+        ]);
+        expect(hex(hashBytesOf(Number.MAX_VALUE))).toBe(hex(expected));
+      });
     });
+    describe("string", () => {
+      it("produces `TAG_STRING` + LEB128 byte length + UTF-8 for `hello`", () => {
+        // UTF-8 for "hello": [0x68, 0x65, 0x6c, 0x6c, 0x6f], 5 bytes
+        // LEB128(5) = [0x05]
+        const expected = sha256([
+          0x24,
+          0x05,
+          0x68,
+          0x65,
+          0x6c,
+          0x6c,
+          0x6f,
+        ]);
+        expect(hashBytesOf("hello")).toEqual(expected);
+      });
 
-    it("produces a 32-byte hash (SHA-256)", () => {
-      const values: FabricValue[] = [
-        null,
-        true,
-        false,
-        0,
-        42,
-        "",
-        "hello",
-        0n,
-        127n,
-        undefined,
-        [],
-        [1, 2],
-        {},
-        { a: 1 },
-        new FabricEpochNsec(0n),
-        new FabricEpochDays(0n),
-        new FabricBytes(new Uint8Array([1])),
-        FabricError.fromNativeError(new Error("x")),
-      ];
-      for (const v of values) {
-        expect(hashBytesOf(v).length).toBe(32);
-      }
+      it("produces `TAG_STRING` + zero length for the empty string", () => {
+        // LEB128(0) = [0x00]
+        const expected = sha256([0x24, 0x00]);
+        expect(hashBytesOf("")).toEqual(expected);
+      });
+
+      it("produces different hashes for different strings", () => {
+        expect(hex(hashBytesOf("a"))).not.toBe(hex(hashBytesOf("b")));
+        expect(hex(hashBytesOf(""))).not.toBe(hex(hashBytesOf("a")));
+      });
+
+      it("encodes multi-byte UTF-8 characters correctly", () => {
+        // Verify consistency (same value -> same hash)
+        expect(hashBytesOf("\u00e9")).toEqual(hashBytesOf("\u00e9"));
+        // e-acute is 2 bytes in UTF-8
+        expect(hex(hashBytesOf("e"))).not.toBe(hex(hashBytesOf("\u00e9")));
+      });
+
+      it("encodes surrogate pairs (emoji) correctly", () => {
+        // U+1F600 (grinning face) is 4 bytes in UTF-8
+        const emoji = "\u{1F600}";
+        const enc = new TextEncoder();
+        const utf8 = enc.encode(emoji);
+        expect(utf8.length).toBe(4); // 4 bytes in UTF-8
+        // LEB128(4) = [0x04]
+        const expected = sha256([
+          0x24,
+          0x04,
+          ...utf8,
+        ]);
+        expect(hashBytesOf(emoji)).toEqual(expected);
+      });
+
+      it("takes the TAG_STRING_HASH path for a long string", () => {
+        // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64), so the value is fed
+        // as [TAG_STRING_HASH][sha256(utf8)] -- a fixed-length compaction in
+        // place of the inline `[TAG_STRING][len][utf8]` form.
+        const value = "x".repeat(100);
+        const valueHash = sha256(new TextEncoder().encode(value));
+        const expected = sha256([0xf0, ...valueHash]);
+        expect(hashBytesOf(value)).toEqual(expected);
+      });
+
+      it("is deterministic and value-distinct on the long-string path", () => {
+        // Two different strings both > 64 utf8 bytes should hash differently;
+        // identical long strings should hash the same.
+        const a1 = "a".repeat(100);
+        const a2 = "a".repeat(100);
+        const b = "b".repeat(100);
+        expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+        expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
+      });
     });
+    describe("bigint", () => {
+      it("encodes `0n` as `TAG_BIGINT` + LEB128 length 1 + `[0x00]`", () => {
+        // LEB128(1) = [0x01]
+        const expected = sha256([0x26, 0x01, 0x00]);
+        expect(hashBytesOf(0n)).toEqual(expected);
+      });
 
-    it("produces different hashes for different values of different types", () => {
-      const hashes = new Set([
-        hex(hashBytesOf(null)),
-        hex(hashBytesOf(true)),
-        hex(hashBytesOf(false)),
-        hex(hashBytesOf(0)),
-        hex(hashBytesOf("")),
-        hex(hashBytesOf(0n)),
-        hex(hashBytesOf(undefined)),
-        hex(hashBytesOf([])),
-        hex(hashBytesOf({})),
-      ]);
-      // All 9 should be distinct.
-      expect(hashes.size).toBe(9);
+      it("encodes `127n` as 1 byte: `0x7F`", () => {
+        const expected = sha256([0x26, 0x01, 0x7f]);
+        expect(hashBytesOf(127n)).toEqual(expected);
+      });
+
+      it("encodes `128n` as 2 bytes: `0x00`, `0x80`", () => {
+        // 128 = 0x80, but high bit set means negative in two's complement,
+        // so we need a leading 0x00. LEB128(2) = [0x02].
+        const expected = sha256([0x26, 0x02, 0x00, 0x80]);
+        expect(hashBytesOf(128n)).toEqual(expected);
+      });
+
+      it("encodes `-1n` as 1 byte: `0xFF`", () => {
+        const expected = sha256([0x26, 0x01, 0xff]);
+        expect(hashBytesOf(-1n)).toEqual(expected);
+      });
+
+      it("encodes `-128n` as 1 byte: `0x80`", () => {
+        const expected = sha256([0x26, 0x01, 0x80]);
+        expect(hashBytesOf(-128n)).toEqual(expected);
+      });
+
+      it("encodes `-129n` as 2 bytes: `0xFF`, `0x7F`", () => {
+        const expected = sha256([0x26, 0x02, 0xff, 0x7f]);
+        expect(hashBytesOf(-129n)).toEqual(expected);
+      });
+
+      it("encodes a large `bigint` correctly", () => {
+        // 2^64 = 18446744073709551616n
+        // hex: 10000000000000000 -> 9 bytes: 01 00 00 00 00 00 00 00 00
+        const big = 2n ** 64n;
+        const hash = hashBytesOf(big);
+        expect(hash.length).toBe(32); // SHA-256 produces 32 bytes
+
+        // Verify it's consistent
+        expect(hashBytesOf(big)).toEqual(hash);
+      });
+
+      it("matches a hand-computed byte stream for `0x112233445566778899abcdefn`", () => {
+        // 12-byte positive bigint, high nibble 0x1 so no sign-extension needed.
+        // TAG_BIGINT(0x26) + LEB128(12)=0x0c + big-endian bytes
+        const expected = sha256([
+          0x26,
+          0x0c,
+          0x11,
+          0x22,
+          0x33,
+          0x44,
+          0x55,
+          0x66,
+          0x77,
+          0x88,
+          0x99,
+          0xab,
+          0xcd,
+          0xef,
+        ]);
+        expect(hex(hashBytesOf(0x112233445566778899abcdefn))).toBe(
+          hex(expected),
+        );
+      });
+
+      it("matches a hand-computed byte stream for `-0x112233445566778899abcdefn`", () => {
+        // Negative two's complement of 11 22 33 44 55 66 77 88 99 AB CD EF:
+        //   Invert: EE DD CC BB AA 99 88 77 66 54 32 10
+        //   Add 1:  EE DD CC BB AA 99 88 77 66 54 32 11
+        // High byte 0xEE has bit 7 set -- correctly negative, 12 bytes.
+        // TAG_BIGINT(0x26) + LEB128(12)=0x0c + big-endian two's complement
+        const expected = sha256([
+          0x26,
+          0x0c,
+          0xee,
+          0xdd,
+          0xcc,
+          0xbb,
+          0xaa,
+          0x99,
+          0x88,
+          0x77,
+          0x66,
+          0x54,
+          0x32,
+          0x11,
+        ]);
+        expect(hex(hashBytesOf(-0x112233445566778899abcdefn))).toBe(
+          hex(expected),
+        );
+      });
+
+      it("produces `TAG_UNDEFINED` for `undefined`", () => {
+        // [0x21]
+        const expected = sha256([0x21]);
+        expect(hashBytesOf(undefined)).toEqual(expected);
+      });
     });
+    describe("cross-type distinctness", () => {
+      it("produces different hashes for `null`, `undefined`, and `false`", () => {
+        const nullH = hex(hashBytesOf(null));
+        const undefH = hex(hashBytesOf(undefined));
+        const falseH = hex(hashBytesOf(false));
+        expect(nullH).not.toBe(undefH);
+        expect(nullH).not.toBe(falseH);
+        expect(undefH).not.toBe(falseH);
+      });
 
-    // =========================================================================
-    // Edge cases
-    // =========================================================================
-
-    it("hashes a deeply nested structure", () => {
-      const deep = { a: { b: { c: { d: [1, { e: true }] } } } };
-      const hash = hashBytesOf(deep);
-      expect(hash.length).toBe(32);
-      expect(hashBytesOf(deep)).toEqual(hash);
+      it('number `0` vs `bigint` value `0n` vs string `"0"` are distinct', () => {
+        const numH = hex(hashBytesOf(0));
+        const bigH = hex(hashBytesOf(0n));
+        const strH = hex(hashBytesOf("0"));
+        expect(numH).not.toBe(bigH);
+        expect(numH).not.toBe(strH);
+        expect(bigH).not.toBe(strH);
+      });
     });
+    describe("FabricBytes", () => {
+      it("produces `TAG_BYTES` + LEB128 length + raw bytes for a `FabricBytes`", () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+        // LEB128(3) = [0x03]
+        const expected = sha256([
+          0x25,
+          0x03,
+          0x01,
+          0x02,
+          0x03,
+        ]);
+        expect(hashBytesOf(bytes)).toEqual(expected);
+      });
 
-    it("hashes an array with all holes", () => {
-      const arr = new Array(5); // all holes
-      const hash = hashBytesOf(arr);
-      expect(hash.length).toBe(32);
-
-      // TAG_ARRAY + TAG_HOLE + LEB128(5) + TAG_END
-      const expected = sha256([
-        0x10,
-        0x01,
-        0x05,
-        0x00,
-      ]);
-      expect(hash).toEqual(expected);
+      it("produces `TAG_BYTES` + zero length for an empty `FabricBytes`", () => {
+        const bytes = new FabricBytes(new Uint8Array([]));
+        const expected = sha256([0x25, 0x00]);
+        expect(hashBytesOf(bytes)).toEqual(expected);
+      });
     });
+    describe("FabricEpochNsec (dedicated TAG_EPOCH_NSEC primitive tag)", () => {
+      it("matches a hand-computed byte stream for `FabricEpochNsec(0n)`", () => {
+        // TAG_EPOCH_NSEC (0x27) + LEB128(1) + [0x00]
+        const expected = sha256([
+          0x27,
+          0x01,
+          0x00,
+        ]);
+        expect(hashBytesOf(new FabricEpochNsec(0n))).toEqual(expected);
+      });
 
-    it("sorts non-ASCII object keys by UTF-8 bytes", () => {
-      // Keys with non-ASCII should sort by UTF-8 byte values.
-      const h1 = hashBytesOf({ "\u00e9": 1, "a": 2 });
-      const h2 = hashBytesOf({ "a": 2, "\u00e9": 1 });
-      expect(h1).toEqual(h2);
+      it("produces different hashes for FabricEpochNsec values", () => {
+        const d1 = new FabricEpochNsec(0n);
+        const d2 = new FabricEpochNsec(1704067200000000000n);
+        expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
+      });
+
+      it("hashes a FabricEpochNsec with negative value (pre-epoch)", () => {
+        const nsec = new FabricEpochNsec(-1000000000n);
+        const hash = hashBytesOf(nsec);
+        expect(hash.length).toBe(32);
+      });
     });
+    describe("FabricEpochDays (dedicated TAG_EPOCH_DAYS primitive tag)", () => {
+      it("matches a hand-computed byte stream for `FabricEpochDays(0n)`", () => {
+        // TAG_EPOCH_DAYS (0x28) + LEB128(1) + [0x00]
+        const expected = sha256([
+          0x28,
+          0x01,
+          0x00,
+        ]);
+        expect(hashBytesOf(new FabricEpochDays(0n))).toEqual(expected);
+      });
 
-    it("sorts object keys by UTF-8, not UTF-16 (supplementary vs. BMP)", () => {
-      // U+F000 (private use area, BMP): UTF-8 = [EF 80 80] (3 bytes)
-      // U+10000 (supplementary plane):  UTF-8 = [F0 90 80 80] (4 bytes)
-      //
-      // UTF-16 order: U+10000 < U+F000 (surrogates 0xD800 < 0xF000)
-      // UTF-8 order:  U+F000 < U+10000 (0xEF < 0xF0)
-      //
-      // If sorting were naive JS string comparison (UTF-16), U+10000 would
-      // come first. Under correct UTF-8 byte sort, U+F000 comes first.
-      const keyA = "\uF000"; // UTF-8: EF 80 80
-      const keyB = "\u{10000}"; // UTF-8: F0 90 80 80
+      it("produces different hashes for FabricEpochDays values", () => {
+        const d1 = new FabricEpochDays(0n);
+        const d2 = new FabricEpochDays(19723n);
+        expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
+      });
 
-      // Verify the JS string order is opposite to UTF-8 order.
-      expect(keyB < keyA).toBe(true);
+      it("hashes a FabricEpochDays with negative value (pre-epoch)", () => {
+        const days = new FabricEpochDays(-365n);
+        const hash = hashBytesOf(days);
+        expect(hash.length).toBe(32);
+      });
 
-      const obj = { [keyA]: 1, [keyB]: 2 };
-
-      // Expected byte stream with UTF-8 sort order (keyA first):
-      // TAG_OBJECT (0x11)
-      // + keyA: TAG_STRING(0x24) + LEB128(3) + EF 80 80
-      // + value 1: TAG_NUMBER(0x23) + IEEE754 for 1.0
-      // + keyB: TAG_STRING(0x24) + LEB128(4) + F0 90 80 80
-      // + value 2: TAG_NUMBER(0x23) + IEEE754 for 2.0
-      // + TAG_END (0x00)
-      const expected = sha256([
-        // TAG_OBJECT
-        0x11,
-        // keyA: U+F000 (UTF-8 first)
-        0x24,
-        0x03,
-        0xef,
-        0x80,
-        0x80,
-        // value 1
-        0x23,
-        0x3f,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // keyB: U+10000 (UTF-8 second)
-        0x24,
-        0x04,
-        0xf0,
-        0x90,
-        0x80,
-        0x80,
-        // value 2
-        0x23,
-        0x40,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // TAG_END
-        0x00,
-      ]);
-      expect(hashBytesOf(obj)).toEqual(expected);
-
-      // Also verify the wrong (UTF-16) order produces a different hash.
-      const wrongOrder = sha256([
-        0x11,
-        // keyB first (wrong -- UTF-16 order)
-        0x24,
-        0x04,
-        0xf0,
-        0x90,
-        0x80,
-        0x80,
-        0x23,
-        0x40,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // keyA second
-        0x24,
-        0x03,
-        0xef,
-        0x80,
-        0x80,
-        0x23,
-        0x3f,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        // TAG_END
-        0x00,
-      ]);
-      expect(hex(hashBytesOf(obj))).not.toBe(hex(wrongOrder));
+      it("produces different hashes for `FabricEpochNsec` and `FabricEpochDays` with the same `bigint`", () => {
+        // Same underlying value, different tag -> different hash
+        const nsec = new FabricEpochNsec(100n);
+        const days = new FabricEpochDays(100n);
+        expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
+      });
     });
+    describe("FabricError (FabricInstance via DECONSTRUCT)", () => {
+      it("matches a byte stream built from `[DECONSTRUCT]` output for `FabricError`", () => {
+        // Build the expected byte stream programmatically because the
+        // deconstructed state includes `stack` which is environment-dependent.
+        // We construct the stream the same way `hashOf()` does, then SHA-256 it.
+        const error = FabricError.fromNativeError(new Error("test"));
+        const enc = new TextEncoder();
 
-    it("takes the TAG_STRING_HASH path for a long object key", () => {
-      // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64). Object keys go through
-      // the same `getStringRep()` codepath as bare string values, so a long
-      // key is fed as `[TAG_STRING_HASH][sha256(utf8)]`.
-      const longKey = "x".repeat(100);
-      const obj = { [longKey]: 1 } as unknown as FabricValue;
-      const keyHash = sha256(new TextEncoder().encode(longKey));
-      // Stream: TAG_OBJECT, [TAG_STRING_HASH, keyHash], value(1.0), TAG_END
-      const expected = sha256([
-        0x11, // TAG_OBJECT
-        0xf0, // TAG_STRING_HASH
-        ...keyHash,
-        // Value `1`: TAG_NUMBER + IEEE-754 BE bit pattern for 1.0
-        0x23,
-        0x3f,
-        0xf0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00, // TAG_END
-      ]);
-      expect(hashBytesOf(obj)).toEqual(expected);
+        // TAG_INSTANCE (0x12)
+        const stream: number[] = [0x12];
+
+        const pushShortString = (value: string) => {
+          const encoded = enc.encode(value);
+          stream.push(0x24, encoded.length, ...encoded);
+        };
+
+        const pushLongString = (value: string) => {
+          const hashed = sha256(enc.encode(value));
+          stream.push(0xf0, ...hashed);
+        };
+
+        // Type tag.
+        pushShortString("Error@1");
+
+        // Deconstructed state is an object with sorted keys.
+        // FabricError.DECONSTRUCT() returns:
+        //   { type: "Error", name: null, message: "test", stack: <string> }
+        // Keys sorted by UTF-8: message, name, stack, type
+        stream.push(0x11); // TAG_OBJECT
+
+        // Key "message" + value "test"
+        pushShortString("message");
+        pushShortString("test");
+
+        // Key "name" + value null (name === type for Error, so null)
+        pushShortString("name");
+        stream.push(0x20); // TAG_NULL
+
+        // Key "stack" + value (the actual stack string)
+        pushShortString("stack");
+        pushLongString(error.stack!);
+
+        // Key "type" + value "Error"
+        pushShortString("type");
+        pushShortString("Error");
+
+        // TAG_END for the object
+        stream.push(0x00);
+
+        const expected = sha256(stream);
+        expect(hashBytesOf(error)).toEqual(expected);
+      });
+
+      it("produces different hashes for different errors", () => {
+        const e1 = FabricError.fromNativeError(new Error("hello"));
+        const e2 = FabricError.fromNativeError(new Error("world"));
+        expect(hex(hashBytesOf(e1))).not.toBe(hex(hashBytesOf(e2)));
+      });
+
+      it("produces different hashes for `TypeError` vs. `Error`", () => {
+        const e1 = FabricError.fromNativeError(new Error("msg"));
+        const e2 = FabricError.fromNativeError(new TypeError("msg"));
+        expect(hex(hashBytesOf(e1))).not.toBe(hex(hashBytesOf(e2)));
+      });
     });
+    describe("Arrays", () => {
+      it("produces TAG_ARRAY + TAG_END for an empty array", () => {
+        const expected = sha256([0x10, 0x00]);
+        expect(hashBytesOf([])).toEqual(expected);
+      });
 
-    it("is deterministic and key-distinct for long object keys", () => {
-      const a1 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
-      const a2 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
-      const b = { ["b".repeat(100)]: 1 } as unknown as FabricValue;
-      expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
-      expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
+      it("uses hole run-length encoding for the sparse array [1, , 3]", () => {
+        // TAG_ARRAY
+        // + number 1 (TAG_NUMBER + IEEE754)
+        // + TAG_HOLE + LEB128(1)
+        // + number 3 (TAG_NUMBER + IEEE754)
+        // + TAG_END
+        const expected = sha256([
+          // TAG_ARRAY
+          0x10,
+          // Element 0: number 1
+          0x23,
+          0x3f,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // Element 1: hole run of 1
+          0x01,
+          0x01,
+          // Element 2: number 3
+          0x23,
+          0x40,
+          0x08,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // TAG_END
+          0x00,
+        ]);
+        // deno-lint-ignore no-sparse-arrays
+        expect(hashBytesOf([1, , 3])).toEqual(expected);
+      });
+
+      it("coalesces multiple consecutive holes into one run", () => {
+        // [1, , , , 5] -> hole run of 3
+        const arr = new Array(5);
+        arr[0] = 1;
+        arr[4] = 5;
+        const hash = hashBytesOf(arr);
+
+        // Verify by building the expected byte stream manually
+        const expected = sha256([
+          // TAG_ARRAY
+          0x10,
+          // Element 0: number 1
+          0x23,
+          0x3f,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // Elements 1-3: hole run of 3
+          0x01,
+          0x03,
+          // Element 4: number 5
+          0x23,
+          0x40,
+          0x14,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // TAG_END
+          0x00,
+        ]);
+        expect(hash).toEqual(expected);
+      });
+
+      it("produces distinct hashes for `[1, undefined, 3]` vs. `[1, , 3]` vs. `[1, null, 3]`", () => {
+        // deno-lint-ignore no-sparse-arrays
+        const sparseH = hex(hashBytesOf([1, , 3]));
+        const undefH = hex(hashBytesOf([1, undefined, 3]));
+        const nullH = hex(hashBytesOf([1, null, 3]));
+
+        expect(sparseH).not.toBe(undefH);
+        expect(sparseH).not.toBe(nullH);
+        expect(undefH).not.toBe(nullH);
+      });
+
+      it("recursively hashes nested arrays", () => {
+        const hash = hashBytesOf([[1, 2], [3]]);
+        expect(hash.length).toBe(32);
+        // Different from flat array
+        expect(hex(hash)).not.toBe(hex(hashBytesOf([1, 2, 3])));
+      });
     });
+    describe("Objects", () => {
+      it("produces TAG_OBJECT + TAG_END for an empty object", () => {
+        const expected = sha256([0x11, 0x00]);
+        expect(hashBytesOf({})).toEqual(expected);
+      });
 
-    // =========================================================================
-    // FabricHash hashing (TAG_CONTENT_ID = 0x29)
-    // =========================================================================
+      it("is deterministic in object key order (sorted by UTF-8)", () => {
+        // Keys inserted in different orders produce the same hash.
+        const h1 = hashBytesOf({ a: 1, b: 2 });
+        const h2 = hashBytesOf({ b: 2, a: 1 });
+        expect(h1).toEqual(h2);
+      });
 
-    it("matches a hand-computed byte stream for `FabricHash`", () => {
-      // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
-      // Hash bytes: [0xDE, 0xAD, 0xBE, 0xEF] (4 bytes)
-      const cid = new FabricHash(
-        new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
-        "fid1",
-      );
-      // Expected: TAG_CONTENT_ID(0x29), "fid1" (encoded), hashLen(0x04), hash
-      const expected = sha256([
-        0x29,
-        0x24,
-        0x04,
-        0x66,
-        0x69,
-        0x64,
-        0x31,
-        0x04,
-        0xDE,
-        0xAD,
-        0xBE,
-        0xEF,
-      ]);
-      expect(hex(hashBytesOf(cid))).toBe(hex(expected));
+      it("matches a hand-computed byte stream for {a: 1, b: 2}", () => {
+        // Keys sorted: "a" (0x61) < "b" (0x62)
+        // LEB128 lengths are single bytes for small values.
+        const expected = sha256([
+          // TAG_OBJECT
+          0x11,
+          // Key "a": TAG_STRING + LEB128(1) + UTF-8
+          0x24,
+          0x01,
+          0x61,
+          // Value 1: TAG_NUMBER + IEEE754 for 1.0
+          0x23,
+          0x3f,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // Key "b": TAG_STRING + LEB128(1) + UTF-8
+          0x24,
+          0x01,
+          0x62,
+          // Value 2: TAG_NUMBER + IEEE754 for 2.0
+          0x23,
+          0x40,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // TAG_END
+          0x00,
+        ]);
+        expect(hashBytesOf({ a: 1, b: 2 })).toEqual(expected);
+      });
+
+      it("recursively hashes nested objects", () => {
+        const hash = hashBytesOf({ x: { y: 1 } });
+        expect(hash.length).toBe(32);
+        expect(hex(hash)).not.toBe(hex(hashBytesOf({ x: 1 })));
+      });
+
+      it("hashes an object with mixed value types", () => {
+        const hash = hashBytesOf({
+          str: "hello",
+          num: 42,
+          bool: true,
+          nil: null,
+        });
+        expect(hash.length).toBe(32);
+        // Consistency
+        expect(hash).toEqual(
+          hashBytesOf({ str: "hello", num: 42, bool: true, nil: null }),
+        );
+      });
     });
+    describe("Consistency and distinctness", () => {
+      it("produces the same hash for the same value every time", () => {
+        expect(hashBytesOf(42)).toEqual(hashBytesOf(42));
+        expect(hashBytesOf("hello")).toEqual(hashBytesOf("hello"));
+        expect(hashBytesOf([1, 2, 3])).toEqual(hashBytesOf([1, 2, 3]));
+        expect(hashBytesOf({ a: 1 })).toEqual(hashBytesOf({ a: 1 }));
+      });
 
-    it("produces different hashes for `FabricHash` with different algorithm tags", () => {
-      const bytes = new Uint8Array([0x01, 0x02, 0x03]);
-      const cid1 = new FabricHash(bytes, "fid1");
-      const cid2 = new FabricHash(bytes, "fid2");
-      expect(hex(hashBytesOf(cid1))).not.toBe(hex(hashBytesOf(cid2)));
+      it("produces a 32-byte hash (SHA-256)", () => {
+        const values: FabricValue[] = [
+          null,
+          true,
+          false,
+          0,
+          42,
+          "",
+          "hello",
+          0n,
+          127n,
+          undefined,
+          [],
+          [1, 2],
+          {},
+          { a: 1 },
+          new FabricEpochNsec(0n),
+          new FabricEpochDays(0n),
+          new FabricBytes(new Uint8Array([1])),
+          FabricError.fromNativeError(new Error("x")),
+        ];
+        for (const v of values) {
+          expect(hashBytesOf(v).length).toBe(32);
+        }
+      });
+
+      it("produces different hashes for different values of different types", () => {
+        const hashes = new Set([
+          hex(hashBytesOf(null)),
+          hex(hashBytesOf(true)),
+          hex(hashBytesOf(false)),
+          hex(hashBytesOf(0)),
+          hex(hashBytesOf("")),
+          hex(hashBytesOf(0n)),
+          hex(hashBytesOf(undefined)),
+          hex(hashBytesOf([])),
+          hex(hashBytesOf({})),
+        ]);
+        // All 9 should be distinct.
+        expect(hashes.size).toBe(9);
+      });
     });
+    describe("Edge cases", () => {
+      it("hashes a deeply nested structure", () => {
+        const deep = { a: { b: { c: { d: [1, { e: true }] } } } };
+        const hash = hashBytesOf(deep);
+        expect(hash.length).toBe(32);
+        expect(hashBytesOf(deep)).toEqual(hash);
+      });
 
-    it("produces different hashes for `FabricHash` with different hash bytes", () => {
-      const cid1 = new FabricHash(
-        new Uint8Array([0x01, 0x02]),
-        "fid1",
-      );
-      const cid2 = new FabricHash(
-        new Uint8Array([0x03, 0x04]),
-        "fid1",
-      );
-      expect(hex(hashBytesOf(cid1))).not.toBe(hex(hashBytesOf(cid2)));
+      it("hashes an array with all holes", () => {
+        const arr = new Array(5); // all holes
+        const hash = hashBytesOf(arr);
+        expect(hash.length).toBe(32);
+
+        // TAG_ARRAY + TAG_HOLE + LEB128(5) + TAG_END
+        const expected = sha256([
+          0x10,
+          0x01,
+          0x05,
+          0x00,
+        ]);
+        expect(hash).toEqual(expected);
+      });
+
+      it("sorts non-ASCII object keys by UTF-8 bytes", () => {
+        // Keys with non-ASCII should sort by UTF-8 byte values.
+        const h1 = hashBytesOf({ "\u00e9": 1, "a": 2 });
+        const h2 = hashBytesOf({ "a": 2, "\u00e9": 1 });
+        expect(h1).toEqual(h2);
+      });
+
+      it("sorts object keys by UTF-8, not UTF-16 (supplementary vs. BMP)", () => {
+        // U+F000 (private use area, BMP): UTF-8 = [EF 80 80] (3 bytes)
+        // U+10000 (supplementary plane):  UTF-8 = [F0 90 80 80] (4 bytes)
+        //
+        // UTF-16 order: U+10000 < U+F000 (surrogates 0xD800 < 0xF000)
+        // UTF-8 order:  U+F000 < U+10000 (0xEF < 0xF0)
+        //
+        // If sorting were naive JS string comparison (UTF-16), U+10000 would
+        // come first. Under correct UTF-8 byte sort, U+F000 comes first.
+        const keyA = "\uF000"; // UTF-8: EF 80 80
+        const keyB = "\u{10000}"; // UTF-8: F0 90 80 80
+
+        // Verify the JS string order is opposite to UTF-8 order.
+        expect(keyB < keyA).toBe(true);
+
+        const obj = { [keyA]: 1, [keyB]: 2 };
+
+        // Expected byte stream with UTF-8 sort order (keyA first):
+        // TAG_OBJECT (0x11)
+        // + keyA: TAG_STRING(0x24) + LEB128(3) + EF 80 80
+        // + value 1: TAG_NUMBER(0x23) + IEEE754 for 1.0
+        // + keyB: TAG_STRING(0x24) + LEB128(4) + F0 90 80 80
+        // + value 2: TAG_NUMBER(0x23) + IEEE754 for 2.0
+        // + TAG_END (0x00)
+        const expected = sha256([
+          // TAG_OBJECT
+          0x11,
+          // keyA: U+F000 (UTF-8 first)
+          0x24,
+          0x03,
+          0xef,
+          0x80,
+          0x80,
+          // value 1
+          0x23,
+          0x3f,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // keyB: U+10000 (UTF-8 second)
+          0x24,
+          0x04,
+          0xf0,
+          0x90,
+          0x80,
+          0x80,
+          // value 2
+          0x23,
+          0x40,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // TAG_END
+          0x00,
+        ]);
+        expect(hashBytesOf(obj)).toEqual(expected);
+
+        // Also verify the wrong (UTF-16) order produces a different hash.
+        const wrongOrder = sha256([
+          0x11,
+          // keyB first (wrong -- UTF-16 order)
+          0x24,
+          0x04,
+          0xf0,
+          0x90,
+          0x80,
+          0x80,
+          0x23,
+          0x40,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // keyA second
+          0x24,
+          0x03,
+          0xef,
+          0x80,
+          0x80,
+          0x23,
+          0x3f,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          // TAG_END
+          0x00,
+        ]);
+        expect(hex(hashBytesOf(obj))).not.toBe(hex(wrongOrder));
+      });
+
+      it("takes the TAG_STRING_HASH path for a long object key", () => {
+        // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64). Object keys go through
+        // the same `getStringRep()` codepath as bare string values, so a long
+        // key is fed as `[TAG_STRING_HASH][sha256(utf8)]`.
+        const longKey = "x".repeat(100);
+        const obj = { [longKey]: 1 } as unknown as FabricValue;
+        const keyHash = sha256(new TextEncoder().encode(longKey));
+        // Stream: TAG_OBJECT, [TAG_STRING_HASH, keyHash], value(1.0), TAG_END
+        const expected = sha256([
+          0x11, // TAG_OBJECT
+          0xf0, // TAG_STRING_HASH
+          ...keyHash,
+          // Value `1`: TAG_NUMBER + IEEE-754 BE bit pattern for 1.0
+          0x23,
+          0x3f,
+          0xf0,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x00, // TAG_END
+        ]);
+        expect(hashBytesOf(obj)).toEqual(expected);
+      });
+
+      it("is deterministic and key-distinct for long object keys", () => {
+        const a1 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
+        const a2 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
+        const b = { ["b".repeat(100)]: 1 } as unknown as FabricValue;
+        expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+        expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
+      });
     });
+    describe("FabricHash hashing (TAG_CONTENT_ID = 0x29)", () => {
+      it("matches a hand-computed byte stream for `FabricHash`", () => {
+        // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
+        // Hash bytes: [0xDE, 0xAD, 0xBE, 0xEF] (4 bytes)
+        const cid = new FabricHash(
+          new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
+          "fid1",
+        );
+        // Expected: TAG_CONTENT_ID(0x29), "fid1" (encoded), hashLen(0x04), hash
+        const expected = sha256([
+          0x29,
+          0x24,
+          0x04,
+          0x66,
+          0x69,
+          0x64,
+          0x31,
+          0x04,
+          0xDE,
+          0xAD,
+          0xBE,
+          0xEF,
+        ]);
+        expect(hex(hashBytesOf(cid))).toBe(hex(expected));
+      });
 
-    it("works for a `FabricHash` inside a plain object (does not throw)", () => {
-      // This is meant to capture the essence of using `FabricHash` instances as
-      // things like content IDs inside `Fact` objects.
-      const fact = {
-        cause: new FabricHash(new Uint8Array([0x05, 0x06]), "fid1"),
-        the: "text/plain",
-        of: "entity:456",
-        is: { value: 914 },
-      };
+      it("produces different hashes for `FabricHash` with different algorithm tags", () => {
+        const bytes = new Uint8Array([0x01, 0x02, 0x03]);
+        const cid1 = new FabricHash(bytes, "fid1");
+        const cid2 = new FabricHash(bytes, "fid2");
+        expect(hex(hashBytesOf(cid1))).not.toBe(hex(hashBytesOf(cid2)));
+      });
 
-      expect(() => hashOf(fact)).not.toThrow();
+      it("produces different hashes for `FabricHash` with different hash bytes", () => {
+        const cid1 = new FabricHash(
+          new Uint8Array([0x01, 0x02]),
+          "fid1",
+        );
+        const cid2 = new FabricHash(
+          new Uint8Array([0x03, 0x04]),
+          "fid1",
+        );
+        expect(hex(hashBytesOf(cid1))).not.toBe(hex(hashBytesOf(cid2)));
+      });
+
+      it("works for a `FabricHash` inside a plain object (does not throw)", () => {
+        // This is meant to capture the essence of using `FabricHash` instances as
+        // things like content IDs inside `Fact` objects.
+        const fact = {
+          cause: new FabricHash(new Uint8Array([0x05, 0x06]), "fid1"),
+          the: "text/plain",
+          of: "entity:456",
+          is: { value: 914 },
+        };
+
+        expect(() => hashOf(fact)).not.toThrow();
+      });
     });
+    describe("`FabricHash` result", () => {
+      it("returns a `FabricHash` with the `fid1` tag", () => {
+        const result = hashOf(42);
+        expect(result).toBeInstanceOf(FabricHash);
+        expect(result.tag).toBe("fid1");
+        expect(result.length).toBe(32);
+      });
 
-    // =========================================================================
-    // hashOf() returns FabricHash
-    // =========================================================================
+      it("produces `fid1:<base64>` via `FabricHash.toString()`", () => {
+        const result = hashOf(42);
+        const str = result.toString();
+        expect(str.startsWith("fid1:")).toBe(true);
+        // Should not contain padding (unpadded base64).
+        expect(str.includes("=")).toBe(false);
+      });
 
-    it("returns a `FabricHash` with the `fid1` tag", () => {
-      const result = hashOf(42);
-      expect(result).toBeInstanceOf(FabricHash);
-      expect(result.tag).toBe("fid1");
-      expect(result.length).toBe(32);
-    });
-
-    it("produces `fid1:<base64>` via `FabricHash.toString()`", () => {
-      const result = hashOf(42);
-      const str = result.toString();
-      expect(str.startsWith("fid1:")).toBe(true);
-      // Should not contain padding (unpadded base64).
-      expect(str.includes("=")).toBe(false);
-    });
-
-    it("produces a frozen `FabricHash` (`FabricPrimitive`)", () => {
-      const result = hashOf(42);
-      expect(Object.isFrozen(result)).toBe(true);
+      it("produces a frozen `FabricHash` (`FabricPrimitive`)", () => {
+        const result = hashOf(42);
+        expect(Object.isFrozen(result)).toBe(true);
+      });
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // Caching behavior
-  // ---------------------------------------------------------------------------
 
   describe("hashOf() caching", () => {
     it("returns the same precomputed-constant object for `null`", () => {
@@ -1115,104 +1073,93 @@ describe("value-hash", () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Native instance hashing (on-the-fly conversion)
-  // ---------------------------------------------------------------------------
-
   describe("hashOf() native instances", () => {
-    // --- Date ---
+    describe("Date", () => {
+      it("hashes a native `Date` without throwing", () => {
+        const date = new Date("2024-01-01T00:00:00Z");
+        const hash = hashBytesOf(date);
+        expect(hash.length).toBe(32);
+      });
 
-    it("hashes a native `Date` without throwing", () => {
-      const date = new Date("2024-01-01T00:00:00Z");
-      const hash = hashBytesOf(date);
-      expect(hash.length).toBe(32);
+      it("produces the same hash for a native `Date` as for an equivalent `FabricEpochNsec`", () => {
+        const date = new Date("2024-01-01T00:00:00Z");
+        const nsec = BigInt(date.getTime()) * 1_000_000n;
+        const dateHash = hex(hashBytesOf(date));
+        const epochHash = hex(hashBytesOf(new FabricEpochNsec(nsec)));
+        expect(dateHash).toBe(epochHash);
+      });
+
+      it("produces different hashes for different Dates", () => {
+        const d1 = new Date("2024-01-01T00:00:00Z");
+        const d2 = new Date("2025-06-15T12:00:00Z");
+        expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
+      });
     });
+    describe("RegExp", () => {
+      it("hashes a native `RegExp` without throwing", () => {
+        const re = /hello/gi;
+        const hash = hashBytesOf(re);
+        expect(hash.length).toBe(32);
+      });
 
-    it("produces the same hash for a native `Date` as for an equivalent `FabricEpochNsec`", () => {
-      const date = new Date("2024-01-01T00:00:00Z");
-      const nsec = BigInt(date.getTime()) * 1_000_000n;
-      const dateHash = hex(hashBytesOf(date));
-      const epochHash = hex(hashBytesOf(new FabricEpochNsec(nsec)));
-      expect(dateHash).toBe(epochHash);
+      it("produces the same hash for a native `RegExp` as for an equivalent `FabricRegExp`", () => {
+        const re = /hello/gi;
+        const nativeHash = hex(hashBytesOf(re));
+        const fabricHash = hex(hashBytesOf(new FabricRegExp(re)));
+        expect(nativeHash).toBe(fabricHash);
+      });
+
+      it("produces different hashes for different RegExps", () => {
+        const r1 = /foo/;
+        const r2 = /bar/;
+        expect(hex(hashBytesOf(r1))).not.toBe(hex(hashBytesOf(r2)));
+      });
     });
+    describe("Uint8Array", () => {
+      it("hashes a native `Uint8Array` without throwing", () => {
+        const buf = new Uint8Array([1, 2, 3]);
+        const hash = hashBytesOf(buf);
+        expect(hash.length).toBe(32);
+      });
 
-    it("produces different hashes for different Dates", () => {
-      const d1 = new Date("2024-01-01T00:00:00Z");
-      const d2 = new Date("2025-06-15T12:00:00Z");
-      expect(hex(hashBytesOf(d1))).not.toBe(hex(hashBytesOf(d2)));
+      it("produces the same hash for a native `Uint8Array` as for a `FabricBytes` with the same bytes", () => {
+        const bytes = new Uint8Array([10, 20, 30]);
+        const nativeHash = hex(hashBytesOf(bytes));
+        const fabricHash = hex(hashBytesOf(new FabricBytes(bytes)));
+        expect(nativeHash).toBe(fabricHash);
+      });
+
+      it("produces different hashes for different Uint8Arrays", () => {
+        const b1 = new Uint8Array([1, 2, 3]);
+        const b2 = new Uint8Array([4, 5, 6]);
+        expect(hex(hashBytesOf(b1))).not.toBe(hex(hashBytesOf(b2)));
+      });
     });
+    describe("Deferred types (not yet handled — these document known gaps)", () => {
+      it("throws for `Map` (deferred — needs recursive translation)", () => {
+        expect(() => hashOf(new Map([["a", 1]]))).toThrow(
+          "unsupported object type",
+        );
+      });
 
-    // --- RegExp ---
+      it("throws for `Set` (deferred — needs recursive translation)", () => {
+        expect(() => hashOf(new Set([1, 2, 3]))).toThrow(
+          "unsupported object type",
+        );
+      });
 
-    it("hashes a native `RegExp` without throwing", () => {
-      const re = /hello/gi;
-      const hash = hashBytesOf(re);
-      expect(hash.length).toBe(32);
-    });
+      it("throws for `Error` (deferred — needs recursive translation)", () => {
+        expect(() => hashOf(new Error("test"))).toThrow(
+          "unsupported object type",
+        );
+      });
 
-    it("produces the same hash for a native `RegExp` as for an equivalent `FabricRegExp`", () => {
-      const re = /hello/gi;
-      const nativeHash = hex(hashBytesOf(re));
-      const fabricHash = hex(hashBytesOf(new FabricRegExp(re)));
-      expect(nativeHash).toBe(fabricHash);
-    });
-
-    it("produces different hashes for different RegExps", () => {
-      const r1 = /foo/;
-      const r2 = /bar/;
-      expect(hex(hashBytesOf(r1))).not.toBe(hex(hashBytesOf(r2)));
-    });
-
-    // --- Uint8Array ---
-
-    it("hashes a native `Uint8Array` without throwing", () => {
-      const buf = new Uint8Array([1, 2, 3]);
-      const hash = hashBytesOf(buf);
-      expect(hash.length).toBe(32);
-    });
-
-    it("produces the same hash for a native `Uint8Array` as for a `FabricBytes` with the same bytes", () => {
-      const bytes = new Uint8Array([10, 20, 30]);
-      const nativeHash = hex(hashBytesOf(bytes));
-      const fabricHash = hex(hashBytesOf(new FabricBytes(bytes)));
-      expect(nativeHash).toBe(fabricHash);
-    });
-
-    it("produces different hashes for different Uint8Arrays", () => {
-      const b1 = new Uint8Array([1, 2, 3]);
-      const b2 = new Uint8Array([4, 5, 6]);
-      expect(hex(hashBytesOf(b1))).not.toBe(hex(hashBytesOf(b2)));
-    });
-
-    // --- Deferred types (not yet handled — these document known gaps) ---
-
-    it("throws for `Map` (deferred — needs recursive translation)", () => {
-      expect(() => hashOf(new Map([["a", 1]]))).toThrow(
-        "unsupported object type",
-      );
-    });
-
-    it("throws for `Set` (deferred — needs recursive translation)", () => {
-      expect(() => hashOf(new Set([1, 2, 3]))).toThrow(
-        "unsupported object type",
-      );
-    });
-
-    it("throws for `Error` (deferred — needs recursive translation)", () => {
-      expect(() => hashOf(new Error("test"))).toThrow(
-        "unsupported object type",
-      );
-    });
-
-    it("throws for HasToJSON (deferred — needs recursive translation)", () => {
-      const obj = { toJSON: () => "hello" };
-      expect(() => hashOf(obj)).toThrow("unsupported object type");
+      it("throws for HasToJSON (deferred — needs recursive translation)", () => {
+        const obj = { toJSON: () => "hello" };
+        expect(() => hashOf(obj)).toThrow("unsupported object type");
+      });
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // hashStringOf
-  // ---------------------------------------------------------------------------
 
   describe("hashStringOf", () => {
     it("returns a string", () => {
@@ -1273,10 +1220,6 @@ describe("value-hash", () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // taggedHashStringOf
-  // ---------------------------------------------------------------------------
-
   describe("taggedHashStringOf", () => {
     it("returns a string", () => {
       const result = taggedHashStringOf(42);
@@ -1295,10 +1238,6 @@ describe("value-hash", () => {
       expect(sansTag).toBe(hashStringOf(value));
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // IncrementalHasher.digest("base64url")
-  // ---------------------------------------------------------------------------
 
   describe("IncrementalHasher digest base64url", () => {
     it("returns a string", () => {
