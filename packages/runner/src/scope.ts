@@ -1,3 +1,4 @@
+import { isRecord } from "@commonfabric/utils/types";
 import type { CellScope, LinkScope, SchemaScope } from "./builder/types.ts";
 
 export const DEFAULT_CELL_SCOPE: CellScope = "space";
@@ -66,4 +67,16 @@ export function canFollowScopedLink(
     return true;
   }
   return scopeRank(linkScope) <= scopeRank(schemaScope);
+}
+
+export function cellScopeForSchema(
+  schema: unknown,
+): CellScope | undefined {
+  if (!isRecord(schema)) return undefined;
+  if (isCellScope(schema.scope)) return schema.scope;
+
+  const asCell = schema.asCell;
+  const asCellEntry = Array.isArray(asCell) ? asCell.at(0) : undefined;
+  const asCellScope = isRecord(asCellEntry) ? asCellEntry.scope : undefined;
+  return isCellScope(asCellScope) ? asCellScope : undefined;
 }

@@ -13,7 +13,7 @@ import { Cell, createCell } from "../src/cell.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-Deno.test("Cell.key applies concrete scope from child schema", async () => {
+Deno.test("Cell.key preserves link scope when child schema sets a follow cap", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -42,15 +42,70 @@ Deno.test("Cell.key applies concrete scope from child schema", async () => {
     );
 
     assertEquals(cell.getAsNormalizedFullLink().scope, "space");
-    assertEquals(cell.key("name").getAsNormalizedFullLink().scope, "user");
+    assertEquals(cell.key("name").getAsNormalizedFullLink().scope, "space");
     assertEquals(
       cell.key("selectedRoom").getAsNormalizedFullLink().scope,
-      "session",
+      "space",
     );
     assertEquals(
       cell.key("selectedRoom", "room").getAsNormalizedFullLink().scope,
-      "session",
+      "space",
     );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("Cell.key reads a stored broader link when child schema is scoped", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const sessionTargetBase = runtime.getCell<string | null>(
+      space,
+      "schema scoped child stored link target",
+      undefined,
+      tx,
+    );
+    const sessionTarget = createCell<string | null>(
+      runtime,
+      { ...sessionTargetBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    sessionTarget.set("a");
+
+    const cell = runtime.getCell(
+      space,
+      "schema scoped child stored link root",
+      {
+        type: "object",
+        properties: {
+          sessionTarget: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+            scope: "session",
+          },
+        },
+        required: ["sessionTarget"],
+      },
+      tx,
+    );
+    cell.setRawUntyped({
+      sessionTarget: sessionTarget.getAsLink({ base: cell }),
+    });
+
+    const sessionTargetKey = cell.key("sessionTarget");
+    const stored = parseLink(
+      sessionTargetKey.getRawUntyped(),
+      sessionTargetKey as Cell<unknown>,
+    )!;
+    assertEquals(stored.id, sessionTarget.getAsNormalizedFullLink().id);
+    assertEquals(stored.scope, "session");
+    assertEquals(cell.key("sessionTarget").get(), "a");
   } finally {
     await runtime.dispose();
     await storageManager.close();

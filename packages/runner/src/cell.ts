@@ -95,7 +95,12 @@ import {
   type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
+import {
+  cellScopeForSchema,
+  isCellScope,
+  normalizeCellScope,
+  scopeRank,
+} from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -1162,10 +1167,6 @@ export class CellImpl<T extends FabricValue>
         path: [...currentLink.path, key.toString()] as string[],
         schema: childSchema,
       };
-
-      if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
-        currentLink = { ...currentLink, scope: childSchema.scope };
-      }
     }
 
     // Determine the kind based on schema flags
@@ -1335,6 +1336,19 @@ export class CellImpl<T extends FabricValue>
       readTx,
       this.link,
     );
+    const resolvedInPlace = link.id === this.link.id &&
+      link.space === this.link.space &&
+      (link.scope ?? "space") === (this.link.scope ?? "space") &&
+      link.path.length === this.link.path.length &&
+      link.path.every((segment, index) => segment === this.link.path[index]);
+    const schemaScope = cellScopeForSchema(link.schema) ??
+      (resolvedInPlace ? cellScopeForSchema(this.link.schema) : undefined);
+    if (
+      schemaScope !== undefined &&
+      scopeRank(schemaScope) > scopeRank(link.scope)
+    ) {
+      link = { ...link, scope: schemaScope };
+    }
     const dereferenceView = cfcLabelViewForDereferenceTraces(
       readTx,
       readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
@@ -2543,14 +2557,6 @@ function schemaWithDefaultAndScope<T>(
   return scopedSchema;
 }
 
-function schemaCellScope(
-  schema: JSONSchema | undefined,
-): CellScope | undefined {
-  return isRecord(schema) && isCellScope(schema.scope)
-    ? schema.scope
-    : undefined;
-}
-
 /**
  * Factory function to create Cell constructor with static methods for a specific cell kind
  */
@@ -2577,7 +2583,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // causes infinite recursion when the schema is serialized
       // TODO(ubik2): Use Cell links for default here once that's supported
       const schema = schemaWithDefaultAndScope(value, providedSchema, scope);
-      const linkScope = scope ?? schemaCellScope(schema);
+      const linkScope = scope ?? cellScopeForSchema(schema);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(
@@ -2610,7 +2616,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       }
 
       const schema = mergeSchemaScope(undefined, scope);
-      const linkScope = scope ?? schemaCellScope(schema);
+      const linkScope = scope ?? cellScopeForSchema(schema);
 
       // Create a cell without a link
       const cell = createCell<T>(

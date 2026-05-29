@@ -57,6 +57,7 @@ import {
 } from "./cfc/label-view-state.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { LINK_V1_TAG } from "./sigil-types.ts";
+import { cellScopeForSchema, scopeRank } from "./scope.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -246,6 +247,18 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
       [LINK_V1_TAG]: cleanInner,
     },
   };
+};
+
+const scopedLinkForSchemaWrite = (
+  link: NormalizedFullLink,
+): NormalizedFullLink | undefined => {
+  const schemaScope = cellScopeForSchema(link.schema);
+  if (
+    schemaScope !== undefined && scopeRank(schemaScope) > scopeRank(link.scope)
+  ) {
+    return { ...link, scope: schemaScope };
+  }
+  return undefined;
 };
 
 /**
@@ -738,14 +751,43 @@ export function normalizeAndDiff(
       const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [
         i.toString(),
       ]);
+      const childLink = {
+        ...link,
+        path: [...link.path, i.toString()],
+        schema: childSchema,
+      };
+      const scopedChildLink = scopedLinkForSchemaWrite(childLink);
+      if (scopedChildLink !== undefined) {
+        const currentChildValue = inCur ? currentArray![i] : undefined;
+        changes.push(
+          ...normalizeAndDiff(
+            runtime,
+            tx,
+            childLink,
+            createSigilLinkFromParsedLink(scopedChildLink, { base: childLink }),
+            context,
+            options,
+            seen,
+            currentChildValue,
+          ),
+        );
+        changes.push(
+          ...normalizeAndDiff(
+            runtime,
+            tx,
+            scopedChildLink,
+            newValue[i],
+            context,
+            options,
+            seen,
+          ),
+        );
+        continue;
+      }
       const nestedChanges = normalizeAndDiff(
         runtime,
         tx,
-        {
-          ...link,
-          path: [...link.path, i.toString()],
-          schema: childSchema,
-        },
+        childLink,
         newValue[i],
         context,
         options,
@@ -858,10 +900,42 @@ export function normalizeAndDiff(
       });
 
       const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
+      const childLink = {
+        ...link,
+        path: [...link.path, key],
+        schema: childSchema,
+      };
+      const scopedChildLink = scopedLinkForSchemaWrite(childLink);
+      if (scopedChildLink !== undefined) {
+        changes.push(
+          ...normalizeAndDiff(
+            runtime,
+            tx,
+            childLink,
+            createSigilLinkFromParsedLink(scopedChildLink, { base: childLink }),
+            context,
+            options,
+            seen,
+            currentRecord[key],
+          ),
+        );
+        changes.push(
+          ...normalizeAndDiff(
+            runtime,
+            tx,
+            scopedChildLink,
+            newValue[key],
+            context,
+            options,
+            seen,
+          ),
+        );
+        continue;
+      }
       const nestedChanges = normalizeAndDiff(
         runtime,
         tx,
-        { ...link, path: [...link.path, key], schema: childSchema },
+        childLink,
         newValue[key],
         context,
         options,

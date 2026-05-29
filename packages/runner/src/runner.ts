@@ -68,7 +68,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
-import { isCellScope, narrowestScope } from "./scope.ts";
+import { cellScopeForSchema, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
@@ -162,9 +162,7 @@ function schedulerActionLinkIdentity(link: NormalizedFullLink) {
 function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isRecord(schema) && isCellScope(schema.scope)
-    ? schema.scope
-    : undefined;
+  return cellScopeForSchema(schema);
 }
 
 function patternDefaultScope(pattern: Pattern): CellScope | undefined {
@@ -634,7 +632,7 @@ export class Runner {
   ): void {
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
-      undefined,
+      argumentSchema,
       tx,
     );
     argumentCell.set(argument);
@@ -648,7 +646,10 @@ export class Runner {
     diffAndUpdate(
       this.runtime,
       tx,
-      argumentLink,
+      {
+        ...argumentLink,
+        ...(argumentSchema !== undefined && { schema: argumentSchema }),
+      },
       argument,
       argumentLink,
     );
@@ -716,6 +717,7 @@ export class Runner {
       argumentCellLink,
       internalCellLink,
       resultCellLink,
+      { tx },
     );
     const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
@@ -2512,6 +2514,7 @@ export class Runner {
         result,
         {
           narrowestReadScope,
+          targetSchema: resultSchema,
         },
       );
       return result;
@@ -2594,7 +2597,10 @@ export class Runner {
       getMetaLink(resultCell, "internal")!,
       outputs,
       resultCell.getAsLink(),
-      { narrowestReadScope: effectiveOutputScope },
+      {
+        narrowestReadScope: effectiveOutputScope,
+        targetSchema: effectiveResultSchema,
+      },
     );
     return result;
   }
@@ -3215,7 +3221,7 @@ export class Runner {
       argumentCellLink,
       internalCellLink,
       resultCellLink,
-      { bindPatterns: false },
+      { bindPatterns: false, tx },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
@@ -3223,6 +3229,7 @@ export class Runner {
       argumentCellLink,
       internalCellLink,
       resultCellLink,
+      { tx },
     );
 
     // For `map` and future other node types that take closures, we need to
@@ -3288,6 +3295,7 @@ export class Runner {
               outputBindingSchema,
               builtinIdentity,
             ),
+            { targetSchema: outputBindingSchema },
           );
         },
         addCancel,
@@ -3484,7 +3492,7 @@ export class Runner {
       argumentCellLink,
       internalCellLink,
       resultCellLink,
-      { targetSchema: patternImpl.argumentSchema },
+      { targetSchema: patternImpl.argumentSchema, tx },
     );
 
     // If output bindings is a link to a non-redirect cell,
@@ -3540,6 +3548,7 @@ export class Runner {
         internalCellLink,
         outputBindings,
         resultCell.getAsLink(),
+        { targetSchema: patternImpl.resultSchema },
       );
     }
 

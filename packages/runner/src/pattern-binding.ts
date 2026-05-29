@@ -19,20 +19,28 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { CellScope } from "./builder/types.ts";
-import { isCellScope, scopeRank } from "./scope.ts";
+import {
+  cellScopeForSchema,
+  isCellScope,
+  narrowestScope,
+  scopeRank,
+} from "./scope.ts";
 
 type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
+  targetSchema?: JSONSchema;
 };
 
 type UnwrapOneLevelOptions = {
   bindPatterns?: boolean;
   targetSchema?: JSONSchema;
+  tx?: IExtendedStorageTransaction;
 };
 
 const scopedLinkForPath = (
@@ -40,6 +48,10 @@ const scopedLinkForPath = (
   link: NormalizedFullLink,
   path: readonly string[],
   schemaOverride?: JSONSchema,
+  options: {
+    tx?: IExtendedStorageTransaction;
+    scopeMissingSchemaLinks?: boolean;
+  } = {},
 ): NormalizedFullLink => {
   let scope = link.scope;
   let schema = link.schema;
@@ -47,22 +59,30 @@ const scopedLinkForPath = (
 
   for (const key of path) {
     childSchema = cfc.getSchemaAtPath(schema, [key]);
-    if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
-      scope = childSchema.scope;
-    }
+    const asCellEntry = ContextualFlowControl.getAsCellValues(childSchema)[0];
+    const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
+    if (isCellScope(asCellScope)) scope = asCellScope;
     schema = childSchema;
   }
 
   const finalSchema = schemaOverride ?? childSchema;
-  if (isRecord(finalSchema)) {
-    if (isCellScope(finalSchema.scope)) {
-      scope = finalSchema.scope;
-    }
-    const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
-    const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
-    if (isCellScope(asCellScope)) {
-      scope = asCellScope;
-    }
+  const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
+  const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
+  if (isCellScope(asCellScope)) {
+    scope = asCellScope;
+  } else if (schemaOverride !== undefined && asCellEntry !== undefined) {
+    scope = cellScopeForSchema(childSchema) ?? scope;
+  }
+  const schemaScope = cellScopeForSchema(finalSchema);
+  if (
+    options.scopeMissingSchemaLinks === true &&
+    schemaScope !== undefined &&
+    (schemaScope === "user" ||
+      options.tx?.read(toMemorySpaceAddress({ ...link, path: [...path] }))
+          .error
+          ?.name === "NotFoundError")
+  ) {
+    scope = schemaScope;
   }
 
   return {
@@ -123,14 +143,23 @@ export function sendValueToBinding<T>(
       );
     }
 
+    const parsedBinding = parseLink(binding, cell)!;
     const ref = resolveLink(
       cell.runtime,
       tx,
-      parseLink(binding, cell)!,
+      parsedBinding,
       "writeRedirect",
       { preserveOverwrite: true },
     );
-    const outputScope = options.narrowestReadScope;
+    const schemaOutputScope = narrowestScope([
+      cellScopeForSchema(parsedBinding.schema),
+      cellScopeForSchema(options.targetSchema),
+    ]);
+    const outputScope = options.narrowestReadScope !== undefined ||
+        cellScopeForSchema(parsedBinding.schema) !== undefined ||
+        cellScopeForSchema(options.targetSchema) !== undefined
+      ? narrowestScope([options.narrowestReadScope, schemaOutputScope])
+      : undefined;
     if (
       outputScope !== undefined &&
       scopeRank(outputScope) > scopeRank(ref.scope)
@@ -174,7 +203,13 @@ export function sendValueToBinding<T>(
           internalCellLink,
           binding[i],
           value[i],
-          options,
+          {
+            ...options,
+            targetSchema: cell.runtime.cfc.getSchemaAtPath(
+              options.targetSchema,
+              [String(i)],
+            ),
+          },
         );
       }
     }
@@ -188,7 +223,13 @@ export function sendValueToBinding<T>(
           internalCellLink,
           binding[key],
           value[key],
-          options,
+          {
+            ...options,
+            targetSchema: cell.runtime.cfc.getSchemaAtPath(
+              options.targetSchema,
+              [key],
+            ),
+          },
         );
       }
     }
@@ -274,7 +315,10 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;
         return createSigilLinkFromParsedLink(
-          scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+          scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema, {
+            tx: options?.tx,
+            scopeMissingSchemaLinks: true,
+          }),
           { includeSchema: true, overwrite: "redirect" },
         );
       } else if (Array.isArray(alias.cell)) {

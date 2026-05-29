@@ -766,7 +766,7 @@ describe("link-utils", () => {
       });
     });
 
-    it("should not promote stripped scoped asCell entries to schema scope", () => {
+    it("should preserve scope from stripped scoped asCell entries", () => {
       const schema = {
         type: "object",
         properties: {
@@ -790,9 +790,11 @@ describe("link-utils", () => {
           rack: {
             type: "array",
             items: { type: "string" },
+            scope: "user",
           },
           message: {
             type: "string",
+            scope: "session",
           },
         },
       });

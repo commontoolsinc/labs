@@ -17,7 +17,12 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import { canFollowScopedLink, isSchemaScope, scopeRank } from "./scope.ts";
+import {
+  canFollowScopedLink,
+  cellScopeForSchema,
+  isSchemaScope,
+  scopeRank,
+} from "./scope.ts";
 import type { SchemaScope } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
@@ -280,18 +285,38 @@ export function resolveLink(
     }
 
     if (nextHop !== undefined) {
-      if (!canFollowLinkHop(link, nextHop.link)) {
+      const hopSchemaScope = cellScopeForSchema(nextHop.link.schema);
+      const isSelfRedirect = nextHop.kind === "write-redirect" &&
+        nextHop.link.id === link.id &&
+        nextHop.link.space === link.space &&
+        nextHop.link.scope === link.scope &&
+        nextHop.link.path.length === link.path.length &&
+        nextHop.link.path.every((segment, index) =>
+          segment === link.path[index]
+        );
+      if (
+        isSelfRedirect &&
+        hopSchemaScope !== undefined &&
+        scopeRank(hopSchemaScope) > scopeRank(nextHop.link.scope)
+      ) {
+        nextHop = {
+          ...nextHop,
+          link: { ...nextHop.link, scope: hopSchemaScope },
+        };
+      }
+      const hop = nextHop;
+      if (!canFollowLinkHop(link, hop.link)) {
         logger.info("scope: blocked narrower link follow", () => [{
           schemaScope: schemaScopeForLink(link),
-          linkScope: nextHop.link.scope,
+          linkScope: hop.link.scope,
           source: cfcAddressFromLink(link),
-          target: cfcAddressFromLink(nextHop.link),
+          target: cfcAddressFromLink(hop.link),
         }]);
         link = undefinedDataLink(link);
         break;
       }
-      recordDereferenceHop(tx, nextHop);
-      const nextLink = nextHop.link;
+      recordDereferenceHop(tx, hop);
+      const nextLink = hop.link;
       const crossSpace = nextLink.space !== link.space;
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
@@ -312,9 +337,7 @@ export function resolveLink(
           runtime.storageManager.addCrossSpacePromise(promise);
         }
       }
-    } else {
-      break;
-    }
+    } else break;
   }
 
   const result = { ...link } satisfies NormalizedFullLink;
