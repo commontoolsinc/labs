@@ -409,38 +409,43 @@ declassify-on-reveal — lands on one of the four primitives.
 
 ## The companion pattern
 
-`packages/patterns/poker-sanitization-demo/main.tsx` makes the memo concrete. Because the
-proposed primitives don't exist in the runtime yet, it **implements them as ordinary module-scope
-TypeScript** (`RevealLevel`/`FacetPolicy`, `revealLevelFor()`, `projectHand()`, `BlindedCard` +
-`reblind()`), then runs them inside a working pattern:
+`packages/patterns/poker-sanitization-demo/main.tsx` makes the memo concrete, and is deliberately
+split into **what CFC enforces today** vs **what this memo proposes** — so it demonstrates real CFC
+idiomatically rather than faking the extension.
 
-- a full Hold'em lifecycle — shuffle (reblind) → deal → flop → turn → river → showdown → fold/muck;
-- a **viewer selector** (Alice / Bob / Charlie / Spectator) so you can watch the *same* canonical
-  state re-project live: owner sees `values`, the table sees `cardinality`, a folded hand
-  collapses to `existence`, showdown declassifies everything to `values`;
-- every spot a real CFC primitive would replace the hand-rolled logic marked `// CFC-WISH §x`.
+**Enforced (idiomatic, real CFC):**
 
-It **type-checks, transforms, deploys, and runs** (`deno task cf check …/main.tsx --no-run`, exit 0;
-deployed to a local toolshed and driven in-browser, 0 console errors). It is still a
-*demonstration*, not a real game: poker hand-ranking, betting, and turn order are omitted — only the
-state transitions that exercise sanitization are modelled, and the primitives are hand-rolled
-stand-ins, not enforced policy. If shown to Berni, the memo is the argument; the pattern is the
-"here, click through it" companion.
+- Each hand is a real `Confidential<Card[], readonly [PokerHoleCards]>` cell, created the idiomatic
+  way (`lift` → `Cell.for(id).set(...)`), so it carries a genuine `ifc.confidentiality` label.
+- A `cf-cfc-render-boundary` with `maxConfidentiality={[]}` **actually blocks every hand from
+  rendering** — this is the one CFC mechanism the runtime enforces today.
+- The **showdown is a real integrity-gated declassification**: a trusted-action surface
+  (`data-ui-surface` / `data-ui-event-integrity` / `data-ui-action` + a `TrustedActionWrite` output)
+  flips the cell that drives `declassifyConfidentiality`. Only that trusted gesture reveals the
+  hands; **folded hands are never declassified.**
+- `cf-cfc-label` shows a hand's live label (the real `ifc.confidentiality`).
+
+**Proposed (clearly labelled "simulated — not enforced"):** the graded reveal lattice
+(`existence`/`cardinality`/`order`) and per-reader projection — shown only as an illustration of the
+target shapes, with an explicit note that CFC today is binary (blocked or fully declassified).
+
+The pattern also carries an **honest-limitation panel**: the render boundary hides labelled content
+in a *trusted host*; it does not encrypt the cell, so real secrecy between mutually-distrusting
+players still needs the per-reader materialization of §4.4.
+
+It **type-checks, deploys, and runs** (`deno task cf check … --no-run`, exit 0; deployed to a local
+toolshed and driven in-browser, 0 console errors).
 
 ### Live demo (screenshots)
 
-The same canonical table state, projected for different viewers, with a colour-coded chip on each
-hand showing the reveal level applied (`docs/proposals/images/`):
+The same hands, before and after the trusted showdown (`docs/proposals/images/`):
 
-- **Viewing as Alice, at the flop** (`poker-v2-02-alice-flop.png`): Alice's own row is highlighted
-  (`👁 you`) with a green **VALUES** chip and her real cards `10♥ 6♥`; Bob and Charlie show blue
-  card-backs with amber **COUNT** chips (`×2`). One state, two projections, side by side.
-- **Spectator at the flop** (`poker-v2-01-spectator-flop.png`): the public board (`8♣ 2♥ J♣`) and
-  phase stepper are visible to everyone; all hands are **COUNT**-only.
-- **Spectator at showdown** (`poker-v2-03-spectator-showdown.png`): surviving hands declassify
-  `cardinality → values` for the whole table (green **VALUES**: `Alice 10♥ 6♥`, `Bob 6♠ 9♥`), while
-  the folded hand keeps a gray **EXISTS · one bit** chip — `■ folded, contents never revealable`.
-  Three reveal levels visible at once.
+- **Blocked** (`poker-v3-01-blocked.png`): every hand shows *"Content hidden by policy"* — the
+  render boundary refusing to render the labelled cell — plus a `🔒 blocked by render boundary`
+  note. Status: *"Hands are confidential — the render boundary is blocking them."*
+- **Revealed** (`poker-v3-02-revealed.png`): after the **trusted Showdown** action declassifies the
+  `PokerHoleCards` atom, the same boundaries now permit the cards (`Alice A♠A♥`, `Bob K♦K♣`,
+  `Charlie 7♥2♦`). Nothing else in the pattern can flip that cell.
 
-![Viewing as Alice at the flop — owner sees values, opponents see count](./images/poker-v2-02-alice-flop.png)
-![Spectator at showdown — survivors revealed, folded hand stays at existence](./images/poker-v2-03-spectator-showdown.png)
+![Hands blocked by the CFC render boundary](./images/poker-v3-01-blocked.png)
+![Hands revealed after the trusted showdown declassification](./images/poker-v3-02-revealed.png)
