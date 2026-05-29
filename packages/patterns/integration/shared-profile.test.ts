@@ -223,7 +223,7 @@ async function fillAllProfileCreateInputs(
 }
 
 async function readProfileCreateProbe(page: Page) {
-  return await page.evaluate(() => {
+  return await page.evaluate(async () => {
     function collect(root: Document | ShadowRoot, result: Element[]): void {
       for (const element of root.querySelectorAll("*")) {
         result.push(element);
@@ -248,8 +248,48 @@ async function readProfileCreateProbe(page: Page) {
 
     const elements: Element[] = [];
     collect(document, elements);
+    const home = await (async () => {
+      try {
+        type ProbeCell = {
+          sync?: () => Promise<unknown>;
+          ref?: () => unknown;
+          key?: (path: string) => ProbeCell;
+          resolveAsCell?: () => Promise<ProbeCell>;
+        };
+        const rt = (globalThis as unknown as {
+          commonfabric?: {
+            rt?: { getHomeSpaceCell?: () => Promise<ProbeCell> };
+          };
+        }).commonfabric?.rt;
+        const homeCell = await rt?.getHomeSpaceCell?.();
+        const defaultPattern = await homeCell?.key?.("defaultPattern")
+          .resolveAsCell?.();
+        const profile = defaultPattern?.key?.("profile");
+        const resolvedProfile = await profile?.resolveAsCell?.().catch((
+          error: unknown,
+        ) => ({
+          ref: () => undefined,
+          sync: () =>
+            Promise.resolve(
+              error instanceof Error ? error.message : String(error),
+            ),
+        }));
+        return {
+          defaultPattern: defaultPattern?.ref?.(),
+          profile: await profile?.sync?.(),
+          profileName: await defaultPattern?.key?.("profileName").sync?.(),
+          resolvedProfile: {
+            ref: resolvedProfile?.ref?.(),
+            value: await resolvedProfile?.sync?.(),
+          },
+        };
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    })();
     return {
       text: deepText(document).slice(0, 2000),
+      home,
       tags: elements
         .map((element) => element.tagName.toLowerCase())
         .filter((tag) =>

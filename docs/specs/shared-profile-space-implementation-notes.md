@@ -659,3 +659,46 @@ made before committing.
 - The data model should keep documenting `profileName` and
   `initialNameApplied` as implementation support for immediate profile-name
   wishes.
+
+## Slice 17: Review Follow-Up Corrections
+
+### Ambiguity or Incorrect Spec
+
+- The profile default-pattern display name was ambiguous: the helper used
+  `ProfileHome`, while the actual profile-home pattern exports `[NAME]` as
+  `Profile`.
+- Moving `asCellImpl()` to unwrap `[toCell]` before `isCell()` introduced a
+  nullish-input edge case for public annotation helpers.
+- The pattern integration shard exposed that `default-app.test.ts` left the
+  browser runtime scheduler in pull mode after its notebook regression test.
+  That leaked into the shared-profile test and left `.inSpace(name)` profile
+  links unresolved in the home space.
+
+### Decision
+
+- Treat `[NAME]: "Profile"` as the canonical existing-default marker for the
+  profile default pattern.
+- Keep `asCellImpl()` permissive for `null` and `undefined`; annotation helpers
+  should ignore non-cell inputs rather than throwing.
+- Restore scheduler push mode in a `finally` block after the default-app
+  notebook pull-mode regression. Shared-profile continues to test the product's
+  normal push-mode browser flow; broader pull-mode `.inSpace()` support remains
+  a separate runtime concern.
+- Keep extra shared-profile failure diagnostics for the home default `profile`
+  and `profileName` cells so future CI failures distinguish missing writes from
+  unresolved same-space profile links.
+
+### Tests Added
+
+- `packages/piece/test/profile-default-pattern.test.ts`
+  - Verifies a valid existing profile default is kept and not fetched/recreated.
+- `packages/runner/test/cell-hooks.test.ts`
+  - Verifies cell annotation helpers ignore nullish values.
+- `packages/patterns/integration/default-app.test.ts`
+  - Restores scheduler mode after the pull-mode notebook regression so later
+    integration tests run with a clean scheduler mode.
+
+### Spec Correction Needed
+
+- Specs that mention the profile default pattern by exported `[NAME]` should use
+  `Profile`; `ProfileHome` is only the source/module concept.

@@ -638,6 +638,7 @@ Deno.test("pattern factory .inSpace() handler side effect can write linked child
     await runtime.idle();
     await runtime.storageManager.synced();
     await result.pull();
+    await profile.pull();
 
     const childLink = parseLink(profile.getRaw(), profile);
     assertEquals(childLink?.space, targetSpace);

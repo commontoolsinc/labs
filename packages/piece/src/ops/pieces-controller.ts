@@ -21,7 +21,7 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
 const PROFILE_DEFAULT_PATTERN_URL = "/api/patterns/system/profile-home.tsx";
-const PROFILE_DEFAULT_PATTERN_NAME = "ProfileHome";
+const PROFILE_DEFAULT_PATTERN_NAME = "Profile";
 
 async function timePiecesPhase<T>(
   label: string,

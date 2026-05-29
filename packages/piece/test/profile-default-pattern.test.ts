@@ -19,7 +19,7 @@ const patternSource = (name: string) =>
 const sourcesByPath = new Map([
   ["/api/patterns/system/home.tsx", patternSource("Home")],
   ["/api/patterns/system/default-app.tsx", patternSource("DefaultPieceList")],
-  ["/api/patterns/system/profile-home.tsx", patternSource("ProfileHome")],
+  ["/api/patterns/system/profile-home.tsx", patternSource("Profile")],
 ]);
 
 describe("PiecesController profile default patterns", () => {
@@ -85,8 +85,22 @@ describe("PiecesController profile default patterns", () => {
     const profileDefault = await controller.ensureProfileDefaultPattern();
     const value = profileDefault.getCell().get();
 
-    expect(value?.[NAME]).toBe("ProfileHome");
+    expect(value?.[NAME]).toBe("Profile");
     expect(fetchedPaths).toContain("/api/patterns/system/profile-home.tsx");
+  });
+
+  it("keeps existing profile defaults that already use the profile pattern", async () => {
+    const profileDID = await deriveProfileSpaceDID(signer);
+    const controller = await controllerForSpace(profileDID);
+
+    const originalDefault = await controller.ensureProfileDefaultPattern();
+    expect(originalDefault.getCell().get()?.[NAME]).toBe("Profile");
+
+    fetchedPaths = [];
+    const profileDefault = await controller.ensureProfileDefaultPattern();
+
+    expect(profileDefault.getCell().get()?.[NAME]).toBe("Profile");
+    expect(fetchedPaths).not.toContain("/api/patterns/system/profile-home.tsx");
   });
 
   it("repairs profile spaces that already have an ordinary default pattern", async () => {
@@ -97,7 +111,7 @@ describe("PiecesController profile default patterns", () => {
     expect(ordinaryDefault.getCell().get()?.[NAME]).toBe("DefaultPieceList");
 
     const profileDefault = await controller.ensureProfileDefaultPattern();
-    expect(profileDefault.getCell().get()?.[NAME]).toBe("ProfileHome");
+    expect(profileDefault.getCell().get()?.[NAME]).toBe("Profile");
     expect(fetchedPaths).toContain("/api/patterns/system/default-app.tsx");
     expect(fetchedPaths).toContain("/api/patterns/system/profile-home.tsx");
   });
