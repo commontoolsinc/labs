@@ -1,6 +1,6 @@
 import {
   type FabricValue,
-  shallowMutableClone,
+  shallowMutableDeepFrozenClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import {
@@ -161,12 +161,14 @@ export function extractDefaultValues(
   if (
     schema.type === "object" && schema.properties && isRecord(schema.properties)
   ) {
-    // Shallow mutable copy of the schema default, so injecting top-level
+    // Mutable top-level copy of the schema default, so injecting top-level
     // property defaults below doesn't mutate the schema's own default object.
-    // A shallow copy suffices: only top-level keys are written here, and the
-    // result is normalized downstream by `fabricFromNativeValue` (which
-    // rebuilds a fresh tree), so sharing nested references is safe.
-    const obj = shallowMutableClone(
+    // Only top-level keys are written here, and the result is normalized
+    // downstream by `fabricFromNativeValue` (which rebuilds a fresh tree), so a
+    // shallow copy would suffice for correctness; we deep-freeze the bound
+    // children as inexpensive defense-in-depth against accidental deeper
+    // mutation of the shared default.
+    const obj = shallowMutableDeepFrozenClone(
       (isRecord(schema.default) ? schema.default : {}) as FabricValue,
     ) as Record<string, FabricValue>;
     for (const [propKey, propSchema] of Object.entries(schema.properties)) {

@@ -3,7 +3,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import {
   type FabricObject,
   type FabricValue,
-  shallowMutableClone,
+  shallowMutableDeepFrozenClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
@@ -446,11 +446,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           );
         }
         // When modernDataModel is ON, stored objects are deep-frozen by
-        // fabricFromNativeValueModern(). Shallow-clone before mutation to avoid
-        // TypeError on frozen objects. `shallowMutableClone` always copies,
-        // because the value may be the transaction's working copy, which must
-        // not be mutated in place.
-        valueObj = shallowMutableClone(
+        // fabricFromNativeValueModern(). Clone before mutation to avoid
+        // TypeError on frozen objects: this always copies (the value may be the
+        // transaction's working copy, which must not be mutated in place), and
+        // it deep-freezes the bound children as inexpensive defense-in-depth
+        // against accidental deeper mutation of the shared input.
+        valueObj = shallowMutableDeepFrozenClone(
           currentValue as FabricValue,
         ) as FabricObject;
       }
