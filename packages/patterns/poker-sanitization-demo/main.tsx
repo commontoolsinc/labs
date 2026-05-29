@@ -181,10 +181,14 @@ const LABEL_BOX = {
 const OUTER_STYLE: Record<string, string> = {
   padding: "1rem",
   maxWidth: "920px",
-  "--cf-theme-color-primary": "#2563eb",
+};
+
+// Set on a button HOST inline (nearest wins) — the dark theme re-declares the primary tokens
+// closer to the button than the outer container, so an outer override loses. Darker blue + white
+// guarantees contrast in both modes.
+const BTN_SOLID: Record<string, string> = {
+  "--cf-theme-color-primary": "#1d4ed8",
   "--cf-theme-color-primary-foreground": "#ffffff",
-  "--cf-theme-color-secondary": "#e2e8f0",
-  "--cf-theme-color-secondary-foreground": "#0f172a",
 };
 
 // ENFORCED / SIMULATED / OUT OF SCOPE badge — replaces the retired reveal-level "pill".
@@ -645,6 +649,7 @@ export default pattern<unknown, PokerOutput>(() => {
                   color="primary"
                   variant="solid"
                   size="lg"
+                  style={BTN_SOLID as never}
                 >
                   🏆 Showdown — reveal the hands
                 </cf-button>
@@ -703,8 +708,9 @@ export default pattern<unknown, PokerOutput>(() => {
                 <cf-button
                   data-ui-action={COUNT_ACTION}
                   onClick={releaseCount}
-                  color="accent"
+                  color="primary"
                   variant="solid"
+                  style={BTN_SOLID as never}
                 >
                   Release the count to the table
                 </cf-button>
