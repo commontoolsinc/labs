@@ -61,6 +61,7 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { createReadOnlyTransactionError } from "./storage/interface.ts";
+import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -1447,9 +1448,11 @@ function trackVisitedDoc(
   }
   // Load the metadata-linked docs recursively unless we're a retracted fact.
   if (context.includeMeta) {
-    // Loading metadata requires the full doc. This could be narrowed, but it
-    // happens in a non-reactive context.
-    const { ok: fullDoc } = tx.read({ ...target, path: [] });
+    // Loading metadata requires the full doc. Ignore this read for scheduling.
+    const { ok: fullDoc } = tx.read(
+      { ...target, path: [] },
+      { meta: ignoreReadForScheduling },
+    );
     if (fullDoc) {
       loadMetaLinkedDocs(
         tx,
@@ -1498,8 +1501,9 @@ export function loadMetaLinkedDoc(
   if (address === undefined) {
     return undefined;
   }
-  // This only happens in the query path, so don't worry about scheduler
-  const result = tx.read(address);
+  // This read only loads the linked metadata doc so traversal can inspect it.
+  // The schema-guided traversal below records the real scheduling reads.
+  const result = tx.read(address, { meta: ignoreReadForScheduling });
   if (result.error) {
     return undefined;
   }
