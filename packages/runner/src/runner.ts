@@ -782,7 +782,9 @@ export class Runner {
         : {},
       isRecord(previousInternal) ? previousInternal : {},
     ) as FabricValue;
-    // Convert-and-freeze (default): a deep-frozen value lets the storage write
+    // Convert-and-freeze (default): the convert step is load-bearing -- it
+    // normalizes nested `toJSON`-bearing values (so this can't be a plain
+    // clone) -- and producing a deep-frozen result lets the storage write
     // boundary's `cloneIfNecessary` identity-pass instead of
     // deep-cloning-to-freeze.
     internalCell.setRawUntyped(fabricFromNativeValue(internal));
