@@ -262,38 +262,42 @@ describe("deep-freeze", () => {
   });
 
   describe("`deepFreeze()` protocol dispatch via `[DEEP_FREEZE]`", () => {
-    it("short-circuits a `FabricPrimitive` unchanged (arm 2)", () => {
-      const epoch = new FabricEpochNsec(1234567890n);
-      // `FabricPrimitive`s self-freeze at construction; `deepFreeze` must
-      // return them unchanged without entering the object-walk.
-      expect(deepFreeze(epoch)).toBe(epoch);
+    describe("arm 2 (`FabricPrimitive` short-circuit)", () => {
+      it("returns the `FabricPrimitive` unchanged", () => {
+        const epoch = new FabricEpochNsec(1234567890n);
+        // `FabricPrimitive`s self-freeze at construction; `deepFreeze` must
+        // return them unchanged without entering the object-walk.
+        expect(deepFreeze(epoch)).toBe(epoch);
+      });
     });
 
-    it("delegates to `[DEEP_FREEZE]` and freezes in place (arm 3)", () => {
-      const inner = new Error("cause");
-      const outer = new Error("outer", { cause: inner });
-      const fe = FabricError.fromNativeError(outer);
-      expect(Object.isFrozen(fe)).toBe(false);
+    describe("arm 3 (`[DEEP_FREEZE]` delegation)", () => {
+      it("delegates and freezes in place", () => {
+        const inner = new Error("cause");
+        const outer = new Error("outer", { cause: inner });
+        const fe = FabricError.fromNativeError(outer);
+        expect(Object.isFrozen(fe)).toBe(false);
 
-      const result = deepFreeze(fe);
+        const result = deepFreeze(fe);
 
-      // Freeze-in-place: same identity, now deep-frozen (wrapper + wrapped
-      // Error + recursed cause).
-      expect(result).toBe(fe);
-      expect(Object.isFrozen(fe)).toBe(true);
-      // (FabricError no longer has a wrapped Error slot to check directly;
-      // the native projection is lazy, and any built projection is frozen.)
-      expect(Object.isFrozen(inner)).toBe(true);
-    });
+        // Freeze-in-place: same identity, now deep-frozen (wrapper + wrapped
+        // Error + recursed cause).
+        expect(result).toBe(fe);
+        expect(Object.isFrozen(fe)).toBe(true);
+        // (FabricError no longer has a wrapped Error slot to check directly;
+        // the native projection is lazy, and any built projection is frozen.)
+        expect(Object.isFrozen(inner)).toBe(true);
+      });
 
-    it("recurses `[DEEP_FREEZE]` into nested `FabricValue`s (arm 3)", () => {
-      const fe = FabricError.fromNativeError(new Error("e"));
-      const container = { wrapped: fe as unknown as FabricValue, n: 1 };
-      deepFreeze(container);
-      expect(Object.isFrozen(container)).toBe(true);
-      expect(Object.isFrozen(fe)).toBe(true);
-      // (FabricError no longer has a wrapped Error slot to check directly;
-      // the native projection is lazy, and any built projection is frozen.)
+      it("recurses into nested `FabricValue`s", () => {
+        const fe = FabricError.fromNativeError(new Error("e"));
+        const container = { wrapped: fe as unknown as FabricValue, n: 1 };
+        deepFreeze(container);
+        expect(Object.isFrozen(container)).toBe(true);
+        expect(Object.isFrozen(fe)).toBe(true);
+        // (FabricError no longer has a wrapped Error slot to check directly;
+        // the native projection is lazy, and any built projection is frozen.)
+      });
     });
   });
 
