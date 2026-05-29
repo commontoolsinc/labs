@@ -13,6 +13,8 @@ import {
   type SchedulerBenchEnv,
 } from "./scheduler-bench-helpers.ts";
 
+const benchDiagnosticsEnabled = Deno.env.get("BENCH_DIAGNOSTICS") === "1";
+
 const FANOUT_SIZES = [100, 1000] as const;
 
 const recordNumberSchema = {
@@ -192,9 +194,11 @@ for (const fanout of FANOUT_SIZES) {
             (sum, count) => sum + count,
             0,
           );
-          console.log(
-            `materializer fanout ${fanout}: materializerRuns=${graph.getMaterializerRuns()}, readerRuns=${totalReaderRuns}`,
-          );
+          if (benchDiagnosticsEnabled) {
+            console.error(
+              `materializer fanout ${fanout}: materializerRuns=${graph.getMaterializerRuns()}, readerRuns=${totalReaderRuns}`,
+            );
+          }
           consumeNumber(graph.target.get().k0);
 
           await cleanupSchedulerBenchEnv(graph.env);
@@ -217,9 +221,11 @@ Deno.bench(
         await updateSource(graph.env, graph.source, 1);
         await graph.env.runtime.scheduler.idle();
 
-        console.log(
-          `static declared write: computationRuns=${graph.getComputationRuns()}, effectRuns=${graph.effectRuns.value}`,
-        );
+        if (benchDiagnosticsEnabled) {
+          console.error(
+            `static declared write: computationRuns=${graph.getComputationRuns()}, effectRuns=${graph.effectRuns.value}`,
+          );
+        }
         consumeNumber(graph.target.get());
 
         await cleanupSchedulerBenchEnv(graph.env);
