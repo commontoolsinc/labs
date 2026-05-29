@@ -129,9 +129,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     this.registry.set(TAGS.RegExp, FabricRegExp);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // `SerializationContext<string>` -- public boundary interface
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Encodes a fabric value to a JSON string. Serializes modern types into
@@ -268,12 +268,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return JsonEncodingContext.#parseWireText(json);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Tree-walking serialization (private)
   //
   // Moved from serialization.ts. These methods walk the value tree,
   // dispatching to type handlers and applying structural escaping.
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Serializes a fabric value into wire format. Recursively processes nested
@@ -309,7 +309,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result;
     }
 
-    // --- Primitives ---
+    // Primitives.
     if (
       value === null || typeof value === "boolean" ||
       typeof value === "number" || typeof value === "string"
@@ -434,7 +434,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return state as FabricValue;
       }
 
-      // --- Type handler dispatch ---
+      // Type handler dispatch.
       //
       // `TypeHandler.deserialize()` makes a contractual guarantee that its
       // results are deep-frozen, rather than relying on every caller to
