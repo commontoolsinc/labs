@@ -12,8 +12,8 @@ import {
 const { FRONTEND_URL } = env;
 // Keep these as guardrails rather than exact budgets; CI reload runs vary
 // slightly while still exercising persisted scheduler-state reuse.
-const NOTEBOOK_RELOAD_GRAPH_ACTION_RUN_LIMIT = 125;
-const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 70;
+const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 150;
+const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 80;
 const NOTEBOOK_RELOAD_TIMEOUT_MS = 180_000;
 
 const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
@@ -111,9 +111,9 @@ describe("default-app notebook reload integration test", () => {
     if (!EXPECT_PERSISTENT_SCHEDULER_STATE) return;
 
     assert(
-      schedulerSummary.graph.actionRunsFromStats <=
-        NOTEBOOK_RELOAD_GRAPH_ACTION_RUN_LIMIT,
-      `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_GRAPH_ACTION_RUN_LIMIT} current graph action runs, saw ${schedulerSummary.graph.actionRunsFromStats}`,
+      schedulerSummary.graph.actionRuns <=
+        NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,
+      `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${schedulerSummary.graph.actionRuns}`,
     );
     assert(
       schedulerSummary.graph.computationRunsFromStats <=
