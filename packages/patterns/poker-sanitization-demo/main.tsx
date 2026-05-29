@@ -173,6 +173,7 @@ const LABEL_BOX = {
   borderRadius: "8px",
   padding: "8px",
   marginTop: "6px",
+  color: "#334155",
 };
 
 // Force high-contrast button colours so they read in both light and dark mode (CSS custom
@@ -267,6 +268,7 @@ const STAGE = {
   padding: "10px",
   minWidth: "150px",
   background: "#ffffff",
+  color: "#0f172a", // explicit so light-bg boxes stay readable in dark mode
 };
 const STAGE_TITLE = { fontSize: "12px", fontWeight: "700", marginBottom: "6px" };
 const STAGE_BODY = { marginBottom: "6px", minHeight: "30px" };
@@ -332,7 +334,7 @@ function tryThis() {
   const step = (n: string, text: string) => (
     <div style={{ display: "flex", gap: "8px", alignItems: "baseline" }}>
       <span style={STEP_NUM}>{n}</span>
-      <span style={{ fontSize: "13px" }}>{text}</span>
+      <span style={{ fontSize: "13px", color: "#334155" }}>{text}</span>
     </div>
   );
   return (
@@ -342,6 +344,7 @@ function tryThis() {
         flexDirection: "column",
         gap: "6px",
         background: "#f1f5f9",
+        color: "#334155",
         borderRadius: "10px",
         padding: "10px 12px",
       }}
@@ -784,7 +787,7 @@ export default pattern<unknown, PokerOutput>(() => {
                     that serves each reader only their projection. Simulated here — one screen shows
                     both:
                   </cf-label>
-                  <div style={{ border: "1px dashed #fdba74", borderRadius: "10px", padding: "10px", background: "#fffbeb", fontSize: "13px" }}>
+                  <div style={{ border: "1px dashed #fdba74", borderRadius: "10px", padding: "10px", background: "#fffbeb", color: "#334155", fontSize: "13px" }}>
                     <div>reader <b>Alice</b> → her cards</div>
                     <div>reader <b>Bob</b> → only the count</div>
                   </div>
