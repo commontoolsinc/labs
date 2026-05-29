@@ -183,13 +183,13 @@ const OUTER_STYLE: Record<string, string> = {
   maxWidth: "920px",
 };
 
-// Set on a button HOST inline (nearest wins) — the dark theme re-declares the primary tokens
-// closer to the button than the outer container, so an outer override loses. Darker blue + white
-// guarantees contrast in both modes.
-const BTN_SOLID: Record<string, string> = {
-  "--cf-theme-color-primary": "#1d4ed8",
-  "--cf-theme-color-primary-foreground": "#ffffff",
-};
+// cf-button writes the whole theme token set onto its own host inline style, so style/var
+// overrides lose. The one lever that wins is ::part from a light-DOM <style> — scope it to the
+// two primary CTAs so they're high-contrast (saturated blue + white) in both light and dark mode
+// without changing every button in the app.
+const CTA_CSS =
+  "cf-button.cta::part(button){background:#1d4ed8 !important;color:#ffffff !important;" +
+  "border-color:#1d4ed8 !important;}";
 
 // ENFORCED / SIMULATED / OUT OF SCOPE badge — replaces the retired reveal-level "pill".
 type Badge = "ENFORCED" | "SIMULATED" | "OUT OF SCOPE";
@@ -605,6 +605,7 @@ export default pattern<unknown, PokerOutput>(() => {
     [UI]: (
       <cf-screen title="Poker sanitization demo">
         <cf-vstack gap="3" style={OUTER_STYLE as never}>
+          <style>{CTA_CSS}</style>
           {/* HERO — secret hands + the one trusted reveal (also the showdown trusted surface) */}
           <cf-card
             id="trusted-showdown-surface"
@@ -646,10 +647,10 @@ export default pattern<unknown, PokerOutput>(() => {
                 <cf-button
                   data-ui-action={SHOWDOWN_ACTION}
                   onClick={reveal}
+                  className="cta"
                   color="primary"
                   variant="solid"
                   size="lg"
-                  style={BTN_SOLID as never}
                 >
                   🏆 Showdown — reveal the hands
                 </cf-button>
@@ -708,9 +709,9 @@ export default pattern<unknown, PokerOutput>(() => {
                 <cf-button
                   data-ui-action={COUNT_ACTION}
                   onClick={releaseCount}
+                  className="cta"
                   color="primary"
                   variant="solid"
-                  style={BTN_SOLID as never}
                 >
                   Release the count to the table
                 </cf-button>
