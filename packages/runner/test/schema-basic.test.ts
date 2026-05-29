@@ -725,7 +725,7 @@ describe("Schema - Basic Types and References", () => {
       expect(innerStringCell.get()).toBe("hello double asCell");
     });
 
-    it("should apply scoped asCell object entries when following links", () => {
+    it("should not follow scoped asCell object entries during key navigation", () => {
       const outer = runtime.getCell<{ current: Cell<string> }>(
         space,
         "scoped-ascell-object-entry",
@@ -743,7 +743,12 @@ describe("Schema - Basic Types and References", () => {
       );
 
       const currentCell = outer.key("current");
-      expect(currentCell.getAsNormalizedFullLink().scope).toBe("space");
+      const currentLink = currentCell.getAsNormalizedFullLink();
+      expect(currentLink).toMatchObject({
+        id: outer.getAsNormalizedFullLink().id,
+        scope: "user",
+        path: ["current"],
+      });
 
       const target = runtime.getCell<string>(
         space,
@@ -759,14 +764,7 @@ describe("Schema - Basic Types and References", () => {
       outer.set({ current: target });
 
       const linkedCurrentCell = outer.key("current");
-      expect(linkedCurrentCell.getAsNormalizedFullLink()).toMatchObject({
-        id: target.getAsNormalizedFullLink().id,
-        scope: "user",
-        path: [],
-      });
-      const linkedTarget = linkedCurrentCell.get();
-      expect(isCell(linkedTarget)).toBe(true);
-      expect(linkedTarget.get()).toBe("target value");
+      expect(linkedCurrentCell.getAsNormalizedFullLink()).toEqual(currentLink);
     });
 
     it("should preserve nested asCell wrappers through anyOf branches", () => {

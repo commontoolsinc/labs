@@ -17,7 +17,8 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
+import { canFollowScopedLink, isSchemaScope, scopeRank } from "./scope.ts";
+import type { SchemaScope } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -68,6 +69,35 @@ const schemaScopeForLink = (link: NormalizedFullLink) =>
   isRecord(link.schema) && isSchemaScope(link.schema.scope)
     ? link.schema.scope
     : undefined;
+
+const combineSchemaScopeCaps = (
+  outerScope: SchemaScope | undefined,
+  innerScope: SchemaScope | undefined,
+): SchemaScope | undefined => {
+  if (outerScope === undefined || outerScope === "any") return innerScope;
+  if (innerScope === undefined || innerScope === "any") return outerScope;
+  return scopeRank(outerScope) <= scopeRank(innerScope)
+    ? outerScope
+    : innerScope;
+};
+
+const preserveSchemaScopeCap = (
+  schema: NormalizedFullLink["schema"],
+  inheritedScope: SchemaScope | undefined,
+): NormalizedFullLink["schema"] => {
+  if (schema === undefined) return undefined;
+  const schemaScope = isRecord(schema) && isSchemaScope(schema.scope)
+    ? schema.scope
+    : undefined;
+  const effectiveScope = combineSchemaScopeCaps(inheritedScope, schemaScope);
+  if (effectiveScope === undefined || effectiveScope === schemaScope) {
+    return schema;
+  }
+  return {
+    ...ContextualFlowControl.toSchemaObj(schema),
+    scope: effectiveScope,
+  };
+};
 
 const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
   ...link,
@@ -231,8 +261,10 @@ export function resolveLink(
           const remainingPath = link.path.slice(lastValid.length);
           let { schema, ...restLink } = nextHop.link;
           if (schema !== undefined && remainingPath.length > 0) {
+            const inheritedScope = schemaScopeForLink(nextHop.link);
             const cfc = new ContextualFlowControl();
             schema = cfc.getSchemaAtPath(schema, remainingPath);
+            schema = preserveSchemaScopeCap(schema, inheritedScope);
           }
           nextHop = {
             ...nextHop,
