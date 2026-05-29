@@ -1,33 +1,46 @@
-# Modeling hidden-information games with CFC — graded reveal is reducers + relabel policies, and the real gap is per-recipient materialization
+# Modeling hidden-information games with CFC — it's already expressible (field-level labels + label-gated sync + reducers)
 
 **Status:** Design exploration / motivating sketch (non-normative)
 **For:** CFC designers (`../specs/cfc`) and anyone weighing what belongs on the CFC roadmap
 **Companion:** working demo pattern at `packages/patterns/poker-sanitization-demo/main.tsx` (type-checks; click-through)
+
+> **Reflects review by @seefeldb.** Earlier drafts billed "graded, per-reader projection" as a
+> missing primitive. It isn't: per-field secrecy is **field-level CFC**; reader-relative delivery is
+> **label-gated per-recipient sync** — a *known, planned* memory-engine step (not shipping a
+> reader's-confidential data to that client), which we simply **assume** here; and the one
+> genuinely-CFC-native piece is a **reducer + relabel** for coarser single-field summaries. There is
+> no missing projection primitive.
 
 ---
 
 ## What this is, and the decision it informs
 
 This memo uses a board game as a **forcing function** for hidden-information modeling in CFC, and
-arrives at a sharper conclusion than it set out with: the per-viewer "graded reveal" a card game
-needs is **already expressible** in CFC as *trusted reducers + integrity-guarded relabel policies*,
-with **no new label primitive**. What's actually missing is an *enforcement* layer
-(per-recipient materialization), not a label-model feature.
+concludes that CFC's existing model **already covers it** — no new label primitive, and no new
+"per-reader projection" layer. The pieces:
 
-It is **not** a proposal to ship a poker game. The decision this memo informs is:
+- **Per-field secrecy** ("some aspects of a value are more secret than others") → **field-level
+  confidentiality labels**, and **field-level opaque/not-opaque** for blind pass-through.
+- **Reader-relative delivery** (Alice gets her cards, Bob doesn't) → **label-gated per-recipient
+  sync**: the memory engine simply doesn't sync a reader-confidential field to a client that can't
+  read it. This is a *known, planned* memory-engine step; this memo **assumes** it.
+- **A coarser summary of a single field** ("Bob sees the *count*, not the cards") — the one case
+  field-level labels don't cover — → a **trusted reducer + integrity-guarded relabel policy**.
 
-> CFC's label model already covers graded per-reader reveal (via reducers + relabel policies). The
-> roadmap question is therefore narrower: **build a per-recipient materialization layer** (run the
-> right reducer per reader, route outputs server-side) and a **canned-reducer library** — or keep
-> steering people to scope-partitioning (`PerUser`)? And separately, is *unlinkability* (shuffles)
-> worth research, given it's the one behaviour with no CFC home?
+So boardgame's `SanitizedForPlayer` ≈ **label-gated per-recipient sync (planned) + reducers**, not a
+new projection mechanism.
 
-**Central claim, in one sentence.** CFC access is binary per `(value, principal)` with gradation on
-the label lattice; "Bob sees the count, not the cards" is a *trusted reducer* (`count = length`,
-inheriting the cards' confidentiality and minting a resolution-reduction integrity atom) whose
-output a *policy relabels* to a lower audience — so the only genuine gaps are **per-recipient
-materialization** (architecture, not labels) and **unlinkability** (an open research property),
-with **recombination** (§14.3.2) bounding how many reducers you can safely publish at once.
+It is **not** a proposal to ship a poker game. The decisions this memo informs are narrow:
+
+> 1. Is a small **reducer library + authoring affordance** (`count`/`exists`/`order` + "for audience
+>    X serve reduction R") worth adding as ergonomics over the existing label model?
+> 2. How is the **recombination** hazard (§14.3.2) bounded when one secret has several reducers?
+> 3. Is **unlinkability** (shuffles) worth a research track, or explicitly out of scope?
+
+**Central claim, in one sentence.** CFC access is binary per `(value, principal)`; per-viewer
+hidden-information is **field-level labels + opaque + label-gated per-recipient sync (assumed,
+planned) + reducers** for coarser single-field summaries — with **no** new projection primitive, and
+only **recombination** (§14.3.2) and **unlinkability** as open/out-of-scope concerns.
 
 ---
 
@@ -142,54 +155,40 @@ new mechanism:
 
 The most encouraging single find: **§8.5.6.1 already separates *membership confidentiality*
 (which / how-many items) from *member confidentiality* (each item's value).** That is precisely
-the axis `len`/`order` live on. CFC has the right *seam*; it lacks a graded, reader-relative
-*projection* across it.
+the axis `len`/`order` live on — i.e. *per-field* secrecy, which field-level CFC already labels.
 
-### Being precise about what CFC *does* have (and why it's not enough)
+### Why the "graded, reader-relative projection" framing was wrong
 
-CFC is not purely all-or-nothing — it has three adjacent partial-declassification mechanisms, and
-it's worth saying exactly why each falls short, because the gap is narrower and sharper than
-"CFC is binary":
+Earlier drafts argued CFC was missing a *graded, reader-relative, read-time projection* primitive.
+Per review (@seefeldb), each of those three is already covered — by **field-level CFC**, by
+**field-level opaque**, and by the **planned label-gated sync**:
 
-- **`maxConfidentiality` ceilings** (`08-08`, render-boundary): bound how sensitive a value may
-  be to pass a boundary. This is a *threshold on a whole value*, not a transform that emits a
-  reduced shape.
-- **Error declassification** (`05-policy-architecture.md` §5.4): reduces an error to
-  `sanitizedFields` at a target confidentiality. This *is* a value-reducing declassifier — but it
-  is **not reader-relative** (same sanitized error for everyone) and **not an ordered lattice**
-  (it's a hand-written field list per rule).
-- **`cf-cfc-render-boundary`** (`packages/patterns/cfc-render-policy-demo/main.tsx`): shows/hides a
-  subtree in a *trusted host*. It is a **UI gate**, not a transform of the data, and it does not
-  stop a reader's runtime from reading the underlying bytes.
+- **Per-field / "graded".** "Some aspects of a value are more secret than others" is just
+  **field-level confidentiality labels** — different subpaths carry different labels (`ifc` is
+  path-granular). A structured value with public and secret fields needs no new mechanism. The
+  *only* thing field-level labels don't give you is a **coarser value derived from a single field**
+  (the *count* of a list, the *existence* bit) — and that's the reducer (below). So "graded" isn't a
+  gap; the narrow real case is single-field summarisation.
+- **Reader-relative.** Delivering different fields to different readers is **field-level labels +
+  per-recipient sync**: label a field confidential-to-Alice and the engine simply doesn't sync it to
+  Bob's client. Field-level **opaque/not-opaque** covers the blind-pass-through case. There is no
+  need for a per-reader *projection* primitive.
+- **Read-time projection / "the render boundary doesn't stop reading the bytes".** Correct today,
+  but **not shipping a reader's-confidential data to that client is a known, planned memory-engine
+  step**. For the purpose of this experiment it is reasonable to **assume confidentiality labels
+  control what gets synced** to each client. So this is planned infrastructure, not a fundamental
+  gap — and it *is* the same thing as "reader-relative" above.
 
-So the precise gaps are three, and all three must hold simultaneously for the game:
+Net: `SanitizedForPlayer`'s goal, re-expressed in CFC terms, is **(a) label-gated per-recipient sync
+(planned) + (b) reducers for coarser single-field summaries** — not a new projection layer.
 
-1. **Graded** — a value reduces to one of several *ordered* shapes, not just pass/block.
-2. **Reader-relative** — the shape is a function of *who is reading*, evaluated per reader.
-3. **Read-time projection of one stored cell** — the same canonical cell yields many shapes;
-   notably, the spec has **no** mention of per-reader / per-viewer / per-recipient projection, and
-   the runner deliberately dropped its legacy query-time redaction. Boardgame's
-   `SanitizedForPlayer` is exactly this, and CFC has no analogue.
+### A note on scopes
 
-### The obvious objection: "why not just scopes?"
-
-Anyone who knows the runtime will say: put each player's hand in a `PerUser` scope, the table in
-`PerSpace`, done. That works for *binary* hidden-vs-visible, and the skeleton pattern uses it. But
-it cannot express what the game actually needs:
-
-- **No graded reveal.** Scopes give "in or out." "Bob sees the *count* of Alice's hand" requires a
-  separate, manually-maintained count cell — the exact hand-sync code boardgame's one tag avoids.
-- **Reveal transitions become data migrations.** Deal (→ hidden), showdown (→ visible), muck
-  (→ "existed") are, with scopes, *moves of data between scopes* triggered by handlers. As policy,
-  they're a label change on a value that never moves. The latter is auditable and reversible; the
-  former scatters the same logical card across scopes over its lifetime.
-- **No unlinkability / animation identity.** Scopes have no story for "you may animate the shuffle
-  but not trace a card through it," nor for a stable token that survives public moves.
-- **Structure leaks.** The *existence* of a per-user cell is itself observable; `existence`-level
-  reveal ("a hand was folded, contents never knowable") isn't naturally expressible.
-
-Scopes are the right tool for *coarse* sharing boundaries. The game needs *fine, graded,
-time-varying* reveal on values that stay put. That's the new capability.
+`PerUser`/`PerSpace` scopes are *coarse* data-addressing boundaries (and "addressing, not
+authorization" — multi-user docs). They can give binary hidden-vs-visible, but the
+confidentiality-label path above is the right tool for field-level, reader-relative secrecy and for
+the time-varying relabels (deal → showdown) a game needs; you don't want to scatter one logical
+card across scopes over its lifetime.
 
 ---
 
@@ -246,33 +245,19 @@ are ordinary CFC. The boardgame ladder is just a *family of canned reducers*: `e
 PolicyNonEmpty), `count` (≈ PolicyLen), `orderSkeleton` (≈ PolicyOrder), identity (≈ PolicyVisible).
 No new primitive.
 
-## What is genuinely missing
+## What's left (no missing label primitive)
 
-Given the above, only one thing is a real **gap**, one is **ergonomics**, and two are **out of
-scope**:
+Given the above, there's no missing label-model primitive. What remains is one **assumed (planned)
+dependency**, one **ergonomics** opportunity, and two **out-of-scope** concerns.
 
-### The real gap — per-recipient materialization (enforcement/architecture)
+### Assumed (planned) — label-gated per-recipient sync
 
-CFC specifies the *check* (`canAccess`) and the *relabel* (exchange rules), but **not an
-orchestration that, per reader, runs the right reducer and routes each reader to the projection
-they can satisfy.** Boardgame's `SanitizedForPlayer` is exactly that: a server-authoritative,
-per-recipient materialization that runs before bytes leave the trusted boundary. The CFC spec
-describes no per-recipient projection/materialization layer (the closest, error declassification
-§5.4.2 and multi-party consent §3.9.5, each produce *one* shared output, not per-reader variants).
-A sketch of the missing piece — the read-time dual of the sink gate (§5.2):
-
-```ts
-// Trusted boundary: for THIS reader, run the most-revealing reducer whose relabelled output the
-// reader can satisfy, and emit only that. Nothing below it ever sees the raw cell.
-function materializeForReader(cell: CellRef, reader: Principal): { value: unknown; label: Label };
-```
-
-Today the runtime has no such layer (the legacy query-time redaction was removed; the
-`cf-cfc-render-boundary` is a *trusted-host UI gate*, not server-side projection). **This — not a
-label primitive — is the thing to put on the roadmap, and it's the fork worth Berni's call:** a
-trusted materializer participants delegate to, vs. partitioning each player's secret into a scope
-peers can't read (`PerUser`, the cooperative-demo answer; not a hard boundary — §3.6 / multi-user
-docs).
+Reader-relative delivery depends on the engine not syncing a reader-confidential field to a client
+that can't read it. That is a **known, planned memory-engine step**, not something this experiment
+needs to invent — so we **assume** it: confidentiality labels control what is synced to each client.
+(The `cf-cfc-render-boundary` we use in the demo is a *trusted-host UI gate* standing in for this;
+the real boundary is the sync layer.) With that assumption, boardgame's `SanitizedForPlayer` is
+nothing more than **label-gated sync + reducers** — no bespoke per-recipient projection layer.
 
 ### Ergonomics — a canned reducer/projection library
 
@@ -299,9 +284,9 @@ semantics.
 ## Worked example: Texas Hold'em
 
 Each hand is `Confidential<Card[], [HoleCards(player)]>`. "Reveal level" = which trusted reducer's
-output a policy releases to the table; "audience" = the label it's released to. (M) marks the one
-step that needs the missing **materialization** layer; (R) the open **recombination** caveat; (U)
-the open **unlinkability** problem.
+output a policy releases to the table; "audience" = the label it's released to. (S) marks where
+**label-gated sync** does the per-reader delivery (assumed/planned); (R) the open **recombination**
+caveat; (U) the open **unlinkability** problem.
 
 | Field | Label | How others learn anything | Mechanism |
 |---|---|---|---|
@@ -313,8 +298,8 @@ the open **unlinkability** problem.
 1. **Deal** → `holeCards[p]` is `[HoleCards(p)]`-secret. A `countReducer` emits `length` (inherits
    the secret, mints `ReducedBy{count}`); `releaseCountToTable` relabels *that derived value* to
    `[table]`. Alice (who satisfies `HoleCards(Alice)`) sees her cards; the table sees `{count: 2}`.
-   **(M)** the runtime must actually run the reducer per-reader and serve Alice the cards but Bob
-   the count — that routing is the missing materialization layer.
+   **(S)** Alice gets the cards and Bob only the count because **label-gated sync** ships each field
+   to the clients that can read it — the planned memory-engine behaviour we assume here.
 2. **Flop/Turn/River** → community cards start `[HoleCards(deck)]`-secret; a trusted "deal
    community card" action (§3.8/§6) authorizes an identity-reducer relabel to `[table]`. A normal
    declassification event.
@@ -328,7 +313,7 @@ the open **unlinkability** problem.
    were folded even after the deck is shown" is the unlinkability property CFC has no home for.
 
 Every mechanic except unlinkability is `{trusted reducer} + {relabel policy}` over the binary
-lattice; the only new machinery anyone has to *build* is the per-reader materialization in step 1.
+lattice, delivered by label-gated sync; no new projection machinery is required.
 
 ---
 
@@ -341,7 +326,7 @@ lattice; the only new machinery anyone has to *build* is the per-reader material
 | "Opponent has N cards" (count, not cards) | `countReducer` + integrity-guarded relabel (§8.7, §3.3, §5.3.2) | ✅ already expressible (label model) |
 | "Positions visible, faces hidden" (order) | `orderSkeletonReducer` + relabel | ✅ already expressible (label model) |
 | Reveal that changes over time (deal→showdown) | trusted action fires the relabel exchange rule | ✅ already (a relabel, not a data move) |
-| **One cell, the right reduced view served to each reader** | — | ❌ **missing: per-recipient materialization** (architecture) |
+| The right fields served to each reader | label-gated per-recipient sync | ✅ assumed (planned memory-engine step) |
 | Canned `count`/`order`/`exists` reducers + declarative authoring | hand-write reducer + rule each | ⚠️ ergonomic gap (library) |
 | Publish several partial reveals of one secret safely | — | ⚠️ recombination, open (§14.3.2) |
 | Can't trace a card through a shuffle (unlinkability) | — | ❌ out of scope / open research |
@@ -350,22 +335,17 @@ lattice; the only new machinery anyone has to *build* is the per-reader material
 
 ## Open questions for CFC designers
 
-1. **Is "graded reveal" settled as reducers + relabel policies?** This memo now argues yes — no new
-   label dimension. Sanity-check that against the spec's intent (esp. §3.3 resolution-reduction
-   integrity + §5.3.2 exchange rules). If agreed, the earlier "ordered dimension" idea should be
-   formally retired.
-2. **Per-recipient materialization — build it, or stay scope-only?** The real fork. Is a trusted
-   server-side materializer (run reducer per reader, route outputs) on the roadmap, or is the
-   intended answer always `PerUser` scope-partitioning (with its "addressing, not authorization"
-   caveat)?
-3. **A standard reducer library + authoring affordance.** Worth a `count`/`order`/`exists` library
-   and sugar like *"for audience X, serve reduction R"* lowering to a reducer + exchange rule?
-4. **Recombination budget.** When one secret has several reducers (count *and* later full cards,
+1. **Confirm the framing.** Per-viewer hidden-info = field-level labels + opaque + label-gated
+   per-recipient sync (planned) + reducers for single-field summaries. Agreed there's no missing
+   projection primitive, and the earlier "ordered reveal dimension" is retired?
+2. **A standard reducer library + authoring affordance.** Worth a `count`/`exists`/`order` library
+   and sugar like *"for audience X, serve reduction R"* lowering to a reducer + exchange rule? (This
+   is the only net-new ask, and it's ergonomics.)
+3. **Recombination budget.** When one secret has several reducers (count *and* later full cards,
    etc.), how is the composition hazard (§14.3.2) bounded — per-secret reducer allow-lists,
    linkage tracking, a DP-style budget?
-5. **Unlinkability — research or out of scope?** Boardgame's scramble has no CFC analogue (it's a
-   relational, not who-may-read, property). Is it worth a research track, or explicitly declared
-   out of scope?
+4. **Unlinkability — research or out of scope?** Boardgame's scramble has no CFC analogue (it's a
+   relational, not who-may-read, property). Worth a research track, or explicitly out of scope?
 
 ---
 
@@ -395,9 +375,10 @@ by policy*, not a graded level. Each stage is badged **ENFORCED** (the two real 
 their boundaries + the trusted relabels) or **SIMULATED** (the reducer minting `ReducedBy{count}`
 and the relabel being *gated* on it — no such runtime primitive exists).
 
-**Honest panels:** a `🧭 materialization gap` panel (per-reader routing *Alice→cards / Bob→count* is
-the missing layer, simulated here) and a `⚠️ scope & limitations` panel (trusted-host UI gate ≠
-encryption; **recombination** and **unlinkability** out of scope).
+**Honest panels:** a `🧭 per-recipient sync` panel (Alice→cards / Bob→count is the *planned*
+label-gated sync, simulated here on one host) and a `⚠️ scope & limitations` panel (the
+render-boundary is a trusted-host stand-in for the sync layer; **recombination** and
+**unlinkability** out of scope).
 
 It **type-checks, deploys, and runs** (`deno task cf check … --no-run`, exit 0; deployed to a local
 toolshed and driven in-browser, 0 console errors).
