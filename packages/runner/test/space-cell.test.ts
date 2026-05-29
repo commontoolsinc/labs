@@ -45,7 +45,7 @@ describe("Runtime.getSpaceCell", () => {
 
     it("should have no defaultPattern in a fresh space", () => {
       // When the space cell itself is undefined, accessing defaultPattern
-      // via the schema (which has asCell: true) returns a Cell reference,
+      // via the schema (which has asCell: ["cell"]) returns a Cell reference,
       // but that cell's value should be undefined for a fresh space
       const spaceCell = runtime.getSpaceCell(space);
       const defaultPatternCell = spaceCell.key("defaultPattern");

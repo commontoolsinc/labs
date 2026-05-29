@@ -98,7 +98,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         error: { type: "object", additionalProperties: true },
         messages: {
@@ -170,7 +170,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        run: { asStream: true },
+        run: { asCell: ["stream"] },
         pending: { type: "boolean" },
         messages: {
           type: "array",
@@ -185,7 +185,7 @@ describe("llmDialog", () => {
       {
         type: "object",
         properties: {
-          addMessage: { ...LLMMessageSchema, asStream: true },
+          addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         },
         required: ["addMessage"],
       } as const satisfies JSONSchema,
@@ -267,7 +267,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         error: { type: "object", additionalProperties: true },
         messages: {
@@ -375,7 +375,7 @@ describe("llmDialog", () => {
           recipient: { type: "string" },
           subject: { type: "string" },
           body: { type: "string" },
-          result: { type: "object", asCell: true },
+          result: { type: "object", asCell: ["cell"] },
         },
         required: ["recipient", "subject", "body", "result"],
       },
@@ -391,7 +391,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         messages: {
           type: "array",
@@ -557,7 +557,7 @@ describe("llmDialog", () => {
           emails: {
             type: "array",
             items: { type: "object", additionalProperties: true },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["emails"],
@@ -574,7 +574,7 @@ describe("llmDialog", () => {
           type: "array",
           items: { type: "object", additionalProperties: true },
         },
-        summary: { type: "string", asCell: true },
+        summary: { type: "string", asCell: ["cell"] },
         tools: true,
       },
       required: ["emails", "summary", "tools"],
@@ -698,7 +698,7 @@ describe("llmDialog", () => {
           emails: {
             type: "array",
             items: { type: "object", additionalProperties: true },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["emails"],
@@ -715,7 +715,7 @@ describe("llmDialog", () => {
           type: "array",
           items: { type: "object", additionalProperties: true },
         },
-        summary: { type: "string", asCell: true },
+        summary: { type: "string", asCell: ["cell"] },
         tools: true,
       },
       required: ["emails", "summary", "tools"],
@@ -878,7 +878,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         messages: {
           type: "array",
@@ -978,7 +978,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         messages: {
           type: "array",
@@ -999,7 +999,7 @@ describe("llmDialog", () => {
       {
         type: "object",
         properties: {
-          result: { type: "object", asCell: true },
+          result: { type: "object", asCell: ["cell"] },
         },
         required: ["result"],
       },
@@ -1029,14 +1029,14 @@ describe("llmDialog", () => {
           recipient: { type: "string" },
           subject: { type: "string" },
           body: { type: "string" },
-          result: { type: "object", asCell: true },
+          result: { type: "object", asCell: ["cell"] },
         },
         required: ["recipient", "subject", "body", "result"],
       },
       {
         type: "object",
         properties: {
-          sent: { type: "object", asCell: true },
+          sent: { type: "object", asCell: ["cell"] },
           route: { type: "string" },
         },
         required: ["sent"],
@@ -1099,12 +1099,12 @@ describe("llmDialog", () => {
           body: {
             type: "object",
             additionalProperties: true,
-            asCell: true,
+            asCell: ["cell"],
           },
           emails: {
             type: "object",
             additionalProperties: true,
-            asCell: true,
+            asCell: ["cell"],
           },
           route: { type: "string" },
         },
@@ -1253,7 +1253,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         error: { type: "object", additionalProperties: true },
         messages: {
@@ -1381,7 +1381,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         pinnedCells: {
           type: "array",
@@ -1501,7 +1501,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         pinnedCells: {
           type: "array",
@@ -1587,7 +1587,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         pinnedCells: {
           type: "array",
@@ -1728,7 +1728,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         pinnedCells: {
           type: "array",
@@ -1836,7 +1836,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         error: { type: "object", additionalProperties: true },
         flattenedTools: {
@@ -1925,7 +1925,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         error: { type: "object", additionalProperties: true },
         flattenedTools: {
@@ -2012,7 +2012,7 @@ describe("llmDialog", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         error: { type: "object", additionalProperties: true },
         flattenedTools: {

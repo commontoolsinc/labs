@@ -895,7 +895,7 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
     }, {
       type: "object",
       properties: {
-        conversation: { asCell: true },
+        conversation: { asCell: ["cell"] },
       },
       required: ["conversation"],
     }, ({ conversation: nextConversation }, { conversation }) => {

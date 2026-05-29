@@ -161,7 +161,7 @@ type SchemaCore<
   Depth extends DepthLevel,
   WrapCells extends boolean,
 > = T extends { $ref: "#" } ? SchemaInner<
-    Omit<Root, "asCell" | "asStream">,
+    Omit<Root, "asCell">,
     Root,
     DecrementDepth<Depth>,
     WrapCells
@@ -208,13 +208,11 @@ type SchemaCore<
     : Record<string, unknown>
   : any;
 
-type WrapperList<T extends JSONSchema> = T extends { asCell: true }
-  ? readonly ["cell"]
-  : T extends { asStream: true } ? readonly ["stream"]
-  : T extends { asCell: infer AC extends readonly AsCellType[] } ? AC
+type WrapperList<T extends JSONSchema> = T extends
+  { asCell: infer AC extends readonly AsCellType[] } ? AC
   : readonly [];
 
-type StripWrappers<T extends JSONSchema> = Omit<T, "asCell" | "asStream">;
+type StripWrappers<T extends JSONSchema> = Omit<T, "asCell">;
 
 type ShiftWrapper<T extends readonly AsCellType[]> = T extends
   readonly [infer _First extends AsCellType, ...infer Rest extends AsCellType[]]

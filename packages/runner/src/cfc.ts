@@ -504,20 +504,12 @@ export class ContextualFlowControl {
     return cfcSchemaIsFalse(schema);
   }
 
-  // Utility function to handle the legacy asCell and asStream tags, as well
-  // as the modern asCell array tag.
+  // Utility function to handle the asCell array tag.
   static getAsCellValues(
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {
-    // Support both modern and legacy versions
-    if (isRecord(schema)) {
-      if (Array.isArray(schema.asCell)) {
-        return schema.asCell;
-      } else if (schema.asCell === true) {
-        return ["cell"];
-      } else if (schema.asStream === true) {
-        return ["stream"];
-      }
+    if (isRecord(schema) && Array.isArray(schema.asCell)) {
+      return schema.asCell;
     }
     return [];
   }

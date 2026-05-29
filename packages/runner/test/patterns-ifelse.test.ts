@@ -63,7 +63,7 @@ describe("Pattern Runner - ifElse", () => {
         "expandChat": { "type": "boolean" },
         "text": { "type": "string" },
       },
-      "asCell": true,
+      "asCell": ["cell"],
     } as const satisfies JSONSchema;
     const expandHandler = handler(
       InputSchema,
@@ -203,7 +203,7 @@ describe("Pattern Runner - ifElse", () => {
           type: "array",
           items: InnerSchema,
           default: [],
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["list"],
@@ -216,7 +216,7 @@ describe("Pattern Runner - ifElse", () => {
           type: "array",
           items: InnerSchema,
           default: [],
-          asCell: true,
+          asCell: ["cell"],
         },
       },
       required: ["list"],
@@ -225,8 +225,8 @@ describe("Pattern Runner - ifElse", () => {
     const OutputWithHandler = {
       type: "object",
       properties: {
-        list: { type: "array", items: InnerSchema, asCell: true },
-        add: { ...InnerSchema, asStream: true },
+        list: { type: "array", items: InnerSchema, asCell: ["cell"] },
+        add: { ...InnerSchema, asCell: ["stream"] },
       },
       required: ["add", "list"],
     } as const satisfies JSONSchema;

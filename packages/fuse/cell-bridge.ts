@@ -46,14 +46,14 @@ import type {
   PiecesController,
 } from "@commonfabric/piece/ops";
 
-/** Strip asStream/asCell markers from a schema for display as input schema. */
+/** Strip asCell markers from a schema for display as input schema. */
 function getInputSchema(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
     return undefined;
   }
-  const { asStream: _s, asCell: _c, ...rest } = schema as Record<
+  const { asCell: _c, ...rest } = schema as Record<
     string,
     unknown
   >;

@@ -43,7 +43,7 @@ describe("Cell array element conversion", () => {
       items: {
         type: "object",
         properties: { foo: { type: "number" } },
-        asCell: true,
+        asCell: ["cell"],
       },
     } as const satisfies JSONSchema;
     const refCell = runtime.getCell<{ foo: number }[]>(

@@ -961,13 +961,13 @@ describe("Schema - Link Resolution", () => {
         properties: {
           test: { type: "object", properties: { foo: { type: "string" } } },
         },
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema;
 
       const resultCell = outer.asSchema({
         type: "object",
         properties: { inner: asObjectSchema },
-        asCell: true,
+        asCell: ["cell"],
       }).get();
       expect(isCell(resultCell)).toBe(true);
 
@@ -1776,13 +1776,13 @@ describe("Schema - Link Resolution", () => {
 
       const asCellSchema = {
         type: "unknown",
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema;
 
       const resultCell = outer.asSchema({
         type: "object",
         properties: { inner: asObjectSchema },
-        asCell: true,
+        asCell: ["cell"],
       }).get();
       expect(isCell(resultCell)).toBe(true);
 
@@ -1947,13 +1947,13 @@ describe("Schema - Link Resolution", () => {
 
       const asCellSchema = {
         type: "unknown",
-        asCell: true,
+        asCell: ["cell"],
       } as const satisfies JSONSchema;
 
       const resultCell = outer.asSchema({
         type: "array",
         items: asObjectSchema,
-        asCell: true,
+        asCell: ["cell"],
       }).get();
       expect(isCell(resultCell)).toBe(true);
 

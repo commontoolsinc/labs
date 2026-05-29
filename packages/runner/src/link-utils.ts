@@ -426,7 +426,7 @@ export type SanitizeSchemaForLinksOptions = {
 };
 
 /**
- * Traverse schema and remove all asCell and asStream flags.
+ * Traverse schema and remove all asCell flags.
  * Also handles circular references by using JSON Schema $ref.
  *
  * When circular references are detected, they are extracted to a $defs
@@ -565,7 +565,7 @@ function recursiveStripAsCellFromSchema(
   if (context.options.keepAsCell) {
     result = { ...schema };
   } else {
-    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    const { asCell: _c, ...restSchema } = schema;
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     // If we're keeping streams and the outermost is a stream, keep it
     if (

@@ -166,7 +166,7 @@ export function createQueryResultProxy<T>(
   // If the value is a stream marker ({ $stream: true }), return a Cell with
   // stream kind so that .send() is available. This handles the case where a
   // pattern's Output type wasn't explicitly specified, causing the capture
-  // schema to lose the asStream information.
+  // schema to lose the asCell stream information.
   if (isStreamValue(value)) {
     return createCell(runtime, link, tx, false, "stream", cfcLabelView) as T;
   }

@@ -533,18 +533,18 @@ describe("schema-utils", () => {
       expect(schema.type).toBe("string");
     });
 
-    it("can set properties to `undefined` (key remains present)", () => {
-      const schema = { type: "object", asStream: true } as JSONSchemaObj;
+    it("can set properties to undefined (key remains present)", () => {
+      const schema = { type: "object", asCell: ["stream"] } as JSONSchemaObj;
       const result = schemaWithProperties(schema, {
-        asStream: undefined,
+        default: undefined,
       }) as JSONSchemaObj;
 
       // The key must still exist on the result — `undefined` is a meaningful
       // value distinct from absence, which matters once schemas carry
       // FabricValue-typed fields.
-      expect(result.asStream).toBe(undefined);
-      expect("asStream" in result).toBe(true);
-      expect(result.type).toBe("object");
+      expect(result.default).toBe(undefined);
+      expect("default" in result).toBe(true);
+      expect(result.asCell).toEqual(["stream"]);
     });
 
     it("can add new properties", () => {
@@ -694,7 +694,7 @@ describe("schema-utils", () => {
 
   describe("schemaWithoutProperties", () => {
     it("removes a single named property", () => {
-      const schema: JSONSchemaObj = { type: "object", asCell: true };
+      const schema: JSONSchemaObj = { type: "object", asCell: ["cell"] };
       const result = schemaWithoutProperties(schema, "asCell") as JSONSchemaObj;
 
       expect(result).toEqual({ type: "object" });
@@ -704,32 +704,32 @@ describe("schema-utils", () => {
     it("removes multiple named properties", () => {
       const schema = {
         type: "object",
-        asCell: true,
-        asStream: true,
+        asCell: ["cell"],
+        default: {},
       } as JSONSchemaObj;
       const result = schemaWithoutProperties(
         schema,
         "asCell",
-        "asStream",
+        "default",
       ) as JSONSchemaObj;
 
       expect(result).toEqual({ type: "object" });
       expect("asCell" in result).toBe(false);
-      expect("asStream" in result).toBe(false);
+      expect("default" in result).toBe(false);
     });
 
     it("returns a frozen result", () => {
-      const schema: JSONSchemaObj = { type: "object", asCell: true };
+      const schema: JSONSchemaObj = { type: "object", asCell: ["cell"] };
       const result = schemaWithoutProperties(schema, "asCell");
 
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("does not mutate the original", () => {
-      const schema: JSONSchemaObj = { type: "object", asCell: true };
+      const schema: JSONSchemaObj = { type: "object", asCell: ["cell"] };
       schemaWithoutProperties(schema, "asCell");
 
-      expect(schema.asCell).toBe(true);
+      expect(schema.asCell).toEqual(["cell"]);
     });
 
     it("is a no-op (deep-frozen clone) when the named property is absent from a mutable schema", () => {
@@ -765,13 +765,13 @@ describe("schema-utils", () => {
 
     describe("intern contagion", () => {
       it("interns the result when the input schema is interned", () => {
-        const schema = internSchema({ type: "object", asCell: true });
+        const schema = internSchema({ type: "object", asCell: ["cell"] });
         const result = schemaWithoutProperties(schema, "asCell");
         expect(isInternedSchema(result)).toBe(true);
       });
 
       it("leaves the result uninterned when the input schema is not interned", () => {
-        const schema: JSONSchemaObj = { type: "object", asCell: true };
+        const schema: JSONSchemaObj = { type: "object", asCell: ["cell"] };
         const result = schemaWithoutProperties(schema, "asCell");
         expect(isInternedSchema(result)).toBe(false);
         // But it should still be frozen.

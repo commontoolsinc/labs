@@ -292,7 +292,7 @@ type AsCellEntry =
 
 type JSONSchemaObj = {
   scope?: SchemaScope;
-  asCell?: boolean | readonly AsCellEntry[];
+  asCell?: readonly AsCellEntry[];
   // ...
 };
 ```
