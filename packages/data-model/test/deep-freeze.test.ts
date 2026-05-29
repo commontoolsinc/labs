@@ -262,7 +262,7 @@ describe("deep-freeze", () => {
   });
 
   describe("`deepFreeze()` protocol dispatch via `[DEEP_FREEZE]`", () => {
-    describe("arm 2 (`FabricPrimitive` short-circuit)", () => {
+    describe("`FabricPrimitive` short-circuit", () => {
       it("returns the `FabricPrimitive` unchanged", () => {
         const epoch = new FabricEpochNsec(1234567890n);
         // `FabricPrimitive`s self-freeze at construction; `deepFreeze` must
@@ -271,7 +271,7 @@ describe("deep-freeze", () => {
       });
     });
 
-    describe("arm 3 (`[DEEP_FREEZE]` delegation)", () => {
+    describe("`[DEEP_FREEZE]` delegation", () => {
       it("delegates and freezes in place", () => {
         const inner = new Error("cause");
         const outer = new Error("outer", { cause: inner });
@@ -332,22 +332,20 @@ describe("deep-freeze", () => {
     });
   });
 
-  /**
-   * Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
-   * 4-arm dispatch) and the analogous arms of `checkValue` inside
-   * `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
-   * Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
-   * references), so cycle tests only apply to Arm 4 (plain-object / array
-   * fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
-   * covered in `fabric-instances/native-instance-utils.test.ts`.
-   *
-   * Termination assertion: a cycle without shared-`inProgress` threading would
-   * manifest as `RangeError: Maximum call stack size exceeded` (a clean fast
-   * throw, not a hang). `.not.toThrow()` is the discriminating assertion for
-   * "this call terminates."
-   */
+  // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
+  // 4-arm dispatch) and the analogous arms of `checkValue` inside
+  // `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
+  // Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
+  // references), so cycle tests only apply to Arm 4 (plain-object / array
+  // fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
+  // covered in `fabric-instances/native-instance-utils.test.ts`.
+  //
+  // Termination assertion: a cycle without shared-`inProgress` threading would
+  // manifest as `RangeError: Maximum call stack size exceeded` (a clean fast
+  // throw, not a hang). `.not.toThrow()` is the discriminating assertion for
+  // "this call terminates."
   describe("cycle behavior", () => {
-    describe("`deepFreeze()` (Arm 4: plain object / array)", () => {
+    describe("`deepFreeze()` (plain object / array)", () => {
       it("terminates on a self-referential plain object", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;
