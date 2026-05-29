@@ -130,7 +130,7 @@ describe("FabricRegExp", () => {
     });
 
     describe("toNativeValue()", () => {
-      it("returns a frozen `RegExp` (copy of unfrozen) when `frozen` is true", () => {
+      it("returns a frozen `RegExp` (copy of unfrozen) when `frozen` is `true`", () => {
         const re = /abc/gi;
         const sr = new FabricRegExp(re);
         const result = sr.toNativeValue(true);
@@ -149,7 +149,7 @@ describe("FabricRegExp", () => {
         expect(result).toBe(re); // same reference
       });
 
-      it("returns the original unfrozen `RegExp` when `frozen` is false", () => {
+      it("returns the original unfrozen `RegExp` when `frozen` is `false`", () => {
         const re = /abc/gi;
         const sr = new FabricRegExp(re);
         const result = sr.toNativeValue(false);
@@ -157,7 +157,7 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("returns an unfrozen copy of a frozen `RegExp` when `frozen` is false", () => {
+      it("returns an unfrozen copy of a frozen `RegExp` when `frozen` is `false`", () => {
         const re = Object.freeze(/abc/gi);
         const sr = new FabricRegExp(re);
         const result = sr.toNativeValue(false);
@@ -179,7 +179,7 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(fr.regex)).toBe(true);
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` true only when wrapper + `RegExp` frozen", () => {
+      it("via dispatch: `[IS_DEEP_FROZEN]` is `true` only when wrapper + `RegExp` frozen", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(isDeepFrozenFabricValue(fr)).toBe(false);
         deepFreeze(fr);
@@ -195,7 +195,7 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(fr.regex)).toBe(true);
       });
 
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` true only when wrapper + `RegExp` frozen", () => {
+      it("via direct member invocation: `[IS_DEEP_FROZEN]` is `true` only when wrapper + `RegExp` frozen", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fr[DEEP_FREEZE](subFreeze);
@@ -215,7 +215,7 @@ describe("FabricRegExp", () => {
         expect(result.flavor).toBe("es2025");
       });
 
-      it("defaults to empty `source`, `flags`, and `es2025` `flavor`", () => {
+      it("defaults to empty `source`, `flags`, and `es2025` flavor", () => {
         const state = {} as FabricValue;
         const result = FabricRegExp[RECONSTRUCT](state, dummyContext);
         expect(result.regex.source).toBe("(?:)");
@@ -276,7 +276,7 @@ describe("FabricRegExp", () => {
       expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
     });
 
-    it("`isConvertibleNativeInstance()` returns true for `RegExp`", () => {
+    it("`isConvertibleNativeInstance()` returns `true` for `RegExp`", () => {
       expect(isConvertibleNativeInstance(/abc/)).toBe(true);
       expect(isConvertibleNativeInstance(new RegExp("test", "gi"))).toBe(true);
     });
@@ -290,11 +290,11 @@ describe("FabricRegExp", () => {
       resetDataModelConfig();
     });
 
-    it("returns true for a plain `RegExp`", () => {
+    it("returns `true` for a plain `RegExp`", () => {
       expect(isFabricCompatible(/abc/gi)).toBe(true);
     });
 
-    it("returns true for a `RegExp` nested in objects", () => {
+    it("returns `true` for a `RegExp` nested in objects", () => {
       expect(isFabricCompatible({ pattern: /abc/gi })).toBe(true);
     });
   });
