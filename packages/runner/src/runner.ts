@@ -90,7 +90,6 @@ import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 export {
-  cellAwareDeepCopy,
   extractDefaultValues,
   mergeObjects,
   validateAndCheckOpaqueRefs,
