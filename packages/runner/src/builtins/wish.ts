@@ -271,12 +271,18 @@ function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
     "profile",
   );
   const profileRaw = profileField.getRaw();
-  const profileDefault = isRecord(profileRaw) && "value" in profileRaw
-    ? profileField.key("value").resolveAsCell()
+  const profileValueDefault = profileField.key("value").resolveAsCell();
+  const profileValueLink = profileValueDefault.getAsNormalizedFullLink();
+  const hasMaterializedProfileValueLink =
+    profileValueLink.space !== homeSpaceCell.space &&
+    profileValueLink.path.length === 0;
+  const profileDefault = hasMaterializedProfileValueLink ||
+      (isRecord(profileRaw) && "value" in profileRaw)
+    ? profileValueDefault
     : profileField.resolveAsCell();
   const profileLink = profileDefault.getAsNormalizedFullLink();
   if (
-    profileRaw === undefined ||
+    (!hasMaterializedProfileValueLink && profileRaw === undefined) ||
     profileLink.space === homeSpaceCell.space ||
     profileLink.path.length > 0
   ) {

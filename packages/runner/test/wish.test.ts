@@ -2319,7 +2319,7 @@ describe("wish built-in", () => {
         .toBe("Ada Lovelace");
     });
 
-    it("resolves profile targets from writeonly profile value wrappers", async () => {
+    it("resolves profile targets from materialized profile.value links", async () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-profile-writeonly-wrapper-space",
       )).did();
@@ -2347,7 +2347,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      homeDefaultCell.key("profile").set({ value: profileDefaultCell });
+      homeDefaultCell.key("profile", "value").set(profileDefaultCell);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();

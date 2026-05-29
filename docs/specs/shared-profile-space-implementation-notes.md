@@ -749,3 +749,30 @@ made before committing.
 - The spec should call out the home profile storage shape: the public well-known
   field is `profile`, but writeonly bindings can persist the actual profile
   default link under `profile.value`.
+
+## Slice 19: Materialized Profile Value Links
+
+### Ambiguity or Incorrect Spec
+
+- The profile link wrapper can be partially materialized: `profile.value` can
+  contain the profile default link even when `profile` itself does not have a
+  readable raw wrapper object in the current frame.
+
+### Decision
+
+- Treat a cross-space, root-path `profile.value` link as an authoritative
+  profile default link, even if `profile.getRaw()` is undefined.
+- Keep rejecting same-home-space links and non-root links as missing/invalid
+  profile defaults.
+
+### Tests Added
+
+- `packages/runner/test/wish.test.ts`
+  - Covers profile wishes resolving through a materialized `profile.value`
+    child link.
+
+### Spec Correction Needed
+
+- Docs that describe the home well-known `profile` field should state that
+  implementations must resolve the `profile.value` child link when writeonly
+  profile bindings materialize only that child.
