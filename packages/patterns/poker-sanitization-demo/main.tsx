@@ -426,19 +426,40 @@ export default pattern<unknown, PokerOutput>(() => {
                 <div style={NAME_COL}>Alice</div>
                 {aliceCell}
                 {aliceNote}
-                <cf-cfc-label data-cfc-label-surface="alice" $value={aliceConf} />
               </div>
               <div style={HAND_ROW}>
                 <div style={NAME_COL}>Bob</div>
                 {bobCell}
                 {bobNote}
-                <cf-cfc-label data-cfc-label-surface="bob" $value={bobConf} />
               </div>
               <div style={HAND_ROW}>
                 <div style={NAME_COL}>Charlie</div>
                 {charlieCell}
                 {charlieNote}
-                <cf-cfc-label data-cfc-label-surface="charlie" $value={charlieConf} />
+              </div>
+            </cf-vstack>
+          </cf-card>
+
+          {/* The real live label the render boundary checks (one compact instance) */}
+          <cf-card>
+            <cf-vstack slot="content" gap="2">
+              <cf-heading level={3}>🏷️ Live CFC label on a hand</cf-heading>
+              <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
+                The actual <code>ifc.confidentiality</code> the runtime attached to Alice's hand —
+                exactly what the render boundary above reads to decide whether to show it.
+              </cf-label>
+              <div
+                style={{
+                  fontSize: "11px",
+                  maxHeight: "110px",
+                  overflow: "auto",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  padding: "8px",
+                }}
+              >
+                <cf-cfc-label data-cfc-label-surface="alice" $value={aliceConf} />
               </div>
             </cf-vstack>
           </cf-card>
