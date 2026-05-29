@@ -262,14 +262,14 @@ describe("deep-freeze", () => {
   });
 
   describe("`deepFreeze()` protocol dispatch via `[DEEP_FREEZE]`", () => {
-    it("arm 2: `FabricPrimitive` short-circuits unchanged", () => {
+    it("short-circuits a `FabricPrimitive` unchanged (arm 2)", () => {
       const epoch = new FabricEpochNsec(1234567890n);
       // `FabricPrimitive`s self-freeze at construction; `deepFreeze` must
       // return them unchanged without entering the object-walk.
       expect(deepFreeze(epoch)).toBe(epoch);
     });
 
-    it("arm 3: delegates to `[DEEP_FREEZE]` and freezes in place", () => {
+    it("delegates to `[DEEP_FREEZE]` and freezes in place (arm 3)", () => {
       const inner = new Error("cause");
       const outer = new Error("outer", { cause: inner });
       const fe = FabricError.fromNativeError(outer);
@@ -286,7 +286,7 @@ describe("deep-freeze", () => {
       expect(Object.isFrozen(inner)).toBe(true);
     });
 
-    it("arm 3: recurses `[DEEP_FREEZE]` into nested `FabricValue`s", () => {
+    it("recurses `[DEEP_FREEZE]` into nested `FabricValue`s (arm 3)", () => {
       const fe = FabricError.fromNativeError(new Error("e"));
       const container = { wrapped: fe as unknown as FabricValue, n: 1 };
       deepFreeze(container);
@@ -328,81 +328,80 @@ describe("deep-freeze", () => {
     });
   });
 
-  // ===========================================================================
-  // Circular-value cycle behavior.
-  //
-  // Scope: cycle coverage for `deepFreeze()`'s arms (per the function's
-  // doc-comment 4-arm dispatch) and the analogous arms of `checkValue` inside
-  // `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
-  // Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
-  // references), so cycle tests only apply to Arm 4 (plain-object / array
-  // fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
-  // covered in `fabric-instances/native-instance-utils.test.ts`.
-  //
-  // Termination assertion: a cycle without shared-`inProgress` threading
-  // would manifest as `RangeError: Maximum call stack size exceeded` (a
-  // clean fast throw, not a hang). `.not.toThrow()` is the discriminating
-  // assertion for "this call terminates."
-  // ===========================================================================
+  /**
+   * Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
+   * 4-arm dispatch) and the analogous arms of `checkValue` inside
+   * `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
+   * Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
+   * references), so cycle tests only apply to Arm 4 (plain-object / array
+   * fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
+   * covered in `fabric-instances/native-instance-utils.test.ts`.
+   *
+   * Termination assertion: a cycle without shared-`inProgress` threading would
+   * manifest as `RangeError: Maximum call stack size exceeded` (a clean fast
+   * throw, not a hang). `.not.toThrow()` is the discriminating assertion for
+   * "this call terminates."
+   */
+  describe("cycle behavior", () => {
+    describe("`deepFreeze()` (Arm 4: plain object / array)", () => {
+      it("terminates on a self-referential plain object", () => {
+        const a: Record<string, unknown> = { x: 1 };
+        a.self = a;
+        expect(() => deepFreeze(a)).not.toThrow();
+        expect(Object.isFrozen(a)).toBe(true);
+      });
 
-  describe("`deepFreeze()` cycle behavior (Arm 4: plain object / array)", () => {
-    it("terminates on a self-referential plain object", () => {
-      const a: Record<string, unknown> = { x: 1 };
-      a.self = a;
-      expect(() => deepFreeze(a)).not.toThrow();
-      expect(Object.isFrozen(a)).toBe(true);
+      it("terminates on a self-referential array", () => {
+        const arr: unknown[] = [1, 2];
+        arr.push(arr);
+        expect(() => deepFreeze(arr)).not.toThrow();
+        expect(Object.isFrozen(arr)).toBe(true);
+      });
+
+      it("terminates on a two-node cycle through plain objects (a -> b -> a)", () => {
+        const a: Record<string, unknown> = { tag: "a" };
+        const b: Record<string, unknown> = { tag: "b" };
+        a.next = b;
+        b.next = a;
+        expect(() => deepFreeze(a)).not.toThrow();
+        expect(Object.isFrozen(a)).toBe(true);
+        expect(Object.isFrozen(b)).toBe(true);
+      });
+
+      it("terminates on a cycle that mixes plain object and array layers", () => {
+        const arr: unknown[] = [];
+        const obj: Record<string, unknown> = { children: arr };
+        arr.push(obj);
+        expect(() => deepFreeze(obj)).not.toThrow();
+        expect(Object.isFrozen(obj)).toBe(true);
+        expect(Object.isFrozen(arr)).toBe(true);
+      });
     });
 
-    it("terminates on a self-referential array", () => {
-      const arr: unknown[] = [1, 2];
-      arr.push(arr);
-      expect(() => deepFreeze(arr)).not.toThrow();
-      expect(Object.isFrozen(arr)).toBe(true);
-    });
+    describe("`isDeepFrozenFabricValue()` (regression pin)", () => {
+      // `checkValue` inside `isDeepFrozenFabricValue` maintains a closure-
+      // captured `seen` set, so it is currently cycle-safe across Arms 3 and
+      // 4 via that closure. These tests pin that property so a future fix
+      // does not regress it.
+      it("terminates on a deep-frozen self-referential plain object", () => {
+        const a: Record<string, unknown> = { x: 1 };
+        a.self = a;
+        Object.freeze(a);
+        expect(() => isDeepFrozenFabricValue(a)).not.toThrow();
+        // The graph is deep-frozen-shaped (every reachable object frozen).
+        expect(isDeepFrozenFabricValue(a)).toBe(true);
+      });
 
-    it("terminates on a two-node cycle through plain objects (a -> b -> a)", () => {
-      const a: Record<string, unknown> = { tag: "a" };
-      const b: Record<string, unknown> = { tag: "b" };
-      a.next = b;
-      b.next = a;
-      expect(() => deepFreeze(a)).not.toThrow();
-      expect(Object.isFrozen(a)).toBe(true);
-      expect(Object.isFrozen(b)).toBe(true);
-    });
-
-    it("terminates on a cycle that mixes plain object and array layers", () => {
-      const arr: unknown[] = [];
-      const obj: Record<string, unknown> = { children: arr };
-      arr.push(obj);
-      expect(() => deepFreeze(obj)).not.toThrow();
-      expect(Object.isFrozen(obj)).toBe(true);
-      expect(Object.isFrozen(arr)).toBe(true);
-    });
-  });
-
-  describe("isDeepFrozenFabricValue cycle behavior (regression pin)", () => {
-    // `checkValue` inside `isDeepFrozenFabricValue` maintains a closure-
-    // captured `seen` set, so it is currently cycle-safe across Arms 3 and
-    // 4 via that closure. These tests pin that property so a future fix
-    // does not regress it.
-    it("terminates on a deep-frozen self-referential plain object", () => {
-      const a: Record<string, unknown> = { x: 1 };
-      a.self = a;
-      Object.freeze(a);
-      expect(() => isDeepFrozenFabricValue(a)).not.toThrow();
-      // The graph is deep-frozen-shaped (every reachable object frozen).
-      expect(isDeepFrozenFabricValue(a)).toBe(true);
-    });
-
-    it("terminates on a deep-frozen two-node cycle", () => {
-      const a: Record<string, unknown> = { tag: "a" };
-      const b: Record<string, unknown> = { tag: "b" };
-      a.next = b;
-      b.next = a;
-      Object.freeze(a);
-      Object.freeze(b);
-      expect(() => isDeepFrozenFabricValue(a)).not.toThrow();
-      expect(isDeepFrozenFabricValue(a)).toBe(true);
+      it("terminates on a deep-frozen two-node cycle", () => {
+        const a: Record<string, unknown> = { tag: "a" };
+        const b: Record<string, unknown> = { tag: "b" };
+        a.next = b;
+        b.next = a;
+        Object.freeze(a);
+        Object.freeze(b);
+        expect(() => isDeepFrozenFabricValue(a)).not.toThrow();
+        expect(isDeepFrozenFabricValue(a)).toBe(true);
+      });
     });
   });
 });
