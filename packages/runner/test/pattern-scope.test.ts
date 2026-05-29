@@ -591,7 +591,7 @@ Deno.test("pattern factory .inSpace() handler side effect can write linked child
       required: ["value"],
     }, {
       type: "object",
-      properties: { profile: { asCell: true } },
+      properties: { profile: { asCell: ["cell"] } },
       required: ["profile"],
     }, ({ value }, { profile }) => {
       profile.set(Child.inSpace(targetSpace)({ value }));
@@ -604,7 +604,7 @@ Deno.test("pattern factory .inSpace() handler side effect can write linked child
       {
         type: "object",
         properties: {
-          profile: { asCell: true },
+          profile: { asCell: ["cell"] },
         },
         required: ["profile"],
       } as const,
@@ -672,7 +672,7 @@ Deno.test("pattern factory .inSpace() resolves named handler children to DIDs", 
       required: ["value"],
     }, {
       type: "object",
-      properties: { target: { asCell: true } },
+      properties: { target: { asCell: ["cell"] } },
       required: ["target"],
     }, ({ value }, { target }) => {
       target.set(Child.inSpace(spaceName)({ value }));
@@ -685,7 +685,7 @@ Deno.test("pattern factory .inSpace() resolves named handler children to DIDs", 
       {
         type: "object",
         properties: {
-          target: { asCell: true },
+          target: { asCell: ["cell"] },
         },
         required: ["target"],
       } as const,
