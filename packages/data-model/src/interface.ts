@@ -10,9 +10,9 @@
  * corresponding declarations there.
  */
 
-// ===========================================================================
+//
 // `FabricSpecialObject`
-// ===========================================================================
+//
 
 /**
  * Abstract base class for all fabric-system value types. This is the common
@@ -24,9 +24,9 @@
  */
 export abstract class FabricSpecialObject {}
 
-// ===========================================================================
+//
 // Fabric instance protocol (`[DECONSTRUCT]` / `[RECONSTRUCT]` / `FabricInstance`)
-// ===========================================================================
+//
 
 /**
  * Well-known symbol for deconstructing a fabric instance into its essential
@@ -152,9 +152,9 @@ export abstract class FabricInstance extends FabricSpecialObject {
   abstract shallowClone(frozen: boolean): FabricInstance;
 }
 
-// ===========================================================================
+//
 // Fabric primitive base class
-// ===========================================================================
+//
 
 /**
  * Abstract base class for "special primitive" fabric types -- values that
@@ -179,9 +179,9 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
   }
 }
 
-// ===========================================================================
+//
 // Type definitions
-// ===========================================================================
+//
 
 /**
  * The full set of values that the fabric storage layer can represent. This
@@ -275,9 +275,9 @@ export type FabricNativeObject =
   | Uint8Array
   | { toJSON(): unknown };
 
-// ===========================================================================
+//
 // Fabric protocol interfaces
-// ===========================================================================
+//
 
 /**
  * Interface for classes that can reconstruct fabric instances from essential

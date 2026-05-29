@@ -1,10 +1,6 @@
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { FrozenSet } from "./frozen-builtins.ts";
 
-// ---------------------------------------------------------------------------
-// Utility: native-instance type guard
-// ---------------------------------------------------------------------------
-
 /**
  * Returns `true` if the value is a native JS object type that the fabric
  * system knows how to wrap. These are the "wild-west" instances that get
@@ -30,19 +26,11 @@ export function isConvertibleNativeInstance(value: object): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Utility: safe property copy
-// ---------------------------------------------------------------------------
-
 /** Keys that must never be copied to prevent prototype pollution. */
 export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
   "__proto__",
   "constructor",
 ]);
-
-// ---------------------------------------------------------------------------
-// Utility: `Error` class lookup
-// ---------------------------------------------------------------------------
 
 /** Map from Error subclass name to its constructor. */
 const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([

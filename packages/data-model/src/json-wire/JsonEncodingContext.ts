@@ -129,9 +129,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     this.registry.set(TAGS.RegExp, FabricRegExp);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // `SerializationContext<string>` -- public boundary interface
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Encodes a fabric value to a JSON string. Serializes modern types into
@@ -158,9 +158,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return this.deserialize(parsed, runtime);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Static helpers
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Indicates if the given text has a "first-blush" appearance as valid JSON
@@ -171,9 +171,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return value.startsWith(ENCODING_PREFIX_TAG);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Byte-level boundary (public for now -- used by serializeToBytes tests)
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Serializes a fabric value to UTF-8 JSON bytes.
@@ -193,9 +193,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return this.deserialize(tree, runtime);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Tag wrapping/unwrapping (private)
-  // -------------------------------------------------------------------------
+  //
 
   /** Returns the wire format tag for a fabric instance's type. */
   private getTagFor(value: FabricInstance): string {
@@ -253,9 +253,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return { tag, state };
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Byte conversion (private)
-  // -------------------------------------------------------------------------
+  //
 
   /** Converts a wire-format tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonWireValue): Uint8Array {
@@ -268,12 +268,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return JsonEncodingContext.#parseWireText(json);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Tree-walking serialization (private)
   //
-  // Moved from serialization.ts. These methods walk the value tree,
-  // dispatching to type handlers and applying structural escaping.
-  // -------------------------------------------------------------------------
 
   /**
    * Serializes a fabric value into wire format. Recursively processes nested
@@ -284,7 +281,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     _seen?: Set<object>,
     registry: TypeHandlerRegistry = defaultRegistry,
   ): JsonWireValue {
-    // --- Try type handlers first ---
+    // Try type handlers first
     const handler = registry.findSerializer(value);
     if (handler) {
       const seen = _seen ?? new Set<object>();
@@ -309,7 +306,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result;
     }
 
-    // --- Primitives ---
+    // Primitives
     if (
       value === null || typeof value === "boolean" ||
       typeof value === "number" || typeof value === "string"
@@ -317,7 +314,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return value as JsonWireValue;
     }
 
-    // --- Arrays ---
+    // Arrays
     if (Array.isArray(value)) {
       const seen = _seen ?? new Set<object>();
       if (seen.has(value)) {
@@ -347,7 +344,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result as JsonWireValue;
     }
 
-    // --- Plain objects ---
+    // Plain objects
     const seen = _seen ?? new Set<object>();
     if (seen.has(value as object)) {
       throw new Error("Circular reference detected during serialization");
@@ -385,9 +382,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return result as JsonWireValue;
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Tree-walking deserialization (private)
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Deserializes a wire-format value back into modern runtime types.
@@ -434,7 +431,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return state as FabricValue;
       }
 
-      // --- Type handler dispatch ---
+      // Type handler dispatch
       //
       // `TypeHandler.deserialize()` makes a contractual guarantee that its
       // results are deep-frozen, rather than relying on every caller to
@@ -470,7 +467,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         ));
       }
 
-      // --- Class registry fallback ---
+      // Class registry fallback
       const cls = this.getClassFor(tag);
       const deserializedState = this.deserialize(state, runtime, registry);
 

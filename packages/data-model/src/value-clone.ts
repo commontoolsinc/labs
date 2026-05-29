@@ -439,7 +439,7 @@ export function cloneForMutation<T extends FabricValue>(
   // final value-at-`path` thaw if it's a plain container or `FabricInstance`.
   const cloneOpts = { frozen: false as const, deep: false as const, force };
 
-  // --- Empty-path fast path ---------------------------------------------
+  // Empty-path fast path
   if (path.length === 0) {
     if (!isMutableHandle(value)) {
       throw new CloneForMutationError(
@@ -454,10 +454,9 @@ export function cloneForMutation<T extends FabricValue>(
     return { value: newRoot, pathValue: newRoot };
   }
 
-  // --- Non-empty path ---------------------------------------------------
-  // The root must be a plain container; descent through a `FabricInstance`
-  // root would have nowhere to go (path-style access into FabricInstance
-  // internals isn't supported).
+  // Non-empty path: The root must be a plain container; descent through a
+  // `FabricInstance` root would have nowhere to go (path-style access into
+  // FabricInstance internals isn't supported).
   if (!isPlainContainer(value)) {
     throw new CloneForMutationError(
       "non-container-root",
