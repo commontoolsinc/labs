@@ -7,7 +7,7 @@ import {
 import type { TriggerTraceEntry } from "@commonfabric/runtime-client";
 
 describe("debug utils", () => {
-  it("summarizeDebugValue classifies common process/result shapes", () => {
+  it("summarizeDebugValue classifies common metadata/result shapes", () => {
     const summary = summarizeDebugValue({
       $NAME: "My Note",
       $TYPE: "notes/note",
@@ -26,7 +26,7 @@ describe("debug utils", () => {
     expect(summary.looksLike).toContain("named-piece-output");
     expect(summary.looksLike).toContain("pattern-result");
     expect(summary.looksLike).toContain("ui-result");
-    expect(summary.looksLike).toContain("runtime-process-cell");
+    expect(summary.looksLike).toContain("runtime-metadata-doc");
     expect(summary.looksLike).toContain("default-app-or-home-state");
     expect(summary.looksLike).toContain("index-state");
   });

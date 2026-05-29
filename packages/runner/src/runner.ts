@@ -1910,7 +1910,7 @@ export class Runner {
         );
         targets.push(target);
       } catch (error) {
-        // Some setup paths have not fully materialized process-cell redirects
+        // Some setup paths have not fully materialized metadata redirects
         // yet. Leave those to runtime dependency collection after the action
         // has run, but keep debug context for unexpected resolution failures.
         logger.debug("static-redirect-write-target", () => [

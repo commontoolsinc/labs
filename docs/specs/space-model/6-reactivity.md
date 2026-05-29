@@ -163,10 +163,10 @@ internal cell ── meta:result ──┼──> result cell
 child result ─── meta:result ──┘
 ```
 
-Older descriptions call this the `sourceCell` chain. The important property is
-the direction of discovery: from an arbitrary owned cell, follow `result`
-metadata until reaching the owning result cell; from that result cell, read
-`pattern` metadata to determine which pattern governs the piece.
+The important property is the direction of discovery: from an arbitrary owned
+cell, follow `result` metadata until reaching the owning result cell; from that
+result cell, read `pattern` metadata to determine which pattern governs the
+piece.
 
 This metadata is not a reactive dependency edge. Runtime code generally reads it
 with scheduling ignored, because it is ownership/control-plane information used

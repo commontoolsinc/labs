@@ -489,7 +489,7 @@ This helper:
 - groups `commonfabric.rt.getTriggerTrace()` by exact `space/entity/path`
 - counts direct action schedules and downstream scheduled effects
 - reads the hottest changed cells through `CellHandle`
-- annotates them with shape hints like `ui-result`, `runtime-process-cell`,
+- annotates them with shape hints like `ui-result`, `runtime-metadata-doc`,
   `default-app-or-home-state`, and `index-state`
 
 ### watchWrites / getWriteStackTrace
@@ -538,7 +538,7 @@ Each recorded entry includes:
 Interpret repeated root writes in this order:
 
 - `setup:setMetaRaw`: initial result metadata linkage
-- `setup:setRawUntyped`: initial process-cell or result-cell materialization
+- `setup:setRawUntyped`: initial result or metadata-linked cell materialization
 - `raw:setRawUntyped`: raw builtin/helper rewriting a result cell directly
 
 If you want immediate log output instead of post-hoc inspection, enable the

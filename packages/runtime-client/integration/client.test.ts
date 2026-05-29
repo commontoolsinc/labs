@@ -471,7 +471,7 @@ export default pattern((_) => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      // Create a root cell that will have the structure like a process cell
+      // Create a root cell with nested runtime metadata-shaped content.
       const rootCell = await rt.getCell(
         session.space,
         "test-nested-stream-" + Date.now(),
