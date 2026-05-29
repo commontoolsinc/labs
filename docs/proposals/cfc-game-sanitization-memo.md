@@ -404,18 +404,18 @@ toolshed and driven in-browser, 0 console errors).
 
 ### Live demo (screenshots)
 
-The reducer pipeline, before and after the trusted relabel (`docs/proposals/images/`):
+(`docs/proposals/images/`)
 
-- **Blocked** (`poker-v4-01-reducer-blocked.png`): *Alice's secret hand* (ENFORCED) → reducer →
-  *Reducer output* (SIMULATED: mints `ReducedBy{count}`) → relabel `[Alice]→[table]` → *Count cell
-  (own atom)* showing *"Content hidden by policy"* (ENFORCED) — the count's own boundary blocking it.
-- **Released** (`poker-v4-02-reducer-released.png`): after the **trusted "Release count to table"**
-  action, the count cell's own boundary permits it and shows **"2 cards"** — a *separate* labelled
-  value the table can read, while the full hand stays blocked. Its live `PokerHandCount` label is
-  shown below.
+- **Hero — "view as Alice"** (`poker-hero-viewas.png`): the per-reader projection. Acting as Alice,
+  her hand renders (`10♥ 6♥`, "👁 your hand") while Bob and Charlie show *"secret from you"* — their
+  CFC render boundaries refusing to render. The viewer switch is labelled **SIMULATED** because it's
+  the per-recipient *materialization* the memo proposes (faked here via a button, not real
+  authenticated identity). The Showdown action reveals everyone's hands to all.
+- **Reducer pipeline, released** (`poker-reducer-released.png`): `secret hand` (ENFORCED) → `reducer`
+  (SIMULATED: mints `ReducedBy{count}`) → relabel → `Count (own value): 2 cards` (ENFORCED) — the
+  count is a *separate* labelled value the table can read while the full hand stays blocked. Below
+  it, the "Play the hand" controls show the status breadcrumb (`PHASE … preflop …`) and the
+  phase-gated deal buttons.
 
-![Reducer pipeline — count cell blocked by its own render boundary](./images/poker-v4-01-reducer-blocked.png)
-![Reducer pipeline — count released to the table as a separate labelled value](./images/poker-v4-02-reducer-released.png)
-
-(The hands' own block → trusted-showdown reveal still works the same way:
-`poker-v3-01-blocked.png` / `poker-v3-02-revealed.png`.)
+![Hero — viewing as Alice: her hand renders; opponents stay secret](./images/poker-hero-viewas.png)
+![Reducer pipeline — the count released to the table as a separate labelled value](./images/poker-reducer-released.png)
