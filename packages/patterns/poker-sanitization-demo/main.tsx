@@ -195,6 +195,7 @@ function badge(kind: Badge) {
 }
 
 function cardChip(c: Card) {
+  if (!c || !c.suit) return <span />; // guard transient undefined during reactive updates
   return (
     <span style={{ ...FACE_UP, color: suitColor(c.suit) }}>
       {c.rank}{c.suit}
