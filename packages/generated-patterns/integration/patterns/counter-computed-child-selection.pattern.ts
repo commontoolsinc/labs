@@ -1,11 +1,4 @@
-import {
-  Cell,
-  computed,
-  Default,
-  handler,
-  pattern,
-  str,
-} from "commonfabric";
+import { Cell, computed, Default, handler, pattern, str } from "commonfabric";
 
 const defaultCounterSeed = [2, 5, 3];
 

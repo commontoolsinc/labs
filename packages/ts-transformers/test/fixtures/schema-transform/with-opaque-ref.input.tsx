@@ -1,4 +1,4 @@
-import { Cell, computed, pattern, toSchema, UI } from "commonfabric";
+import { Cell, pattern, toSchema, UI } from "commonfabric";
 
 interface State {
   value: Cell<number>;

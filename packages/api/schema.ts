@@ -405,7 +405,6 @@ declare module "commonfabric" {
     ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
   }
 
-
   // Augment WishFunction with schema-based overloads
   interface WishFunction {
     <S extends JSONSchema = JSONSchema>(
