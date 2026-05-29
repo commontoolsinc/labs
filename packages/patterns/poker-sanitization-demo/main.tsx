@@ -19,8 +19,8 @@
 //   SIMULATED (no runtime primitive exists; labelled as such in-UI):
 //     - The reducer MINTING a `ReducedBy{count}` integrity atom and the relabel being GATED on it
 //       (we drive the relabel from a trusted action instead).
-//     - Per-recipient MATERIALIZATION: routing Alice the cards but Bob the count. This demo runs
-//       in one trusted host and shows both on one screen; it does not route per reader.
+//     - Label-gated PER-RECIPIENT SYNC (a planned memory-engine step): delivering Alice the cards
+//       but Bob the count. Assumed here — one trusted host shows both on one screen.
 //
 //   OUT OF SCOPE: recombination (multiple reducers on one secret, §14.3.2) and unlinkability
 //   (shuffles). Stated in-UI.
@@ -478,8 +478,8 @@ const setBool = handler<unknown, { cell: Writable<boolean>; next: boolean }>(
   },
 );
 
-// Simulated per-reader materialization: which player's runtime are we acting as? (Not real
-// authenticated identity — the materialization layer the memo proposes is simulated by this.)
+// Simulated per-recipient sync: which player's runtime are we acting as? (Not real authenticated
+// identity — stands in for the planned label-gated sync that delivers each field per reader.)
 const setViewer = handler<unknown, { viewer: Writable<string>; next: string }>(
   (_, s) => {
     s.viewer.set(s.next);
@@ -542,7 +542,7 @@ export default pattern<unknown, PokerOutput>(() => {
   const revealed = new Writable<boolean>(false);
   const countReleased = new Writable<boolean>(false);
   const phase = new Writable<string>("predeal");
-  const viewer = new Writable<string>("Spectator"); // simulated per-reader materialization
+  const viewer = new Writable<string>("Spectator"); // simulated per-recipient sync
 
   // Confidential views of the three hands (real ifc.confidentiality labels).
   const aliceConf: Writable<ConfHand> = makeHand({ id: "poker-hand-alice", cards: alice }) as never;
@@ -676,7 +676,7 @@ export default pattern<unknown, PokerOutput>(() => {
 
               {tryThis()}
 
-              {/* Simulated per-reader materialization: act as a specific player */}
+              {/* Simulated per-recipient sync: act as a specific player */}
               <cf-vstack gap="1">
                 <cf-hstack gap="2" style={{ alignItems: "center", flexWrap: "wrap" }}>
                   <span style={{ fontSize: "13px", fontWeight: "700" }}>View as:</span>
@@ -687,8 +687,8 @@ export default pattern<unknown, PokerOutput>(() => {
                   {badge("SIMULATED")}
                 </cf-hstack>
                 <cf-label style={{ fontSize: "12px", color: "#94a3b8" }}>
-                  Switching reader is the <b>per-recipient materialization</b> the memo proposes —
-                  simulated here (one host; not real authenticated identity).
+                  Switching reader stands in for <b>label-gated per-recipient sync</b> (a planned
+                  memory-engine step) — simulated here on one host, not real authenticated identity.
                 </cf-label>
               </cf-vstack>
 
@@ -863,9 +863,9 @@ export default pattern<unknown, PokerOutput>(() => {
                 </summary>
                 <cf-vstack gap="2" style={{ marginTop: "8px" }}>
                   <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
-                    {badge("SIMULATED")} <b>Per-reader routing.</b> CFC has the labels but no layer
-                    that serves each reader only their projection. Simulated here — one screen shows
-                    both:
+                    {badge("SIMULATED")} <b>Per-recipient sync.</b> Delivering each field only to
+                    clients that can read it is label-gated sync — a <i>planned</i> memory-engine
+                    step. Assumed here; one screen stands in for it:
                   </cf-label>
                   <div style={{ border: "1px dashed #fdba74", borderRadius: "10px", padding: "10px", background: "#fffbeb", color: "#334155", fontSize: "13px" }}>
                     <div>reader <b>Alice</b> → her cards</div>
@@ -874,8 +874,8 @@ export default pattern<unknown, PokerOutput>(() => {
                   <cf-label style={{ fontSize: "13px", color: "#64748b" }}>
                     {badge("OUT OF SCOPE")} <b>Recombination</b> (many summaries of one secret can
                     leak more than any one — §14.3.2) and <b>unlinkability</b> (a shuffle you can’t
-                    trace) — relational properties CFC’s lattice doesn’t model. Also: the render
-                    boundary hides content in a trusted host; it doesn’t encrypt the cell.
+                    trace) — relational properties CFC’s lattice doesn’t model. (The render boundary
+                    here is a trusted-host stand-in for the sync layer.)
                   </cf-label>
                 </cf-vstack>
               </details>
