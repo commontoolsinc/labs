@@ -2093,7 +2093,7 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
     });
     const hostRunner = new FakeProcessRunner([{
       stdout: "captured=http://localhost:8000/piece\ntarget=host\n",
-      stderr: "",
+      stderr: "debug-page-secret=stderr-observation\n",
       exitCode: 0,
     }]);
     const engine = new CfHarnessEngine({
@@ -2252,12 +2252,17 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       status: string;
       executionTarget: string;
       stdout: string;
+      stderr: string;
     };
     assertEquals(scriptOutput.status, "executed");
     assertEquals(scriptOutput.executionTarget, "host");
     assertEquals(
       scriptOutput.stdout,
       "captured=http://localhost:8000/piece\ntarget=host\n",
+    );
+    assertEquals(
+      scriptOutput.stderr,
+      "debug-page-secret=stderr-observation\n",
     );
     assertEquals(hostRunner.requests.length, 1);
     assertEquals(hostRunner.requests[0], {
@@ -2290,6 +2295,10 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       delegateToolMessage.content.includes(
         "captured=http://localhost:8000/piece",
       ),
+      false,
+    );
+    assertEquals(
+      delegateToolMessage.content.includes("debug-page-secret"),
       false,
     );
     const delegateOutput = JSON.parse(delegateToolMessage.content) as {
