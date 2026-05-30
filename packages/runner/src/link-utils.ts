@@ -576,12 +576,13 @@ function recursiveStripAsCellFromSchema(
     } else {
       result = restSchema;
     }
-    const asCellScope = ContextualFlowControl.getAsCellScope(
-      asCellValues.at(0),
-    );
-    if (asCellScope !== undefined && result.scope === undefined) {
-      result = { ...result, scope: asCellScope };
-    }
+    // Do NOT promote the stripped asCell entry's scope onto the resulting
+    // schema's top-level `scope`. The scope of an asCell value belongs to the
+    // link to its target (which carries its own scope) and acts as a follow cap;
+    // promoting it here makes it look like an authored container scope, which is
+    // then stamped onto the *container* link on reads, addressing the wrong
+    // scoped instance (the read lands on an empty narrower instance). See
+    // CT-1623.
   }
 
   // Recursively process all object properties

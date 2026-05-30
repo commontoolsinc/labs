@@ -590,6 +590,103 @@ Deno.test("cross-space scoped links preserve target space and resolved scope", a
   }
 });
 
+Deno.test("lift can read session-scoped cell passed from pattern input", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const sessionTargetBase = runtime.getCell<string | null>(
+      space,
+      "lift captured session target",
+      undefined,
+      tx,
+    );
+    const sessionTarget = createCell<string | null>(
+      runtime,
+      { ...sessionTargetBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    sessionTarget.set("a");
+    const sessionTargetLink = sessionTarget.getAsNormalizedFullLink();
+    assertEquals(sessionTargetBase.getAsNormalizedFullLink().scope, "space");
+    assertEquals(sessionTargetLink.scope, "session");
+    assertEquals(sessionTarget.get(), "a");
+
+    const isSessionOpen = lift(
+      {
+        type: "object",
+        properties: {
+          sessionTarget: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+          id: { type: "string" },
+        },
+        required: ["sessionTarget", "id"],
+      },
+      { type: "boolean" },
+      (
+        { sessionTarget, id }: {
+          sessionTarget: Cell<string | null>;
+          id: string;
+        },
+      ) => sessionTarget.get() === id,
+    );
+
+    const Root = pattern<{ sessionTarget: Cell<string | null> }>(
+      ({ sessionTarget }) => ({
+        isOpen: isSessionOpen({ sessionTarget, id: "a" }),
+      }),
+      {
+        type: "object",
+        properties: {
+          sessionTarget: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+        },
+        required: ["sessionTarget"],
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "lift reads session scoped cell passed from pattern input",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, Root, { sessionTarget }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    // The stored argument link to the session-scoped cell must preserve its
+    // own scope (and point at that cell), not be re-scoped to the container.
+    const argumentCell = runtime.getCellFromLink(
+      getMetaLink(result, "argument")!,
+    );
+    const argTarget = argumentCell.key("sessionTarget");
+    const storedArgumentTargetLink = parseLink(argTarget.getRaw(), argTarget)!;
+    assertEquals(storedArgumentTargetLink.id, sessionTargetLink.id);
+    assertEquals(storedArgumentTargetLink.path, sessionTargetLink.path);
+    assertEquals(storedArgumentTargetLink.space, sessionTargetLink.space);
+    assertEquals(storedArgumentTargetLink.scope, sessionTargetLink.scope);
+
+    assertEquals(result.key("isOpen").get() as unknown, true);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("broad computed output links to narrower scoped result", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
