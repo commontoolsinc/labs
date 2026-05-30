@@ -10,7 +10,6 @@
 import {
   computed,
   Default,
-  derive,
   handler,
   ifElse,
   NAME,
@@ -110,16 +109,13 @@ interface CategoryListInput {
 }
 
 const CategoryList = pattern<CategoryListInput>(({ items }) => {
-  const categories = derive(
-    { items },
-    ({ items: itemsArray }: { items: ShoppingItem[] }) => {
-      const cats = new Set<string>();
-      for (const item of itemsArray) {
-        cats.add(item.category || "Uncategorized");
-      }
-      return Array.from(cats).sort();
-    },
-  );
+  const categories = computed(() => {
+    const cats = new Set<string>();
+    for (const item of items.get()) {
+      cats.add(item.category || "Uncategorized");
+    }
+    return Array.from(cats).sort();
+  });
 
   return {
     [NAME]: "Shopping List by Category (Index)",
