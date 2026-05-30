@@ -88,17 +88,23 @@ type RejectedRecord = {
   error: { name: string; message: string };
 };
 type ScriptedOutcome =
-  | { kind: "accept"; remoteInterleave?: RemoteCommit }
+  | { kind: "accept"; remoteInterleave?: RemoteCommit; delayMs?: number }
   | {
     kind: "rejectConflict";
     message?: string;
     remoteInterleave?: RemoteCommit;
+    delayMs?: number;
   }
-  | { kind: "dropThenReplayAccept"; remoteInterleave?: RemoteCommit }
+  | {
+    kind: "dropThenReplayAccept";
+    remoteInterleave?: RemoteCommit;
+    delayMs?: number;
+  }
   | {
     kind: "dropThenReplayReject";
     message?: string;
     remoteInterleave?: RemoteCommit;
+    delayMs?: number;
   };
 type RemoteCommit = {
   label: string;
@@ -145,6 +151,10 @@ class ScriptedServerModel {
 
   setOutcome(localSeq: number, outcome: ScriptedOutcome): void {
     this.scripted.set(localSeq, outcome);
+  }
+
+  delayFor(localSeq: number): number {
+    return this.scripted.get(localSeq)?.delayMs ?? 0;
   }
 
   seed(id: URI, value: RootValue): DocState {
@@ -386,8 +396,8 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
         });
         break;
       case "transact": {
+        const commit = message.commit!;
         setTimeout(() => {
-          const commit = message.commit!;
           const response = this.model.transact(commit);
           if (response.type === "drop") {
             this.#closeReceiver(new Error("disconnect"));
@@ -400,7 +410,7 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
               ? { ok: response.applied }
               : { error: response.error }),
           });
-        }, 0);
+        }, this.model.delayFor(commit.localSeq));
         break;
       }
       default:
@@ -645,6 +655,115 @@ Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", as
       [
         "set",
       ],
+    );
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 waits for pending semantic writes before flushing no-op scheduler observations", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const write = beginSet(harness, DOCS.A, valueFor("pending-write"));
+    harness.model.setOutcome(write.localSeq, { kind: "accept", delayMs: 25 });
+
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:read-pending-a"),
+    }, sourceFromReads([{ id: DOCS.A }]));
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert(
+      harness.model.transactLocalSeqs.every((localSeq) =>
+        localSeq === write.localSeq
+      ),
+    );
+
+    await assertResultOk(write.promise);
+    await assertResultOk(observation);
+
+    const applied = [...harness.model.applied.values()].sort((a, b) =>
+      a.applied.seq - b.applied.seq
+    );
+    assertEquals(applied.length, 2);
+    assertEquals(applied[0].localSeq, write.localSeq);
+    assertEquals(applied[1].commit.operations, []);
+    assertEquals(
+      applied[1].commit.schedulerObservationBatch?.[0]?.reads.pending.map((
+        read,
+      ) => ({
+        id: read.id,
+        localSeq: read.localSeq,
+      })),
+      [{ id: DOCS.A, localSeq: write.localSeq }],
+    );
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 sends observations from optimistic commit notifications after the current write", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    let observation:
+      | Promise<
+        { ok: Record<PropertyKey, never>; error?: undefined } | {
+          ok?: undefined;
+          error: { name?: string; message?: string };
+        }
+      >
+      | undefined;
+    harness.storageManager.subscribe({
+      next(notification) {
+        if (notification.type !== "commit" || observation) {
+          return { done: false };
+        }
+        observation = harness.replica.commitNative({
+          operations: [],
+          schedulerObservation: schedulerObservationFor(
+            "action:read-current-optimistic-write",
+          ),
+        }, sourceFromReads([{ id: DOCS.A }]));
+        return { done: false };
+      },
+    });
+
+    const write = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("current-optimistic-write"),
+    );
+    harness.model.setOutcome(write.localSeq, { kind: "accept", delayMs: 25 });
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert(
+      harness.model.transactLocalSeqs.every((localSeq) =>
+        localSeq === write.localSeq
+      ),
+    );
+
+    await assertResultOk(write.promise);
+    assertExists(observation);
+    await assertResultOk(observation);
+
+    const applied = [...harness.model.applied.values()].sort((a, b) =>
+      a.applied.seq - b.applied.seq
+    );
+    assertEquals(applied.length, 2);
+    assertEquals(applied[0].localSeq, write.localSeq);
+    assertEquals(applied[1].commit.operations, []);
+    assertEquals(
+      applied[1].commit.schedulerObservationBatch?.[0]?.reads.pending.map((
+        read,
+      ) => ({
+        id: read.id,
+        localSeq: read.localSeq,
+      })),
+      [{ id: DOCS.A, localSeq: write.localSeq }],
     );
   } finally {
     await harness.close();

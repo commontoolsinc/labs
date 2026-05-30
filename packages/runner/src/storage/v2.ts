@@ -1384,7 +1384,38 @@ class SpaceReplica implements ISpaceReplica {
     });
   }
 
-  private async flushSchedulerObservationBatch(): Promise<
+  private hasSchedulerObservationBatchBefore(
+    beforeLocalSeq: number | undefined,
+  ): boolean {
+    if (beforeLocalSeq === undefined) {
+      return this.#schedulerObservationBatch.length > 0;
+    }
+    return this.#schedulerObservationBatch.some((entry) =>
+      entry.commit.localSeq < beforeLocalSeq
+    );
+  }
+
+  private takeSchedulerObservationBatchEntries(
+    beforeLocalSeq: number | undefined,
+  ): SchedulerObservationBatchEntry[] {
+    if (beforeLocalSeq === undefined) {
+      return this.#schedulerObservationBatch.splice(0);
+    }
+    const firstLaterEntry = this.#schedulerObservationBatch.findIndex((
+      entry,
+    ) => entry.commit.localSeq >= beforeLocalSeq);
+    if (firstLaterEntry === 0) {
+      return [];
+    }
+    if (firstLaterEntry === -1) {
+      return this.#schedulerObservationBatch.splice(0);
+    }
+    return this.#schedulerObservationBatch.splice(0, firstLaterEntry);
+  }
+
+  private async flushSchedulerObservationBatch(options: {
+    beforeLocalSeq?: number;
+  } = {}): Promise<
     Result<Unit, StorageTransactionRejected>
   > {
     let lastResult: Result<Unit, StorageTransactionRejected> = { ok: {} };
@@ -1392,7 +1423,7 @@ class SpaceReplica implements ISpaceReplica {
       if (this.#schedulerObservationFlushPromise) {
         lastResult = await this.#schedulerObservationFlushPromise;
         if (
-          this.#schedulerObservationBatch.length === 0 ||
+          !this.hasSchedulerObservationBatchBefore(options.beforeLocalSeq) ||
           "error" in lastResult
         ) {
           return lastResult;
@@ -1400,21 +1431,25 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
 
-      if (this.#schedulerObservationBatch.length === 0) {
+      if (!this.hasSchedulerObservationBatchBefore(options.beforeLocalSeq)) {
         return lastResult;
       }
 
-      lastResult = await this.startSchedulerObservationBatchFlush();
+      lastResult = await this.startSchedulerObservationBatchFlush(
+        options.beforeLocalSeq,
+      );
       if ("error" in lastResult) {
         return lastResult;
       }
     }
   }
 
-  private startSchedulerObservationBatchFlush(): Promise<
+  private startSchedulerObservationBatchFlush(
+    beforeLocalSeq?: number,
+  ): Promise<
     Result<Unit, StorageTransactionRejected>
   > {
-    const entries = this.#schedulerObservationBatch.splice(0);
+    const entries = this.takeSchedulerObservationBatchEntries(beforeLocalSeq);
     const localSeq = this.#nextLocalSeq++;
     const commit: ClientCommit = {
       localSeq,
@@ -1422,7 +1457,14 @@ class SpaceReplica implements ISpaceReplica {
       operations: [],
       schedulerObservationBatch: entries.map((entry) => entry.commit),
     };
-    const promise = this.pushCommit(localSeq, [], commit, undefined)
+    const prerequisiteCommits = [...this.#commitPromises];
+    const promise = (async () => {
+      // Scheduler-only observations may cite pending local writes in their
+      // read evidence. The server can only validate those reads after the
+      // referenced semantic commits have reached durable commit rows.
+      await Promise.allSettled(prerequisiteCommits);
+      return await this.pushCommit(localSeq, [], commit, undefined);
+    })()
       .then((result) => {
         for (const entry of entries) {
           entry.pending.resolve(result);
@@ -1559,10 +1601,12 @@ class SpaceReplica implements ISpaceReplica {
     try {
       if (
         operations.length > 0 &&
-        (this.#schedulerObservationBatch.length > 0 ||
+        (this.hasSchedulerObservationBatchBefore(localSeq) ||
           this.#schedulerObservationFlushPromise)
       ) {
-        const flushResult = await this.flushSchedulerObservationBatch();
+        const flushResult = await this.flushSchedulerObservationBatch({
+          beforeLocalSeq: localSeq,
+        });
         const rejection = flushResult.error;
         if (rejection !== undefined) {
           const error = new Error(rejection.message);

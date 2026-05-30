@@ -675,3 +675,36 @@
     action runs and 45 computation runs. The remaining runs are mostly first
     observations for wish/render helper actions or computations that were
     legitimately dirty but not demanded before the reload.
+- Follow-up correction: SQLite replay inspection showed that many of those
+  "missing observation" cases were actually dropped no-op observations with
+  `pending-read-missing`, not authored actions that had never observed. The
+  no-op observation payload does not retain the pending localSeq that caused the
+  drop, so the database alone could only show the drop reason, not the exact
+  dependency edge.
+- Root cause: scheduler-only observations can read optimistic local writes and
+  encode those reads as pending localSeq dependencies. There were two ordering
+  bugs. First, a no-op batch could transact while earlier semantic commits were
+  still outstanding. Second, a semantic commit's optimistic notification could
+  enqueue observations that depend on the current commit, and `pushCommit()`
+  then flushed those observations before sending the current commit. Both cases
+  made the pending read look permanently unresolved to the memory engine and
+  caused `pending-read-missing` drops.
+- Decision: a scheduler-only batch now waits for commits that were already
+  outstanding when the flush began. Semantic commits still flush older queued
+  no-op observations before the write, but only entries with localSeqs older
+  than the semantic commit. Observations created by the write's own optimistic
+  notification have later localSeqs, remain queued, and flush after the current
+  write can be resolved by the server.
+- Validation:
+  - `HEADLESS=1 deno test -A packages/runner/test/memory-v2-stacked-commit.test.ts --filter "waits for pending semantic writes"`
+  - `HEADLESS=1 deno test -A packages/runner/test/memory-v2-stacked-commit.test.ts --filter "optimistic commit"`
+  - `HEADLESS=1 deno test -A packages/runner/test/memory-v2-stacked-commit.test.ts --filter "flushes no-op scheduler batches"`
+  - `HEADLESS=1 deno test -A packages/runner/test/memory-v2-stacked-commit.test.ts packages/runner/test/memory-v2-subscription.test.ts packages/memory/test/v2-scheduler-state-test.ts`
+  - `HEADLESS=1 PIPE_CONSOLE=1 CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 deno task integration --port-offset=911 patterns-reload`
+- Result: the reload shard still does non-trivial work, but the concrete
+  no-op observation ordering bug was a large part of the `pending-read-missing`
+  noise. The latest run reported 61 total action runs and 38 computation runs,
+  with 5 `pending-read-missing` drops in the reload session instead of the
+  hundreds seen before this fix. The remaining drops are early transient
+  observations for sinks/notebook work that later receive kept observations in
+  the same reload session.
