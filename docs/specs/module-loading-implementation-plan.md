@@ -15,8 +15,10 @@ steps with the files each touches, exit criteria, and validation commands.
   rehydration miss on its own. It is the priority.
 - **Never under-count value dependencies.** Over-approximation (extra
   invalidation) is acceptable; missing a real behavioral change is not.
-- **Preserve the synchronous execution contract.** The scheduler runs actions
-  synchronously; no run-time `await` may be introduced into the load path.
+- **Synchronous execution is a given.** The scheduler runs actions
+  synchronously; the loader must load synchronously (SES `ModuleSource` +
+  `importNow` with a pre-populated module map). This is assumed, not something
+  to re-litigate — no run-time `await` may be introduced into the load path.
 - **Keep AMD and ESM paths parallel behind a flag** until the ESM path reaches
   full verifier and corpus parity. No big-bang switch.
 - **Each phase lands independently** with its own tests green and is revertible.
@@ -33,12 +35,12 @@ steps with the files each touches, exit criteria, and validation commands.
 
 ---
 
-## Phase 0 — Feasibility spike (no production code)
+## Phase 0 — Loader shape confirmation (no production code)
 
-De-risk the two assumptions that can sink the whole effort before investing in
-either phase.
+Synchronous loading is assumed (see constraints). Phase 0 is a short
+confirmation that the chosen mechanics fit, not a go/no-go gate.
 
-### 0.1 Synchronous `importNow` prototype
+### 0.1 `importNow` shape prototype
 
 Throwaway script under `packages/runner/scratch/` (do not commit to `src/`):
 
@@ -48,24 +50,18 @@ Throwaway script under `packages/runner/scratch/` (do not commit to `src/`):
   symbol from a stub `cf:runtime/commonfabric`.
 - Resolve with a `resolveHook` over content-addressed specifiers and load with
   `compartment.importNow("cf:module/<hashA>")`.
-- Assert: load is fully synchronous, exports resolve, cyclic `a<->b` works, and a
-  thrown error surfaces a usable stack.
+- Confirm exports resolve, cyclic `a<->b` works, and a thrown error surfaces a
+  usable stack.
 
-**Exit criteria:** `importNow` + a pre-populated module map reproduces today's
-synchronous, single-shot evaluation semantics under `ses@^1.15.0` in Deno. If
-`importNow` is unavailable or forces async, stop and redesign the loader before
-Phase 2 (Phase 1 is unaffected and can still proceed).
+**Exit criteria:** a working `importNow` + pre-populated-module-map skeleton to
+template Phase 2's loader from.
 
 ### 0.2 Synchronous-caller census
 
 Enumerate every caller of `Engine.evaluate`
 (`packages/runner/src/harness/engine.ts:232`) and `SESIsolate.execute`
-(`packages/runner/src/sandbox/ses-runtime.ts:135`) and record whether each
-consumes the result synchronously (`.inner()`) or can tolerate a promise. Output
-a short table committed to this plan's follow-up notes.
-
-**Exit criteria:** a definitive list of synchronous load sites the ESM path must
-satisfy.
+(`packages/runner/src/sandbox/ses-runtime.ts:135`) so the ESM path covers each
+synchronous load site. Output a short table in this plan's follow-up notes.
 
 ---
 
@@ -87,8 +83,10 @@ changes, while still emitting AMD.
   is too disruptive for existing patterns in Phase 1, instead derive value edges
   from **emitted JS** (type imports already elided) and document the choice.
 
-**Decision to record:** source of `normSrc` — emitted JS (preferred; types
-already gone) vs normalized TS (needs explicit type-edge filtering).
+**Decided:** `normSrc` is the canonicalized **compiled JS** of each module (see
+the spec's Module Identity section). The compiler's own type elision is what
+keeps type-only changes out of the hash, so 1.1's value-edge filtering is a
+belt-and-suspenders refinement of the import map, not the primary type guard.
 
 **Files:** `js-compiler/typescript/resolver.ts`, `options.ts`.
 **Exit:** a function returning, per module, its ordered value-edge specifiers.
@@ -302,8 +300,7 @@ only loader.
 
 | Risk | Phase | Mitigation / gate |
 | --- | --- | --- |
-| `importNow` not synchronous under ses@1.15 | 0 | Spike before any Phase 2 work; Phase 1 unaffected. |
-| Type/value edge misclassification | 1 | Prefer emitted-JS source for `normSrc`; over-inclusion only; tests for type-only no-op. |
+| Type/value edge misclassification | 1 | `normSrc` over emitted JS (compiler elides types); over-inclusion only; tests for type-only no-op. |
 | Verifier divergence on ESM | 3 | Corpus parity harness as release blocker before default-on. |
 | Many-small-modules perf regression | 2/4 | Benchmarks; consider one compartment per load with shared map. |
 | Cycle hashing nondeterminism | 1 | SCC condensation with sorted members; determinism test. |

@@ -161,12 +161,20 @@ runtime (value) imports.
 
 For each authored module `M`:
 
-- `normSrc(M)` — the canonical normalized representation of `M` alone after the
-  CF transformer pipeline and TypeScript emit, with inline source maps and the
-  `//# sourceURL`/prefix decorations stripped. Computing over emitted JS (rather
-  than raw TS) means type-only imports and type-only named specifiers have
-  already been elided by the compiler, which is the mechanism that keeps types
-  out of the hash (see Type Imports below).
+- `normSrc(M)` — the canonical normalized representation of `M`'s **own** code
+  (not its dependencies', which enter the hash via the Merkle edges below).
+  **Decision: hash the compiled JavaScript of `M`**, after the CF transformer
+  pipeline and TypeScript emit, with inline source maps and the
+  `//# sourceURL`/prefix decorations stripped. Hashing emitted JS rather than raw
+  TS means type-only imports, type-only named specifiers, and type annotations
+  have already been elided by the compiler — that elision is the mechanism that
+  keeps types out of the hash (see Type Imports below), so we never have to
+  detect and strip types by hand. The accepted trade-off is that emitted bytes
+  depend on the compiler/transformer version, so the same source hashes
+  differently across runtime versions; that is correct here, because the
+  scheduler's `runtimeFingerprint` already invalidates observations on a runtime
+  change. This identity is meant to survive reloading the same code from a
+  different entry point, not a runtime upgrade.
 - `valueDeps(M)` — the ordered set of `M`'s runtime imports, each a pair
   `(specifierText, target)` where `target` is either another authored module or
   an external runtime module.
