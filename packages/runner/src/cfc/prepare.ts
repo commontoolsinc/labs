@@ -873,9 +873,11 @@ const unsupportedTrustSensitiveReason = (
   const unsupportedKeys = [
     "projection",
     "collection",
+    "flowPrecisionClaim",
   ] as const;
+  const ifc = schema.ifc as Record<string, unknown>;
   for (const key of unsupportedKeys) {
-    const value = schema.ifc[key];
+    const value = ifc[key];
     if (value !== undefined) {
       return `unsupported trust-sensitive claim ${key} at /${path.join("/")}`;
     }
@@ -1694,7 +1696,11 @@ const mergeLabels = (
     left?.confidentiality,
     right?.confidentiality,
   ),
-  integrity: mergeLabelValues(left?.integrity, right?.integrity),
+  integrity: left === undefined
+    ? mergeLabelValues(right?.integrity)
+    : right === undefined
+    ? mergeLabelValues(left.integrity)
+    : mergeLabelValues(left.integrity, right.integrity),
 });
 
 const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
