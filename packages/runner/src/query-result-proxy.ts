@@ -160,7 +160,7 @@ export function createQueryResultProxy<T>(
       readTx,
       readTx.getCfcState().dereferenceTraces.slice(traceStart),
     ),
-  ]);
+  ], { integrity: "intersection" });
   const value = readTx.readValueOrThrow(link) as any;
 
   // If the value is a stream marker ({ $stream: true }), return a Cell with

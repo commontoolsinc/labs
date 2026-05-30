@@ -73,7 +73,7 @@ export const cfcLabelViewForDereference = (
   mergeCfcLabelViews([
     cfcLabelViewForAddress(tx, source),
     cfcLabelViewForAddress(tx, target),
-  ]);
+  ], { integrity: "intersection" });
 
 export const cfcLabelViewForDereferenceTraces = (
   tx: IExtendedStorageTransaction,
@@ -83,6 +83,7 @@ export const cfcLabelViewForDereferenceTraces = (
     traces.map((trace) =>
       cfcLabelViewForDereference(tx, trace.source, trace.target)
     ),
+    { integrity: "intersection" },
   );
 
 export const getCarriedCfcLabelView = (
