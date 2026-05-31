@@ -471,7 +471,10 @@ const writeIsPatternSetupInitialization = (
     input.kind === "structural-provenance" &&
     input.claim === CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION &&
     input.sources.some((source) => {
-      if (source.space !== target.space || source.id !== target.id) {
+      if (
+        source.space !== target.space || source.id !== target.id ||
+        normalizeCellScope(source.scope) !== target.scope
+      ) {
         return false;
       }
       // Only the redirect target itself, or a field nested under it, counts as
@@ -546,28 +549,74 @@ const candidateSchemasByTarget = (
 };
 
 /**
- * Maps each write target to the implementation identity that authored it
- * (captured when its write-policy inputs were recorded). Used to verify
- * writeAuthorizedBy per target rather than against the transaction's last
- * implementation identity.
+ * Maps each write target cell to the list of its `schema` write-policy inputs
+ * (path + the implementation identity that authored each, captured when the
+ * input was recorded). `writeAuthorizedBy` is verified per field, so we must
+ * keep each schema input's identity separately rather than collapsing a cell to
+ * a single identity: a cell may carry several protected fields written under
+ * different identities, and only `schema` inputs (not trusted-event/structural
+ * ones) author the IFC entries that `writeAuthorizedBy` checks.
  */
-const identitiesByTarget = (
+const schemaInputIdentitiesByTarget = (
   inputs: readonly WritePolicyInput[],
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
     | undefined,
-): Map<string, ImplementationIdentity | undefined> => {
-  const result = new Map<string, ImplementationIdentity | undefined>();
+): Map<
+  string,
+  Array<
+    { path: readonly string[]; identity: ImplementationIdentity | undefined }
+  >
+> => {
+  const result = new Map<
+    string,
+    Array<
+      { path: readonly string[]; identity: ImplementationIdentity | undefined }
+    >
+  >();
   for (const input of inputs) {
-    if (!("target" in input) || input.target === undefined) {
+    if (input.kind !== "schema") {
       continue;
     }
     const key = targetKey(input.target);
-    if (!result.has(key)) {
-      result.set(key, identityForInput(input));
-    }
+    const list = result.get(key) ?? [];
+    list.push({
+      path: canonicalizeLogicalPath(input.target.path),
+      identity: identityForInput(input),
+    });
+    result.set(key, list);
   }
   return result;
+};
+
+/**
+ * The authoring identity for a field path: the schema input on this cell whose
+ * own path is the longest prefix of (or equal to) the field path. That input is
+ * the one whose schema contributed the IFC entry at this path, so its identity
+ * is the one `writeAuthorizedBy` must be verified against.
+ */
+const identityForSchemaPath = (
+  entries:
+    | Array<
+      { path: readonly string[]; identity: ImplementationIdentity | undefined }
+    >
+    | undefined,
+  path: readonly string[],
+): ImplementationIdentity | undefined => {
+  if (entries === undefined) {
+    return undefined;
+  }
+  let bestLength = -1;
+  let bestIdentity: ImplementationIdentity | undefined;
+  for (const entry of entries) {
+    if (
+      concretePathHasPrefix(path, entry.path) && entry.path.length > bestLength
+    ) {
+      bestLength = entry.path.length;
+      bestIdentity = entry.identity;
+    }
+  }
+  return bestIdentity;
 };
 
 const targetKey = (target: {
@@ -1629,7 +1678,14 @@ const verifyInputRequirements = (
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
   },
-  targetIdentity?: ImplementationIdentity,
+  // Resolves the implementation identity that authored the schema write-policy
+  // input covering a given field path (the longest-prefix schema input on this
+  // cell). `writeAuthorizedBy` is verified per field against its authoring
+  // identity, so two protected fields on the same cell written under different
+  // identities are each checked against the correct one.
+  identityForPath?: (
+    path: readonly string[],
+  ) => ImplementationIdentity | undefined,
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
     !isInternalVerifierRead(read.meta)
@@ -1674,7 +1730,7 @@ const verifyInputRequirements = (
       tx,
       entry.schema,
       entry.path,
-      targetIdentity,
+      identityForPath?.(entry.path),
     );
     const setupProjection = setupProjectionSourceMatchesValue(
       tx,
@@ -2027,7 +2083,7 @@ export const prepareBoundaryCommit = (
     state.writePolicyInputs,
     identityForInput,
   );
-  const targetIdentities = identitiesByTarget(
+  const schemaIdentities = schemaInputIdentitiesByTarget(
     state.writePolicyInputs,
     identityForInput,
   );
@@ -2125,7 +2181,7 @@ export const prepareBoundaryCommit = (
       tx,
       verificationSchema,
       target,
-      targetIdentities.get(key),
+      (path) => identityForSchemaPath(schemaIdentities.get(key), path),
     );
     if (requirementFailure) {
       reasons.push(requirementFailure);

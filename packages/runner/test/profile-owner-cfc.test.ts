@@ -422,4 +422,122 @@ describe("profile owner CFC policy", () => {
       await storageManager.close();
     }
   });
+
+  it("rejects the same owner-protected write without a setup-projection marker", async () => {
+    // Negative twin of the test above: identical write under a non-writer
+    // identity, but WITHOUT recording the setup-projection marker. Proves the
+    // marker is load-bearing — the exemption is not an unconditional bypass.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({ id: "no-marker", actingPrincipal: alice.did() });
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "system.not-the-profile-writer",
+      });
+      const cell = runtime.getCell(
+        alice.did(),
+        "owner-init-no-marker",
+        profileSchema(alice.did()),
+        tx,
+      );
+      cell.set({ name: "Ada", avatar: "", elements: [] });
+      const target = cell.getAsNormalizedFullLink();
+      recordTrustedEdit(tx, target, ["name"]);
+      recordTrustedEdit(tx, target, ["avatar"]);
+      recordTrustedEdit(tx, target, ["elements"]);
+      // No setup-projection marker recorded.
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("writeAuthorizedBy");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("verifies writeAuthorizedBy per field against the authoring identity", async () => {
+    // Two protected fields on one cell, each authorized by a different builtin,
+    // written under their respective identities. writeAuthorizedBy must be
+    // verified per field against the identity that authored that field's write,
+    // not collapsed to the first identity seen for the cell.
+    const twoFieldSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        x: { type: "string", ifc: { writeAuthorizedBy: ["writer.x"] } },
+        y: { type: "string", ifc: { writeAuthorizedBy: ["writer.y"] } },
+      },
+      required: ["x", "y"],
+    };
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({ id: "per-path", actingPrincipal: alice.did() });
+      const cell = runtime.getCell(
+        alice.did(),
+        "per-path-identity",
+        twoFieldSchema,
+        tx,
+      );
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "writer.x",
+      });
+      cell.key("x").set("vx");
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "writer.y",
+      });
+      cell.key("y").set("vy");
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects a field written under another field's authorized identity", async () => {
+    // Field y written under writer.x (authorized only for x). Must be rejected:
+    // the per-field identity must not be borrowed from another field's write.
+    const twoFieldSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        x: { type: "string", ifc: { writeAuthorizedBy: ["writer.x"] } },
+        y: { type: "string", ifc: { writeAuthorizedBy: ["writer.y"] } },
+      },
+      required: ["x", "y"],
+    };
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "per-path-neg",
+        actingPrincipal: alice.did(),
+      });
+      const cell = runtime.getCell(
+        alice.did(),
+        "per-path-identity-neg",
+        twoFieldSchema,
+        tx,
+      );
+      // Both fields written under writer.x; y is not authorized for writer.x.
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "writer.x",
+      });
+      cell.key("x").set("vx");
+      cell.key("y").set("vy");
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("writeAuthorizedBy");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
