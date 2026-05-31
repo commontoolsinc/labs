@@ -6,6 +6,7 @@ import {
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
+  isReactiveOriginTaggedTemplate,
   type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -511,6 +512,44 @@ function isSharedPreClosureDeferredArrayMethodControlFlowExpression(
     isOwnedDeferredJsxArrayMethodRoot(current.whenFalse, context, analyze);
 }
 
+// An interpolation `${expr}` inside a TAGGED template (e.g. str`...${expr}...`).
+// AST shape: expr.parent is a TemplateSpan, span.parent is a TemplateExpression,
+// and that template's parent is a TaggedTemplateExpression. Untagged template
+// literals are deliberately excluded — they already lower as a single reactive
+// unit via emitTemplateExpression, so we must not also classify their spans as
+// independent sites. Tagged templates (str/llm/…) lift over the *values* they
+// receive, so a computed interpolation must be lifted per-span or it freezes.
+function isTaggedTemplateSpanInterpolation(
+  expression: ts.Expression,
+  parent: ts.Node,
+): boolean {
+  if (!ts.isTemplateSpan(parent) || parent.expression !== expression) {
+    return false;
+  }
+  const template = parent.parent;
+  return !!template &&
+    ts.isTemplateExpression(template) &&
+    !!template.parent &&
+    ts.isTaggedTemplateExpression(template.parent) &&
+    template.parent.template === template;
+}
+
+// True when `expression` is an interpolation inside a tagged template whose tag
+// is a reactive-origin runtime call (str/llm/…). Only those tags re-read the
+// values they receive, so only there must a computed interpolation be lifted.
+function isReactiveRuntimeCallTaggedTemplateSpan(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const span = expression.parent;
+  if (!span || !ts.isTemplateSpan(span)) return false;
+  const template = span.parent;
+  if (!template || !ts.isTemplateExpression(template)) return false;
+  const tagged = template.parent;
+  if (!tagged || !ts.isTaggedTemplateExpression(tagged)) return false;
+  return isReactiveOriginTaggedTemplate(tagged, context.checker);
+}
+
 export function getExpressionContainerKind(
   expression: ts.Expression,
 ): ExpressionContainerKind | undefined {
@@ -519,6 +558,9 @@ export function getExpressionContainerKind(
 
   if (ts.isJsxExpression(parent) && parent.expression === expression) {
     return "jsx-expression";
+  }
+  if (isTaggedTemplateSpanInterpolation(expression, parent)) {
+    return "template-span";
   }
   if (
     (ts.isArrowFunction(parent) || ts.isFunctionExpression(parent)) &&
@@ -939,6 +981,19 @@ export function classifyExpressionSiteHandling(
 
   if (siteInfo.reactiveContext.kind !== "pattern") {
     return { kind: "skip", reason: "non-pattern-context" };
+  }
+
+  if (containerKind === "template-span") {
+    // Interpolations inside a reactive tagged template (str/llm/…). The tag
+    // lifts over the *values* it receives: a bare reactive read passes through
+    // and is re-read by the tag, but a computed expression (call, binary, etc.)
+    // must be lifted per-span or it freezes at construction. Treat it like a
+    // shared post-closure site — sharedLowerable() lifts only when the span
+    // requires a rewrite, leaving bare reads as bare `.key(...)` reads.
+    if (!isReactiveRuntimeCallTaggedTemplateSpan(expression, context)) {
+      return { kind: "skip", reason: "not-lowerable" };
+    }
+    return sharedDecision();
   }
 
   if (

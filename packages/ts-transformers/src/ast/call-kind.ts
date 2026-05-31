@@ -443,6 +443,20 @@ export function isReactiveOriginExpression(
   return false;
 }
 
+// A tagged template `str`...`` is semantically a call to its tag, but it is a
+// TaggedTemplateExpression in the AST — not a CallExpression — so detectCallKind
+// (keyed on CallExpression) does not classify it. This resolves the tag the same
+// way detectCallKind resolves a callee and reports whether it is a reactive-origin
+// commonfabric runtime call (e.g. str/llm). Scoped helper: a fuller unification of
+// tagged templates into detectCallKind is tracked as a follow-up.
+export function isReactiveOriginTaggedTemplate(
+  expression: ts.TaggedTemplateExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const tagKind = resolveExpressionKind(expression.tag, checker, new Set());
+  return !!tagKind && isReactiveOriginKind(tagKind);
+}
+
 export function classifyWildcardTraversalCall(
   call: ts.CallExpression,
   checker?: ts.TypeChecker,
