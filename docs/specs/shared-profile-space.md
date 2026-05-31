@@ -1,0 +1,455 @@
+# Shared Profile Space
+
+## Status
+
+Implementation spec.
+
+This document captures the target behavior for shared user profiles across
+multi-user patterns. It is intended to drive implementation across home-space
+schema, profile-space creation, default-pattern selection, `wish()` resolution,
+authorization, and integration tests.
+
+## Summary
+
+Multi-user patterns should not ask each user for their display name and avatar
+inside every pattern. A user has one shared profile space, linked from their
+home space. Patterns can discover profile data and profile-hosted pieces through
+`wish()` without knowing the profile space DID up front.
+
+The profile is a real space. Its `spaceCell.defaultPattern` is a new
+profile-specific default pattern, not the normal space default app. The profile
+default pattern initially owns:
+
+- the profile owner's name and avatar
+- a list of profile elements, implemented as pieces in the profile space
+- owner-only handlers for adding profile elements from a fixed catalog or a
+  pattern URL
+
+The user's home space links to the profile through a well-known field on the
+home default pattern, following the same durable field pattern as favorites. If
+the link is missing, the home pattern renders a profile-name input. Submitting a
+name starts the profile default pattern in a new profile space via
+`PatternFactory.inSpace(...)` and stores the created profile default-pattern link
+on the home default pattern.
+
+`wish()` gains a profile search scope for hashtag queries. A profile-scoped wish
+searches pieces in the current user's profile space whose descriptions or user
+tags contain the requested hashtag, analogous to the existing favorites and
+mentionables hashtag paths.
+
+Patterns that render viewer-specific profile data from a shared space should
+make that rendered result user-scoped. For example, a shared demo pattern that
+directly renders `wish({ query: "#profileName" })` should use a user-scoped
+result schema so each viewer sees their own profile projection.
+
+## Goals
+
+- Provide one durable profile per authenticated user.
+- Keep profile data separate from ordinary home-space settings and from
+  per-collaboration-space data.
+- Make profile discovery work from any space the user visits.
+- Let profile owners add profile elements without exposing direct mutation of
+  the profile element list.
+- Add an integration test that creates a profile and proves a demo multi-user
+  pattern can render the user's shared name.
+- Make `wish({ query: "#profile" })` resolve to the current user's profile
+  default pattern. Existing learned-summary consumers must migrate to a more
+  explicit target before relying on this feature.
+
+## Non-Goals
+
+- Replacing the home space. The home space remains the user's singleton root for
+  settings, favorites, spaces, and the profile-space link.
+- Designing a full rich profile data model. The first profile default pattern
+  only needs name, avatar, and add-element mechanics.
+- Migrating every current profile-like pattern in one change.
+- Making `wish()` scope strings part of the cell storage scope lattice. This
+  document uses "wish scope" for search domains; it is separate from
+  `space | user | session` cell instance scopes.
+
+## Current Repo Facts
+
+- `Runtime.getHomeSpaceCell()` creates the home space cell at
+  `(space = userIdentityDID, cause = userIdentityDID)`.
+- `PiecesController.ensureDefaultPattern()` links a default pattern at
+  `spaceCell.defaultPattern`. Today it chooses `system/home.tsx` for the home
+  space and `system/default-app.tsx` for other spaces.
+- The current home pattern owns durable cells such as `favorites`, `journal`,
+  `learned`, `spaces`, and `defaultAppUrl` on the home default pattern.
+- The current docs say favorites are on `spaceCell.favorites`, but current code
+  uses `homeSpaceCell.defaultPattern.favorites`. The implemented profile flow
+  follows that actual shape and stores the profile link at
+  `homeSpaceCell.defaultPattern.profile`.
+- `PatternFactory.inSpace(space?: string | AnyCell<unknown>)` exists. DID
+  strings and cell arguments resolve synchronously; named spaces and omitted
+  spaces resolve during async action/handler post-run. Post-run resolution
+  replaces the runtime annotation itself with the resolved DID; unresolved names
+  must not survive outside the handler frame.
+- `wish()` currently supports scope values `"~"` for home favorites, `"."` for
+  current-space mentionables, and arbitrary DIDs for other spaces.
+- The string `#profile` was previously a well-known home target that resolved
+  to `home.defaultPattern.learned.summary`. This implementation intentionally
+  retargets it to the profile default pattern so profile-aware patterns have a
+  direct well-known profile entry point.
+
+## Data Model
+
+### Home Default Pattern Link
+
+Add a well-known field to the home default pattern:
+
+```ts
+type HomeDefaultPattern = {
+  favorites: Favorite[];
+  profile?: Cell<ProfileDefaultPattern>;
+  profileName?: string;
+};
+```
+
+`profile` is a cell link to the profile default pattern. The linked cell lives
+in the profile space, so its normalized link carries the profile space DID:
+
+```ts
+homeSpaceCell.defaultPattern.profile -> profile default pattern cell
+```
+
+`homeSpaceCell.profileSpace` is not part of the target v1 shape. Earlier
+implementation notes used that name for the durable link, but the implemented
+home-field convention is `homeSpaceCell.defaultPattern.profile`.
+
+### Profile Space Identity
+
+Profile creation uses `PatternFactory.inSpace(...)`:
+
+```ts
+const profile = ProfileHome.inSpace(spaceName)({ initialName: name });
+```
+
+When `spaceName` is a non-DID string, the runner resolves it during async
+post-run through the existing named-space derivation path. When the argument is
+omitted, the runner generates a fresh DID. The home default pattern's `profile`
+link is the durable source of truth after creation. Runtime-only `.inSpace`
+annotations are also rewritten to the resolved DID during post-run.
+
+### Profile Default Pattern Output
+
+The initial profile default pattern should export this contract:
+
+```ts
+type ProfileElement = {
+  cell: Cell<unknown>;
+  tag: string;
+  userTags: string[];
+  title?: string;
+  source?: "catalog" | "url";
+};
+
+type ProfileDefaultPattern = {
+  [NAME]: string;
+  [UI]: VNode;
+  name: string;
+  avatar: string;
+  elements: ProfileElement[];
+  addElement: Stream<AddProfileElementEvent>;
+  removeElement: Stream<{ cell: Cell<unknown> }>;
+  initialNameApplied: string;
+};
+```
+
+`avatar` starts as a string. The first implementation can use a URL, data URL,
+or emoji-like text. Binary/blob avatar upload is out of scope.
+
+`elements` is the profile-space analog of favorites and mentionables. Each
+entry points at a piece that lives in the profile space. `tag` stores the
+snapshot string used for hashtag search, following the favorites pattern:
+explicit tag if supplied, otherwise a serialized schema/description snapshot.
+`userTags` stores user-supplied tags without `#`.
+
+The profile default pattern may also include an internal `allPieces` list if
+that is useful for rendering, but external code must depend on `elements` and
+`addElement`, not `allPieces`.
+
+## Profile Default Pattern Selection
+
+Default pattern creation needs a third case:
+
+1. Home space: `/api/patterns/system/home.tsx`
+2. Profile space: `/api/patterns/system/profile-home.tsx`
+3. Other spaces: home `defaultPattern.defaultAppUrl` or
+   `/api/patterns/system/default-app.tsx`
+
+A profile space is not identified by `space === userIdentityDID`. It is
+identified by the profile default-pattern link at
+`homeSpaceCell.defaultPattern.profile`, whose normalized link carries the
+profile space DID, or by the explicit profile-creation path before the link
+exists. Implementation options:
+
+- Add `ensureProfileDefaultPattern(profileSpaceDID)` and
+  `recreateProfileDefaultPattern(profileSpaceDID)` instead of overloading
+  `ensureDefaultPattern()`.
+- Or add a `defaultPatternKind: "home" | "profile" | "space"` option to the
+  default-pattern controller, with profile creation passing `"profile"`.
+
+The first option is safer because opening an arbitrary non-home space should
+continue to use the ordinary default app unless it is reached through the
+profile-space creation/link path.
+
+## Home Pattern Flow
+
+The home pattern owns `homeDefaultPattern.profile`.
+
+If `profile` is missing:
+
+- render an input field for the user's profile name
+- submitting it stores the requested name, which drives a profile-creation
+  action/lift
+- that action starts `system/profile-home.tsx` with `.inSpace(name)`, passes the
+  submitted name as the initial profile name, and writes the resulting profile
+  default-pattern link to `homeDefaultPattern.profile`
+
+If `profile` is present:
+
+- render the profile default pattern or a compact summary based on
+  `profile.name` and `profile.avatar`
+
+This write targets the home default pattern because that is the current durable
+home-field convention used by favorites. If custom home pattern replacement
+needs to preserve profile links independently, that should be handled as a
+separate migration.
+
+## Adding Profile Elements
+
+Profile elements are added through the profile default pattern's `addElement`
+stream. Callers must not push to `elements` directly.
+
+`AddProfileElementEvent` initially supports two sources:
+
+```ts
+type AddProfileElementEvent =
+  | { catalogId: string }
+  | { patternUrl: string; title?: string; tag?: string };
+```
+
+The fixed catalog is a small allowlist of pattern URLs or module descriptors
+owned by the profile default pattern. URL-based creation compiles the supplied
+pattern URL using the same resolver path as ordinary piece creation.
+
+The handler creates the piece in the profile space, snapshots its searchable
+tag, deduplicates by cell identity, and appends a `ProfileElement`.
+
+## Authorization
+
+The v1 protected data is the profile default pattern's owner-controlled fields
+and element mutations:
+
+- `profileDefault.name`
+- `profileDefault.avatar`
+- `profileDefault.elements`
+- `profileDefault.addElement` / `profileDefault.removeElement` writes that
+  mutate `elements`
+
+Those protected fields must carry owner integrity shaped like:
+
+```ts
+{ kind: "represents-principal", subject: ownerDid }
+```
+
+Writes to those fields must satisfy the owner integrity and must be
+`WriteAuthorizedBy` the trusted profile handlers or trusted profile UI actions.
+This is CFC-enforced, not UI-only. The UI may hide editing controls for
+non-owners, but that is only a convenience check.
+
+The home link write to `homeSpaceCell.defaultPattern.profile` is durable and
+protected by CFC as profile-link data. It carries static `"profile-link"`
+integrity and is `WriteAuthorizedBy` the profile-link creation flow in the home
+default pattern. This is separate from the profile owner's
+`represents-principal` integrity on the profile default fields: v1 protects the
+link against direct untrusted writes, but does not add a second owner-specific
+atom to the home link itself.
+
+Profile creation UI rendered by `wish({ query: "#profile" })[UI]` must be
+vended through a trusted pattern surface, not raw runner-owned input markup. The
+trusted surface sends the same create-profile event used by the home profile tab
+and leaves navigation unchanged. The transient requested-name trigger that feeds
+this flow is ordinary home default-pattern state; the durable protected surface
+is the resulting `homeSpaceCell.defaultPattern.profile` link.
+
+The owner check should use `runtime.userIdentityDID` / `storageManager.as.did()`
+as the authenticated principal. It should not use the current collaboration
+space DID. If static CFC authoring aliases cannot express exact owner-DID
+requirements, profile creation should use a profile schema factory that embeds
+the owner DID into the profile default schema.
+
+## Wish Scope
+
+### Scope Value
+
+Add a profile wish scope value:
+
+```ts
+type WishScope = "~" | "." | "profile" | DID;
+```
+
+The string `"profile"` is reserved and must be removed from the arbitrary-DID
+bucket. Today `getArbitraryDIDs()` treats every non-`"~"`/`"."` value as a DID;
+that must change before `scope: ["profile"]` is exposed.
+
+### Hashtag Search
+
+For hashtag queries, `scope: ["profile"]` searches
+`homeSpaceCell.defaultPattern.profile.elements`.
+
+Matching follows the favorites behavior:
+
+1. `userTags` exact match, lowercased, without `#`
+2. `tag` hashtag match using the existing hashtag extractor
+
+The result maps each matching `ProfileElement` to `element.cell`, then applies
+the query path suffix the same way favorites and mentionables do.
+
+Examples:
+
+```tsx
+// Search profile elements only.
+const profileCard = wish({ query: "#profile-card", scope: ["profile"] });
+
+// Search favorites, current space, and profile elements.
+const person = wish({
+  query: "#person",
+  scope: ["~", ".", "profile"],
+});
+```
+
+Search order for mixed scopes is:
+
+1. favorites (`"~"`)
+2. current-space mentionables (`"."`)
+3. profile elements (`"profile"`)
+4. explicit DID spaces, in caller-provided order
+
+This preserves existing favorites-first behavior and makes profile an explicit
+extension rather than a new default.
+
+### Well-Known Profile Targets
+
+`wish({ query: "#profile" })` resolves to the current user's profile default
+pattern.
+
+Add these explicit profile targets:
+
+```tsx
+wish({ query: "#profile" })            // homeDefault.profile
+wish({ query: "#profileSpace" })       // the profile space cell, derived from the profile link
+wish({ query: "#profileName" })        // homeDefault.profileName, then profile.initialNameApplied
+wish({ query: "#profileAvatar" })      // homeDefault.profile.avatar
+```
+
+The optional `[UI]` for `wish({ query: "#profile" })` is persona-aware:
+
+- when the profile exists, render a link to the profile default pattern
+- when the profile is missing, render the same profile-name input as the home
+  profile tab through the trusted profile-create pattern surface
+- submitting the input creates the profile through the home default pattern but
+  does not navigate away from the current view
+- the wish UI should then reactively replace itself with the profile link once
+  `homeDefault.profile` is written
+
+If the old learned-summary shortcut remains useful, it should get a new explicit
+target instead of overloading `#profile`.
+
+## Integration Test Plan
+
+Add a browser integration test with a demo pattern.
+
+### Demo Pattern
+
+Create a small test/demo pattern that renders the current user's shared profile
+name and profile wish UI:
+
+```tsx
+export default pattern(() => {
+  const profile = wish({ query: "#profile" });
+  const name = wish<string>({ query: "#profileName" });
+  return {
+    [NAME]: "Profile Name Demo",
+    [UI]: (
+      <div>
+        <div>{name.result ?? "No profile"}</div>
+        <div>{profile}</div>
+      </div>
+    ),
+  };
+});
+```
+
+The test should assert both states:
+
+1. before profile creation, the demo renders the missing-profile state and the
+   inline profile creation input from `wish({ query: "#profile" })[UI]`
+2. after profile creation and name entry, the demo renders the profile name
+   and the profile wish UI renders a link to the profile
+
+### Browser Flow
+
+The integration test should:
+
+1. create a fresh browser identity
+2. navigate to a fresh ordinary space
+3. add or open the demo pattern
+4. assert the demo has no profile name yet
+5. submit the profile name through the demo's inline profile wish UI
+6. assert the rendered text is the profile name
+7. assert the inline profile wish UI has reacted into a profile link
+8. optionally create a second ordinary space with the same identity and assert
+    the same profile name renders there too
+9. for multi-user coverage, log in as a second identity against the same
+    shared ordinary space/piece, create that user's profile, and assert the demo
+    renders the second user's name without changing the first user's profile
+
+The test should use the existing shell integration harness style from
+`packages/patterns/integration/default-app.test.ts`, including fresh noble
+identities and `waitForRuntimeIdle` before assertions. The CFC browser helpers
+already provide useful primitives such as `waitForText`, `fillCfInput`, and
+`waitForRuntimeIdle`; the CFC group-chat integration tests show the existing
+shape for switching identities while keeping a shared piece under test.
+
+### Runner-Level Tests
+
+Add focused runner tests for `wish()`:
+
+- `scope: ["profile"]` is not treated as a DID
+- profile hashtag search reads `homeSpaceCell.defaultPattern.profile`
+- mixed scope ordering is stable
+- missing profile link returns an empty/error `WishState` without throwing out
+  of the scheduler action
+- `wish({ query: "#profile" })` returns the profile default pattern
+
+## Implementation Plan
+
+1. Add schemas and helper types for the profile default-pattern link and
+   `ProfileDefaultPattern` / `ProfileElement`.
+2. Add `PatternFactory.inSpace(...)` and use it for profile-space creation.
+3. Add the profile default pattern at
+   `packages/patterns/system/profile-home.tsx`.
+4. Add profile default-pattern creation in `packages/piece` for explicit
+   profile-space controller flows.
+5. Update the home pattern to render missing and linked profile states.
+6. Update `WishParams.scope`, `wish()` parsing, and hashtag search for
+   `"profile"`.
+7. Add explicit profile well-known targets: `#profileSpace`, `#profileName`,
+   and `#profileAvatar`.
+8. Add runner tests for wish behavior.
+9. Add the browser integration test and demo pattern.
+10. Update `docs/common/conventions/wish.md` and
+    `docs/common/conventions/HOME_SPACE.md` after behavior lands.
+
+## Open Questions
+
+- Should profile spaces be readable by all collaborators by default, or private
+  until explicitly shared?
+- Should the profile default pattern expose `elements` only, or also a
+  default-app-compatible `addPiece` stream for reuse?
+- Should avatar be a string permanently, or should the first implementation
+  reserve a future blob shape?
+- How should a user intentionally reset or migrate their profile space if the
+  home-space link points to a broken or obsolete profile?

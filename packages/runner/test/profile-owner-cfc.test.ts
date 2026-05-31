@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -76,6 +77,46 @@ const createRuntime = () => {
     storageManager,
   });
   return { runtime, storageManager };
+};
+
+const compileHomePattern = async (runtime: Runtime) => {
+  const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+    /\/$/,
+    "",
+  );
+  const sourcePath = new URL(
+    "../../patterns/system/home.tsx",
+    import.meta.url,
+  ).pathname;
+  const program = await runtime.harness.resolve(
+    new FileSystemProgramResolver(sourcePath, repoRoot),
+  );
+  return await runtime.patternManager.compilePattern(program);
+};
+
+const compileProfileHomePattern = async (runtime: Runtime) => {
+  const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+    /\/$/,
+    "",
+  );
+  const sourcePath = new URL(
+    "../../patterns/system/profile-home.tsx",
+    import.meta.url,
+  ).pathname;
+  const program = await runtime.harness.resolve(
+    new FileSystemProgramResolver(sourcePath, repoRoot),
+  );
+  return await runtime.patternManager.compilePattern(program);
+};
+
+const resolveLocalSchemaRef = (root: JSONSchema, schema: JSONSchema) => {
+  const ref = (schema as { $ref?: string }).$ref;
+  if (!ref?.startsWith("#/$defs/")) {
+    return schema;
+  }
+  const defName = ref.slice("#/$defs/".length);
+  return (root as { $defs?: Record<string, JSONSchema> }).$defs?.[defName] ??
+    schema;
 };
 
 const setTrustedProfileWriter = (
@@ -348,6 +389,154 @@ describe("profile owner CFC policy", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error?.message).toContain("ownerPrincipal");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("marks the home profile link as integrity-protected data", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const rootSchema = homePattern.resultSchema as JSONSchema;
+      const profileSchema = resolveLocalSchemaRef(
+        rootSchema,
+        (rootSchema as { properties?: Record<string, JSONSchema> }).properties
+          ?.profile ?? {},
+      ) as { ifc?: { addIntegrity?: unknown[]; writeAuthorizedBy?: unknown } };
+      expect(profileSchema.ifc?.addIntegrity).toContain("profile-link");
+      expect(profileSchema.ifc?.writeAuthorizedBy).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("marks production profile fields as owner-protected data", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const profileHomePattern = await compileProfileHomePattern(runtime);
+      const rootSchema = profileHomePattern.resultSchema as JSONSchema;
+      const properties =
+        (rootSchema as { properties?: Record<string, JSONSchema> })
+          .properties ?? {};
+
+      for (const field of ["name", "avatar", "elements"]) {
+        const fieldSchema = resolveLocalSchemaRef(
+          rootSchema,
+          properties[field],
+        );
+        const ifc = (fieldSchema as { ifc?: Record<string, unknown> }).ifc;
+        expect(ifc?.ownerPrincipal).toEqual({
+          __ctCurrentPrincipal: true,
+        });
+        expect(ifc?.addIntegrity).toContainEqual({
+          kind: "represents-principal",
+          subject: { __ctCurrentPrincipal: true },
+        });
+        expect(ifc?.writeAuthorizedBy).toBeDefined();
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("allows a pattern to initialize its own owner-protected result fields during creation", async () => {
+    // Reproduces the pattern-creation gap: instantiating a pattern whose result
+    // declares owner-protected fields (writeAuthorizedBy bound to its own edit
+    // handlers) means the runtime must project and initialize those fields
+    // (avatar = "", elements = []). That trusted initialization is authored by
+    // the creating context, which is NOT any of the per-field edit handlers, so
+    // the writeAuthorizedBy modification gate rejects the pattern's own setup.
+    // This is independent of cross-space: the same happens same-space for any
+    // `aCell.set(SomePattern({}))` creation flow.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const profileHomePattern = await compileProfileHomePattern(runtime);
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "pattern-create",
+        actingPrincipal: alice.did(),
+      });
+      // The creating context (e.g. a profile-create handler) is not the
+      // per-field edit handler (setName/setAvatar/addElement).
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "system.profile-create",
+      });
+      const resultCell = runtime.getCell(
+        alice.did(),
+        "pattern-create-owner-init",
+        profileHomePattern.resultSchema,
+        tx,
+      );
+      runtime.runner.run(
+        tx,
+        profileHomePattern,
+        { initialName: "Ada" },
+        resultCell,
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects direct untrusted writes to the home profile link", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const tx = runtime.edit();
+      runtime.getCell(
+        alice.did(),
+        "home-profile-link-untrusted",
+        homePattern.resultSchema,
+        tx,
+      );
+      const profileDefault = runtime.getCell(
+        alice.did(),
+        "home-profile-link-untrusted-target",
+        undefined,
+        tx,
+      );
+      profileDefault.set({
+        name: "Ada",
+        avatar: "",
+        elements: [],
+      });
+      await tx.commit();
+
+      const writeTx = runtime.edit();
+      const protectedHomeDefault = runtime.getCell(
+        alice.did(),
+        "home-profile-link-untrusted",
+        homePattern.resultSchema,
+        writeTx,
+      );
+      protectedHomeDefault.key("profile").set(profileDefault);
+      writeTx.prepareCfc();
+      const result = await writeTx.commit();
+      expect(result.error?.message).toContain("trusted");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not expose a writable profile creation trigger", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      const properties =
+        (homePattern.resultSchema as { properties?: Record<string, unknown> })
+          .properties ?? {};
+      expect(properties.requestedProfileName).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

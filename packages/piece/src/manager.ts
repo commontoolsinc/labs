@@ -779,10 +779,6 @@ export class PieceManager {
       cause ?? { space: this.space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
-    await timePiecePhase(
-      "setupPersistent.runtime.setup",
-      () => this.runtime.setup(undefined, pattern, inputs ?? {}, piece),
-    );
     const knownPatternId = (() => {
       try {
         return this.runtime.patternManager.getPatternId(pattern);
@@ -790,6 +786,10 @@ export class PieceManager {
         return undefined;
       }
     })();
+    await timePiecePhase(
+      "setupPersistent.runtime.setup",
+      () => this.runtime.setup(undefined, pattern, inputs ?? {}, piece),
+    );
     await timePiecePhase(
       "setupPersistent.syncPattern",
       () =>
