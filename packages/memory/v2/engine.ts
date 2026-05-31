@@ -3891,6 +3891,22 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
   }
 };
 
+// Scheduler shallow reads already treat direct child writes as parent
+// structural changes, so emitting the parent path here would dirty unrelated
+// recursive sibling readers under the same object.
+const schedulerWritePathsForPatch = (patch: PatchOp): string[][] => {
+  switch (patch.op) {
+    case "replace":
+    case "add":
+    case "remove":
+      return [parsePointer(patch.path)];
+    case "move":
+      return [parsePointer(patch.from), parsePointer(patch.path)];
+    case "splice":
+      return [parsePointer(patch.path)];
+  }
+};
+
 const schedulerWriteAddressesForRevisions = (
   space: string,
   revisions: readonly AppliedRevision[],
@@ -3898,7 +3914,7 @@ const schedulerWriteAddressesForRevisions = (
   const writes = new Map<string, SchedulerObservationAddress>();
   for (const revision of revisions) {
     const paths = revision.op === "patch" && revision.patches
-      ? revision.patches.flatMap(touchedPathsForPatch)
+      ? revision.patches.flatMap(schedulerWritePathsForPatch)
       : [[]];
     for (const path of paths) {
       const write = normalizeSchedulerAddress({

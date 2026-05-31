@@ -1035,6 +1035,110 @@ Deno.test("memory v2 marks persisted readers dirty during semantic commits", asy
   }
 });
 
+Deno.test("memory v2 object property patches dirty shallow parents without recursive siblings", async () => {
+  const { engine, path } = await createEngine();
+  const source = {
+    space: sourceRead.space,
+    scope: sourceRead.scope,
+    id: sourceRead.id,
+  };
+  const recursiveSiblingRead = {
+    ...source,
+    path: ["value", "parentNotebook"],
+  };
+  const shallowParentRead = {
+    ...source,
+    path: ["value"],
+  };
+  const recursiveChildRead = {
+    ...source,
+    path: ["value", "notebookSelectItems"],
+  };
+  const stateFor = (actionId: string) =>
+    getSchedulerActionState(engine, {
+      branch: "",
+      pieceId: "of:piece",
+      processGeneration: 1,
+      actionId,
+    })?.directDirtySeq;
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:seed-object",
+      space: source.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: source.id,
+          scope: source.scope,
+          value: { value: { parentNotebook: "root" } },
+        }],
+      },
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation: observationForAction("recursive-sibling-reader", {
+        reads: [recursiveSiblingRead],
+        shallowReads: [],
+        readWatermarks: [
+          { ...recursiveSiblingRead, kind: "recursive", seq: 1 },
+        ],
+      }),
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation: observationForAction("shallow-parent-reader", {
+        reads: [],
+        shallowReads: [shallowParentRead],
+        readWatermarks: [
+          { ...shallowParentRead, kind: "shallow", seq: 1 },
+        ],
+      }),
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation: observationForAction("recursive-child-reader", {
+        reads: [recursiveChildRead],
+        shallowReads: [],
+        readWatermarks: [
+          { ...recursiveChildRead, kind: "recursive", seq: 1 },
+        ],
+      }),
+    });
+
+    const commit = applyCommit(engine, {
+      sessionId: "session:add-child",
+      space: source.space,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: source.id,
+          scope: source.scope,
+          patches: [{
+            op: "add",
+            path: "/value/notebookSelectItems",
+            value: ["note"],
+          }],
+        }],
+      },
+    });
+
+    assertEquals(stateFor("recursive-sibling-reader"), null);
+    assertEquals(stateFor("shallow-parent-reader"), commit.seq);
+    assertEquals(stateFor("recursive-child-reader"), commit.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", async () => {
   setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
