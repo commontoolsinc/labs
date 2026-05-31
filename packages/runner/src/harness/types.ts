@@ -122,4 +122,11 @@ export interface Harness extends EventTarget {
     value: unknown,
     options: UnsafeHostTrustOptions,
   ): void;
+
+  // Translate a source-location string (`/<id>/file.tsx:line:col`, as found on
+  // an action's `src`) into a stable, content-addressed implementation hash
+  // (`cf:module/<moduleHash>:line:col`). Returns undefined when the source
+  // location does not correspond to a loaded module, in which case callers fall
+  // back to the raw source location. See docs/specs/module-loading.md.
+  implementationHashForSource?(sourceLocation: string): string | undefined;
 }

@@ -591,6 +591,15 @@ export function schedulerImplementationFingerprint(
   actionId: string,
   telemetry: SchedulerActionInfo | undefined,
 ): string {
+  // Prefer the per-module content-addressed identity when available: it is
+  // stable across reloads, entry points, and TCB upgrades (see
+  // docs/specs/module-loading.md). The `src` source location is only stable
+  // within a single bundle layout, so it is the fallback.
+  const implementationHash = (action as { implementationHash?: unknown })
+    .implementationHash;
+  if (typeof implementationHash === "string" && implementationHash.length > 0) {
+    return `impl:${implementationHash}`;
+  }
   const sourceId = (action as { src?: unknown }).src;
   if (typeof sourceId === "string" && sourceId.length > 0) {
     return `src:${sourceId}`;

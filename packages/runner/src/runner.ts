@@ -2202,6 +2202,25 @@ export class Runner {
   }
 
   /**
+   * Attach a stable, content-addressed implementation identity to an action,
+   * derived from its bundle-relative source location. No-op when the harness
+   * cannot resolve the location (built-in or unmapped sources); the scheduler
+   * then falls back to the raw source location for its implementation
+   * fingerprint. See docs/specs/module-loading.md.
+   */
+  private applyImplementationHash(
+    action: Action,
+    sourceLocation: string,
+  ): void {
+    const implementationHash = this.runtime.harness
+      .implementationHashForSource?.(sourceLocation);
+    if (implementationHash) {
+      (action as { implementationHash?: string }).implementationHash =
+        implementationHash;
+    }
+  }
+
+  /**
    * If the final target of the link chain is a stream, return the first link.
    *
    * @param inputs
@@ -3002,6 +3021,7 @@ export class Runner {
         schedulerJavaScriptActionName(name, processCell, reads, writes),
         { setSrc: true },
       );
+      this.applyImplementationHash(action, name);
     }
 
     // Writable arguments alone do not make an output-producing action a
@@ -3356,6 +3376,9 @@ export class Runner {
       }
     };
     setRunnableName(action, rawName, { setSrc: true });
+    if (impl.src) {
+      this.applyImplementationHash(action, impl.src);
+    }
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
