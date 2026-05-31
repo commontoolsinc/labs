@@ -142,6 +142,47 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.b).toBe(2);
   });
 
+  it("does not turn a type-only import into a runtime record edge", () => {
+    // `import type` from a module that is NOT in the graph must not create a
+    // dangling resolution / runtime import.
+    const sources = files({
+      "/main.ts":
+        `import type { Foo } from "external-types";\nexport const run = (x: Foo): number => 1;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const record = records.get(specifierByPath.get("/main.ts")!)!;
+    expect(record.imports).not.toContain("external-types");
+    // Loads cleanly (verifier sees no dangling edge).
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { run(x: unknown): number };
+    expect(ns.run(undefined)).toBe(1);
+  });
+
+  it("collects enum exports", () => {
+    const sources = files({
+      "/main.ts": `export enum Color { Red = 1, Blue = 2 }`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { Color: Record<string, unknown> };
+    expect(ns.Color.Red).toBe(1);
+  });
+
+  it("ignores type-only re-exports instead of throwing", () => {
+    const sources = files({
+      "/types.ts": `export interface Foo { n: number }`,
+      "/main.ts":
+        `export type * from "./types.ts";\nexport const run = (): number => 1;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { run(): number };
+    expect(ns.run()).toBe(1);
+  });
+
   it("throws loudly on unsupported `export * from`", () => {
     const sources = files({
       "/inner.ts": `export const x = 1;`,

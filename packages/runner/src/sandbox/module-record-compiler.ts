@@ -1,9 +1,6 @@
 import ts from "typescript";
 import type { Source } from "@commonfabric/js-compiler";
-import {
-  collectImportSpecifiers,
-  resolveImportSpecifier,
-} from "@commonfabric/js-compiler";
+import { resolveImportSpecifier } from "@commonfabric/js-compiler";
 import {
   computeModuleHashes,
   findInternalTarget,
@@ -87,21 +84,6 @@ export function compileSourcesToRecords(
   const records = new Map<string, VirtualModuleRecord>();
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
-    const importSpecs = collectImportSpecifiers(source, TARGET);
-    const resolutions: Record<string, string> = {};
-    for (const spec of importSpecs) {
-      const resolved = resolveImportSpecifier(spec, source);
-      const internal = findInternalTarget(fileNames, resolved);
-      if (internal !== undefined) {
-        resolutions[spec] = specifierByPath.get(internal)!;
-      } else if (spec in runtimeModules) {
-        resolutions[spec] = `cf:runtime/${spec}`;
-      } else {
-        // Unknown external; leave as-is so a missing-record error is explicit.
-        resolutions[spec] = spec;
-      }
-    }
-
     const moduleHash = hashes.get(source.name)!;
     const cached = options.recordCache?.get(moduleHash);
     let exportNames: string[];
@@ -120,6 +102,26 @@ export function compileSourcesToRecords(
         },
       }).outputText;
       options.recordCache?.set(moduleHash, { exports: exportNames, compiled });
+    }
+
+    // Runtime imports are exactly the `require()` calls in the compiled output.
+    // Type-only imports (`import type`, inline `import("…")` type refs) are
+    // erased by the compiler and never appear here, so they correctly do not
+    // become record edges — unlike `collectImportSpecifiers`, which includes
+    // them for module *identity*.
+    const importSpecs = extractRuntimeImports(compiled);
+    const resolutions: Record<string, string> = {};
+    for (const spec of importSpecs) {
+      const resolved = resolveImportSpecifier(spec, source);
+      const internal = findInternalTarget(fileNames, resolved);
+      if (internal !== undefined) {
+        resolutions[spec] = specifierByPath.get(internal)!;
+      } else if (spec in runtimeModules) {
+        resolutions[spec] = `cf:runtime/${spec}`;
+      } else {
+        // Unknown external; leave as-is so a missing-record error is explicit.
+        resolutions[spec] = spec;
+      }
     }
 
     // Expose `__esModule` on the namespace so that an importer compiled with
@@ -163,6 +165,21 @@ export function compileSourcesToRecords(
   }
 
   return { records, specifierByPath };
+}
+
+/**
+ * Extract the runtime import specifiers actually emitted as `require()` calls
+ * in the compiled CommonJS body. This is the precise runtime dependency set;
+ * type-only imports have already been erased by the compiler.
+ */
+function extractRuntimeImports(compiled: string): string[] {
+  const re = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+  const out = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(compiled)) !== null) {
+    out.add(match[1]);
+  }
+  return [...out];
 }
 
 /** Collect bound identifier names from a (possibly destructuring) binding. */
@@ -231,11 +248,17 @@ function collectExportNames(source: Source): string[] {
       }
       names.add("default"); // `export default <expr>`
     } else if (ts.isExportDeclaration(statement)) {
+      // `export type ...` re-exports are compile-time only; ignore them.
+      if (statement.isTypeOnly) {
+        continue;
+      }
       const clause = statement.exportClause;
       if (clause && ts.isNamedExports(clause)) {
-        // `export { a, b }` or `export { a } from "./m"`.
+        // `export { a, b }` or `export { a } from "./m"`; skip `export { type T }`.
         for (const element of clause.elements) {
-          names.add(element.name.text);
+          if (!element.isTypeOnly) {
+            names.add(element.name.text);
+          }
         }
       } else if (clause && ts.isNamespaceExport(clause)) {
         // `export * as ns from "./m"`.
