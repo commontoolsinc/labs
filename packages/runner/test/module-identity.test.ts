@@ -147,6 +147,17 @@ describe("computeModuleHashes", () => {
     expect(after.get("/a.ts")).not.toBe(before.get("/a.ts"));
   });
 
+  it("gives byte-identical modules at different paths distinct identities", () => {
+    // Identity includes the authored path, so two identical-content files are
+    // distinct modules (their actions live at distinct source locations).
+    const body = `export const f = () => 1;`;
+    const hashes = computeModuleHashes(
+      program("/a.ts", { "/a.ts": body, "/b.ts": body }),
+      { runtimeFingerprint: RFP },
+    );
+    expect(hashes.get("/a.ts")).not.toBe(hashes.get("/b.ts"));
+  });
+
   it("folds the runtime fingerprint into modules that import runtime modules", () => {
     const usesRuntime =
       `import { h } from "commonfabric"; export const a = () => h();`;

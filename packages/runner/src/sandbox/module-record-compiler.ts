@@ -4,7 +4,10 @@ import {
   collectImportSpecifiers,
   resolveImportSpecifier,
 } from "@commonfabric/js-compiler";
-import { computeModuleHashes } from "../harness/module-identity.ts";
+import {
+  computeModuleHashes,
+  findInternalTarget,
+} from "../harness/module-identity.ts";
 import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 /**
@@ -25,23 +28,6 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 const TARGET = ts.ScriptTarget.ES2023;
 
-const RESOLUTION_SUFFIXES = [
-  "",
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mts",
-  ".mjs",
-  ".d.ts",
-  "/index.ts",
-  "/index.tsx",
-  "/index.js",
-  "/index.jsx",
-  "/index.mts",
-  "/index.mjs",
-];
-
 /** Per-module compiled artifact, cacheable by module hash (Phase 4). */
 export interface CompiledModuleArtifact {
   exports: string[];
@@ -53,6 +39,10 @@ export interface CompiledModuleArtifact {
  * Because the hash already folds in the transitive import closure, a cached
  * artifact is valid as long as its key matches — editing one file invalidates
  * only that module (and its importers, whose hashes change).
+ *
+ * The cache assumes the fixed compiler options used by this adapter (CommonJS,
+ * ES2023, esModuleInterop). A caller sharing one cache across differing
+ * compiler options would need to fold an options tag into the key.
  */
 export interface ModuleRecordCache {
   get(moduleHash: string): CompiledModuleArtifact | undefined;
@@ -132,9 +122,14 @@ export function compileSourcesToRecords(
       options.recordCache?.set(moduleHash, { exports: exportNames, compiled });
     }
 
+    // Expose `__esModule` on the namespace so that an importer compiled with
+    // esModuleInterop (`__importDefault`) reads this module's `default` export
+    // rather than wrapping the whole namespace. Authored sources are ESM.
+    const namespaceExports = [...exportNames, "__esModule"];
+
     records.set(specifier, {
       imports: importSpecs,
-      exports: exportNames,
+      exports: namespaceExports,
       resolutions,
       execute: (moduleExports, compartment, resolvedImports) => {
         // Evaluate the compiled CommonJS body inside the SES compartment so it
@@ -156,24 +151,12 @@ export function compileSourcesToRecords(
         for (const name of exportNames) {
           moduleExports[name] = finalExports[name];
         }
+        moduleExports.__esModule = true;
       },
     });
   }
 
   return { records, specifierByPath };
-}
-
-function findInternalTarget(
-  fileNames: Set<string>,
-  resolved: string,
-): string | undefined {
-  for (const suffix of RESOLUTION_SUFFIXES) {
-    const candidate = resolved + suffix;
-    if (fileNames.has(candidate)) {
-      return candidate;
-    }
-  }
-  return undefined;
 }
 
 /** Statically collect the names a module exports (named + default). */

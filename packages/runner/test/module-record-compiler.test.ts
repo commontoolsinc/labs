@@ -47,6 +47,19 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.default()).toBe(42);
   });
 
+  it("resolves a default import across modules (esModuleInterop)", () => {
+    const sources = files({
+      "/dep.ts": `const value = 7;\nexport default value;`,
+      "/main.ts":
+        `import dep from "./dep.ts";\nexport const run = (): number => dep + 1;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { run(): number };
+    expect(ns.run()).toBe(8);
+  });
+
   it("supports a runtime-module record injected into the graph", () => {
     const sources = files({
       "/main.ts":

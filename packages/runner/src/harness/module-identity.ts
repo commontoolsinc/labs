@@ -14,8 +14,11 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
  * type alike. The resulting identity is:
  *
  *  - **entry-point independent**: it depends only on the module's own reachable
- *    import closure, not on which entry point pulled it into a compilation, nor
- *    on unrelated sibling files;
+ *    import closure and its authored (bundle-relative) path, not on which entry
+ *    point pulled it into a compilation, nor on unrelated sibling files. The
+ *    authored path is included so two byte-identical modules at different paths
+ *    keep distinct identities; that path is stable across entry points, unlike
+ *    the whole-program `/<id>/` prefix this replaces;
  *  - **TCB independent**: it hashes authored source, not compiled output, so a
  *    transformer/compiler upgrade does not change it (the scheduler's separate
  *    `runtimeFingerprint` covers compilation-semantics changes);
@@ -31,8 +34,10 @@ const VERSION_TAG = "cf/module-id/v1";
 
 // Candidate suffixes used to match a resolved bare path (which usually omits an
 // extension, e.g. `./b`) against a concrete file name in the program.
+// Extensioned and directory-index candidates are tried before the bare ""
+// match so that, like TypeScript module resolution, `import "./a"` prefers
+// `/a.ts` over a literal extensionless `/a` when both exist.
 const RESOLUTION_SUFFIXES = [
-  "",
   ".ts",
   ".tsx",
   ".js",
@@ -46,6 +51,7 @@ const RESOLUTION_SUFFIXES = [
   "/index.jsx",
   "/index.mts",
   "/index.mjs",
+  "",
 ];
 
 export interface ModuleIdentityOptions {
@@ -149,7 +155,13 @@ export function computeModuleHashes(
   return result;
 }
 
-function findInternalTarget(
+/**
+ * Match a resolved (relative) import path against a concrete file name in the
+ * program, trying TypeScript-style extension and directory-index candidates.
+ * Shared by module identity and the ESM record adapter so they agree on what
+ * counts as an internal edge.
+ */
+export function findInternalTarget(
   fileNames: Set<string>,
   resolved: string,
 ): string | undefined {

@@ -421,6 +421,10 @@ export class Engine extends EventTarget implements Harness {
   // prefixed source path (`/<id>/file.tsx`) so it can be matched against the
   // source-map `source` that appears in an action's source location.
   private registerModuleHashes(id: string, files: Source[]): void {
+    // No `runtimeFingerprint` is passed: the scheduler tracks runtime/TCB
+    // changes on its own `runtimeFingerprint` axis, so the implementation
+    // identity is intentionally pure code identity (runtime-module import
+    // leaves hash with the empty fingerprint).
     const hashes = computeModuleHashes({ main: "", files });
     for (const [path, hash] of hashes) {
       this.moduleHashByPrefixedSource.set(`/${id}${path}`, hash);
@@ -499,6 +503,7 @@ export class Engine extends EventTarget implements Harness {
     this.nextLoadId = 0;
     this.executableRegistry.clear();
     this.bundleValidator.clear();
+    this.moduleHashByPrefixedSource.clear();
   }
 
   private getSESRuntime(): SESRuntime {
