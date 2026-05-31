@@ -17,7 +17,8 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
+import { canFollowScopedLink } from "./scope.ts";
+import type { SchemaScope } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -64,10 +65,14 @@ const recordDereferenceHop = (
   });
 };
 
-const schemaScopeForLink = (link: NormalizedFullLink) =>
-  isRecord(link.schema) && isSchemaScope(link.schema.scope)
-    ? link.schema.scope
-    : undefined;
+// The scope cap a link's schema imposes on the next link it permits a read to
+// follow (see ContextualFlowControl.getSchemaScopeCap for the precedence). This
+// caps *which* link scopes may be followed; it must never be copied onto the
+// followed link itself.
+const schemaScopeForLink = (
+  link: NormalizedFullLink,
+): SchemaScope | undefined =>
+  ContextualFlowControl.getSchemaScopeCap(link.schema);
 
 const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
   ...link,

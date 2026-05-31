@@ -765,7 +765,12 @@ describe("link-utils", () => {
       });
     });
 
-    it("should preserve scope from stripped scoped asCell entries", () => {
+    it("does not promote stripped asCell entry scope to schema scope", () => {
+      // The scope of an asCell value belongs to the link to its target (the
+      // link carries its own scope) and acts as a follow cap. It must NOT be
+      // promoted onto the stripped schema's top-level `scope`: doing so makes it
+      // look like an authored container scope, which then gets stamped onto the
+      // container link on reads and addresses the wrong scoped instance (CT-1623).
       const schema = {
         type: "object",
         properties: {
@@ -789,11 +794,9 @@ describe("link-utils", () => {
           rack: {
             type: "array",
             items: { type: "string" },
-            scope: "user",
           },
           message: {
             type: "string",
-            scope: "session",
           },
         },
       });

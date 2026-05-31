@@ -9,7 +9,38 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+// The read follow-cap (link-resolution/traverse) and the write target scope
+// (data-updating) both derive from ContextualFlowControl.getSchemaScopeCap, so
+// they can never disagree about which scoped instance a slot addresses. This
+// pins the single precedence: outermost asCell entry scope first (the immediate
+// cell/slot), then the top-level `scope` (the value when there is no wrapper).
+Deno.test("getSchemaScopeCap precedence: asCell entry before top-level scope", () => {
+  const cap = (schema: JSONSchema) =>
+    ContextualFlowControl.getSchemaScopeCap(schema);
+  assertSchemaScope(
+    cap({ type: "string", asCell: [{ kind: "cell", scope: "session" }] }),
+    "session",
+  );
+  assertSchemaScope(cap({ type: "string", scope: "user" }), "user");
+  // When both are present, the immediate (asCell) cell scope wins.
+  assertSchemaScope(
+    cap({
+      type: "object",
+      scope: "user",
+      asCell: [{ kind: "cell", scope: "session" }],
+    }),
+    "session",
+  );
+  assertSchemaScope(cap({ type: "string" }), undefined);
+  assertSchemaScope(cap({ type: "string", scope: "any" }), "any");
+});
+
+function assertSchemaScope(actual: unknown, expected: unknown) {
+  expect(actual).toBe(expected);
+}
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -725,7 +756,7 @@ describe("Schema - Basic Types and References", () => {
       expect(innerStringCell.get()).toBe("hello double asCell");
     });
 
-    it("should honor scoped asCell object entries", () => {
+    it("keeps the asCell entry scope on the schema, not stamped on the link", () => {
       const outer = runtime.getCell<{ current: Cell<string> }>(
         space,
         "scoped-ascell-object-entry",
@@ -742,8 +773,15 @@ describe("Schema - Basic Types and References", () => {
         tx,
       );
 
+      // key() must not stamp the asCell entry scope onto the container link: an
+      // asCell field is a reference whose link lives in the container at the
+      // container's own scope; the entry scope is a follow cap on the target
+      // (carried by the stored link). Stamping it here reads the wrong scoped
+      // instance of the container (see CT-1623).
       const currentCell = outer.key("current");
-      expect(currentCell.getAsNormalizedFullLink().scope).toBe("user");
+      expect(currentCell.getAsNormalizedFullLink().scope).toBe("space");
+      const schema = currentCell.getAsNormalizedFullLink().schema as any;
+      expect(schema?.asCell?.[0]?.scope ?? schema?.scope).toBe("user");
     });
 
     it("should preserve nested asCell wrappers through anyOf branches", () => {

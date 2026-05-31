@@ -8,6 +8,7 @@ import type {
   SchemaScope,
 } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
+import { isSchemaScope } from "./scope.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
@@ -522,5 +523,30 @@ export class ContextualFlowControl {
     entry: AsCellEntry | undefined,
   ): SchemaScope | undefined {
     return typeof entry === "string" ? undefined : entry?.scope;
+  }
+
+  /**
+   * The scope a schema declares at this level: the outermost `asCell` entry's
+   * scope if present, otherwise the top-level `scope`. The outermost `asCell`
+   * entry describes the immediate cell/slot (the addressing scope of the link
+   * to it, and the read follow-cap for that immediate hop); the top-level
+   * `scope` applies only when there is no `asCell` wrapper.
+   *
+   * This single precedence is used both for the read follow-cap (which link
+   * scopes a read may follow — see link-resolution.ts / traverse.ts) and for
+   * the write target scope (where content is stored — see data-updating.ts), so
+   * the two never disagree. It is a schema-level declaration only; it must never
+   * be stamped onto a navigated link's own scope (see CT-1623).
+   */
+  static getSchemaScopeCap(
+    schema: JSONSchema | undefined,
+  ): SchemaScope | undefined {
+    if (!isRecord(schema)) return undefined;
+    const entryScope = ContextualFlowControl.getAsCellScope(
+      ContextualFlowControl.getAsCellValues(schema).at(0),
+    );
+    if (isSchemaScope(entryScope)) return entryScope;
+    if (isSchemaScope(schema.scope)) return schema.scope;
+    return undefined;
   }
 }

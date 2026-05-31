@@ -34,7 +34,12 @@ import {
   REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
-import type { CellScope, JSONObject, JSONSchema } from "./builder/types.ts";
+import type {
+  CellScope,
+  JSONObject,
+  JSONSchema,
+  SchemaScope,
+} from "./builder/types.ts";
 import {
   addressKey,
   createDataCellURI,
@@ -42,7 +47,7 @@ import {
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
+import { canFollowScopedLink } from "./scope.ts";
 import type {
   Activity,
   CommitError,
@@ -1229,9 +1234,17 @@ function notFound(
 }
 
 const schemaScopeForSelector = (selector?: SchemaPathSelector) =>
-  isRecord(selector?.schema) && isSchemaScope(selector.schema.scope)
-    ? selector.schema.scope
-    : undefined;
+  schemaFollowScopeCap(selector?.schema);
+
+/**
+ * The scope cap a schema imposes on the link it permits a read to follow (see
+ * ContextualFlowControl.getSchemaScopeCap for the precedence, e.g.
+ * `asCell: [{ kind: "cell", scope: "session" }]` caps at session). This caps
+ * *which* link scopes may be followed; it must never be copied onto the
+ * followed link itself.
+ */
+const schemaFollowScopeCap = (schema: unknown): SchemaScope | undefined =>
+  ContextualFlowControl.getSchemaScopeCap(schema as JSONSchema | undefined);
 
 /**
  * Get a string to use as a key for the specified address

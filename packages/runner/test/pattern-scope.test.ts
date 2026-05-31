@@ -13,7 +13,7 @@ import { Cell, createCell } from "../src/cell.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-Deno.test("Cell.key applies concrete scope from child schema", async () => {
+Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -41,14 +41,28 @@ Deno.test("Cell.key applies concrete scope from child schema", async () => {
       tx,
     );
 
+    // key() only extends the path; it never changes the link's scope. The
+    // declared scope lives in the schema and is realized on read (as a follow
+    // cap) and on write (content goes to the scoped instance with a base-scope
+    // redirect). It is not stamped onto the navigated link.
     assertEquals(cell.getAsNormalizedFullLink().scope, "space");
-    assertEquals(cell.key("name").getAsNormalizedFullLink().scope, "user");
+    assertEquals(cell.key("name").getAsNormalizedFullLink().scope, "space");
     assertEquals(
       cell.key("selectedRoom").getAsNormalizedFullLink().scope,
-      "session",
+      "space",
     );
     assertEquals(
       cell.key("selectedRoom", "room").getAsNormalizedFullLink().scope,
+      "space",
+    );
+
+    // The scope is carried on the schema of the navigated link.
+    assertEquals(
+      (cell.key("name").getAsNormalizedFullLink().schema as any)?.scope,
+      "user",
+    );
+    assertEquals(
+      (cell.key("selectedRoom").getAsNormalizedFullLink().schema as any)?.scope,
       "session",
     );
   } finally {
@@ -590,6 +604,156 @@ Deno.test("cross-space scoped links preserve target space and resolved scope", a
   }
 });
 
+Deno.test("key() does not stamp the asCell entry scope onto the container link", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const outer = runtime.getCell(
+      space,
+      "key-ascell container",
+      {
+        type: "object",
+        properties: {
+          // asCell field: a reference whose link lives in the container at the
+          // container's own scope; the entry scope is a follow cap on the target.
+          current: {
+            type: "string",
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+          // inline scoped field: addressed at its scope via write-side narrowing
+          // + a base-scope redirect, not by stamping the navigated link.
+          plain: { type: "string", scope: "user" },
+        },
+      },
+      tx,
+    );
+
+    // key() only extends the path; it must NOT stamp the schema scope (asCell
+    // entry or inline) onto the navigated link. Scope is carried on the schema
+    // (a follow cap on reads, the target scope on writes); stamping it here reads
+    // the wrong, narrower, empty scoped instance of the container — see CT-1623.
+    const current = outer.key("current");
+    assertEquals(current.getAsNormalizedFullLink().scope, "space");
+    const currentSchema = current.getAsNormalizedFullLink().schema as any;
+    assertEquals(
+      currentSchema?.asCell?.[0]?.scope ?? currentSchema?.scope,
+      "session",
+    );
+
+    const plain = outer.key("plain");
+    assertEquals(plain.getAsNormalizedFullLink().scope, "space");
+    assertEquals(
+      (plain.getAsNormalizedFullLink().schema as any)?.scope,
+      "user",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("lift can read session-scoped cell passed from pattern input", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const sessionTargetBase = runtime.getCell<string | null>(
+      space,
+      "lift captured session target",
+      undefined,
+      tx,
+    );
+    const sessionTarget = createCell<string | null>(
+      runtime,
+      { ...sessionTargetBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    sessionTarget.set("a");
+    const sessionTargetLink = sessionTarget.getAsNormalizedFullLink();
+    assertEquals(sessionTargetBase.getAsNormalizedFullLink().scope, "space");
+    assertEquals(sessionTargetLink.scope, "session");
+    assertEquals(sessionTarget.get(), "a");
+
+    const isSessionOpen = lift(
+      {
+        type: "object",
+        properties: {
+          sessionTarget: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+          id: { type: "string" },
+        },
+        required: ["sessionTarget", "id"],
+      },
+      { type: "boolean" },
+      (
+        { sessionTarget, id }: {
+          sessionTarget: Cell<string | null>;
+          id: string;
+        },
+      ) => sessionTarget.get() === id,
+    );
+
+    const Root = pattern<{ sessionTarget: Cell<string | null> }>(
+      ({ sessionTarget }) => ({
+        isOpen: isSessionOpen({ sessionTarget, id: "a" }),
+      }),
+      {
+        type: "object",
+        properties: {
+          sessionTarget: {
+            anyOf: [{ type: "string" }, { type: "null" }],
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+        },
+        required: ["sessionTarget"],
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "lift reads session scoped cell passed from pattern input",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, Root, { sessionTarget }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    // The stored argument link to the session-scoped cell must preserve its
+    // own scope (and point at that cell), not be re-scoped to the container.
+    const argumentCell = runtime.getCellFromLink(
+      getMetaLink(result, "argument")!,
+    );
+    const argTarget = argumentCell.key("sessionTarget");
+    const storedArgumentTargetLink = parseLink(argTarget.getRaw(), argTarget)!;
+    assertEquals(storedArgumentTargetLink.id, sessionTargetLink.id);
+    assertEquals(storedArgumentTargetLink.path, sessionTargetLink.path);
+    assertEquals(storedArgumentTargetLink.space, sessionTargetLink.space);
+    assertEquals(storedArgumentTargetLink.scope, sessionTargetLink.scope);
+
+    assertEquals(result.key("isOpen").get() as unknown, true);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("broad computed output links to narrower scoped result", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
@@ -757,18 +921,13 @@ Deno.test("opaque JS action result schema scope participates in effective output
     await runtime.storageManager.synced();
     await result.pull();
 
-    const internalLink = getMetaLink(result, "internal");
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    const rawValue = internalCell?.key("value").getRaw();
-    const outputLink = parseLink(rawValue, internalCell!);
+    // The result schema's scope:session participates in the effective output
+    // scope: the output is addressed at the session instance. The output is
+    // reachable via the result's `value` link, which carries scope:session
+    // (the output's content lives in the session instance, not the base).
+    const outputLink = parseLink(result.key("value").getRaw(), result);
     assertEquals(outputLink?.scope, "session");
-
-    const scopedOutputCell = runtime.getCellFromLink(outputLink!);
-    const auxiliaryLink = parseLink(
-      scopedOutputCell.key("nested").getRaw(),
-      scopedOutputCell,
-    );
-    assertEquals(auxiliaryLink?.scope, "session");
+    // Following that link resolves the session-scoped structured output.
     assertEquals(result.key("value").get() as unknown, { nested: 42 });
   } finally {
     await runtime.dispose();

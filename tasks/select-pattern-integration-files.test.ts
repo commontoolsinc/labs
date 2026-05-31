@@ -22,16 +22,22 @@ Deno.test("parseShard rejects invalid shard notation", () => {
 });
 
 Deno.test("pattern integration four-way shard keeps slow files balanced", () => {
+  // The heaviest end-to-end tests are spread one per shard so no shard
+  // dominates: group-chat (shard 2), parking-coordinator (shard 3), and
+  // spec-gallery (shard 4); `all` runs alone on shard 1.
   assertEquals(shardForPatternIntegrationFile("all.test.ts", 4), 1);
   assertEquals(
-    shardForPatternIntegrationFile("cfc-spec-gallery.test.ts", 4),
+    shardForPatternIntegrationFile("cfc-group-chat-demo.test.ts", 4),
     2,
   );
   assertEquals(
-    shardForPatternIntegrationFile("cfc-authorized-save.test.ts", 4),
+    shardForPatternIntegrationFile("parking-coordinator-admin-view.test.ts", 4),
     3,
   );
-  assertEquals(shardForPatternIntegrationFile("nested-counter.test.ts", 4), 4);
+  assertEquals(
+    shardForPatternIntegrationFile("cfc-spec-gallery.test.ts", 4),
+    4,
+  );
 });
 
 Deno.test("unknown pattern integration files are assigned deterministically", () => {
