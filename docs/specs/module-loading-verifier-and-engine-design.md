@@ -146,14 +146,30 @@ verdicts to the AMD verifier, replacing only the packaging checks.
    structural rules for ESM: exactly one module unit per record; import-specifier
    allow-list (reuse `isAllowedAuthoredImportSpecifier`); no top-level executable
    statements beyond the classified items; no mutable bindings.
-3. **Decide the parse substrate.** The adapter currently compiles to CJS for the
-   record body. Two options for the verifier: (a) verify the **authored ESM
-   source** AST directly (cleaner classification, native import/export), or (b)
-   verify the **compiled CJS** like AMD does. Recommendation: verify the authored
-   ESM AST — it avoids re-deriving intent from `__importDefault`/`Object.define-
-   Property(exports,…)` artifacts and is closer to what the author wrote. The
-   compiled body is still what executes, so add a cheap consistency check that
-   the compiled exports/imports match the authored classification.
+3. **Parse substrate — DECIDED: scan the compiled output, no AST (cost-driven).**
+   The current verifier is not a TS AST parse; it is a single-pass token scanner
+   (`compiled-js-parser.ts`) over the compiled bundle text, and its security
+   classifier (`classifyExpressionText` et al.) operates on text ranges, not AST
+   nodes. Measured cost (≈1.9 KB module): `ts.createSourceFile` ≈ 70–120 µs vs a
+   single scan pass ≈ 2–5 µs — i.e. an authored-AST verify is ~15–50× the current
+   per-module cost. Absolute cost is sub-ms/module and dwarfed by the compile-time
+   `createProgram`, but the budget is "no more expensive than today," so the
+   default is to **reuse the existing AST-free scanner classifier on the compiled
+   output** (the proven path — the AMD verifier already matches compiled-emit
+   canonical forms like `Object.defineProperty(exports,"__esModule"…)` /
+   `__importDefault` / `__exportStar`). Only the *structural* front-end is new
+   (recognize ESM/CJS module-item forms instead of `define()`).
+   - **Memoize the verdict by content-addressed module hash**, so evaluate-time
+     re-verify is O(1) for unchanged modules and incremental edits re-verify only
+     the changed module (cheaper than the AMD whole-bundle re-verify).
+   - Authored-source AST classification is the fallback *only if* compiled-output
+     classification proves too messy. If taken, keep it cost-neutral: the adapter
+     already does ~2–3 `createSourceFile` calls/module (`collectExportNames`,
+     `extractRuntimeImports`, `transpileModule`); parse **once** and share that
+     SourceFile across export-collection + import-extraction + verification — a net
+     reduction — and still memoize by hash.
+   - **Cost gate:** a micro-bench plus the flag-on CI lane must show ESM total
+     verify cost ≤ AMD verify cost before the default flips.
 4. **Wire** `verifyModuleGraph` to call `classifyModuleItems` per record and to
    refuse to run when classification is absent/failed (remove the "structural
    only" disclaimer once this lands).
@@ -162,7 +178,7 @@ verdicts to the AMD verifier, replacing only the packaging checks.
    test that, for a corpus of authored sources, the AMD verifier and ESM verifier
    agree (accept↔accept, reject↔reject). This is the release gate for Phase 5.
 
-**Open questions:** authored-AST vs compiled-body substrate (above); how the
+**Open questions:** how the
 content-addressed identity (`__cfHardenFn`/binding-identity byte-equality) ports
 when the ESM emit differs from AMD emit (the canonical helper sources may need an
 ESM-emit variant); whether `export *` (Part C) needs a classification rule.
