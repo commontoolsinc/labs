@@ -1,9 +1,9 @@
 # 05 — Reactivity
 
 SQLite is not itself reactive: nothing in the runtime's read-tracking observes a
-`SELECT`. v1 makes queries reactive with an explicit, coarse mechanism —
-**parallel reactivity cells that change when a query should be redone** — which
-gets us a long way without a query-dependency analyzer.
+`SELECT`. v1 makes queries reactive with an explicit, coarse mechanism — **the
+handle cell itself stands in for "this database changed"** — which gets us a
+long way without a query-dependency analyzer.
 
 ## The model
 
@@ -12,18 +12,21 @@ gets us a long way without a query-dependency analyzer.
   everything it transitively links to. When `reactOn`'s **committed** value
   changes, the scheduler re-runs the query action, which re-issues
   `sqlite.query` and writes fresh rows into its result cell.
-- Every database handle exposes a `version: number` field. The **write path
-  bumps `db.version` after the write commits durably** (see "Committed, not
-  in-flight" below). A query with `reactOn: db.version` therefore re-runs after
-  any committed write to that database — the simplest correct default.
+- Pass **the whole `db` handle** as `reactOn`. The built-in recovers its handle
+  cell (via `toCell`, Section [01](./01-api.md#the-handle-type)) and subscribes
+  to it. The **write path marks that handle cell dirty after the write commits
+  durably** (see "Committed, not in-flight"), so `reactOn: db` means "any
+  committed write to this database re-runs the query." There is **no readable
+  `version` field** — nothing for code to depend on out of band; the handle cell
+  is the token.
 - Authors who want tighter invalidation pass a narrower cell as `reactOn` (e.g. a
-  per-table or per-topic version cell they bump themselves from the same handler
-  that writes), trading precision for manual bookkeeping. v1 does not parse SQL
-  to compute fine-grained read sets.
+  per-table or per-topic cell they bump themselves from the same handler that
+  writes), trading precision for manual bookkeeping. v1 does not parse SQL to
+  compute fine-grained read sets.
 
 This is deliberately the same shape the runtime uses elsewhere: reactivity is
-driven by observing cells, and the SQL layer manufactures a cell (`version`)
-whose changes stand in for "the query's underlying data may have changed."
+driven by observing cells, and the handle cell's post-commit dirtying stands in
+for "the query's underlying data may have changed."
 
 ## Committed, not in-flight
 
@@ -38,31 +41,37 @@ in-flight writes. This matters because:
   transaction has actually run on the server. Re-running the query against an
   optimistic local state would read rows that don't exist server-side yet.
 
-Therefore `db.version` must be bumped **on durable commit**, not on the
+Therefore the handle cell must be dirtied **on durable commit**, not on the
 optimistic local write. Two viable mechanisms, in preference order:
 
 1. **Server-driven (preferred).** When `applyCommitTransaction` applies a
    `sqlite` operation (Section [04](./04-server-execution-and-transactions.md)),
-   the server marks the database's reactivity key dirty for the space — exactly
-   how cell writes mark entities dirty
+   the server marks the **handle cell's entity** dirty — exactly how cell writes
+   mark entities dirty
    ([`packages/memory/v2/server.ts`](../../../packages/memory/v2/server.ts)
-   `markSpaceDirty`). The session push (`session/effect`) carries the new
-   `version`, which lands in the handle cell only after the commit is durable.
-   The query, watching `db.version`, re-runs. This naturally satisfies
-   "committed only," because the value only changes via the server's
-   post-commit sync.
-
-2. **Client post-commit bump.** Failing a server hook, the write built-in bumps
-   `db.version` from a **post-commit effect** rather than inline — the same
-   `enqueueSinkRequestPostCommitEffect` seam `fetchData`/`llm` use
+   `markSpaceDirty`, which already works per entity id). The session push
+   (`session/effect`) reaches the query only after the commit is durable, so the
+   re-run sees committed state. For the cell-derived default the handle cell
+   lives in the same space as the commit, so this is a same-space dirty signal.
+2. **Client post-commit bump.** Failing a server hook, the write built-in
+   touches the handle cell from a **post-commit effect** rather than inline — the
+   same `enqueueSinkRequestPostCommitEffect` seam `fetchData`/`llm` use
    ([`packages/runner/src/builtins/fetch-data.ts`](../../../packages/runner/src/builtins/fetch-data.ts),
    [`packages/runner/src/cfc/sink-request.ts`](../../../packages/runner/src/cfc/sink-request.ts)).
-   The effect runs only after the surrounding transaction commits, so the bump —
-   and the dependent re-query — sees committed state.
+   The effect runs only after the surrounding transaction commits, so the
+   dependent re-query sees committed state.
 
 Either way, the **reactive part waits for fully-committed writes**, which (as
 the goals note) may require going through a path other than the regular
 scheduler's in-flight propagation.
+
+**Injected service-space handles (cross-space wrinkle).** For a `cf`-injected
+on-disk database (Section [03.3](./03-database-sources.md)), the handle cell
+lives in an operator/service space while the SQLite write rides the *pattern's*
+space commit — so the post-commit dirty signal must cross spaces. That is an
+extra mechanism beyond same-space `markSpaceDirty`; it lands with the rest of
+the injected-source stub. Injected datasets are usually read-mostly (`reactOn`
+omitted), so this does not block v1.
 
 ## A general feature this motivates
 
@@ -71,7 +80,7 @@ The clean way to express "re-run only on committed inputs" is to let an action
 re-run the action on transient/optimistic changes to those inputs and wait for
 the committed value. That is a generally useful scheduler capability beyond
 SQLite (any effect that must not act on speculative state benefits). v1 emulates
-it with the post-commit `version` bump; a follow-up could promote it to a
+it with the post-commit handle-cell dirtying; a follow-up could promote it to a
 first-class scheduler annotation (e.g. `committedReads`), at which point
 `sqliteQuery` would declare `reactOn` as commit-only and drop the manual bump.
 Tracked in [08-open-questions.md](./08-open-questions.md).
@@ -84,4 +93,4 @@ Tracked in [08-open-questions.md](./08-open-questions.md).
   reads it will update when *it* changes, independent of the query. This keeps
   query re-execution coarse while still letting per-cell reactivity flow through
   normally.
-- Writes to *other* databases do not bump this `db.version`.
+- Writes to *other* databases dirty *their* handle cells, not this one.

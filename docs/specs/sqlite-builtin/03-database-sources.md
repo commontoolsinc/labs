@@ -1,11 +1,21 @@
 # 03 — Database sources
 
-`sqliteDatabase(source?)` resolves a handle to one of three physical databases.
-Only the first is fully specified for v1; the other two are stubbed behind
-opaque handles so the API is stable when their backends land.
+A handle resolves to one of three physical databases. They split by **who
+chooses the source**:
+
+- **Pattern-chosen** sources come from the `sqliteDatabase(...)` builder — the
+  pattern owns the database (cell-derived default, or VM file).
+- **Injected** sources are wired into a pattern *input* from outside; the
+  pattern is source-agnostic and an operator connects a database via `cf`
+  (on-disk).
+
+Only the cell-derived source is fully specified for v1; the others are stubbed
+so the API is stable when their backends land.
 
 In all cases the **physical identity of the database is opaque to the pattern**.
-Pattern code holds a handle cell; it never names a file or attach alias.
+The handle's readable value is empty (Section [01](./01-api.md#the-handle-type));
+the source descriptor lives as server-side state keyed by the handle cell's id.
+Pattern code holds an opaque handle; it never names a file or attach alias.
 
 ## 03.1 Cell-derived (default)
 
@@ -35,13 +45,11 @@ entity id** — which is itself causal to creation and opaque to the pattern.
 
 Lifecycle:
 
-- **Create on first use.** The first `sqliteExecute` (typically a `CREATE TABLE`)
-  against a fresh handle creates the file. A query against a database with no
-  tables yet returns an empty result, not an error, for the "table exists" check
-  is deferred to the statement.
-- **Schema ownership.** v1 leaves DDL to the pattern (run `CREATE TABLE
-  IF NOT EXISTS …` via `sqliteExecute`). A future revision may let
-  `sqliteDatabase({ schema })` declare tables up front and run migrations.
+- **Create/migrate from the declared schema.** The runtime creates the file and
+  reconciles tables from `sqliteDatabase({ tables })` (Section
+  [01](./01-api.md#schema-ownership--the-database-owns-its-tables)) — patterns do
+  not run `CREATE TABLE`. Migration scope and SQLite `ALTER` limits are tracked
+  in [08-open-questions.md](./08-open-questions.md).
 - **GC.** Because the file is keyed to a cell, its lifetime can later be tied to
   that cell's lifetime. v1 does not garbage-collect; this is noted in
   [08-open-questions.md](./08-open-questions.md).
@@ -74,32 +82,64 @@ transaction. When implemented, VM-file writes will run as a post-commit effect
 commit. This limitation is intentional and called out so callers don't assume
 cross-store atomicity they won't get.
 
-## 03.3 On-disk file via `cf` (stub)
+## 03.3 On-disk file, injected via `cf` (stub)
 
-```ts
-const db = sqliteDatabase({ disk: diskHandle });
+A database that is a **plain file on disk**, opaque to the pattern. The pattern
+does **not** select it with the builder; instead it declares a database
+**input** and an operator connects a file to it via `cf`:
+
+```tsx
+// The pattern is source-agnostic — it just consumes whatever is wired into `db`.
+pattern<{ db: SqliteDatabase }>(({ db }) => {
+  const rows = sqliteQuery({ db, sql: "SELECT … FROM lookup", reactOn: db });
+  // Until connected, `rows.pending` stays true (Section 05 / Example 07-#5).
+});
 ```
 
-A database that is a **plain file on disk**, opaque to the pattern and linked in
-out-of-band via `cf` binary calls (the CLI; see the `cf` skill and
-[`packages/cli`](../../../packages/cli)). The pattern never sees the path; an
-operator runs something like `cf sqlite link ./local.db --into <cell>` to bind a
-real file to an opaque `diskHandle` cell, which the pattern then passes to
-`sqliteDatabase({ disk })`.
+```bash
+# Operator wires an on-disk SQLite file into the piece's `db` input.
+cf piece link <piece-id> db sqlite:/abs/path/reference-data.db
+```
 
-v1 contract: handle type and call shape fixed; server returns `not-implemented`
-until the `cf` linking command exists. Like the VM source, an on-disk file the
-server can co-locate with the space *could* be ATTACHed and made atomic; whether
-to require co-location is an open question
+How the `sqlite:` scheme works (it reuses `cf piece link`'s source parsing —
+[`parseLink`](../../../packages/cli/commands/piece.ts) — alongside existing
+schemes like `of:`, `did:key:`, and the `data:` URI links the runtime already
+resolves):
+
+1. `cf` recognizes the `sqlite:` scheme and **create-if-absents a handle cell**
+   whose id is **content-derived from `(space DID, absolute path)`** — the same
+   content-addressing as
+   [`createRef`](../../../packages/runner/src/create-ref.ts). The cell lives in
+   an operator/service space; the source descriptor (`{ disk: { path } }`) is
+   stored as server-side registration state (webhook-ingress style), not in the
+   cell's readable value.
+2. `cf` then writes a **normal sigil link** from the piece's `db` input field to
+   that handle cell. Because the id is deterministic, this is a genuine
+   cell-to-cell link, not a special value-write — and linking the same path
+   twice resolves to the same handle, so multiple pieces share one handle cell.
+
+**Pending-until-connected** falls out of reactivity: an unpopulated `db` input
+is an empty cell, so `sqliteQuery` reports `pending: true`; when `cf` writes the
+link, the input cell changes, the query action re-runs, and it connects. (A
+populated-but-unreachable database surfaces `error` instead.)
+
+v1 contract: the `sqlite:` registration is **stubbed** — the server returns
+`not-implemented` until on-disk attach + the `cf` command exist. Like the VM
+source, an on-disk file the server can co-locate with the space *could* be
+ATTACHed and made atomic; whether to require co-location is an open question
 ([08-open-questions.md](./08-open-questions.md)). Until then, treat on-disk
-writes as non-atomic post-commit effects.
+writes as non-atomic post-commit effects. Reactive re-query for injected
+service-space handles also carries a cross-space dirty-signal wrinkle (Section
+[05](./05-reactivity.md)); injected datasets are usually read-mostly
+(`reactOn` omitted), so this does not block v1.
 
 ## Source comparison
 
 | | Cell-derived (03.1) | VM file (03.2) | On-disk via `cf` (03.3) |
 | --- | --- | --- | --- |
-| v1 status | **Implemented** | Stub (opaque handle) | Stub (opaque handle) |
-| Identity | Cell entity id | VM handle + path | `cf`-linked disk handle |
+| v1 status | **Implemented** | Stub (builder) | Stub (injected input) |
+| Chosen by | Pattern (`sqliteDatabase()`) | Pattern (`sqliteDatabase({ vm })`) | Operator (`cf piece link sqlite:`) |
+| Identity | Handle cell entity id | VM handle + path | Handle cell id from `(space, path)` |
 | Co-located with space | Yes | No | Maybe |
 | Atomic with cell writes | **Yes** (ATTACH) | No (post-commit effect) | TBD |
 | Typical use | Pattern-owned data | Sandboxed app data | Operator-provided datasets |

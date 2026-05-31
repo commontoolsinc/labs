@@ -8,8 +8,9 @@ scalars. This section defines how a cell crosses that boundary losslessly.
 A column (or bound parameter) is a **link column** iff **both**:
 
 1. its name ends with the suffix `_cf_link`, and
-2. it is declared (in the `rows` / `bind` schema, or by SQLite column affinity)
-   as `string`/`TEXT`.
+2. it is declared `TEXT` — by the database's table schema
+   (`cfLink<T>()`, Section [01](./01-api.md)), by a `sqliteQuery<Row>` result
+   field typed `Cell<T>`, or by SQLite column affinity.
 
 For a link column:
 
@@ -76,9 +77,10 @@ Rationale for absolute links:
 Executed during the write built-in's mutation phase, before the statement is
 queued into the commit (Section [04](./04-server-execution-and-transactions.md)):
 
-1. Determine which parameters target link columns, from the `bind`/`rows`
-   schema (`cfLink` marker) or, lacking a schema, from the `*_cf_link` parameter
-   name when the SQL names columns explicitly.
+1. Determine which parameters target link columns by mapping each parameter to
+   its column (from the statement's named columns) and checking the database's
+   table schema (`cfLink` marker); lacking that, fall back to the `*_cf_link`
+   column name when the SQL names columns explicitly.
 2. For each link parameter:
    - If the value is not a cell reference → **throw**.
    - Resolve it to a `NormalizedFullLink`, build an absolute `SigilLink` via
@@ -95,16 +97,17 @@ encoded string is stable regardless of where the row is later read.
 Executed in the query built-in after rows return from the server, before
 `sendResult`:
 
-1. Identify link columns from the `rows` schema (`cfLink` marker), or fall back
-   to the `*_cf_link` column-name convention from the result set.
+1. Identify link columns from, in order: the `sqliteQuery<Row>` schema (a field
+   typed `Cell<T>` → `asCell`), the database's table schema (`cfLink` marker),
+   or the `*_cf_link` column-name convention from the result set.
 2. For each link column value:
    - `null` → `null`.
    - Else `JSON.parse` and validate it is a single `link@1` sigil. If not →
      **throw** into the query `error`.
    - Reconstruct a `Cell` from the normalized link via the runtime (the same
      path `Cell.fromLink`/link resolution uses), carrying the column's declared
-     element schema (from `cfLink<T>()`) so downstream `.get()`/`.key()` are
-     typed.
+     element schema (from `cfLink<T>()` or the `Cell<T>` in `Row`) so downstream
+     `.get()`/`.key()` are typed.
 3. Non-link columns pass through unchanged.
 
 The decoded `Cell` is a normal reactive cell: reading it later subscribes to
@@ -114,8 +117,10 @@ The decoded `Cell` is a normal reactive cell: reading it later subscribes to
 ## Why a naming convention rather than schema-only
 
 The `*_cf_link` suffix makes the contract legible directly in SQL and in raw
-table dumps, and lets the encode/decode rules apply even when a query omits a
-`rows` schema. The schema (`cfLink<T>()`) refines it with the element type and,
-later, CFC labels — but the suffix is the load-bearing, self-documenting marker.
+table dumps, and lets the encode/decode rules apply even when neither the table
+schema nor a `sqliteQuery<Row>` type covers a column. The schemas
+(`cfLink<T>()`, or a `Cell<T>` field in `Row`) refine it with the element type
+and, later, CFC labels — but the suffix is the load-bearing, self-documenting
+marker.
 This mirrors how the runtime already keys behavior off structural conventions
 rather than out-of-band registration.

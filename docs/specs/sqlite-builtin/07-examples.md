@@ -23,33 +23,26 @@ import {
 
 interface User { name: string; avatarUrl: string }
 
-const MessageRow = table({
-  id: "integer",
-  body: "text",
-  ts: "integer",
-  author_cf_link: cfLink<User>(), // TEXT in SQLite, Cell<User> in TS
-});
-type MessageRow = RowOf<typeof MessageRow>;
-
 export default pattern<{ me: Cell<User> }>(({ me }) => {
-  const db = sqliteDatabase(); // cell-derived, per-space, atomic
-
-  // One-time-ish schema setup (idempotent).
-  sqliteExecute({
-    db,
-    sql: `CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY,
-            author_cf_link TEXT,
-            body TEXT,
-            ts INTEGER
-          )`,
+  // Cell-derived, per-space, atomic. Tables are declared once here; the runtime
+  // owns creation/migration — no CREATE TABLE in pattern code.
+  const db = sqliteDatabase(undefined, {
+    tables: {
+      messages: table({
+        id: "integer primary key",
+        author_cf_link: cfLink<User>(), // TEXT in SQLite, Cell<User> in TS
+        body: "text",
+        ts: "integer",
+      }),
+    },
   });
 
-  const recent = sqliteQuery<MessageRow>({
+  // No <Row> needed: the projection maps 1:1 to the declared `messages` table,
+  // so the runtime already knows `author_cf_link` is a link column.
+  const recent = sqliteQuery({
     db,
     sql: "SELECT id, body, ts, author_cf_link FROM messages ORDER BY ts DESC LIMIT 20",
-    reactOn: db.version, // re-run after any committed write to this db
-    rows: MessageRow,
+    reactOn: db, // re-run after any committed write to this db
   });
 
   const send = handler<{ body: string }, { author: Cell<User> }>(
@@ -57,8 +50,7 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
       sqliteExecute({
         db,
         sql: "INSERT INTO messages (author_cf_link, body, ts) VALUES (?, ?, ?)",
-        params: [author, body, Date.now()], // `author` Cell -> sigil link
-        bind: MessageRow, // tells the runtime param 1 is a _cf_link
+        params: [author, body, Date.now()], // `author` Cell -> sigil link (param 1 targets a _cf_link column)
       });
     },
   );
@@ -78,30 +70,38 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
 
 Key points:
 
-- `params: [author, …]` binds a `Cell<User>` to the `author_cf_link` column; the
-  runtime encodes it to an absolute sigil link string (Section
-  [02](./02-cf-link-encoding.md)). Binding the same cell to `body` would throw.
-- `recent` re-runs only after the `INSERT` **commits durably** (Section
-  [05](./05-reactivity.md)), so it never shows phantom rows.
+- The database owns the `messages` schema, so `author_cf_link` is known to be a
+  link column without any per-query/per-write annotation. Binding the `author`
+  cell to a non-link column (e.g. `body`) would throw (Section
+  [02](./02-cf-link-encoding.md)).
+- `reactOn: db` subscribes to the handle cell; the `INSERT` marks it dirty only
+  after it **commits durably** (Section [05](./05-reactivity.md)), so `recent`
+  never shows phantom rows.
 - Each `m.author_cf_link` decodes to a `Cell<User>`; the inner `derive` updates
   if that user's name changes, without re-running the SQL query.
 
-## Example 2 — Pending/error handling and parameters
+## Example 2 — A projection that needs `<Row>`
+
+When the result shape diverges from a declared table (joins, aliases, computed
+columns), declare it with the `sqliteQuery<Row>` type argument. A `Cell<T>`
+field marks a decoded link column even when the alias drops the `_cf_link`
+suffix.
 
 ```tsx
-const results = sqliteQuery<{ id: number; title: string }>({
+const leaderboard = sqliteQuery<{ author: Cell<User>; n: number }>({
   db,
-  sql: "SELECT id, title FROM docs WHERE owner = :owner AND archived = 0",
-  params: { owner: ownerId },
-  reactOn: db.version,
+  sql: `SELECT author_cf_link AS author, count(*) AS n
+        FROM messages GROUP BY author_cf_link ORDER BY n DESC LIMIT 10`,
+  reactOn: db,
 });
 
 return derive(
-  { rows: results.result, pending: results.pending, error: results.error },
+  { rows: leaderboard.result, pending: leaderboard.pending, error: leaderboard.error },
   ({ rows, pending, error }) => {
     if (pending) return "Loading…";
     if (error) return `Query failed: ${String(error)}`;
-    return rows!.map((r) => r.title);
+    // `author` decoded back into Cell<User> despite the `AS author` alias.
+    return rows!.map((r) => ({ name: derive(r.author, (u) => u?.name), count: r.n }));
   },
 );
 ```
@@ -112,7 +112,7 @@ The handler mutates a cell and inserts a row. Both land in the same commit, so
 an observer never sees the counter incremented without the row (or vice versa).
 
 ```tsx
-const bump = handler<{ body: string }, { count: Cell<number>; db: Cell<SqliteDatabase> }>(
+const bump = handler<{ body: string }, { count: Cell<number>; db: SqliteDatabase }>(
   ({ body }, { count, db }) => {
     count.set(count.get() + 1);                 // cell write
     sqliteExecute({                              // SQLite write, same transaction
@@ -131,26 +131,42 @@ ensures the row and the counter agree.
 ## Example 4 — VM-file source (stubbed)
 
 ```tsx
-// vmHandle is an opaque capability cell to a VM; path is inside that VM.
+// vmHandle is an opaque capability handle to a VM; path is inside that VM.
 const db = sqliteDatabase({ vm: vmHandle, path: "/var/lib/app/data.db" });
 
-// In v1 this resolves but server returns `not-implemented` for VM sources.
-const rows = sqliteQuery({ db, sql: "SELECT * FROM kv", reactOn: db.version });
+// In v1 this resolves but the server returns `not-implemented` for VM sources.
+const rows = sqliteQuery({ db, sql: "SELECT * FROM kv", reactOn: db });
 ```
 
-## Example 5 — On-disk source linked via `cf` (stubbed)
+## Example 5 — On-disk source injected via `cf` (stubbed)
 
-```bash
-# Operator links a real file on disk to an opaque cell the pattern can reference.
-cf sqlite link ./reference-data.db --into did:key:z6Mk…/diskHandle
-```
+The pattern is **source-agnostic**: it declares a `db` *input* and consumes it.
+It never names a file or picks a source — an operator connects one.
 
 ```tsx
-const db = sqliteDatabase({ disk: diskHandle });
-const lookup = sqliteQuery({
-  db,
-  sql: "SELECT value FROM lookup WHERE key = ?",
-  params: [key],
-  // No reactOn: a static reference dataset the operator manages out of band.
+export default pattern<{ db: SqliteDatabase }>(({ db }) => {
+  const lookup = sqliteQuery<{ value: string }>({
+    db,
+    sql: "SELECT value FROM lookup WHERE key = ?",
+    params: [key],
+    // No reactOn: a static reference dataset the operator manages out of band.
+  });
+
+  return derive(
+    { rows: lookup.result, pending: lookup.pending, error: lookup.error },
+    ({ rows, pending, error }) => {
+      if (pending) return "Waiting for a database to be connected…"; // until cf wires it
+      if (error) return `Database error: ${String(error)}`;
+      return rows?.[0]?.value;
+    },
+  );
 });
+```
+
+```bash
+# Operator wires an on-disk SQLite file into the piece's `db` input. The sqlite:
+# scheme create-if-absents a handle cell (id derived from space DID + abs path)
+# and writes a normal sigil link to it. (Stubbed in v1; see Section 03.3.)
+cf piece link <piece-id> db sqlite:/abs/path/reference-data.db
+# Before this runs, the pattern renders "Waiting for a database to be connected…".
 ```

@@ -2,8 +2,8 @@
 
 ## Built-in vs. new Cell type — decision
 
-**Decision: built-ins, with a lightweight database *handle* that is an ordinary
-cell.** We do not introduce a new `Cell` subtype.
+**Decision: built-ins, with a lightweight, opaque database *handle*.** We do not
+introduce a new `Cell` subtype.
 
 The runtime's reactive I/O — `fetchData`, `generateText`, `streamData` — is all
 expressed as built-ins registered in
@@ -32,59 +32,119 @@ was considered and rejected for v1:
 The "database type" the author cares about is therefore expressed two ways,
 neither of which is a new Cell subclass:
 
-- The **handle** is a normal cell carrying a small descriptor (which source,
-  which db identity). Its TypeScript type is `Cell<SqliteDatabase>`.
-- The **table/row shape** is expressed as a JSON Schema the author passes to a
-  query/execute call (`rows` / table schema), which is where `_cf_link` columns
-  and future CFC labels are declared.
+- The **handle** is a branded, opaque value (`SqliteDatabase`) — see "The handle
+  type" below.
+- The **table/row shape** lives on the database (`sqliteDatabase({ tables })`),
+  with `sqliteQuery<T>` declaring divergent result shapes — see "Schema
+  ownership" and "TypeScript and table types".
 
-## `sqliteDatabase(source?)`
+## The handle type
 
-Builder factory that returns an opaque database handle. The handle selects one
-of three sources (Section [03](./03-database-sources.md)); with no argument it
-binds to a cell derived from the current pattern context (the default source).
+`SqliteDatabase` is a **branded, otherwise-empty type**: opaque to pattern code,
+a cell reference to the runtime.
 
 ```ts
-type SqliteDatabase = {
-  /** Reactivity token; bumped after every committed write to this database.
-   *  Pass to `sqliteQuery({ reactOn })` for "re-run on any write" behavior. */
-  readonly version: number;
-};
+declare const __sqliteDb: unique symbol;
+/** Opaque database handle. Empty to pattern code; carries a `toCell`
+ *  back-pointer to its handle cell at runtime. Patterns only ever *forward* it
+ *  (to sqliteQuery / sqliteExecute / reactOn), never read it. */
+type SqliteDatabase = { readonly [__sqliteDb]: true };
+```
 
+Why a branded value rather than `Cell<SqliteDatabase>` or `OpaqueCell<…>`:
+
+- A handle should be **forwarded, never read**. The database identity/source is
+  opaque to the pattern by design, so there are no fields to expose. A branded
+  empty type expresses exactly that.
+- It still travels as a **reference**, because every value materialized from a
+  cell carries a `toCell` back-pointer
+  ([`packages/runner/src/back-to-cell.ts`](../../../packages/runner/src/back-to-cell.ts);
+  query-result proxies expose `[toCell]: () => Cell<unknown>` —
+  [`packages/runner/src/query-result-proxy.ts`](../../../packages/runner/src/query-result-proxy.ts)).
+  So the runtime can always recover the handle cell — to name the database
+  (from its entity id), to resolve its source server-side, and to subscribe for
+  reactivity — without the pattern ever holding a readable `Cell`.
+- The handle cell's **readable value is empty**; the source descriptor lives as
+  **server-side state keyed by the handle cell's id** (Section
+  [03](./03-database-sources.md)), so even at runtime a pattern materializing the
+  handle gets `{}` + `[toCell]`, never the file path. The brand is truthful, not
+  cosmetic.
+
+## `sqliteDatabase(source?, options?)`
+
+Builder factory returning a handle. With no argument it binds to a cell derived
+from the current pattern context (the default, cell-derived source). The
+database's **table schema and DDL are owned here** (see "Schema ownership").
+
+```ts
 export declare function sqliteDatabase(
   source?: SqliteDatabaseSource,
-): OpaqueRef<SqliteDatabase>;
+  options?: { tables?: TableSchemas },
+): SqliteDatabase; // OpaqueRef<SqliteDatabase> in builder position
 
 type SqliteDatabaseSource =
   | undefined // default: cell-derived (Section 03.1)
   | { cell: OpaqueRef<unknown> } // explicit cell-derived
-  | { vm: OpaqueRef<VmHandle>; path: string } // VM file (stub, Section 03.2)
-  | { disk: OpaqueRef<DiskHandle> }; // on-disk via `cf` (stub, Section 03.3)
+  | { vm: OpaqueRef<VmHandle>; path: string }; // VM file (stub, Section 03.2)
+// NOTE: there is no `{ disk }` variant. On-disk databases are *injected* as a
+// pattern input via `cf piece link <piece> <field> sqlite:<path>` (Section 03.3),
+// not selected by the pattern.
 ```
 
-The handle is a cell so it can be passed between sub-patterns and stored, and so
-its `version` field participates in normal reactivity. The underlying database
-identity (file name / attach alias) is **opaque to the pattern** — it is derived
-from the handle cell's entity id (Section [03](./03-database-sources.md)) and
-never constructed by pattern code.
+The underlying database identity (file name / attach alias) is **opaque to the
+pattern** — derived from the handle cell's entity id (Section
+[03](./03-database-sources.md)) and never constructed by pattern code.
 
-## `sqliteQuery(params)` — reactive read
+## Schema ownership — the database owns its tables
+
+The table/column schema is a property of the **database**, not of an individual
+query, so it is declared once on `sqliteDatabase({ tables })` rather than
+re-stated per call. The runtime **owns table creation and migration** from this
+declaration, validating that `_cf_link` columns are `TEXT` and (later) attaching
+per-column CFC labels in one place.
+
+```tsx
+import { table, cfLink, sqliteDatabase } from "commonfabric";
+
+const db = sqliteDatabase(undefined, {
+  tables: {
+    messages: table({
+      id: "integer primary key",
+      body: "text",
+      ts: "integer",
+      author_cf_link: cfLink<User>(), // TEXT in SQLite, Cell<User> in TS
+    }),
+  },
+});
+```
+
+This is the single source of truth: the per-query `rows` argument is **gone**.
+Because result columns map back to declared columns by name, the runtime already
+knows which columns are `_cf_link` for a straightforward
+`SELECT … FROM messages`, and decodes them (Section [02](./02-cf-link-encoding.md))
+with no per-query annotation.
+
+Leaving DDL to the database (rather than the old manual `CREATE TABLE IF NOT
+EXISTS` in pattern code) avoids silent drift: `CREATE TABLE IF NOT EXISTS`
+no-ops when a table already exists with a *different* shape, hiding mismatches.
+Runtime-owned migration reconciles the declared schema instead. (Migration
+scope and SQLite `ALTER` limits are tracked in
+[08-open-questions.md](./08-open-questions.md).)
+
+## `sqliteQuery<Row>(params)` — reactive read
 
 ```ts
 type SqliteQueryParams = {
-  db: OpaqueRef<SqliteDatabase>;
+  db: SqliteDatabase;
   /** A single read-only statement. Multiple statements / write statements throw. */
   sql: string;
-  /** Positional (`?`) or named (`:name`) bindings. Cells are encoded per
-   *  Section 02 only when bound to a `_cf_link` parameter; otherwise a cell
-   *  binding throws. */
+  /** Positional (`?`) or named (`:name`) bindings. A cell bound to a `_cf_link`
+   *  column is encoded per Section 02; a cell bound anywhere else throws. */
   params?: unknown[] | Record<string, unknown>;
-  /** Reactivity input. Read wholesale as an `any` schema; when its committed
-   *  value changes, the query re-runs. Typically `db.version`. See Section 05. */
+  /** Reactivity input. Read wholesale (any schema); when its committed value
+   *  changes, the query re-runs. Pass the whole `db` for "any committed write
+   *  to this database re-runs". See Section 05. */
   reactOn?: unknown;
-  /** Optional JSON Schema describing a result row. Drives `_cf_link` decoding
-   *  and result typing. See "TypeScript and table types" below. */
-  rows?: JSONSchema;
 };
 
 type SqliteQueryState<Row = Record<string, unknown>> = {
@@ -99,28 +159,53 @@ export declare function sqliteQuery<Row = Record<string, unknown>>(
 ```
 
 `sqliteQuery` is **read-only**. The server rejects any statement that is not a
-single `SELECT` (or read-only CTE). Result columns named `*_cf_link` are decoded
-back into live cells before the rows reach the pattern (Section
+single `SELECT` (or read-only CTE). `_cf_link` columns are decoded back into
+live cells before the rows reach the pattern (Section
 [02](./02-cf-link-encoding.md)).
 
-Reactivity is **explicit and coarse** in v1: the query re-runs when `reactOn`'s
-committed value changes. The built-in reads `reactOn` under an `any` schema, so
-*any* change to that value (or anything it transitively links to) invalidates
-the query — the "maintain parallel cells that change when the query should be
-redone" strategy. Passing `db.version` gives "re-run on any write to this
-database"; passing a narrower cell scopes invalidation more tightly.
+The **`Row` type argument replaces the old `rows` schema**. In this codebase a
+type argument can be lowered to a runtime JSON Schema by the transformer — that
+is exactly what `toSchema<T>()` does (a compile-time call the transformer
+rewrites; the runtime stub throws if the transformer didn't run —
+[`packages/runner/src/builder/factory.ts`](../../../packages/runner/src/builder/factory.ts)).
+`sqliteQuery<Row>` is wired the same way: the transformer lowers `Row` into the
+runtime schema the built-in receives, so **one type argument gives both the
+author-facing return type and the runtime decode/CFC schema** — they cannot
+drift, because they are the same `Row`.
+
+This also handles projections the table schema can't: because `Cell<T>` lowers
+to `asCell`, declaring a result field as `Cell<User>` tells the runtime that
+column is cell-bearing **even when an alias hides the `_cf_link` suffix**:
+
+```tsx
+sqliteQuery<{ who: Cell<User>; n: number }>({
+  db,
+  sql: "SELECT author_cf_link AS who, count(*) AS n FROM messages GROUP BY author_cf_link",
+  reactOn: db,
+});
+// `who` carries asCell -> the stored sigil link is decoded into Cell<User>,
+// even though the projection aliased away the _cf_link suffix.
+```
+
+For a straightforward `SELECT … FROM <declared table>`, omit `Row` and let the
+database's table schema drive decoding. Reach for `<Row>` when the projection
+diverges (joins, aliases, computed columns).
+
+> **Transformer dependency.** `sqliteQuery<Row>` requires the ts-transformer to
+> lower its type argument into a schema (alongside `toSchema<T>`). Without that
+> support the generic is erased and carries no runtime decode/CFC info. This is
+> a transformer feature, not just a signature — confirm with the
+> ts-transformers owner. See [08-open-questions.md](./08-open-questions.md).
 
 ## `sqliteExecute(params)` — write
 
 ```ts
 type SqliteExecuteParams = {
-  db: OpaqueRef<SqliteDatabase>;
-  /** One or more write statements (INSERT/UPDATE/DELETE/DDL). */
+  db: SqliteDatabase;
+  /** One or more write statements (INSERT/UPDATE/DELETE). DDL is owned by the
+   *  database, not issued here. */
   sql: string;
   params?: unknown[] | Record<string, unknown>;
-  /** Optional JSON Schema for the bound parameters; declares which params are
-   *  `_cf_link` and (future) carries CFC labels. */
-  bind?: JSONSchema;
 };
 
 type SqliteExecuteState = {
@@ -140,62 +225,36 @@ export declare function sqliteExecute(
 [`packages/runner/src/builtins/index.ts`](../../../packages/runner/src/builtins/index.ts))
 and its writes are folded into the surrounding commit transaction so they are
 atomic with cell writes (Section [04](./04-server-execution-and-transactions.md)).
-A cell bound to a parameter is encoded to a sigil link **only** when that
-parameter targets a `_cf_link` column; otherwise binding a cell throws (Section
-[02](./02-cf-link-encoding.md)).
 
-## TypeScript and table types
+There is **no per-call `bind` schema**: the database's table schema already
+declares which columns are `_cf_link`, so for `INSERT INTO messages
+(author_cf_link, …)` the runtime maps each parameter position to its column and
+encodes link parameters accordingly. A cell bound to a parameter is encoded to a
+sigil link **only** when that parameter targets a `_cf_link` column; otherwise
+binding a cell throws (Section [02](./02-cf-link-encoding.md)).
 
-The most useful TypeScript surface is **row/column declaration**, not full
-inference over arbitrary SQL.
+## TypeScript and table types — why these boundaries
 
-Why we stop short of typing query inputs/outputs from the SQL text:
+- **Table/column declaration** lives on the database (`table(...)`,
+  `cfLink<T>()`), because it is a property of the database and is the natural
+  home for `_cf_link` markers and future per-column CFC labels (the same `ifc`
+  mechanism schemas already support —
+  [`packages/api/index.ts`](../../../packages/api/index.ts) `ifc` field).
+- **Result-row typing** is the `sqliteQuery<Row>` type argument, lowered to a
+  runtime schema by the transformer — needed only when a projection diverges
+  from a declared table.
+- **We do not infer types from the SQL string.** An in-type SQL parser
+  (dialect, expressions, joins, aliases) is brittle and out of proportion to the
+  value. Parameter tuples remain author-annotated.
 
-- Inferring the parameter tuple and result-row type from a `sql` string would
-  require an in-type SQL parser. It is brittle (dialect, expressions, joins,
-  aliases) and out of proportion to the value.
-- The author already knows the row shape they expect. Letting them declare it is
-  simpler and is exactly the hook CFC needs.
-
-So v1 offers a table-schema helper whose primary jobs are (a) marking `_cf_link`
-columns, (b) typing the rows a query returns, and (c) (future) carrying CFC
-labels — the same `ifc` mechanism schemas already support
-([`packages/api/index.ts`](../../../packages/api/index.ts) `ifc` field).
-
-```tsx
-import { table, cfLink, type Default } from "commonfabric";
-
-// `table(...)` is a thin helper returning a JSONSchema for one row, with
-// `_cf_link` columns typed as Cell<T> and (future) per-column `ifc` labels.
-const MessageRowSchema = table({
-  id: "integer",
-  body: "text",
-  ts: "integer",
-  // A `_cf_link` column: stored as TEXT, surfaces as Cell<User>.
-  author_cf_link: cfLink<User>(),
-});
-
-type MessageRow = RowOf<typeof MessageRowSchema>;
-// => { id: number; body: string; ts: number; author_cf_link: Cell<User> }
-
-const recent = sqliteQuery<MessageRow>({
-  db,
-  sql: "SELECT id, body, ts, author_cf_link FROM messages",
-  reactOn: db.version,
-  rows: MessageRowSchema,
-});
-```
-
-`table(...)` and `cfLink<T>()` compile to plain JSON Schema; `cfLink<T>()`
-emits `{ type: "string" }` plus an internal marker (e.g. `cfLink: true`) the
-runtime uses to drive encode/decode and to enforce the "single string field
-ending in `_cf_link`" rule (Section [02](./02-cf-link-encoding.md)). Query
-parameter tuples and free-form result columns remain `unknown`/author-annotated;
-we do not attempt to derive them from the SQL string.
+`table(...)` and `cfLink<T>()` compile to plain JSON Schema; `cfLink<T>()` emits
+`{ type: "string" }` plus an internal marker (e.g. `cfLink: true`) the runtime
+uses to drive encode/decode and to enforce the "single string field ending in
+`_cf_link`" rule (Section [02](./02-cf-link-encoding.md)).
 
 ## Registration & wiring (implementation note)
 
-Following the conventions reported for existing built-ins:
+Following the conventions of existing built-ins:
 
 1. Implementations in `packages/runner/src/builtins/sqlite-query.ts` and
    `packages/runner/src/builtins/sqlite-execute.ts`, each exporting an `Action`
@@ -208,3 +267,5 @@ Following the conventions reported for existing built-ins:
    in `packages/runner/src/builder/built-in.ts`, exported from
    `packages/runner/src/builder/factory.ts`.
 4. Public types in [`packages/api/index.ts`](../../../packages/api/index.ts).
+5. Teach the ts-transformer to lower the `sqliteQuery<Row>` type argument to a
+   runtime schema (alongside `toSchema<T>`).

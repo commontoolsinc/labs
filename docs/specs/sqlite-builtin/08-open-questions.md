@@ -1,6 +1,7 @@
 # 08 — Open questions
 
-Unresolved items for framework-author review, grouped by area.
+Unresolved items for framework-author review, grouped by area. Items resolved
+during design are marked **[resolved]** with the decision.
 
 ## API surface
 
@@ -12,20 +13,26 @@ Unresolved items for framework-author review, grouped by area.
 2. **Multi-statement writes.** Should `sqliteExecute` accept multiple statements
    in one `sql`, or one statement per call (clearer atomicity story, easier
    `_cf_link` param mapping)?
-3. **Result typing.** Is the author-annotated `rows`/`RowOf<>` approach
-   (Section [01](./01-api.md#typescript-and-table-types)) enough, or do we want
-   a heavier `cf` codegen step that reads a live schema and emits row types?
+3. **Transformer support for `sqliteQuery<Row>`.** Result typing relies on the
+   ts-transformer lowering the `Row` type argument into a runtime schema, the
+   way `toSchema<T>()` works (Section
+   [01](./01-api.md#sqlitequeryrowparams--reactive-read)). This must be added to
+   the transformer's type-arg-lowering list — confirm feasibility and effort
+   with the ts-transformers owner. Without it the generic is erased and carries
+   no runtime decode/CFC info.
 
 ## `_cf_link`
 
-4. **Suffix vs. schema-only.** v1 keys off the `*_cf_link` column-name suffix so
-   the contract is visible in raw SQL. Is the implicit naming convention
-   acceptable, or should link columns be required to come with a `cfLink`
-   schema (no behavior from naming alone)?
+4. **[resolved] Suffix vs. schema-only.** Keep both: the `*_cf_link` suffix is
+   the self-documenting fallback (legible in raw SQL); the database table schema
+   (`cfLink<T>()`) and `sqliteQuery<Row>` `Cell<T>` fields refine it with element
+   type and CFC labels and take precedence. The suffix is not required when a
+   schema covers the column, but remains the default driver when none does.
 5. **Schema in stored links.** We strip `schema`/`asCell` from the stored sigil
-   (Section [02](./02-cf-link-encoding.md)) and re-attach the element schema
-   from `cfLink<T>()` on read. If a query omits `rows`, the decoded cell has no
-   schema — acceptable, or should we store a minimal schema reference?
+   (Section [02](./02-cf-link-encoding.md)) and re-attach the element schema from
+   the table schema or `Row` on read. If neither covers a column, the decoded
+   cell has no schema — acceptable, or should we store a minimal schema
+   reference?
 
 ## Transactions & storage
 
@@ -42,38 +49,49 @@ Unresolved items for framework-author review, grouped by area.
    per `Database`. Long queries block the space. Do we need a separate read
    connection (WAL readers don't block writers), a statement timeout, or a
    query cost limit for v1?
-9. **DDL ownership.** v1 leaves `CREATE TABLE` to patterns. Should
-   `sqliteDatabase({ schema })` own table creation/migration instead, so the
-   runtime can validate `_cf_link` columns and (later) CFC labels up front?
+9. **[resolved] DDL ownership.** The database owns table creation/migration via
+   `sqliteDatabase({ tables })` (Section
+   [01](./01-api.md#schema-ownership--the-database-owns-its-tables)); patterns do
+   not run `CREATE TABLE`. **Still open:** the *migration* algorithm — how far to
+   reconcile a changed `tables` declaration given SQLite's limited `ALTER`
+   (add-column is easy; drop/rename/retype need table-rebuild). Define the
+   supported migration set and the failure mode for unsupported changes.
 
 ## Reactivity
 
 10. **Commit-only inputs as a scheduler primitive.** Section
-    [05](./05-reactivity.md) emulates "re-run only on committed inputs" with a
-    post-commit `version` bump. Should the scheduler gain a first-class
+    [05](./05-reactivity.md) emulates "re-run only on committed inputs" with the
+    post-commit handle-cell dirtying. Should the scheduler gain a first-class
     `committedReads` annotation, and would `sqliteQuery` then drop the manual
     bump entirely?
-11. **Finer invalidation.** Is coarse `db.version` invalidation good enough for
-    v1, or do we want table-level version cells (bumped per touched table) out
-    of the box, parsed from the write SQL?
+11. **Finer invalidation.** Is coarse `reactOn: db` (whole-database) invalidation
+    good enough for v1, or do we want table-level handle cells (dirtied per
+    touched table) out of the box, parsed from the write SQL?
+12. **Cross-space dirty signal for injected handles.** A `cf`-injected on-disk
+    handle cell lives in a service space while its writes ride the pattern's
+    space commit (Section [05](./05-reactivity.md)). The post-commit dirty signal
+    must cross spaces — define that mechanism, or restrict injected sources to
+    read-only (no `reactOn`).
 
 ## Sources
 
-12. **VM-file API.** What is the improved VM file interface, and can a VM file
+13. **VM-file API.** What is the improved VM file interface, and can a VM file
     ever be ATTACHed to the space connection for atomicity, or is it always a
     non-atomic post-commit effect (Section [03](./03-database-sources.md))?
-13. **On-disk co-location.** Should `cf`-linked on-disk databases be required to
+14. **On-disk co-location.** Should `cf`-linked on-disk databases be required to
     live where toolshed can ATTACH them (enabling atomicity), or are they always
-    read-mostly external datasets?
-14. **GC of cell-derived dbs.** When the owning cell is collected, who deletes
+    read-mostly external datasets? (Partly informed by the `sqlite:` injection
+    model in Section [03.3](./03-database-sources.md), which fixes *addressing*
+    but not co-location.)
+15. **GC of cell-derived dbs.** When the owning cell is collected, who deletes
     the sibling `.sqlite` file, and when?
 
 ## CFC (future)
 
-15. **Row-label projection language.** Section [06](./06-cfc.md) proposes a pure
+16. **Row-label projection language.** Section [06](./06-cfc.md) proposes a pure
     declarative projection (`principal(field)`, `jsonArray(field)`) so the
     server can evaluate row labels at commit. Is that expressive enough for real
     policies (e.g. recipients stored as a join table rather than a JSON column)?
-16. **Read-time filtering vs. fail-closed.** When a reader lacks clearance for
+17. **Read-time filtering vs. fail-closed.** When a reader lacks clearance for
     some rows, do we silently filter them out of the result set, or fail the
     whole query closed? Filtering leaks row counts; failing closed is coarse.
