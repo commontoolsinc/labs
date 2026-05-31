@@ -13,13 +13,13 @@ steps with the files each touches, exit criteria, and validation commands.
 | Phase | Status | Notes |
 | --- | --- | --- |
 | 0 — Loader shape confirmation | Done | SES `importNow` + virtual (third-party) module records load synchronously, incl. cycles. `ModuleSource`/`StaticModuleRecord` are not exposed by this `ses` build, so the loader uses `{ imports, exports, execute }` records. |
-| 1 — Decouple identity | Done (this PR) | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
-| 2 — ESM emission + SES module loading | Mechanism done, lands in a follow-up PR (behind `esmModuleLoader`, default off) | `importModuleGraphNow` loader + `compileSourcesToRecords` adapter load real compiled multi-module programs end-to-end. **Remaining:** wire into `Engine.evaluate`, run the CF transformer pipeline (currently bare `ts.transpileModule`), and expand `export *` re-exports. |
-| 3 — Verifier port | Structural seam done, follow-up PR | `verifyModuleGraph` validates graph shape/wiring before load. **Remaining (security-critical):** port the SES_SANDBOXING module-item classification from the AMD parser. |
-| 4 — Per-module compilation cache | Done, follow-up PR | `ModuleRecordCache` keyed by module hash; hit reuses the compiled artifact. **Remaining:** persist via the existing compilation-cache backends. |
+| 1 — Decouple identity | Done (merged) | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
+| 2 — ESM emission + SES module loading | Mechanism done (this PR, behind `esmModuleLoader`, default off) | `importModuleGraphNow` loader + `compileSourcesToRecords` adapter load real compiled multi-module programs end-to-end. **Remaining:** wire into `Engine.evaluate`, run the CF transformer pipeline (currently bare `ts.transpileModule`), and expand `export *` re-exports. |
+| 3 — Verifier port | Structural seam done (this PR) | `verifyModuleGraph` validates graph shape/wiring before load. **Remaining (security-critical):** port the SES_SANDBOXING module-item classification from the AMD parser. |
+| 4 — Per-module compilation cache | Done (this PR) | `ModuleRecordCache` keyed by module hash; hit reuses the compiled artifact. **Remaining:** persist via the existing compilation-cache backends. |
 | 5 — Default-on + AMD removal | Not started (intentionally) | Gated on Phase 3 classification parity + benchmarks. Flipping the default / removing AMD cannot land while keeping the build green, so it is a deliberate later rollout. The flag stays **off**. |
 
-This PR contains Phase 1 only; Phases 2–5 land in a separate follow-up PR.
+Phase 1 merged separately; this PR adds the Phases 2–4 mechanism behind the default-off flag.
 
 ## Guiding constraints
 
