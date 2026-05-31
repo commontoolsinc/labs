@@ -2402,11 +2402,16 @@ export class Runner {
         processCell.space,
       )
       : processCell.space;
-    const mustStartAfterCommit = this.handlerResultPatternMustStartAfterCommit(
+    // navigateTo result patterns must start after the handler's transaction
+    // commits so the navigation target is durable. Cross-space children, by
+    // contrast, run inline in a multi-space transaction (below) so they keep
+    // their verified-function identity instead of being re-instantiated.
+    const deferForNavigate = this.handlerResultPatternHasNavigateTo(
       resultPattern,
-      processCell,
     );
-    if (result === undefined && mustStartAfterCommit) {
+    const crossSpace = resultSpace !== processCell.space;
+
+    if (deferForNavigate && result === undefined) {
       const resultCell = this.runtime.getCell(
         resultSpace,
         { resultFor: cause },
@@ -2424,7 +2429,13 @@ export class Runner {
       return result;
     }
 
-    const resultCell = mustStartAfterCommit
+    if (crossSpace && !deferForNavigate) {
+      // Commit the child space first so the originating space's link to it is
+      // never durable before its target.
+      tx.enableMultiSpaceWrites?.([resultSpace, processCell.space]);
+    }
+
+    const resultCell = deferForNavigate
       ? this.setupDeferredHandlerResultPattern(
         tx,
         resultPattern,
@@ -2502,14 +2513,11 @@ export class Runner {
     );
   }
 
-  private handlerResultPatternMustStartAfterCommit(
+  private handlerResultPatternHasNavigateTo(
     pattern: Pattern,
-    processCell: Cell<any>,
   ): boolean {
     return pattern.nodes.some(({ module }) =>
-      (module.type === "ref" && module.implementation === "navigateTo") ||
-      (module.targetSpace !== undefined &&
-        module.targetSpace !== processCell.space)
+      module.type === "ref" && module.implementation === "navigateTo"
     );
   }
 
@@ -3694,10 +3702,13 @@ export class Runner {
     ]);
 
     if (resultCell.space !== resultCellLink.space) {
-      this.runPatternAfterSuccessfulCommit(tx, resultCell, patternImpl, inputs);
-    } else {
-      this.run(tx, patternImpl, inputs, resultCell);
+      // Cross-space child pattern: run it inline in a multi-space transaction
+      // (child space committed first) rather than re-instantiating it in a
+      // deferred second transaction, which would lose its verified-function
+      // identity. The journal allows the cross-space write once opted in.
+      tx.enableMultiSpaceWrites?.([resultCell.space, resultCellLink.space]);
     }
+    this.run(tx, patternImpl, inputs, resultCell);
 
     if (sendToBindings) {
       sendValueToBinding(

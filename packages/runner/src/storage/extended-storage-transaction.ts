@@ -779,6 +779,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.enqueuePostCommitEffect(effect);
   }
 
+  enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
+    this.wrapped.enableMultiSpaceWrites?.(order);
+  }
+
   setReadOnly(reason?: string): void {
     this.wrapped.setReadOnly?.(reason);
   }
