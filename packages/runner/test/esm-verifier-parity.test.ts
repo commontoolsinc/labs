@@ -55,6 +55,11 @@ const ACCEPT: Case[] = [
     body:
       `"use strict";\nObject.defineProperty(exports, "__esModule", { value: true });\nexports.v = void 0;\n${IMPORT}\nexports.v = (0, cf_1.pattern)(() => ({}));`,
   },
+  {
+    name: "__importDefault / __importStar require preamble forms",
+    body:
+      `const cf_1 = __importStar(require("commonfabric"));\nconst d_1 = __importDefault(require("./dep.ts"));\nexports.v = (0, cf_1.pattern)(() => ({}));`,
+  },
 ];
 
 const REJECT: Case[] = [
@@ -98,6 +103,17 @@ const REJECT: Case[] = [
     name: "default export of a runtime namespace",
     body: `${IMPORT}\nexports.default = cf_1;`,
     reject: /Default exports/i,
+  },
+  {
+    name: "shadowed require defeating the import fast-path",
+    body:
+      `const require = (x) => globalThis;\nconst g = require("commonfabric");\nexports.g = g;`,
+    reject: /.*/,
+  },
+  {
+    name: "require of a disallowed specifier (node:fs)",
+    body: `const fs_1 = require("node:fs");\nexports.fs = fs_1;`,
+    reject: /.*/,
   },
 ];
 

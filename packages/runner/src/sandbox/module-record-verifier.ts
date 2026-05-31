@@ -4,7 +4,10 @@ import {
   classifyModuleItems,
 } from "./compiled-bundle-verifier.ts";
 import { parseFunctionText } from "./compiled-js-parser.ts";
-import { isRuntimeModuleIdentifier } from "./runtime-module-policy.ts";
+import {
+  isAllowedAuthoredImportSpecifier,
+  isRuntimeModuleIdentifier,
+} from "./runtime-module-policy.ts";
 
 /**
  * Structural pre-flight verification for a module-record graph (Phase 3 of
@@ -54,13 +57,30 @@ export function verifyCompiledModuleBody(
   // body; offsets stay consistent with `wrapped` for classification.
   const wrapped = `function () {\n${compiled}\n}`;
   const parsed = parseFunctionText(wrapped, 0, wrapped.length);
+  const statementTexts = parsed.body.statements.map((s) =>
+    wrapped.slice(s.start, s.end).trim()
+  );
+
+  // If the body shadows `require` with its own top-level binding, the
+  // `const x = require(...)` fast-path would mis-trust an arbitrary call.
+  // Disable the fast-path entirely so those statements fall through to
+  // classifyModuleItems (which rejects the call result) — matching AMD, where
+  // a non-canonical require has no special treatment.
+  const requireShadowed = statementTexts.some((t) =>
+    /^(?:const|let|var)\s+require\b/.test(t) ||
+    /^function\s*\*?\s*require\b/.test(t)
+  );
 
   const env = new Map<string, BindingInfo>();
   const classifiable: typeof parsed.body.statements = [];
-  for (const statement of parsed.body.statements) {
-    const text = wrapped.slice(statement.start, statement.end).trim();
-    const match = REQUIRE_IMPORT.exec(text);
-    if (match) {
+  parsed.body.statements.forEach((statement, index) => {
+    const match = requireShadowed
+      ? null
+      : REQUIRE_IMPORT.exec(statementTexts[index]);
+    // Only fast-path imports whose specifier is allowed (runtime module or a
+    // local path); arbitrary specifiers (e.g. "node:fs") fall through and are
+    // rejected by classification, matching the AMD dependency allowlist.
+    if (match && isAllowedAuthoredImportSpecifier(match[2])) {
       const [, binding, specifier] = match;
       env.set(binding, {
         kind: "import",
@@ -70,10 +90,10 @@ export function verifyCompiledModuleBody(
           ? specifier
           : undefined,
       });
-      continue;
+      return;
     }
     classifiable.push(statement);
-  }
+  });
 
   classifyModuleItems(wrapped, filename, classifiable, env, {
     requiredGuards: EMPTY_BINDING_SET,
