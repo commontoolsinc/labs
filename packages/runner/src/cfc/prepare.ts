@@ -434,6 +434,57 @@ const setupProjectionSourceMatchesValue = (
   );
 };
 
+// `writeAuthorizedBy` is a *modification* gate (CFC spec §8.15.10): it restricts
+// who may edit an existing owner-protected value. It does not govern the trusted
+// instantiation that first projects and initializes a field (§8.15.4 — defaults
+// are installed by trusted runtime/pattern instantiation; write authorization
+// applies to *subsequent* modifications).
+//
+// When the runtime instantiates a pattern whose result declares owner-protected
+// fields, it records a setup-projection marker on the result cell whose
+// `sources` point at the pattern's own projected (internal) cells — the cells
+// that hold the field's value and carry its `writeAuthorizedBy` schema. The
+// pattern initializing those fields (e.g. `avatar = ""`, `elements = []`) is its
+// own trusted creation step, authored by the runtime's result projection, not by
+// the per-field edit handler. Recognize a target as that trusted-creation site
+// when it is the redirect *source* of a setup-projection marker recorded in this
+// transaction, covering the field path.
+//
+// This is safe because the marker is recorded ONLY by the runtime's result
+// projection — never by an arbitrary `cell.set` — and only when the projection
+// STRUCTURE is established (instantiation), not on value edits (which leave the
+// projection unchanged and so record no marker). Direct untrusted writes, no-op
+// re-writes, and later field edits therefore remain fully enforced; the slot the
+// pattern result is placed into is independently gated by its own
+// `writeAuthorizedBy`, and the owner binding by `currentPrincipalIntegrityReason`.
+const writeIsPatternSetupInitialization = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+): boolean => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  return tx.getCfcState().writePolicyInputs.some((input) =>
+    input.kind === "structural-provenance" &&
+    input.claim === CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION &&
+    input.sources.some((source) => {
+      if (source.space !== target.space || source.id !== target.id) {
+        return false;
+      }
+      // Only the redirect target itself, or a field nested under it, counts as
+      // this pattern's trusted initialization: the marker's `source` path must
+      // be a prefix of (or equal to) the field being written. We deliberately do
+      // not exempt writes to an *ancestor* of the redirect target, which would
+      // cover more than the projected field. (`concretePathHasPrefix(path,
+      // prefix)` tests whether `prefix` is a prefix of `path`.)
+      return concretePathHasPrefix(logicalPath, canonicalizeLogicalPath(source.path));
+    })
+  );
+};
+
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -1626,7 +1677,7 @@ const verifyInputRequirements = (
       tx,
       target,
       entry.path,
-    );
+    ) || writeIsPatternSetupInitialization(tx, target, entry.path);
     if (writeAuthorizedByFailure !== undefined && !setupProjection) {
       return writeAuthorizedByFailure;
     }

@@ -443,6 +443,51 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("allows a pattern to initialize its own owner-protected result fields during creation", async () => {
+    // Reproduces the pattern-creation gap: instantiating a pattern whose result
+    // declares owner-protected fields (writeAuthorizedBy bound to its own edit
+    // handlers) means the runtime must project and initialize those fields
+    // (avatar = "", elements = []). That trusted initialization is authored by
+    // the creating context, which is NOT any of the per-field edit handlers, so
+    // the writeAuthorizedBy modification gate rejects the pattern's own setup.
+    // This is independent of cross-space: the same happens same-space for any
+    // `aCell.set(SomePattern({}))` creation flow.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const profileHomePattern = await compileProfileHomePattern(runtime);
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "pattern-create",
+        actingPrincipal: alice.did(),
+      });
+      // The creating context (e.g. a profile-create handler) is not the
+      // per-field edit handler (setName/setAvatar/addElement).
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "system.profile-create",
+      });
+      const resultCell = runtime.getCell(
+        alice.did(),
+        "pattern-create-owner-init",
+        profileHomePattern.resultSchema,
+        tx,
+      );
+      runtime.runner.run(
+        tx,
+        profileHomePattern,
+        { initialName: "Ada" },
+        resultCell,
+      );
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects direct untrusted writes to the home profile link", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
