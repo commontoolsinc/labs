@@ -934,7 +934,8 @@ class SpaceReplica implements ISpaceReplica {
   }>;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
-  readonly #commitPromises = new Set<
+  readonly #commitPromises = new Map<
+    number,
     Promise<Result<Unit, StorageTransactionRejected>>
   >();
   readonly #schedulerObservationBatch: SchedulerObservationBatchEntry[] = [];
@@ -1021,7 +1022,10 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       await this.flushSchedulerObservationBatch();
     }
-    await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+    await Promise.all([
+      ...this.#syncPromises,
+      ...this.#commitPromises.values(),
+    ]);
   }
 
   async listSchedulerActionSnapshots(
@@ -1413,6 +1417,38 @@ class SpaceReplica implements ISpaceReplica {
     return this.#schedulerObservationBatch.splice(0, firstLaterEntry);
   }
 
+  private schedulerObservationBatchPrerequisiteCommits(
+    entries: readonly SchedulerObservationBatchEntry[],
+  ): Promise<Result<Unit, StorageTransactionRejected>>[] {
+    const pendingLocalSeqs = new Set<number>();
+    for (const entry of entries) {
+      for (const read of entry.commit.reads.pending) {
+        pendingLocalSeqs.add(read.localSeq);
+      }
+    }
+
+    const promises: Promise<Result<Unit, StorageTransactionRejected>>[] = [];
+    for (const localSeq of pendingLocalSeqs) {
+      const promise = this.#commitPromises.get(localSeq);
+      if (promise !== undefined) {
+        promises.push(promise);
+      }
+    }
+    return promises;
+  }
+
+  private trackCommitPromise(
+    localSeq: number,
+    promise: Promise<Result<Unit, StorageTransactionRejected>>,
+  ): void {
+    this.#commitPromises.set(localSeq, promise);
+    promise.finally(() => {
+      if (this.#commitPromises.get(localSeq) === promise) {
+        this.#commitPromises.delete(localSeq);
+      }
+    });
+  }
+
   private async flushSchedulerObservationBatch(options: {
     beforeLocalSeq?: number;
   } = {}): Promise<
@@ -1457,11 +1493,16 @@ class SpaceReplica implements ISpaceReplica {
       operations: [],
       schedulerObservationBatch: entries.map((entry) => entry.commit),
     };
-    const prerequisiteCommits = [...this.#commitPromises];
+    const prerequisiteCommits = this
+      .schedulerObservationBatchPrerequisiteCommits(
+        entries,
+      );
     const promise = (async () => {
       // Scheduler-only observations may cite pending local writes in their
       // read evidence. The server can only validate those reads after the
-      // referenced semantic commits have reached durable commit rows.
+      // referenced semantic commits have reached durable commit rows. Reads
+      // that only mention confirmed data should not be serialized behind
+      // unrelated pending writes.
       await Promise.allSettled(prerequisiteCommits);
       return await this.pushCommit(localSeq, [], commit, undefined);
     })()
@@ -1479,9 +1520,8 @@ class SpaceReplica implements ISpaceReplica {
         return result;
       });
     this.#schedulerObservationFlushPromise = promise;
-    this.#commitPromises.add(promise);
+    this.trackCommitPromise(localSeq, promise);
     promise.finally(() => {
-      this.#commitPromises.delete(promise);
       if (this.#schedulerObservationFlushPromise === promise) {
         this.#schedulerObservationFlushPromise = undefined;
       }
@@ -1586,9 +1626,8 @@ class SpaceReplica implements ISpaceReplica {
           source,
         ),
     );
-    this.#commitPromises.add(promise);
+    this.trackCommitPromise(localSeq, promise);
     const result = await promise;
-    this.#commitPromises.delete(promise);
     return result;
   }
 

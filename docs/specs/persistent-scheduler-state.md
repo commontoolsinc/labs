@@ -638,6 +638,15 @@ When an action run is a no-op:
 6. Leave existing dirty/stale/unknown state in place for dropped observations.
 7. Do not dirty downstream readers, because no actual changed writes occurred.
 
+Clients may batch adjacent no-op observations. When a batched observation cites
+known pending local writes, the client should wait for those referenced semantic
+commits before sending the scheduler-only batch so the server can resolve and
+canonicalize the pending read watermarks. This wait is dependency-specific:
+observations that only read confirmed data, or do not cite a given pending
+write, should not be serialized behind every outstanding write. The server
+remains conservative and drops observations whose pending dependencies are
+missing or stale.
+
 This server-side state changes the role of rehydration. Restart no longer has
 to discover from scratch whether inactive writes made the piece dirty; it loads
 the persisted dirty/stale/unknown action state and validates it against the

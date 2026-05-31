@@ -705,6 +705,39 @@ Deno.test("memory v2 waits for pending semantic writes before flushing no-op sch
   }
 });
 
+Deno.test("memory v2 does not delay independent no-op observations behind pending writes", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const write = beginSet(harness, DOCS.A, valueFor("unrelated-pending"));
+    harness.model.setOutcome(write.localSeq, { kind: "accept", delayMs: 40 });
+
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor(
+        "action:read-independent-b",
+      ),
+    }, sourceFromReads([{ id: DOCS.B }]));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assertEquals(harness.model.transactLocalSeqs.length, 1);
+    assert(harness.model.transactLocalSeqs[0] !== write.localSeq);
+
+    await assertResultOk(write.promise);
+    await assertResultOk(observation);
+
+    const applied = [...harness.model.applied.values()].sort((a, b) =>
+      a.applied.seq - b.applied.seq
+    );
+    assertEquals(applied.length, 2);
+    assertEquals(applied[0].commit.operations, []);
+    assertEquals(applied[1].localSeq, write.localSeq);
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
 Deno.test("memory v2 sends observations from optimistic commit notifications after the current write", async () => {
   setPersistentSchedulerStateConfig(true);
   const harness = createHarness();

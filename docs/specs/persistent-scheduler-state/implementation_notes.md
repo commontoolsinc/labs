@@ -730,3 +730,11 @@
   `pending-read-missing` drops; those are separate from the fixed case where the
   pending semantic commit has already reached the server and can be translated
   to a durable seq.
+- Follow-up client-side narrowing: after adding server-side canonicalization,
+  the client still needs to keep scheduler-only observations from reaching the
+  server before their referenced pending semantic commits are durable. However,
+  it does not need to wait for every outstanding commit. The no-op batch flush
+  now waits only for commit promises whose localSeqs appear in the batch's
+  pending read evidence. This keeps the ordering required for server
+  canonicalization while avoiding a global serialization point for observations
+  that only read confirmed data or unrelated pending writes.
