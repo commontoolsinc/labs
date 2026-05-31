@@ -7,7 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { patternMetaSchema } from "../src/pattern-manager.ts";
+import { PatternManager, patternMetaSchema } from "../src/pattern-manager.ts";
 import {
   CachedCompiler,
   MemoryCompilationCache,
@@ -146,6 +146,72 @@ describe("PatternManager program persistence", () => {
     expect(metaCell.getAsNormalizedFullLink().id).toEqual(patternId);
     await metaCell.sync();
     expect(metaCell.get()?.program?.main).toEqual("/main.ts");
+  });
+
+  it("keeps nested pattern ids stable when loading a persisted parent pattern", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/child.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export const Child = pattern<{ value: number }>(({ value }) => ({",
+            "  childValue: value,",
+            "}));",
+          ].join("\n"),
+        },
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "import { Child } from './child.tsx';",
+            "export default pattern<{ value: number }>(({ value }) => ({",
+            "  child: Child({ value }),",
+            "}));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const nestedPattern = (pattern: any) =>
+      pattern.nodes.find((node: any) => node.module?.type === "pattern")
+        ?.module.implementation;
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    const initialNestedPattern = nestedPattern(compiled);
+    expect(initialNestedPattern).toBeDefined();
+    const initialNestedId = runtime.patternManager.registerPattern(
+      initialNestedPattern,
+    );
+
+    const metaCell = runtime.getCellFromEntityId(
+      space,
+      patternId,
+      [],
+      patternMetaSchema,
+      tx,
+    );
+    metaCell.set({ program } as any);
+    await tx.commit();
+
+    (runtime as unknown as { patternManager: PatternManager }).patternManager =
+      new PatternManager(runtime);
+    tx = runtime.edit();
+
+    const loaded = await runtime.patternManager.loadPattern(
+      patternId,
+      space,
+      tx,
+    );
+    const loadedNestedPattern = nestedPattern(loaded);
+    expect(loadedNestedPattern).toBeDefined();
+    const loadedNestedId = runtime.patternManager.registerPattern(
+      loadedNestedPattern,
+    );
+
+    expect(loadedNestedId).toEqual(initialNestedId);
   });
 
   it("loads pattern metadata from the legacy causal cell", async () => {

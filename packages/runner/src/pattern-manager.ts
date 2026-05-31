@@ -61,6 +61,50 @@ export const patternMetaSchema = internSchema(
 
 export type PatternMeta = Schema<typeof patternMetaSchema>;
 
+function programString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`Pattern source ${field} must be a string`);
+  }
+  return value;
+}
+
+function materializeRuntimeProgram(
+  input: string | RuntimeProgram,
+): RuntimeProgram {
+  if (typeof input === "string") {
+    return {
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: input }],
+    };
+  }
+
+  if (!Array.isArray(input.files)) {
+    throw new Error("Pattern source files must be an array");
+  }
+
+  // Pattern metadata can be read from cells as query-result proxies. Those
+  // proxies preserve useful provenance, but pattern ids must be derived from
+  // source content only; otherwise a reloaded subpattern can hash the parent
+  // `program.files` link instead of the concrete file list.
+  const files = Array.from(input.files, (file, index) => {
+    if (!isRecord(file)) {
+      throw new Error(`Pattern source files[${index}] must be an object`);
+    }
+    return {
+      name: programString(file.name, `files[${index}].name`),
+      contents: programString(file.contents, `files[${index}].contents`),
+    };
+  });
+
+  return {
+    main: programString(input.main, "main"),
+    ...(input.mainExport !== undefined
+      ? { mainExport: programString(input.mainExport, "mainExport") }
+      : {}),
+    files,
+  };
+}
+
 export class PatternManager {
   private inProgressCompilations = new Map<string, Promise<Pattern>>();
   // Maps keyed by patternId for consistent lookups
@@ -266,7 +310,7 @@ export class PatternManager {
 
   registerPattern(
     pattern: Pattern | Module,
-    src?: RuntimeProgram,
+    src?: string | RuntimeProgram,
   ): URI {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);
@@ -277,15 +321,13 @@ export class PatternManager {
       this.seedVerifiedLoadIds(pattern as Pattern, verifiedLoadId);
     }
 
-    if (src && !pattern.program) {
-      if (typeof src === "string") {
-        pattern.program = {
-          main: "/main.tsx",
-          files: [{ name: "/main.tsx", contents: src }],
-        };
-      } else {
-        pattern.program = src;
-      }
+    const source = src !== undefined
+      ? materializeRuntimeProgram(src)
+      : undefined;
+    if (source && !pattern.program) {
+      pattern.program = source;
+    } else if (pattern.program) {
+      pattern.program = materializeRuntimeProgram(pattern.program);
     }
 
     // If this pattern object was already registered, return its id
@@ -295,8 +337,8 @@ export class PatternManager {
       return existingId;
     }
 
-    const generatedRef = src
-      ? createRef({ src }, "pattern source")
+    const generatedRef = source
+      ? createRef({ src: source }, "pattern source")
       : createRef(pattern, "pattern");
     const generatedId = toURI(generatedRef);
 
@@ -335,8 +377,10 @@ export class PatternManager {
       return true;
     }
 
-    const program = this.patternIdMap.get(patternId)?.program;
-    if (!program) return false;
+    const pattern = this.patternIdMap.get(patternId);
+    if (!pattern?.program) return false;
+    const program = materializeRuntimeProgram(pattern.program);
+    pattern.program = program;
 
     const pending = this.pendingMetaById.get(patternId) ?? {};
     const patternMeta: PatternMeta = {
@@ -358,7 +402,6 @@ export class PatternManager {
 
     this.patternMetaCellById.set(patternId, patternMetaCell.withTx());
     // If we have a pattern object for this id, ensure the back mapping exists
-    const pattern = this.patternIdMap.get(patternId);
     if (pattern) this.patternToIdMap.set(pattern, patternId);
     // Clear pending once persisted
     this.pendingMetaById.delete(patternId);
@@ -425,15 +468,7 @@ export class PatternManager {
   }
 
   async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
-    let program: RuntimeProgram;
-    if (typeof input === "string") {
-      program = {
-        main: "/main.tsx",
-        files: [{ name: "/main.tsx", contents: input }],
-      };
-    } else {
-      program = input;
-    }
+    const program = materializeRuntimeProgram(input);
 
     const { cachedCompiler } = this.runtime;
     if (cachedCompiler) {
@@ -495,16 +530,7 @@ export class PatternManager {
    * @returns The compiled pattern (from cache, in-flight compilation, or new)
    */
   compileOrGetPattern(input: string | RuntimeProgram): Promise<Pattern> {
-    // Normalize to RuntimeProgram
-    let program: RuntimeProgram;
-    if (typeof input === "string") {
-      program = {
-        main: "/main.tsx",
-        files: [{ name: "/main.tsx", contents: input }],
-      };
-    } else {
-      program = input;
-    }
+    const program = materializeRuntimeProgram(input);
 
     // Compute deterministic patternId (matches registerPattern's ID generation)
     const patternRef = createRef({ src: program }, "pattern source");
