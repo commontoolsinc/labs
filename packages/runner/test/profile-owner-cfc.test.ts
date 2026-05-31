@@ -211,6 +211,44 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("keeps an authorized write valid after a later same-tx run changes the implementation identity", async () => {
+    // Mirrors running a child pattern inline in the same transaction: the
+    // handler authorizes a protected write under its identity, then a later run
+    // changes the transaction's implementation identity. The earlier write was
+    // valid when made and must stay valid — CFC must verify each write against
+    // the identity that was active when it was recorded, not the last one.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      setTrustedProfileWriter(tx, alice.did());
+      const cell = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-identity-clobber",
+        profileSchema(alice.did()),
+        tx,
+      );
+      cell.set({ name: "Ada", avatar: "ada.png", elements: [] });
+      const target = cell.getAsNormalizedFullLink();
+      recordTrustedEdit(tx, target, ["name"]);
+      recordTrustedEdit(tx, target, ["avatar"]);
+      recordTrustedEdit(tx, target, ["elements"]);
+
+      // A second run in the same transaction (e.g. an inline child pattern)
+      // changes the transaction-level implementation identity.
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "system.unrelated-writer",
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects Bob writing Alice's protected profile fields", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

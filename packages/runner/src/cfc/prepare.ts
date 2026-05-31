@@ -272,6 +272,7 @@ const writeAuthorizedByReason = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
+  targetIdentity?: ImplementationIdentity,
 ): string | undefined => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return undefined;
@@ -286,7 +287,9 @@ const writeAuthorizedByReason = (
     return `writeAuthorizedBy requires a trust snapshot at /${path.join("/")}`;
   }
 
-  const identity = tx.getCfcState().implementationIdentity;
+  // Verify against the identity that authored this target's writes, falling
+  // back to the transaction's current identity for writes recorded without one.
+  const identity = targetIdentity ?? tx.getCfcState().implementationIdentity;
   if (
     Array.isArray(claim) && claim.every((entry) => typeof entry === "string")
   ) {
@@ -457,7 +460,9 @@ const storedMetadataFor = (
  */
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
-  implementationIdentity?: ImplementationIdentity,
+  identityForInput: (input: WritePolicyInput) =>
+    | ImplementationIdentity
+    | undefined,
 ): Map<string, JSONSchema> => {
   const result = new Map<string, JSONSchema>();
   for (const input of inputs) {
@@ -467,7 +472,7 @@ const candidateSchemasByTarget = (
     const key = targetKey(input.target);
     const schema = rebindWriteAuthorizedByClaims(
       input.schema,
-      implementationIdentity,
+      identityForInput(input),
     );
     const candidate = schemaEnvelopeForTargetPath(
       schema,
@@ -482,6 +487,31 @@ const candidateSchemasByTarget = (
         ? existing
         : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
     );
+  }
+  return result;
+};
+
+/**
+ * Maps each write target to the implementation identity that authored it
+ * (captured when its write-policy inputs were recorded). Used to verify
+ * writeAuthorizedBy per target rather than against the transaction's last
+ * implementation identity.
+ */
+const identitiesByTarget = (
+  inputs: readonly WritePolicyInput[],
+  identityForInput: (input: WritePolicyInput) =>
+    | ImplementationIdentity
+    | undefined,
+): Map<string, ImplementationIdentity | undefined> => {
+  const result = new Map<string, ImplementationIdentity | undefined>();
+  for (const input of inputs) {
+    if (!("target" in input) || input.target === undefined) {
+      continue;
+    }
+    const key = targetKey(input.target);
+    if (!result.has(key)) {
+      result.set(key, identityForInput(input));
+    }
   }
   return result;
 };
@@ -1545,6 +1575,7 @@ const verifyInputRequirements = (
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
   },
+  targetIdentity?: ImplementationIdentity,
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
     !isInternalVerifierRead(read.meta)
@@ -1589,6 +1620,7 @@ const verifyInputRequirements = (
       tx,
       entry.schema,
       entry.path,
+      targetIdentity,
     );
     const setupProjection = setupProjectionSourceMatchesValue(
       tx,
@@ -1932,11 +1964,20 @@ export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
 ): string[] => {
   const reasons: string[] = [];
+  const state = tx.getCfcState();
+  const identityForInput = (
+    input: WritePolicyInput,
+  ): ImplementationIdentity | undefined =>
+    state.writePolicyInputIdentities.get(input) ?? state.implementationIdentity;
   const candidates = candidateSchemasByTarget(
-    tx.getCfcState().writePolicyInputs,
-    tx.getCfcState().implementationIdentity,
+    state.writePolicyInputs,
+    identityForInput,
   );
-  const linkWrites = linkWritesByTarget(tx.getCfcState().writePolicyInputs);
+  const targetIdentities = identitiesByTarget(
+    state.writePolicyInputs,
+    identityForInput,
+  );
+  const linkWrites = linkWritesByTarget(state.writePolicyInputs);
   for (const [key, target] of valueWriteTargets(tx)) {
     if (candidates.has(key)) {
       continue;
@@ -2030,6 +2071,7 @@ export const prepareBoundaryCommit = (
       tx,
       verificationSchema,
       target,
+      targetIdentities.get(key),
     );
     if (requirementFailure) {
       reasons.push(requirementFailure);
