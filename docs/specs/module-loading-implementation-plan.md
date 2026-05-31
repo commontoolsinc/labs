@@ -13,8 +13,9 @@ steps with the files each touches, exit criteria, and validation commands.
 - **Ship the scheduler fix first.** Identity decoupling (Phase 1) does not
   require the loader change and resolves the persistent-scheduler-state
   rehydration miss on its own. It is the priority.
-- **Never under-count value dependencies.** Over-approximation (extra
-  invalidation) is acceptable; missing a real behavioral change is not.
+- **Never under-count dependencies (value or type).** Over-approximation (extra
+  invalidation) is acceptable; missing a real behavioral change — including a
+  change to an imported type that the transformer lowers into a schema — is not.
 - **Synchronous execution is a given.** The scheduler runs actions
   synchronously; the loader must load synchronously (SES `ModuleSource` +
   `importNow` with a pre-populated module map). This is assumed, not something
@@ -68,34 +69,39 @@ synchronous load site. Output a short table in this plan's follow-up notes.
 ## Phase 1 — Decouple identity (no loader change) — PRIORITY
 
 Goal: the action implementation fingerprint becomes a per-module Merkle content
-hash, stable across entry points and sensitive to transitive value-import
-changes, while still emitting AMD.
+hash, stable across entry points **and across TCB (transformer/compiler)
+upgrades**, and sensitive to transitive changes in any imported module (value or
+type), while still emitting AMD.
 
-### 1.1 Value-import graph extraction
+### 1.1 Import-graph extraction (all edges)
 
 - Extend `getImports` (`packages/js-compiler/typescript/resolver.ts:94`) to
-  classify each edge as value vs type-only:
-  - skip `import type …` / `export type …` declarations,
-  - for named imports, drop specifiers whose `isTypeOnly` is set,
-  - keep `export * from` and side-effect imports as value edges.
-- Recommend enabling `verbatimModuleSyntax` in
-  `packages/js-compiler/typescript/options.ts` so elision is syntactic. If that
-  is too disruptive for existing patterns in Phase 1, instead derive value edges
-  from **emitted JS** (type imports already elided) and document the choice.
+  collect **every** import and `export … from` edge — including `import type`,
+  `export type`, type-only named specifiers, side-effect imports, and barrels.
+  There is no value/type filtering: type edges are kept because types are
+  load-bearing (the transformer lowers them into generated schemas).
+- No `verbatimModuleSyntax` requirement and no dependence on emit elision; the
+  graph is read directly from the authored source AST.
 
-**Decided:** `normSrc` is the canonicalized **compiled JS** of each module (see
-the spec's Module Identity section). The compiler's own type elision is what
-keeps type-only changes out of the hash, so 1.1's value-edge filtering is a
-belt-and-suspenders refinement of the import map, not the primary type guard.
+**Decided:** `normSrc` is the **authored TypeScript source** of each module
+(line-ending-normalized, pre-transform, pre-emit), not compiled JS. Hashing
+source keeps code identity stable across transformer/compiler upgrades (the TCB
+evolves independently of code references) and naturally includes types. The
+scheduler's separate `runtimeFingerprint` handles compilation-semantics changes.
+See the spec's Module Identity section.
 
-**Files:** `js-compiler/typescript/resolver.ts`, `options.ts`.
-**Exit:** a function returning, per module, its ordered value-edge specifiers.
+**Files:** `js-compiler/typescript/resolver.ts`.
+**Exit:** a function returning, per module, its ordered import-edge specifiers
+(value and type alike).
 
 ### 1.2 Merkle module-hash computation
 
 - New module `packages/runner/src/harness/module-identity.ts`:
   - `computeModuleHashes(program): Map<filePath, string>`.
-  - Build the value-import DAG from 1.1; resolve specifiers to module paths or
+  - `normSrc(M)` is the module's authored source bytes with line-ending
+    normalization only — taken before pretransform's helper-import injection and
+    `/${id}/` prefixing, so those decorations never enter the hash.
+  - Build the import graph from 1.1; resolve specifiers to module paths or
     external runtime leaves.
   - Condense strongly-connected components (Tarjan) to handle ESM cycles; hash
     each SCC as a unit (members sorted by path) and assign members
@@ -153,8 +159,11 @@ it off, fingerprints are byte-for-byte unchanged from today.
 
 - `module-identity.test.ts`:
   - identical module compiled from two different entry points → identical hash;
-  - changing a transitively value-imported function → importer hash changes;
-  - changing a purely type-only import → importer hash unchanged;
+  - changing a transitively-imported function → importer hash changes;
+  - changing a transitively-imported **type** → importer hash changes
+    (`import type` edges count);
+  - recompiling unchanged source under a bumped transformer/compiler version →
+    hash unchanged (TCB independence);
   - adding/removing an unrelated sibling file → untouched module hash stable;
   - import cycle → deterministic, stable hash across repeated runs;
   - `export *` barrel propagates a transitive change.
@@ -178,9 +187,11 @@ green with the scheduler flag on and off.
 
 ### 2.1 ESM compiler mode
 
-- Add an ESM emit path to the compiler: `ModuleKind.ES2022`, no `outFile`,
-  `verbatimModuleSyntax`. Keep the AMD path intact, selected by
-  `EXPERIMENTAL_ESM_MODULE_LOADER`.
+- Add an ESM emit path to the compiler: `ModuleKind.ES2022`, no `outFile`. Keep
+  the AMD path intact, selected by `EXPERIMENTAL_ESM_MODULE_LOADER`.
+  (`verbatimModuleSyntax` is optional here for emit hygiene only; module identity
+  no longer depends on emit-time type elision — it is computed from authored
+  source in Phase 1.)
 
 **Files:** `packages/js-compiler/typescript/options.ts`,
 `packages/js-compiler/typescript/compiler.ts`, bundler bypass in
@@ -300,7 +311,8 @@ only loader.
 
 | Risk | Phase | Mitigation / gate |
 | --- | --- | --- |
-| Type/value edge misclassification | 1 | `normSrc` over emitted JS (compiler elides types); over-inclusion only; tests for type-only no-op. |
+| Missing an import edge (esp. `import type`) | 1 | Collect all import/export-from edges from the source AST; test that a type-only edit changes the importer hash. |
+| Pretransform decorations leaking into `normSrc` | 1 | Hash authored source pre-transform; test TCB-version independence. |
 | Verifier divergence on ESM | 3 | Corpus parity harness as release blocker before default-on. |
 | Many-small-modules perf regression | 2/4 | Benchmarks; consider one compartment per load with shared map. |
 | Cycle hashing nondeterminism | 1 | SCC condensation with sorted members; determinism test. |

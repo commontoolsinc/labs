@@ -4,8 +4,9 @@
 
 Proposal. No implementation yet. This document specifies a replacement for the
 current AMD-bundle module pipeline with (1) per-module content-addressed
-identity computed as a Merkle hash over the transitive value-import graph, and
-(2) ES-module loading into SES compartments. The motivating consumer is
+identity computed as a Merkle hash over each module's authored TypeScript source
+and the transitive import graph, and (2) ES-module loading into SES
+compartments. The motivating consumer is
 [persistent scheduler state](persistent-scheduler-state.md), whose action
 implementation fingerprint is currently unstable across reloads.
 
@@ -27,15 +28,26 @@ fingerprint for byte-identical code, and persistent-scheduler-state rehydration
 misses.
 
 This spec changes module identity from bundle-grained to module-grained.
-Each module is content-addressed by a Merkle hash over its own normalized source
-and the hashes of the modules it imports *for value* (not for type). That hash
-is:
+Each module is content-addressed by a Merkle hash over its own **authored
+TypeScript source** and the hashes of every module it imports. That hash is:
 
 - **stable** across entry points and unrelated sibling files, because it depends
-  only on the module's own reachable value-import closure;
-- **transitively sensitive**, because changing any function in that closure
-  changes the importing module's hash too — behavior can change when an imported
-  function changes, and the fingerprint must reflect that.
+  only on the module's own reachable import closure;
+- **stable across TCB evolution**, because it hashes the author's source, not the
+  compiled output. A transformer or compiler improvement must not retroactively
+  change the identity of code the author never edited — code references can
+  point at long-known-good versions, and the trusted computing base (the
+  transformer/compiler) evolves independently of them;
+- **transitively sensitive**, because changing any module in that closure changes
+  the importing module's hash too — behavior can change when an imported function
+  *or an imported type* changes, and the fingerprint must reflect that.
+
+Imports are tracked regardless of whether they are value or type imports.
+TypeScript types are load-bearing in Common Fabric: the transformer lowers types
+into the emitted output (JSON schemas are generated from types, and those schemas
+drive runtime validation and reactivity). A change to an imported type can change
+runtime behavior, so type-import edges belong in the graph alongside value
+imports.
 
 To make per-module identity natural, the loader moves from a single flattened
 AMD bundle evaluated with `compartment.evaluate(string)` to ES modules
@@ -52,10 +64,15 @@ this work and is out of scope.
 - Give every authored module, and every action within it, an identity that is
   stable across reloads and across the entry point used to compile it.
 - Make that identity sensitive to transitive changes: editing an imported
-  function invalidates the fingerprint of everything that transitively imports
-  it for value.
-- Exclude type-only imports from the hash, so changing a type that has no
-  runtime footprint does not invalidate code.
+  function or type invalidates the fingerprint of everything that transitively
+  imports it.
+- Keep code identity stable across TCB evolution: a transformer/compiler change
+  must not invalidate references to unchanged authored source. Compilation-
+  semantics changes are captured separately by the scheduler's
+  `runtimeFingerprint`, not by the per-module content hash.
+- Track type imports as well as value imports, because the transformer lowers
+  types into emitted output (schema generation), so types affect runtime
+  behavior.
 - Replace the AMD bundle + string-eval loader with ES-module loading in SES
   compartments, preserving the existing synchronous execution contract.
 - Preserve the verifiable-execution guarantees: every module item is still
@@ -147,37 +164,43 @@ rehydration misses.
 
 The naive inverse — hashing each module's bytes in isolation — would be stable
 across entry points but **incorrect**, because a module's runtime behavior
-depends on the functions it imports. If module `A` imports `compute` from `B`
-and `B`'s implementation changes, `A`'s behavior changes even though `A`'s own
-bytes did not. A correct fingerprint must be both stable across entry points and
-sensitive to transitive value-import changes.
+depends on what it imports. If module `A` imports `compute` from `B` and `B`'s
+implementation changes, `A`'s behavior changes even though `A`'s own bytes did
+not — and likewise if `A` imports a *type* from `B` that `B` redefines, because
+that type is lowered into `A`'s generated schema. A correct fingerprint must be
+both stable across entry points and sensitive to transitive changes in any
+imported module, value or type.
 
 ## Proposed Model
 
-### Module Identity: Merkle hash over the value-import graph
+### Module Identity: Merkle hash over the import graph
 
-Define identity per module, bottom-up over the import DAG, including only
-runtime (value) imports.
+Define identity per module, bottom-up over the import graph, including **all**
+imports — value and type.
 
 For each authored module `M`:
 
 - `normSrc(M)` — the canonical normalized representation of `M`'s **own** code
   (not its dependencies', which enter the hash via the Merkle edges below).
-  **Decision: hash the compiled JavaScript of `M`**, after the CF transformer
-  pipeline and TypeScript emit, with inline source maps and the
-  `//# sourceURL`/prefix decorations stripped. Hashing emitted JS rather than raw
-  TS means type-only imports, type-only named specifiers, and type annotations
-  have already been elided by the compiler — that elision is the mechanism that
-  keeps types out of the hash (see Type Imports below), so we never have to
-  detect and strip types by hand. The accepted trade-off is that emitted bytes
-  depend on the compiler/transformer version, so the same source hashes
-  differently across runtime versions; that is correct here, because the
-  scheduler's `runtimeFingerprint` already invalidates observations on a runtime
-  change. This identity is meant to survive reloading the same code from a
-  different entry point, not a runtime upgrade.
-- `valueDeps(M)` — the ordered set of `M`'s runtime imports, each a pair
-  `(specifierText, target)` where `target` is either another authored module or
-  an external runtime module.
+  **Decision: hash the authored TypeScript source of `M`**, as written, before
+  the CF transformer pipeline and before TypeScript emit. Normalization is
+  limited to line-ending canonicalization; type annotations and comments are
+  retained. Hashing the author's source rather than compiled JS is deliberate:
+  - It keeps code identity **stable across TCB evolution.** The transformer and
+    compiler are the trusted computing base; they improve over time. Hashing
+    emitted output would give the same authored code a new identity on every
+    transformer release, so a reference could never denote a long-known-good
+    version of code. Hashing source ties identity to author intent. Compilation-
+    semantics changes are handled on a separate axis by the scheduler's
+    `runtimeFingerprint` (which already encodes the runtime/scheduler version),
+    so the scheduler still invalidates correctly when the TCB changes — without
+    destroying the durable code identity.
+  - It naturally **includes types**, which are load-bearing (the transformer
+    lowers types into emitted schemas). We therefore do *not* strip types, and
+    do *not* need to distinguish type-only from value imports.
+- `deps(M)` — the ordered set of `M`'s imports (value and type alike), each a
+  pair `(specifierText, target)` where `target` is either another authored
+  module or an external runtime module.
 
 The module hash is:
 
@@ -186,7 +209,7 @@ moduleHash(M) = H(
   "cf/module-id/v1",
   normSrc(M),
   sortByText([
-    (specifierText_i, leafOrHash(target_i))   for each value dep i
+    (specifierText_i, leafOrHash(target_i))   for each import i
   ])
 )
 
@@ -204,25 +227,27 @@ upgrade invalidates everything that imports them, consistent with the existing
 **Cycles.** ES modules permit import cycles, so the import graph is not strictly
 a DAG. Compute over the condensation: find strongly-connected components, hash
 each SCC as a unit (members sorted by stable path, concatenating their
-`normSrc` and their out-of-component value-dep edges), and assign every member
-the pair `(sccHash, memberIndexWithinScc)`. Acyclic modules are singleton SCCs
-and reduce to the formula above.
+`normSrc` and their out-of-component import edges), and assign every member the
+pair `(sccHash, memberIndexWithinScc)`. Acyclic modules are singleton SCCs and
+reduce to the formula above.
 
 #### Stability and sensitivity properties
 
 - **Entry-point independence.** `moduleHash(M)` is a function only of the
-  transitive value-import closure reachable from `M` and the normalized text of
+  transitive import closure reachable from `M` and the authored source text of
   those modules. It does not reference the entry point, sibling modules outside
   `M`'s closure, file ordering, or any whole-program prefix. Therefore the same
-  module with the same reachable value-deps hashes identically no matter which
+  module with the same reachable imports hashes identically no matter which
   entry point pulled it into a compilation.
-- **Transitive sensitivity.** If any module `N` in `M`'s value closure changes,
+- **TCB independence.** `moduleHash(M)` is a function of authored source, not of
+  the transformer/compiler version, so a TCB upgrade leaves it unchanged. The
+  scheduler's `runtimeFingerprint` covers the "did the compilation semantics
+  change" question separately, so trusting a persisted observation still
+  requires both a matching `moduleHash` *and* a matching `runtimeFingerprint`.
+- **Transitive sensitivity.** If any module `N` in `M`'s closure changes,
   `moduleHash(N)` changes; since `moduleHash(N)` is an input to every module that
-  transitively imports `N` for value, all of their hashes change. Behavior
-  changes propagate to fingerprints exactly along value-import edges.
-- **Type insensitivity (best effort).** Type-only imports do not appear in
-  emitted JS and contribute no value-dep edge, so changing a purely-type
-  dependency does not change `moduleHash`. See caveat below.
+  transitively imports `N`, all of their hashes change. Changes propagate to
+  fingerprints along every import edge, value or type.
 
 #### Action / function identity
 
@@ -247,24 +272,22 @@ The instance binding hash already computed in
 distinguishes multiple instances of the same implementation. Identity is the
 pair *(implementation hash, instance binding hash)*.
 
-#### Type Imports
+#### Type Imports Are Included
 
-The requirement is that the hash track non-type imports only. Two mechanisms:
+Type imports are part of the graph, not excluded from it. In Common Fabric the
+transformer lowers TypeScript types into emitted output — JSON schemas are
+generated from types, and those schemas drive runtime validation and reactivity
+— so an imported type is load-bearing: redefining it can change runtime
+behavior. Hashing authored TS source (which retains type annotations and
+`import type` declarations) and counting every import edge therefore captures
+type changes by construction.
 
-1. Computing `normSrc` over **emitted JS** rather than TS source. TypeScript
-   elides `import type` and type-only named specifiers during emit, so they
-   never appear as value-dep edges.
-2. Enabling `verbatimModuleSyntax` (or equivalent) in the compiler options so
-   elision is syntactic and predictable: a value import retained in emit is
-   exactly an edge in `valueDeps`, and `import type` is reliably dropped.
-
-Residual imprecision is acceptable and conservative: an import that is in fact
-used only as a type but is not marked `import type` will be retained in emit and
-counted as a value edge, causing extra (unnecessary) invalidation. Over-
-inclusion costs a needless recompute/rerun; it never misses a real change. This
-matches the "over-approximate when uncertain" principle used elsewhere in the
-runtime. We should not under-count: omitting a real value edge would silently
-treat changed behavior as unchanged.
+This means the import-graph extraction must collect **all** import and
+`export … from` edges, including `import type` and type-only named specifiers.
+There is no value/type filtering and no dependence on emit elision. The earlier
+"non-type imports only" framing is withdrawn: it would have silently treated a
+behavior-changing type edit as a no-op, which is exactly the under-counting we
+must avoid.
 
 ### Loader: ES modules in SES compartments
 
@@ -345,9 +368,10 @@ not currently have. Concretely:
 
 - `SchedulerActionObservationV1.implementationFingerprint` becomes
   `moduleHash(M)#symbol` instead of `src:/<id>/path:line:col`. It is stable
-  across reloads and entry points, and it changes when transitive value-import
-  behavior changes — exactly the validity condition the scheduler needs to
-  decide whether a persisted observation may be trusted.
+  across reloads, entry points, and TCB upgrades, and it changes when any
+  transitive import (value or type) changes — exactly the validity condition the
+  scheduler needs to decide whether a persisted observation may be trusted, in
+  combination with the separately-checked `runtimeFingerprint`.
 - The version-1 "implementation fingerprint is a placeholder" limitation in that
   spec is resolved: the fingerprint is now content-derived, so a clean
   observation can no longer be trusted against changed code.
@@ -362,7 +386,7 @@ the scheduler benefit does not block the larger loader change.
 Sequence identity first to retire the rehydration bug quickly, then the loader.
 
 1. **Phase 1 — Decouple identity (no loader change).** Compute `moduleHash(M)`
-   over the per-module value-import graph during compilation and stamp it into
+   over the per-module import graph (all edges) during compilation and stamp it into
    `fn.src` / the action implementation fingerprint, replacing the whole-program
    `computeId` prefix as the identity source. Keep AMD emission. This alone fixes
    the persistent-scheduler-state miss and the staleness gap, and is independently
@@ -378,37 +402,41 @@ Sequence identity first to retire the rehydration bug quickly, then the loader.
 
 ## Risks and Open Questions
 
-- **Synchronous loading must hold.** The central feasibility assumption is that
-  `importNow` + a fully-populated module map covers every load path the scheduler
-  invokes synchronously. This must be validated against `evaluate()`'s callers
-  before committing to Phase 2.
+- **Synchronous loading.** Assumed: `importNow` + a fully-populated module map
+  loads synchronously, covering every load path the scheduler invokes. Phase 0
+  confirms the `importNow` shape and censuses the synchronous call sites rather
+  than treating this as a go/no-go gate.
 - **`ModuleSource` precompile cost.** Many small modules vs one bundle eval may
   shift setup cost. Benchmark compartment construction and `importNow` across
   realistic pattern sizes against today's single eval.
 - **Verifier port effort.** Re-implementing classification against `ModuleSource`
   is the largest engineering item; budget accordingly and keep parity tests
   against the AMD verifier during transition.
-- **Type-vs-value precision.** Exact elision depends on compiler settings;
-  `verbatimModuleSyntax` should be enabled and its effect on existing patterns
-  checked. Over-inclusion is acceptable; verify there is no path to
-  under-inclusion.
+- **Complete import-edge extraction.** Every `import`, `import type`, and
+  `export … from` edge must be collected (the resolver already walks both import
+  and export declarations [resolver.ts:94][c15]); confirm `import type` and
+  type-only named specifiers are not dropped. Missing a type edge would silently
+  treat a behavior-changing type edit as a no-op.
 - **Cycle hashing.** Confirm the SCC condensation is deterministic and that SES's
   ESM cycle semantics match expectations for the existing pattern corpus.
-- **Re-export and barrel files.** `export * from` edges must be counted as value
-  edges (they are, via the resolver's export-declaration handling
-  [resolver.ts:117][c15]); confirm barrels do not collapse distinct modules into
-  one hash.
-- **`normSrc` canonicalization.** The hash must be computed over a representation
-  that is invariant to incidental emit differences (path decorations, inline
-  map bytes) but variant to every behavioral byte. Define this canonical form
-  precisely in implementation.
+- **Re-export and barrel files.** `export * from` edges must be counted (they
+  are, via the resolver's export-declaration handling [resolver.ts:117][c15]);
+  confirm barrels do not collapse distinct modules into one hash.
+- **`normSrc` canonicalization.** The hash is over authored TS source with only
+  line-ending normalization. Confirm it does not accidentally fold in our
+  pretransform decorations (helper-import injection, `/${id}/` prefix), which
+  would reintroduce TCB-version sensitivity. Define the canonical form precisely
+  in implementation: it is the module's original authored bytes, pre-transform.
 
 ## Test Strategy
 
 - Identical module compiled from two different entry points produces the same
   `moduleHash` and the same action implementation fingerprint.
 - Changing a transitively-imported value function changes the importer's
-  `moduleHash`; changing a purely-type import does not.
+  `moduleHash`; changing a transitively-imported **type** also changes it.
+- Recompiling unchanged source under a changed transformer/compiler version
+  leaves `moduleHash` unchanged (TCB independence); the scheduler still
+  invalidates via `runtimeFingerprint`.
 - An unrelated sibling file added to or removed from the compilation does not
   change an untouched module's hash.
 - Import cycles produce deterministic, stable hashes across reloads.
