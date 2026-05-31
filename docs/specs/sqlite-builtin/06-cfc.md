@@ -30,9 +30,10 @@ which is the seam SQLite writes will use.
 
 ## Per-column labels
 
-A column's label is declared on the table/row schema's `ifc`, reusing the exact
-mechanism schemas already support. `cfLink<T>()` and `table(...)` (Section
-[01](./01-api.md)) pass `ifc` through per field:
+A column's label is declared on the database's table schema's `ifc`, reusing the
+exact mechanism schemas already support. `cfLink<T>()` and `table(...)` (the
+schemas registered via `sqliteDatabase({ tables })`, Section [01](./01-api.md))
+pass `ifc` through per field:
 
 ```tsx
 const EmailRowSchema = table({

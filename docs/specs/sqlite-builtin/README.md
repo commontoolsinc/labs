@@ -24,9 +24,12 @@ they can be protected independently once CFC lands:
 - **`sqliteExecute`** — writes (`INSERT`/`UPDATE`/`DELETE`/DDL). Effectful;
   participates in the same transaction as the cell writes around it.
 
-Both operate on an opaque **database handle** produced by a `sqliteDatabase(...)`
-builder, which selects one of three database sources (Section
-[03](./03-database-sources.md)).
+Both operate on an opaque **database handle** — a branded, otherwise-empty
+`SqliteDatabase` value that patterns only forward, never read. It is produced by
+a `sqliteDatabase(...)` builder (cell-derived or VM sources), or **injected as a
+pattern input** for on-disk databases linked via `cf` (Section
+[03](./03-database-sources.md)). The handle's table schema and DDL are owned by
+the database, declared once.
 
 Two cross-cutting rules make cell references first-class inside SQLite:
 
@@ -72,9 +75,10 @@ Two cross-cutting rules make cell references first-class inside SQLite:
 - **Full VM-file and on-disk source implementations.** Both are stubbed behind
   opaque handles (Section [03](./03-database-sources.md)); only the
   cell-derived default source is fully specified for v1.
-- **Auto-derived TypeScript types for query parameters and result rows.** The
-  author annotates row shapes; we do not parse SQL to infer types (Section
-  [01](./01-api.md#typescript-and-table-types)).
+- **Auto-derived TypeScript types from the SQL string.** Tables are declared on
+  the database and result rows via the `sqliteQuery<Row>` type argument; we do
+  not parse SQL to infer parameter/result types (Section
+  [01](./01-api.md#typescript-and-table-types--why-these-boundaries)).
 
 ## Document map
 
@@ -92,17 +96,26 @@ Two cross-cutting rules make cell references first-class inside SQLite:
 ## At a glance
 
 ```tsx
-import { sqliteDatabase, sqliteQuery, sqliteExecute, handler, derive } from "commonfabric";
+import { sqliteDatabase, sqliteQuery, sqliteExecute, table, cfLink, handler, derive } from "commonfabric";
 
-// A database tied to this pattern's own cell (default source).
-const db = sqliteDatabase();
+// A database tied to this pattern's own cell (default source). Tables (and the
+// _cf_link columns) are declared once, here; the runtime owns DDL/migration.
+const db = sqliteDatabase(undefined, {
+  tables: {
+    messages: table({
+      id: "integer primary key",
+      author_cf_link: cfLink<User>(),
+      body: "text",
+      ts: "integer",
+    }),
+  },
+});
 
-// Reactive read. Re-runs whenever `db.version` changes (bumped on commit).
+// Reactive read. Passing the whole `db` means "any committed write re-runs".
 const recent = sqliteQuery({
   db,
   sql: "SELECT id, author_cf_link, body FROM messages ORDER BY ts DESC LIMIT 20",
-  reactOn: db.version,
-  rows: MessageRowSchema, // declares column types + which columns are _cf_link
+  reactOn: db,
 });
 
 // Effectful write, atomic with any surrounding cell writes.
