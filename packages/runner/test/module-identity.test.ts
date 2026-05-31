@@ -107,6 +107,26 @@ describe("computeModuleHashes", () => {
     expect(first.get("/a.ts")).not.toBe(first.get("/b.ts"));
   });
 
+  it("resolves directory-style imports (./dir -> ./dir/index.*) as internal edges", () => {
+    // `./dep` resolves to `./dep/index.mts`; a change there must propagate.
+    const a = `import { d } from "./dep"; export const a = () => d();`;
+    const dep1 = `export const d = () => 1;`;
+    const dep2 = `export const d = () => 2;`;
+
+    const before = computeModuleHashes(
+      program("/a.ts", { "/a.ts": a, "/dep/index.mts": dep1 }),
+      { runtimeFingerprint: RFP },
+    );
+    const after = computeModuleHashes(
+      program("/a.ts", { "/a.ts": a, "/dep/index.mts": dep2 }),
+      { runtimeFingerprint: RFP },
+    );
+
+    // If the directory import were treated as external, /a.ts would not change.
+    expect(after.get("/dep/index.mts")).not.toBe(before.get("/dep/index.mts"));
+    expect(after.get("/a.ts")).not.toBe(before.get("/a.ts"));
+  });
+
   it("folds the runtime fingerprint into modules that import runtime modules", () => {
     const usesRuntime =
       `import { h } from "commonfabric"; export const a = () => h();`;

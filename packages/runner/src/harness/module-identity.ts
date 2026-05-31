@@ -44,6 +44,8 @@ const RESOLUTION_SUFFIXES = [
   "/index.tsx",
   "/index.js",
   "/index.jsx",
+  "/index.mts",
+  "/index.mjs",
 ];
 
 export interface ModuleIdentityOptions {

@@ -90,7 +90,7 @@ evolves independently of code references) and naturally includes types. The
 scheduler's separate `runtimeFingerprint` handles compilation-semantics changes.
 See the spec's Module Identity section.
 
-**Files:** `js-compiler/typescript/resolver.ts`.
+**Files:** `packages/js-compiler/typescript/resolver.ts`.
 **Exit:** a function returning, per module, its ordered import-edge specifiers
 (value and type alike).
 
