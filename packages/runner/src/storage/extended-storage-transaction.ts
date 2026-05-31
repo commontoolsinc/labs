@@ -293,6 +293,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return digest;
   }
 
+  enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
+    this.tx.enableMultiSpaceWrites?.(order);
+  }
+
   setReadOnly(reason = "runtime.readTx()"): void {
     this.readOnlySource = reason;
     this.tx.setReadOnly?.(reason);
@@ -773,6 +777,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
     this.wrapped.enqueuePostCommitEffect(effect);
+  }
+
+  enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
+    this.wrapped.enableMultiSpaceWrites?.(order);
   }
 
   setReadOnly(reason?: string): void {

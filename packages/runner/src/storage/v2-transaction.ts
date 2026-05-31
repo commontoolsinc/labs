@@ -128,6 +128,21 @@ const logger = getLogger("storage.v2.transaction", {
   level: "error",
 });
 
+// Enabled so cross-space partial-commit failures (no rollback) are visible.
+const multiSpaceCommitLogger = getLogger("storage.v2.multi-space-commit", {
+  enabled: true,
+  level: "error",
+});
+
+const toStoreError = (error: unknown): StorageTransactionRejected => {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    name: "StoreError" as const,
+    message,
+    cause: { name: "StoreError", message },
+  };
+};
+
 function withCommitTiming<T>(
   keys: string[],
   fn: () => T,
@@ -731,6 +746,13 @@ export class V2StorageTransaction implements IStorageTransaction {
   #reactivityLogCache?: TransactionReactivityLog;
   #schedulerObservation?: unknown;
   #writeSpace?: MemorySpace;
+  // Multi-space write opt-in (see enableMultiSpaceWrites). When disabled the
+  // transaction rejects writes to a second space; when enabled commit() splits
+  // into one per-space commit.
+  #multiSpaceWrites = false;
+  #commitOrder?: readonly MemorySpace[];
+  // Spaces written to, in first-write order. Used as the default commit order.
+  #writtenSpaces: MemorySpace[] = [];
   #readOnlySource?: string;
   #lastDocument?: {
     branch: SpaceBranch;
@@ -752,6 +774,14 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   isReadOnly(): boolean {
     return this.#readOnlySource !== undefined;
+  }
+
+  enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
+    this.assertWritable("enableMultiSpaceWrites()");
+    this.#multiSpaceWrites = true;
+    if (order !== undefined) {
+      this.#commitOrder = order;
+    }
   }
 
   static create(manager: IStorageManager): IStorageTransaction {
@@ -867,7 +897,27 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       return { error: ready.error };
     }
-    if (this.#writeSpace !== undefined && this.#writeSpace !== space) {
+    const claim = this.claimWriteSpace(space);
+    if (claim.error) {
+      return { error: claim.error };
+    }
+    const branch = this.branch(space);
+    branch.writer ??= new V2Writer(this, space);
+    return { ok: branch.writer };
+  }
+
+  /**
+   * Records `space` as a write target. Without the multi-space opt-in, rejects a
+   * second space with a write-isolation error (preserving the default
+   * single-space guarantee). With it enabled, tracks the space in first-write
+   * order for commit() to split on.
+   */
+  private claimWriteSpace(space: MemorySpace): Result<Unit, WriterError> {
+    if (
+      !this.#multiSpaceWrites &&
+      this.#writeSpace !== undefined &&
+      this.#writeSpace !== space
+    ) {
       return {
         error: WriteIsolationError({
           open: this.#writeSpace,
@@ -875,10 +925,13 @@ export class V2StorageTransaction implements IStorageTransaction {
         }),
       };
     }
-    this.#writeSpace = space;
-    const branch = this.branch(space);
-    branch.writer ??= new V2Writer(this, space);
-    return { ok: branch.writer };
+    if (this.#writeSpace === undefined) {
+      this.#writeSpace = space;
+    }
+    if (!this.#writtenSpaces.includes(space)) {
+      this.#writtenSpaces.push(space);
+    }
+    return { ok: {} };
   }
 
   read(
@@ -1382,6 +1435,13 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: ready.error };
     }
 
+    // Genuine cross-space commits split into one per-space commit. A
+    // single-space transaction (the common case, even with the opt-in set) stays
+    // on the proven path below.
+    if (this.#multiSpaceWrites && this.#writtenSpaces.length > 1) {
+      return this.commitMultiSpace();
+    }
+
     const writeSpace = this.#writeSpace ??
       schedulerObservationCommitSpace(this.#schedulerObservation);
     if (!writeSpace) {
@@ -1429,20 +1489,109 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#state = { status: "done", result };
       return result;
     } catch (error) {
-      const storeError: StorageTransactionRejected = {
-        name: "StoreError" as const,
-        message: error instanceof Error ? error.message : String(error),
-        cause: {
-          name: "StoreError",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      };
       const result: Result<Unit, StorageTransactionRejected> = {
-        error: storeError,
+        error: toStoreError(error),
       };
       this.#state = { status: "done", result };
       return result;
     }
+  }
+
+  /**
+   * Commits a multi-space transaction as one per-space commit each, in commit
+   * order (explicit or first-write). Commits run sequentially with no
+   * cross-space atomicity: a later failure does not roll back earlier spaces; it
+   * is logged and surfaced as the overall result.
+   */
+  private async commitMultiSpace(): Promise<Result<Unit, CommitError>> {
+    const commits: { space: MemorySpace; native: NativeStorageCommit }[] = [];
+    for (const space of this.orderedCommitSpaces()) {
+      const native = this.getNativeCommit(space);
+      const operations = native?.operations ?? [];
+      const hasSchedulerObservation =
+        native?.schedulerObservation !== undefined;
+      if (!native || (operations.length === 0 && !hasSchedulerObservation)) {
+        continue;
+      }
+      commits.push({ space, native });
+    }
+
+    if (commits.length === 0) {
+      const result = { ok: {} } satisfies Result<Unit, CommitError>;
+      this.#state = { status: "done", result };
+      return result;
+    }
+
+    const validation = this.validate();
+    if (validation.error) {
+      this.#state = { status: "done", result: { error: validation.error } };
+      return { error: validation.error };
+    }
+
+    const promise = this.runSplitCommits(commits);
+    this.#state = { status: "pending", promise };
+    const result = await promise;
+    this.#state = { status: "done", result };
+    return result;
+  }
+
+  /**
+   * The written spaces in commit order: the explicit order first (restricted to
+   * spaces actually written), then any remaining spaces in first-write order.
+   */
+  private orderedCommitSpaces(): MemorySpace[] {
+    if (this.#commitOrder === undefined) {
+      return [...this.#writtenSpaces];
+    }
+    const ordered: MemorySpace[] = [];
+    const seen = new Set<MemorySpace>();
+    for (const space of this.#commitOrder) {
+      if (!seen.has(space) && this.#writtenSpaces.includes(space)) {
+        ordered.push(space);
+        seen.add(space);
+      }
+    }
+    for (const space of this.#writtenSpaces) {
+      if (!seen.has(space)) {
+        ordered.push(space);
+        seen.add(space);
+      }
+    }
+    return ordered;
+  }
+
+  private async runSplitCommits(
+    commits: { space: MemorySpace; native: NativeStorageCommit }[],
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    let firstError: StorageTransactionRejected | undefined;
+    for (const { space, native } of commits) {
+      const replica = this.storage.open(space).replica;
+      if (!replica.commitNative) {
+        throw new Error("memory v2 replica does not support commitNative()");
+      }
+      const commitNative = replica.commitNative.bind(replica);
+      try {
+        const result = await commitNative(native, this);
+        if (result.error) {
+          multiSpaceCommitLogger.error(
+            "multi-space-commit-failed",
+            `Cross-space commit to ${space} failed; earlier spaces are not ` +
+              `rolled back`,
+            result.error,
+          );
+          firstError ??= result.error;
+        }
+      } catch (error) {
+        multiSpaceCommitLogger.error(
+          "multi-space-commit-rejected",
+          `Cross-space commit to ${space} rejected; earlier spaces are not ` +
+            `rolled back`,
+          error,
+        );
+        firstError ??= toStoreError(error);
+      }
+    }
+    return firstError ? { error: firstError } : { ok: {} };
   }
 
   private schedulerObservationForNativeCommit(
@@ -1560,15 +1709,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       return { error: ready.error };
     }
-    if (this.#writeSpace !== undefined && this.#writeSpace !== space) {
-      return {
-        error: WriteIsolationError({
-          open: this.#writeSpace,
-          requested: space,
-        }),
-      };
+    const claim = this.claimWriteSpace(space);
+    if (claim.error) {
+      return { error: claim.error };
     }
-    this.#writeSpace = space;
     return { ok: this.branch(space) };
   }
 

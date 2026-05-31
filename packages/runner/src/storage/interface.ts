@@ -475,6 +475,15 @@ export interface IStorageTransaction {
    */
   immediate?: boolean;
   /**
+   * Opt the transaction into writing to more than one memory space. By default
+   * a transaction may write to a single space only. When enabled, commit()
+   * commits each written space's changes as a separate per-space commit, in the
+   * provided order (or first-write order if omitted). The per-space commits run
+   * sequentially with NO cross-space atomicity: if a later commit fails, earlier
+   * ones are not rolled back (the failure is logged).
+   */
+  enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
+  /**
    * Optional read-only mode hook used by runtime-generated fallback read
    * transactions.
    */
