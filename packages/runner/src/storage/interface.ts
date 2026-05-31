@@ -475,6 +475,34 @@ export interface IStorageTransaction {
    */
   immediate?: boolean;
   /**
+   * Opt the transaction into writing to more than one memory space. By default
+   * a transaction may write to a single space only. When enabled, commit()
+   * commits each written space's changes as a separate per-space commit, in the
+   * provided order (or first-write order if omitted). The per-space commits run
+   * sequentially with NO cross-space atomicity, and STOP at the first per-space
+   * failure: spaces committed before the failure are durable and not rolled back
+   * (logged), while the failing space and every space after it are left
+   * uncommitted. (Stopping preserves the requested order — e.g. a child space
+   * before the parent that links to it — and avoids double-applying later writes
+   * on retry.)
+   *
+   * `order` is a sequencing hint ONLY: it controls the order in which written
+   * spaces are committed (spaces listed first commit first). It does NOT
+   * restrict which spaces may be written — a written space absent from `order`
+   * still commits, appended in first-write order. Authorization is unchanged:
+   * each space commits through its own authenticated session exactly as a
+   * single-space commit would, so this opt-in cannot grant access the caller
+   * does not already hold. Calling this more than once is allowed; the last
+   * non-undefined `order` wins.
+   *
+   * Partial-failure contract: because there is no rollback, a multi-space commit
+   * error means the cross-space state is INDETERMINATE — some spaces may be
+   * durably committed and others not. Callers must treat the error accordingly
+   * (the first per-space error is surfaced as the overall result; all per-space
+   * failures are logged).
+   */
+  enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
+  /**
    * Optional read-only mode hook used by runtime-generated fallback read
    * transactions.
    */
