@@ -481,6 +481,21 @@ export interface IStorageTransaction {
    * provided order (or first-write order if omitted). The per-space commits run
    * sequentially with NO cross-space atomicity: if a later commit fails, earlier
    * ones are not rolled back (the failure is logged).
+   *
+   * `order` is a sequencing hint ONLY: it controls the order in which written
+   * spaces are committed (spaces listed first commit first). It does NOT
+   * restrict which spaces may be written — a written space absent from `order`
+   * still commits, appended in first-write order. Authorization is unchanged:
+   * each space commits through its own authenticated session exactly as a
+   * single-space commit would, so this opt-in cannot grant access the caller
+   * does not already hold. Calling this more than once is allowed; the last
+   * non-undefined `order` wins.
+   *
+   * Partial-failure contract: because there is no rollback, a multi-space commit
+   * error means the cross-space state is INDETERMINATE — some spaces may be
+   * durably committed and others not. Callers must treat the error accordingly
+   * (the first per-space error is surfaced as the overall result; all per-space
+   * failures are logged).
    */
   enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
   /**

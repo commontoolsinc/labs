@@ -114,4 +114,32 @@ describe("multi-space write transactions", () => {
     expect(result.error).toBeDefined();
     expect(tx.status().status).not.toBe("pending");
   });
+
+  it("does not roll back earlier spaces when a later space's commit fails", async () => {
+    const tx = runtime.edit();
+    // Order so space A commits (for real) before space B fails.
+    tx.enableMultiSpaceWrites?.([spaceA, spaceB]);
+    tx.writeValueOrThrow(addr(spaceA, "of:partial-a"), { v: 1 });
+    tx.writeValueOrThrow(addr(spaceB, "of:partial-b"), { v: 2 });
+
+    // Space B's native commit returns an error after space A is already durable.
+    const replicaB = storageManager.open(spaceB).replica as unknown as {
+      commitNative: (...args: unknown[]) => Promise<unknown>;
+    };
+    replicaB.commitNative = () =>
+      Promise.resolve({
+        error: { name: "StorageTransactionRejected", message: "space B failed" },
+      });
+
+    const result = await tx.commit();
+    // The first per-space error is surfaced as the overall result.
+    expect(result.error).toBeDefined();
+
+    // No rollback: space A's earlier write is durably present (the documented
+    // indeterminate-partial-state contract).
+    const verify = runtime.edit();
+    expect(verify.readValueOrThrow(addr(spaceA, "of:partial-a"))).toEqual({
+      v: 1,
+    });
+  });
 });
