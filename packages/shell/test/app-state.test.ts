@@ -1,9 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import {
+  App,
+  AppElement,
   applyCommand,
   AppState,
   AppStateSerialized,
   appViewToUrlPath,
+  Command,
   deserialize,
   isAppView,
   isEmbeddedView,
@@ -13,12 +16,35 @@ import {
   urlToAppView,
 } from "@commonfabric/shell/shared";
 import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
-import { assert } from "@std/assert";
+import { assert, assertRejects } from "@std/assert";
 
 const API_URL = "http://common.test/";
 const SPACE_NAME = "common-knowledge";
 
 describe("AppState", () => {
+  it("requires logout before switching identities", async () => {
+    const first = await Identity.generate({ implementation: "noble" });
+    const second = await Identity.generate({ implementation: "noble" });
+    const element = new TestAppElement({
+      apiUrl: new URL(API_URL),
+      view: { spaceName: SPACE_NAME },
+      config: {},
+      identity: first,
+    });
+    const app = new App(element);
+
+    await assertRejects(
+      () => app.setIdentity(second),
+      Error,
+      "Cannot change identity while logged in",
+    );
+
+    await app.apply({ type: "set-identity", identity: undefined });
+    await app.setIdentity(second);
+
+    assert(app.state().identity?.did() === second.did());
+  });
+
   it("serialize", async () => {
     const state: AppState = {
       apiUrl: new URL(API_URL),
@@ -232,3 +258,26 @@ describe("AppState", () => {
     );
   });
 });
+
+class TestAppElement extends EventTarget implements AppElement {
+  keyStore = undefined as never;
+
+  constructor(private appState: AppState) {
+    super();
+  }
+
+  state(): AppState {
+    return this.appState;
+  }
+
+  apply(command: Command): Promise<void> {
+    this.appState = applyCommand(this.appState, command);
+    return Promise.resolve();
+  }
+
+  requestUpdate(): void {}
+
+  getRuntimeSpaceDID(): undefined {
+    return undefined;
+  }
+}

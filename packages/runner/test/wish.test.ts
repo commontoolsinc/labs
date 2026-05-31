@@ -453,6 +453,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("allPieces").get()?.result).toEqual(piecesData);
@@ -506,6 +507,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
@@ -558,6 +560,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
@@ -589,6 +592,7 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
 
+      await runtime.idle();
       await result.pull();
 
       expect(result.key("spaceResult").get()?.result).toEqual(spaceData);
@@ -2244,6 +2248,350 @@ describe("wish built-in", () => {
       expect(favorites).toBeDefined();
       expect(Array.isArray(favorites)).toBe(true);
       expect((favorites as any[])[0].tag).toEqual("test favorite");
+    });
+
+    it("resolves well-known profile targets from the home default profile link", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-space",
+      )).did();
+      const profileSpaceCell = runtime.getSpaceCell(
+        profileSpaceDid,
+        undefined,
+        tx,
+      );
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+      profileSpaceCell.key("defaultPattern").set(profileDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-link",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => {
+        return {
+          profile: wish({ query: "#profile" }),
+          profileName: wish({ query: "#profileName" }),
+          profileAvatar: wish({ query: "#profileAvatar" }),
+          profileSpace: wish({ query: "#profileSpace" }),
+        };
+      });
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-targets-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Ada Lovelace");
+      expect(result.key("profileName").get()?.result).toBe("Ada Lovelace");
+      expect(result.key("profileAvatar").get()?.result).toBe("ada.png");
+      expect(result.key("profileSpace").get()?.result?.defaultPattern?.name)
+        .toBe("Ada Lovelace");
+    });
+
+    it("#profileDefault is not a well-known profile target", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-default-removed-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default-removed",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-default-removed",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profileDefault: wish({ query: "#profileDefault" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-default-removed-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("profileDefault").get()?.result).toBeUndefined();
+      expect(String(result.key("profileDefault").get()?.error)).toContain(
+        "#profiledefault",
+      );
+    });
+
+    it("renders #profile wish UI as a link when the profile exists", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-ui-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-ui-default",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        initialNameApplied: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-ui-link",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-ui-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const ui = result.key("profile").key(UI).get() as any;
+      expect(ui?.name).toBe("cf-cell-link");
+      expect(
+        result.key("profile").key(UI).key("props").key("$cell")
+          .resolveAsCell()
+          .get()?.name,
+      ).toBe("Ada Lovelace");
+    });
+
+    it("renders #profile wish UI as a create-profile input when the profile is missing", async () => {
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-create-ui",
+        undefined,
+        tx,
+      );
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-missing-profile-ui-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("profile").get();
+      const ui = result.key("profile").key(UI).get() as any;
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
+      expect(ui?.name).toBe("cf-render");
+      expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
+      expect(
+        result.key("profile").key(UI).key("props").key("$cell")
+          .resolveAsCell()
+          .getRaw(),
+      ).toBeUndefined();
+    });
+
+    it("searches home default profile elements for hashtag wishes with profile scope", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-hashtag-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default-hashtag",
+        undefined,
+        tx,
+      );
+      const profileCard = runtime.getCell(
+        profileSpaceDid,
+        "profile-card",
+        undefined,
+        tx,
+      );
+      profileCard.set({ title: "Profile Card", kind: "card" });
+      profileDefaultCell.set({
+        name: "Ada",
+        initialNameApplied: "Ada",
+        avatar: "",
+        elements: [{
+          cell: profileCard,
+          tag: "#profile-card",
+          userTags: ["person"],
+          title: "Profile Card",
+        }],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-hashtag-link",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        byUserTag: wish({ query: "#person", scope: ["profile"] }),
+        byTag: wish({ query: "#profile-card", scope: ["profile"] }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-hashtag-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("byUserTag").get()?.result?.title).toBe(
+        "Profile Card",
+      );
+      expect(result.key("byTag").get()?.result?.kind).toBe("card");
+    });
+
+    it("does not parse profile scope as an arbitrary DID", async () => {
+      const wishPattern = pattern(() => ({
+        missing: wish({ query: "#missing", scope: ["profile"] }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-scope-reserved-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("missing").get();
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
+      expect(String(state?.error)).not.toContain("did");
+    });
+
+    it("returns an error state instead of throwing when profile space is missing", async () => {
+      const wishPattern = pattern(() => ({
+        profileName: wish({ query: "#profileName" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-missing-profile-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const state = result.key("profileName").get();
+      expect(state?.result).toBeUndefined();
+      expect(String(state?.error)).toContain("profile");
     });
 
     it("resolves #default from pattern space, not home space", async () => {

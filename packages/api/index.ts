@@ -2152,10 +2152,11 @@ export type WishParams = {
   context?: Record<string, any>;
   schema?: JSONSchema;
   /**
-   * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space).
+   * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space),
+   * "profile" = current user's profile elements.
    * Default (undefined) = favorites only for backward compatibility.
    */
-  scope?: (DID | "~" | ".")[];
+  scope?: (DID | "~" | "." | "profile")[];
   /**
    * When true, skip the suggestion/picker UI pattern (suggestion.tsx).
    * Multiple candidates are returned as-is without disambiguation.

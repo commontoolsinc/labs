@@ -48,6 +48,12 @@ export class App extends EventTarget {
     const identity = id instanceof Identity
       ? id
       : await Identity.fromRaw(deserializeKeyPairRaw(id).privateKey);
+    const currentIdentity = this.state().identity;
+    if (currentIdentity && currentIdentity.did() !== identity.did()) {
+      throw new Error(
+        "Cannot change identity while logged in. Clear identity first.",
+      );
+    }
     await this.apply({ type: "set-identity", identity });
   }
 

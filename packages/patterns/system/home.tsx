@@ -2,12 +2,19 @@ import {
   computed,
   equals,
   handler,
+  ifElse,
   NAME,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
+import ProfileCreate, {
+  type CreateProfileEvent,
+  submitProfileCreation,
+  type TrustedProfileLink,
+} from "./profile-create.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
 // Types from favorites-manager.tsx
@@ -33,6 +40,18 @@ type JournalEntry = {
 type SpaceEntry = {
   name: string;
   did?: string;
+};
+
+type HomeOutput = {
+  [NAME]: string;
+  [UI]: unknown;
+  favorites: Writable<Favorite[]>;
+  journal: Writable<JournalEntry[]>;
+  learned: Writable<LearnedSection>;
+  spaces: Writable<SpaceEntry[]>;
+  defaultAppUrl: Writable<string>;
+  profile?: TrustedProfileLink;
+  createProfile: Stream<CreateProfileEvent>;
 };
 
 // Handler to add a favorite
@@ -103,13 +122,29 @@ const removeSpaceHandler = handler<
   spaces.set(filtered);
 });
 
-export default pattern((_) => {
+export default pattern<Record<string, never>, HomeOutput>((_) => {
   // OWN the data cells (.for for id stability)
   const favorites = new Writable<Favorite[]>([]).for("favorites");
   const journal = new Writable<JournalEntry[]>([]).for("journal");
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
+  // NOTE(CT-1628): the `as any` casts around `profile` below are required
+  // because the CFC wrapper types (TrustedProfileLink) don't yet compose with
+  // Writable/the pattern factory output type. Tracked for a proper type fix.
+  const profile = new Writable<TrustedProfileLink>(undefined).for("profile");
+  const profileName = new Writable("").for("profileName");
+  const createProfileStream = submitProfileCreation({
+    profile: profile as any,
+    profileName,
+  });
+  const profileCreate = ProfileCreate({
+    profile: profile as any,
+    profileName,
+    inputId: "home-profile-name-input",
+    buttonId: "home-profile-create-button",
+  });
+  const hasProfile = computed(() => profile.get() !== undefined);
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -132,9 +167,33 @@ export default pattern((_) => {
           <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
           <cf-tab-panel value="profile">
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
-              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>
 
+              {ifElse(
+                hasProfile,
+                (
+                  <cf-vstack gap="2">
+                    <cf-hstack id="home-profile-summary" gap="2" align="center">
+                      <strong>{profile.key("name")}</strong>
+                      <span style={{ color: "#888" }}>
+                        {profile.key("avatar")}
+                      </span>
+                    </cf-hstack>
+                    <cf-render $cell={profile as any} />
+                  </cf-vstack>
+                ),
+                profileCreate,
+              )}
+
+              {
+                /*
+                Free-form summary lives on learned.summary, independent of the
+                shared profile space. It is intentionally not resolved by the
+                #profile wish (which targets the profile pattern).
+              */
+              }
               <cf-vstack gap="1">
+                <h3 style={{ margin: 0, fontSize: "14px" }}>Profile Summary</h3>
                 <cf-textarea
                   $value={learned.key("summary")}
                   placeholder="Write a short profile summary about yourself..."
@@ -247,10 +306,12 @@ export default pattern((_) => {
     learned,
     spaces,
     defaultAppUrl,
+    profile,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
     removeFavorite: removeFavorite({ favorites }),
     addJournalEntry: addJournalEntry({ journal }),
+    createProfile: createProfileStream,
   };
 });
