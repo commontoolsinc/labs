@@ -56,6 +56,14 @@ export interface CompileSourcesOptions {
   runtimeFingerprint?: string;
   /** Optional per-module compiled-artifact cache, keyed by module hash. */
   recordCache?: ModuleRecordCache;
+  /**
+   * Pre-compiled CommonJS body per source name. When provided (e.g. from
+   * `TypeScriptCompiler.compileToModules`, which runs the full CF transformer
+   * pipeline), the adapter uses it instead of the bare `ts.transpileModule`
+   * fallback. Required for real patterns, whose transformer output (schema
+   * generation, `__cf_data` wrapping) cannot be produced by transpileModule.
+   */
+  precompiledBodies?: Map<string, string>;
 }
 
 export interface CompiledModuleGraph {
@@ -96,7 +104,8 @@ export function compileSourcesToRecords(
       compiled = cached.compiled;
     } else {
       exportNames = collectExportNames(source);
-      compiled = ts.transpileModule(source.contents, {
+      const precompiled = options.precompiledBodies?.get(source.name);
+      compiled = precompiled ?? ts.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
           module: ts.ModuleKind.CommonJS,
