@@ -62,6 +62,8 @@ export interface CompiledModuleGraph {
   records: Map<string, VirtualModuleRecord>;
   /** Content-addressed specifier for each original file path. */
   specifierByPath: Map<string, string>;
+  /** Compiled CommonJS body per specifier — the text the verifier classifies. */
+  compiledBodies: Map<string, string>;
 }
 
 export function compileSourcesToRecords(
@@ -82,6 +84,7 @@ export function compileSourcesToRecords(
   }
 
   const records = new Map<string, VirtualModuleRecord>();
+  const compiledBodies = new Map<string, string>();
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
     const moduleHash = hashes.get(source.name)!;
@@ -109,6 +112,7 @@ export function compileSourcesToRecords(
     // erased by the compiler and never appear here, so they correctly do not
     // become record edges — unlike `collectImportSpecifiers`, which includes
     // them for module *identity*.
+    compiledBodies.set(specifier, compiled);
     const importSpecs = extractRuntimeImports(compiled);
     const resolutions: Record<string, string> = {};
     for (const spec of importSpecs) {
@@ -164,7 +168,7 @@ export function compileSourcesToRecords(
     });
   }
 
-  return { records, specifierByPath };
+  return { records, specifierByPath, compiledBodies };
 }
 
 /**
