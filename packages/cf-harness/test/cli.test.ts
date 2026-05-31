@@ -736,6 +736,98 @@ Deno.test("parseCfHarnessCliArgs supports explicit browser subagent profile auth
   assertEquals(parsed.allowedSubagentProfiles, ["browser"]);
 });
 
+Deno.test("parseCfHarnessCliArgs supports a Browser Access lease", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "browser",
+      "--browser-access-lease-id",
+      "pf-run-1",
+      "--browser-access-cdp-url",
+      "http://127.0.0.1:9363/",
+      "--browser-access-owner",
+      "pattern-factory",
+      "--browser-access-expires-at",
+      "2026-05-29T22:00:00Z",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.browserAccess, {
+    type: "cf-harness.chat.browser-access-lease",
+    leaseId: "pf-run-1",
+    cdpUrl: "http://127.0.0.1:9363",
+    owner: "pattern-factory",
+    expiresAt: "2026-05-29T22:00:00Z",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-lease-id requires a non-empty value",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-cdp-url is required",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "https://example.com:9363",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-cdp-url must be an http:// local origin with an explicit port",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs supports explicit web_fetch subagent profile authorization", async () => {
   const parsed = await parseCfHarnessCliArgs(
     [
@@ -1122,6 +1214,10 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.nativeModelToolIds.includes("google_search"), true);
   assertEquals(
     capabilities.cliFlags.includes("--structured-result-path"),
+    true,
+  );
+  assertEquals(
+    capabilities.cliFlags.includes("--browser-access-cdp-url"),
     true,
   );
   assertEquals(capabilities.cliFlags.includes("--describe-capabilities"), true);
@@ -1536,6 +1632,74 @@ Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async (
     assertEquals(stdout.length, 1, testCase.name);
     assertEquals(stderr, [], testCase.name);
   }
+});
+
+Deno.test("runCfHarnessCli passes Browser Access leases to the prompt loop", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Use browser.",
+      "--gateway-auth-mode",
+      "none",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "browser",
+      "--browser-access-lease-id",
+      "pf-run-1",
+      "--browser-access-cdp-url",
+      "http://localhost:9363",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: () =>
+            Promise.resolve(
+              {
+                model: "gpt-5.4",
+                finalAssistantText: "Browser lease configured.",
+                transcript: [
+                  { role: "user", content: "Use browser." },
+                  {
+                    role: "assistant",
+                    content: "Browser lease configured.",
+                  },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-browser-access",
+                  status: "completed",
+                  createdAt: "2026-05-29T22:00:00.000Z",
+                  updatedAt: "2026-05-29T22:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              } satisfies HarnessPromptLoopResult,
+            ),
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(createdOptions?.browserAccess, {
+    type: "cf-harness.chat.browser-access-lease",
+    leaseId: "pf-run-1",
+    cdpUrl: "http://localhost:9363",
+  });
+  assertEquals(stdout.length, 1);
+  assertEquals(stderr, []);
 });
 
 Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async () => {
