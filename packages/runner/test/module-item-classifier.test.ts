@@ -49,6 +49,37 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
     ).toThrow(/__cf_data/);
   });
 
+  it("honors empty reservedBindings for const declarations (ESM allows AMD-reserved names)", () => {
+    // `define` is an AMD wrapper-reserved name; under ESM (empty reserved set)
+    // a const of that name is allowed. Verifies reservedBindings reaches the
+    // variable-declaration path, not only the function-declaration path.
+    const body =
+      `function () { const define = (n) => n; exports.define = define; }`;
+    const { source, statements } = bodyStatements(body);
+    expect(() =>
+      classifyModuleItems(
+        source,
+        "<m>",
+        statements,
+        new Map<string, BindingInfo>(),
+        ESM_OPTIONS,
+      )
+    ).not.toThrow();
+    // With the AMD reserved set, the same const name is rejected.
+    expect(() =>
+      classifyModuleItems(
+        source,
+        "<m>",
+        statements,
+        new Map<string, BindingInfo>(),
+        {
+          ...ESM_OPTIONS,
+          reservedBindings: new Set(["define"]),
+        },
+      )
+    ).toThrow(/Reserved wrapper binding/);
+  });
+
   it("still rejects top-level mutable bindings (let/var)", () => {
     const body = `function () { let counter = 0; exports.counter = counter; }`;
     const { source, statements } = bodyStatements(body);

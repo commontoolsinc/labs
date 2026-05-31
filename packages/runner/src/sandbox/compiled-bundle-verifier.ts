@@ -324,6 +324,7 @@ export function classifyModuleItems(
           statement,
           env,
           variableKind,
+          options.reservedBindings,
         );
         continue;
       }
@@ -513,6 +514,7 @@ function verifyVariableStatement(
     trimRange(source, statement.start, statement.end).start,
     trimRange(source, statement.start, statement.end).end,
   ),
+  reserved: ReadonlySet<string> = RESERVED_FACTORY_BINDING_SET,
 ): void {
   const start = performance.now();
   try {
@@ -531,6 +533,7 @@ function verifyVariableStatement(
         filename,
         declarator.initializer.start,
         declarator.name,
+        reserved,
       );
       const provisional = provisionalBindingForExpression(
         source,
