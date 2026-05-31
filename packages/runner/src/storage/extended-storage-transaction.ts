@@ -99,6 +99,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     writePolicyInputs: [],
+    writePolicyInputIdentities: new Map(),
     outbox: [],
     diagnostics: [],
   };
@@ -196,7 +197,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // identity-stable, which lets `hashStringOf()` cache its hash on the
     // existing WeakMap. The within-sort tiebreaker in
     // `compareWritePolicyInput` then re-hashes each element via the cache.
-    this.cfcState.writePolicyInputs.push(deepFreeze(input));
+    const frozen = deepFreeze(input);
+    this.cfcState.writePolicyInputs.push(frozen);
+    // Capture the identity active right now so writeAuthorizedBy is verified
+    // against the trust context that authored this write, even if a later run
+    // in the same transaction changes the identity.
+    this.cfcState.writePolicyInputIdentities.set(
+      frozen,
+      this.cfcState.implementationIdentity,
+    );
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }

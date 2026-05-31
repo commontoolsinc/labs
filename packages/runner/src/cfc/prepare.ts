@@ -194,6 +194,31 @@ const hasLiteralDidCurrentPrincipalClaim = (value: unknown): boolean => {
   return false;
 };
 
+const literalDidSubjectsForPrincipalClaim = (
+  value: unknown,
+  kind: string,
+  subjects: string[] = [],
+): string[] => {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      literalDidSubjectsForPrincipalClaim(entry, kind, subjects);
+    }
+    return subjects;
+  }
+  if (isCurrentPrincipalClaimAtom(value) && value.kind === kind) {
+    if (typeof value.subject === "string" && value.subject.startsWith("did:")) {
+      subjects.push(value.subject);
+    }
+    return subjects;
+  }
+  if (isRecord(value)) {
+    for (const entry of Object.values(value)) {
+      literalDidSubjectsForPrincipalClaim(entry, kind, subjects);
+    }
+  }
+  return subjects;
+};
+
 const metadataAppliesToPath = (
   metadata: CfcMetadata,
   path: readonly string[],
@@ -247,6 +272,7 @@ const writeAuthorizedByReason = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
+  targetIdentity?: ImplementationIdentity,
 ): string | undefined => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return undefined;
@@ -261,7 +287,9 @@ const writeAuthorizedByReason = (
     return `writeAuthorizedBy requires a trust snapshot at /${path.join("/")}`;
   }
 
-  const identity = tx.getCfcState().implementationIdentity;
+  // Verify against the identity that authored this target's writes, falling
+  // back to the transaction's current identity for writes recorded without one.
+  const identity = targetIdentity ?? tx.getCfcState().implementationIdentity;
   if (
     Array.isArray(claim) && claim.every((entry) => typeof entry === "string")
   ) {
@@ -406,6 +434,60 @@ const setupProjectionSourceMatchesValue = (
   );
 };
 
+// `writeAuthorizedBy` is a *modification* gate (CFC spec §8.15.10): it restricts
+// who may edit an existing owner-protected value. It does not govern the trusted
+// instantiation that first projects and initializes a field (§8.15.4 — defaults
+// are installed by trusted runtime/pattern instantiation; write authorization
+// applies to *subsequent* modifications).
+//
+// When the runtime instantiates a pattern whose result declares owner-protected
+// fields, it records a setup-projection marker on the result cell whose
+// `sources` point at the pattern's own projected (internal) cells — the cells
+// that hold the field's value and carry its `writeAuthorizedBy` schema. The
+// pattern initializing those fields (e.g. `avatar = ""`, `elements = []`) is its
+// own trusted creation step, authored by the runtime's result projection, not by
+// the per-field edit handler. Recognize a target as that trusted-creation site
+// when it is the redirect *source* of a setup-projection marker recorded in this
+// transaction, covering the field path.
+//
+// This is safe because the marker is recorded ONLY by the runtime's result
+// projection — never by an arbitrary `cell.set` — and only when the projection
+// STRUCTURE is established (instantiation), not on value edits (which leave the
+// projection unchanged and so record no marker). Direct untrusted writes, no-op
+// re-writes, and later field edits therefore remain fully enforced; the slot the
+// pattern result is placed into is independently gated by its own
+// `writeAuthorizedBy`, and the owner binding by `currentPrincipalIntegrityReason`.
+const writeIsPatternSetupInitialization = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+): boolean => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  return tx.getCfcState().writePolicyInputs.some((input) =>
+    input.kind === "structural-provenance" &&
+    input.claim === CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION &&
+    input.sources.some((source) => {
+      if (source.space !== target.space || source.id !== target.id) {
+        return false;
+      }
+      // Only the redirect target itself, or a field nested under it, counts as
+      // this pattern's trusted initialization: the marker's `source` path must
+      // be a prefix of (or equal to) the field being written. We deliberately do
+      // not exempt writes to an *ancestor* of the redirect target, which would
+      // cover more than the projected field. (`concretePathHasPrefix(path,
+      // prefix)` tests whether `prefix` is a prefix of `path`.)
+      return concretePathHasPrefix(
+        logicalPath,
+        canonicalizeLogicalPath(source.path),
+      );
+    })
+  );
+};
+
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -432,7 +514,9 @@ const storedMetadataFor = (
  */
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
-  implementationIdentity?: ImplementationIdentity,
+  identityForInput: (input: WritePolicyInput) =>
+    | ImplementationIdentity
+    | undefined,
 ): Map<string, JSONSchema> => {
   const result = new Map<string, JSONSchema>();
   for (const input of inputs) {
@@ -442,7 +526,7 @@ const candidateSchemasByTarget = (
     const key = targetKey(input.target);
     const schema = rebindWriteAuthorizedByClaims(
       input.schema,
-      implementationIdentity,
+      identityForInput(input),
     );
     const candidate = schemaEnvelopeForTargetPath(
       schema,
@@ -457,6 +541,31 @@ const candidateSchemasByTarget = (
         ? existing
         : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
     );
+  }
+  return result;
+};
+
+/**
+ * Maps each write target to the implementation identity that authored it
+ * (captured when its write-policy inputs were recorded). Used to verify
+ * writeAuthorizedBy per target rather than against the transaction's last
+ * implementation identity.
+ */
+const identitiesByTarget = (
+  inputs: readonly WritePolicyInput[],
+  identityForInput: (input: WritePolicyInput) =>
+    | ImplementationIdentity
+    | undefined,
+): Map<string, ImplementationIdentity | undefined> => {
+  const result = new Map<string, ImplementationIdentity | undefined>();
+  for (const input of inputs) {
+    if (!("target" in input) || input.target === undefined) {
+      continue;
+    }
+    const key = targetKey(input.target);
+    if (!result.has(key)) {
+      result.set(key, identityForInput(input));
+    }
   }
   return result;
 };
@@ -905,6 +1014,52 @@ const currentPrincipalIntegrityReason = (
   const integrity = Array.isArray(ifc.integrity) ? ifc.integrity : [];
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const currentPrincipalValues = [...integrity, ...addIntegrity];
+  const ownerPrincipalSpec = ifc.ownerPrincipal;
+  if (ownerPrincipalSpec !== undefined) {
+    const trustSnapshot = tx.getCfcState().trustSnapshot;
+    if (trustSnapshot === undefined) {
+      return `ownerPrincipal requires a trust snapshot at /${path.join("/")}`;
+    }
+    if (!trustSnapshot.id) {
+      return `ownerPrincipal requires a trust snapshot id at /${
+        path.join("/")
+      }`;
+    }
+    if (!trustSnapshot.actingPrincipal) {
+      return `ownerPrincipal requires an acting principal at /${
+        path.join("/")
+      }`;
+    }
+    const ownerPrincipal = isCurrentPrincipalPlaceholder(ownerPrincipalSpec)
+      ? trustSnapshot.actingPrincipal
+      : ownerPrincipalSpec;
+    if (
+      typeof ownerPrincipal !== "string" ||
+      !ownerPrincipal.startsWith("did:")
+    ) {
+      return `ownerPrincipal must be a DID at /${path.join("/")}`;
+    }
+    const resolvedCurrentPrincipalValues = resolveCurrentPrincipalLabelValues(
+      currentPrincipalValues,
+      trustSnapshot.actingPrincipal,
+    ) ?? currentPrincipalValues;
+    const representedOwners = literalDidSubjectsForPrincipalClaim(
+      resolvedCurrentPrincipalValues,
+      "represents-principal",
+    );
+    if (!representedOwners.some((subject) => subject === ownerPrincipal)) {
+      return `ownerPrincipal requires matching represents-principal integrity at /${
+        path.join("/")
+      }`;
+    }
+    if (trustSnapshot.actingPrincipal !== ownerPrincipal) {
+      return `ownerPrincipal mismatch at /${path.join("/")}`;
+    }
+    if (ifc.writeAuthorizedBy === undefined) {
+      return `ownerPrincipal requires writeAuthorizedBy at /${path.join("/")}`;
+    }
+    return undefined;
+  }
   if (currentPrincipalValues.length === 0) {
     return undefined;
   }
@@ -1474,6 +1629,7 @@ const verifyInputRequirements = (
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
   },
+  targetIdentity?: ImplementationIdentity,
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
     !isInternalVerifierRead(read.meta)
@@ -1518,12 +1674,13 @@ const verifyInputRequirements = (
       tx,
       entry.schema,
       entry.path,
+      targetIdentity,
     );
     const setupProjection = setupProjectionSourceMatchesValue(
       tx,
       target,
       entry.path,
-    );
+    ) || writeIsPatternSetupInitialization(tx, target, entry.path);
     if (writeAuthorizedByFailure !== undefined && !setupProjection) {
       return writeAuthorizedByFailure;
     }
@@ -1861,11 +2018,20 @@ export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
 ): string[] => {
   const reasons: string[] = [];
+  const state = tx.getCfcState();
+  const identityForInput = (
+    input: WritePolicyInput,
+  ): ImplementationIdentity | undefined =>
+    state.writePolicyInputIdentities.get(input) ?? state.implementationIdentity;
   const candidates = candidateSchemasByTarget(
-    tx.getCfcState().writePolicyInputs,
-    tx.getCfcState().implementationIdentity,
+    state.writePolicyInputs,
+    identityForInput,
   );
-  const linkWrites = linkWritesByTarget(tx.getCfcState().writePolicyInputs);
+  const targetIdentities = identitiesByTarget(
+    state.writePolicyInputs,
+    identityForInput,
+  );
+  const linkWrites = linkWritesByTarget(state.writePolicyInputs);
   for (const [key, target] of valueWriteTargets(tx)) {
     if (candidates.has(key)) {
       continue;
@@ -1959,6 +2125,7 @@ export const prepareBoundaryCommit = (
       tx,
       verificationSchema,
       target,
+      targetIdentities.get(key),
     );
     if (requirementFailure) {
       reasons.push(requirementFailure);
