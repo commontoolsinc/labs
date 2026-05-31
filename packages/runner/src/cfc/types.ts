@@ -242,6 +242,14 @@ export type CfcTxState = {
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   writePolicyInputs: WritePolicyInput[];
+  // Implementation identity active when each write-policy input was recorded.
+  // A single transaction may legitimately span multiple trust contexts (e.g. a
+  // handler plus a child pattern it runs); writeAuthorizedBy must be verified
+  // against the identity that authored each write, not the last one active.
+  writePolicyInputIdentities: Map<
+    WritePolicyInput,
+    ImplementationIdentity | undefined
+  >;
   trustSnapshot?: TrustSnapshot;
   implementationIdentity?: ImplementationIdentity;
   outbox: PostCommitSideEffect[];
