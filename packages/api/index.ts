@@ -1384,6 +1384,7 @@ export type PatternFactory<T, R> =
   & toJSON
   & {
     asScope(scope: CellScope): PatternFactory<T, R>;
+    inSpace(space?: string | AnyCell<unknown>): PatternFactory<T, R>;
   };
 
 export type ModuleFactory<T, R> =

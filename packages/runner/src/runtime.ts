@@ -37,6 +37,7 @@ import type {
 } from "./storage/interface.ts";
 import { type Cell, createCell, schemaCellScope } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
+import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
 import { Engine } from "./harness/index.ts";
 import {
@@ -270,6 +271,10 @@ export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
 
+function isMemorySpaceDID(value: string): boolean {
+  return /^did:[^:]+:.+/.test(value);
+}
+
 /**
  * Main Runtime class that orchestrates all services in the runner package.
  *
@@ -310,6 +315,8 @@ export class Runtime {
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
+  /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
+  private readonly spaceNameToDid = new Map<string, MemorySpace>();
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
@@ -923,6 +930,47 @@ export class Runtime {
       spaceCellSchema,
       tx,
     ) as Cell<SpaceCellContents>;
+  }
+
+  /**
+   * Returns the DID for a named `PatternFactory.inSpace("name")` target if it
+   * has already been resolved (or is itself a DID), otherwise `undefined`.
+   *
+   * Synchronous so the pattern builder can route a child result into the target
+   * space at graph-construction time. On a miss, the caller records the name as
+   * pending and the runner resolves it via {@link resolveSpaceName} before
+   * re-running the handler/action (see RetryImmediately).
+   */
+  resolveSpaceNameSync(name: string): MemorySpace | undefined {
+    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    return this.spaceNameToDid.get(name);
+  }
+
+  /**
+   * Resolves a named `inSpace` target to a DID, caching the result.
+   *
+   * NOTE(#1): The derivation is intentionally name-based for now — `createSession`
+   * derives the space key from the name alone (the identity is ignored on the
+   * `spaceName` path), so equal names map to the same shared space across users.
+   * This is the deliberate "shared profile space" behaviour today; revisit once
+   * we can derive unique space DIDs from a string.
+   */
+  async resolveSpaceName(name: string): Promise<MemorySpace> {
+    const cached = this.resolveSpaceNameSync(name);
+    if (cached !== undefined) return cached;
+    const session = await createSession({
+      identity: this.storageManager.as as unknown as Identity,
+      spaceName: name,
+    });
+    // SECURITY INVARIANT: consume ONLY the resolved space DID. `createSession`
+    // may also derive a per-name space identity (private key); we must never
+    // adopt it as a signer here. Writes to the resolved space stay authorized
+    // as the active user (`storageManager.as`) and are gated per-space by the
+    // memory server's ACL, so resolving a name can never grant write access the
+    // caller does not already hold.
+    const did = session.space as MemorySpace;
+    this.spaceNameToDid.set(name, did);
+    return did;
   }
 
   // Convenience methods that delegate to the runner

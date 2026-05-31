@@ -35,6 +35,7 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
+  type Module,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -582,6 +583,25 @@ export class CellImpl<T extends FabricValue>
     this._causeContainer.cause = cause;
 
     return this as unknown as Cell<T>;
+  }
+
+  /**
+   * Pins this (not-yet-linked) cell to a space before its id exists, and routes
+   * any pattern nodes attached to it into that target space. Used by the pattern
+   * builder to implement `PatternFactory.inSpace(...)`. Throws if the cell has
+   * already been linked.
+   */
+  setUnlinkedSpace(space: MemorySpace): void {
+    if (this._causeContainer.id || this._link.id) {
+      throw new Error(
+        "Cannot set space: cell already has a link.",
+      );
+    }
+    this._causeContainer.space = space;
+    this._link = { ...this._link, space };
+    for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
+      (node.module as Module).targetSpace = space;
+    }
   }
 
   /**
@@ -1923,6 +1943,23 @@ export class CellImpl<T extends FabricValue>
       "Copy trap: Something is trying to traverse a cell.",
     );
   }
+}
+
+export function setCellUnlinkedSpace(
+  cell: unknown,
+  space: MemorySpace,
+): void {
+  asCellImpl(cell)?.setUnlinkedSpace(space);
+}
+
+function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
+  if (cell === null || cell === undefined) return undefined;
+  const maybeToCell = (cell as { [toCell]?: () => Cell<unknown> })[toCell];
+  const unproxied = typeof maybeToCell === "function"
+    ? maybeToCell.call(cell)
+    : cell;
+  if (!isCell(unproxied)) return undefined;
+  return unproxied as unknown as CellImpl<FabricValue>;
 }
 
 function subscribeToReferencedDocs<T>(

@@ -13,6 +13,7 @@ import type {
 } from "../telemetry.ts";
 import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
 import { planEventDirtyDependencyScheduling } from "./execution.ts";
+import { RetryImmediately } from "./retry-immediately.ts";
 import {
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
@@ -444,6 +445,35 @@ export async function dispatchQueuedEvent(state: {
   };
 
   const finalize = (error?: unknown): void => {
+    // A RetryImmediately signal means the handler referenced an inSpace("name")
+    // target that has now been resolved into the runtime cache. Abort this run's
+    // transaction and re-queue the event so the handler re-runs and resolves the
+    // name synchronously.
+    if (error instanceof RetryImmediately) {
+      if (tx.status().status === "ready") {
+        tx.abort(error);
+      }
+      if (retriesLeft > 0) {
+        state.eventQueue.unshift({
+          action,
+          eventLink: queuedEvent.eventLink,
+          handler,
+          event: eventValue,
+          retriesLeft: retriesLeft - 1,
+          onCommit,
+        });
+        state.queueExecution();
+      } else {
+        logger.error(
+          "scheduler",
+          "Event handler exhausted retries resolving inSpace names",
+          { handlerId },
+        );
+        runFinalCommitCallback();
+      }
+      return;
+    }
+
     if (error) {
       try {
         state.handleError(error as Error, action);
