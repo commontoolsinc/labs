@@ -26,6 +26,13 @@ export interface VirtualModuleRecord {
   /** Names this module exports. */
   exports: string[];
   /**
+   * Maps each of this module's import specifiers to the absolute
+   * (content-addressed) specifier it resolves to. When omitted, an import
+   * specifier resolves to itself (used by runtime-module records whose imports
+   * are already absolute).
+   */
+  resolutions?: Record<string, string>;
+  /**
    * Populate `moduleExports`. Use `compartment.importNow(resolvedImports[spec])`
    * to obtain an imported module's namespace.
    */
@@ -38,6 +45,7 @@ export interface VirtualModuleRecord {
 
 interface SesCompartment {
   importNow(specifier: string): Record<string, unknown>;
+  evaluate(source: string): unknown;
 }
 
 interface SesCompartmentCtor {
@@ -80,10 +88,13 @@ export function importModuleGraphNow(
 
   const compartment = new CompartmentCtor({ ...globals }, {}, {
     name,
-    // Specifiers are already absolute and content-addressed, so resolution is
-    // the identity function. (Relative specifiers are rewritten to absolute
-    // content-addressed specifiers at compile time.)
-    resolveHook: (importSpecifier: string) => importSpecifier,
+    // Resolve an import specifier against the referrer's resolution map. Runtime
+    // modules and hand-built records whose imports are already absolute omit
+    // `resolutions`, in which case resolution is the identity function.
+    resolveHook: (importSpecifier: string, referrer: string) => {
+      const resolutions = records.get(referrer)?.resolutions;
+      return resolutions?.[importSpecifier] ?? importSpecifier;
+    },
     importNowHook: (specifier: string) => {
       const record = records.get(specifier);
       if (!record) {
