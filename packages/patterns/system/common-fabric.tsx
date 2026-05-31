@@ -452,7 +452,7 @@ export const updateProfile = pattern<
   { success: boolean; message: string }
 >(({ summary }) => {
   // Wish for the profile cell (which is the summary string cell)
-  const profileCell = wish<Writable<string>>({ query: "#profile" });
+  const profileCell = wish<Writable<string>>({ query: "#learnedSummary" });
 
   const result = computed(() => {
     const cell = profileCell.result;

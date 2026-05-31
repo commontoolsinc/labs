@@ -129,7 +129,7 @@ export default pattern<QuickCaptureInput, QuickCaptureOutput>(
     }).result!;
 
     // TODO(#1269): Add wish<{ text: string }>({ query: "#system" }) once #system wish resolution is stable.
-    const profileWish = wish<string>({ query: "#profile" });
+    const profileWish = wish<string>({ query: "#learnedSummary" });
     const profileText = computed(() => profileWish.result ?? "");
 
     const systemPrompt = computed(() => {

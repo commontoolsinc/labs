@@ -33,7 +33,6 @@ export default pattern(
   false as const,
   {
     type: "object",
-    scope: "user",
     properties: {
       [NAME]: { type: "string" },
       [UI]: true,

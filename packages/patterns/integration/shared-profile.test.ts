@@ -2,6 +2,7 @@ import { env, Page } from "@commonfabric/integration";
 import { Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
@@ -35,18 +36,22 @@ describe("shared profile integration test", () => {
     });
     sharedSpaceDid = cc.manager().getSpace();
 
-    const demoSource = await Deno.readTextFile(
-      join(
-        import.meta.dirname!,
-        "..",
-        "shared-profile-demo",
-        "main.tsx",
-      ),
+    // Resolve the demo through the harness (content-addressed program) and
+    // create from that, mirroring the other CFC integration tests. Passing raw
+    // source text with a random suffix instead produced a flaky piece-load race
+    // (the started piece's data was not reliably durable when the shell loaded
+    // it) under the content-addressed module identity scheme.
+    const sourcePath = join(
+      import.meta.dirname!,
+      "..",
+      "shared-profile-demo",
+      "main.tsx",
     );
-    const piece = await cc.create(
-      `${demoSource}\n// integration instance ${crypto.randomUUID()}\n`,
-      { start: true },
+    const rootPath = join(import.meta.dirname!, "..");
+    const program = await cc.manager().runtime.harness.resolve(
+      new FileSystemProgramResolver(sourcePath, rootPath),
     );
+    const piece = await cc.create(program, { start: true });
     pieceId = piece.id;
     const resultCell = cc.manager().getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});

@@ -307,6 +307,10 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     spaces,
     defaultAppUrl,
     profile,
+    // Exposed so #profileName can fall back to the name typed at creation while
+    // the owner-protected profile link is still resolving (creation latency);
+    // the live name comes from the profile's own `initialNameApplied`.
+    profileName,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),

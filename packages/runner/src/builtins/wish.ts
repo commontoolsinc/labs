@@ -138,6 +138,7 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#favorites":
     case "#journal":
     case "#learned":
+    case "#learnedSummary":
     case "#profile":
     case "#profileName":
     case "#profileAvatar":
@@ -697,6 +698,22 @@ function resolveHomeSpaceTarget(
       }];
     }
 
+    case "#learnedSummary": {
+      // The free-form learned summary string (home `learned.summary`). This is
+      // what `#profile` used to resolve to before it was repurposed for the
+      // profile default pattern object; summary consumers wish for this instead.
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError(
+          "User identity DID not available for #learnedSummary",
+        );
+      }
+      return [{
+        cell: getHomeSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "learned", "summary"],
+      }];
+    }
+
     case "#profile": {
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
@@ -709,21 +726,25 @@ function resolveHomeSpaceTarget(
     }
 
     case "#profileName": {
-      const profileName = getHomeSpaceCell(ctx).key("defaultPattern")
-        .resolveAsCell()
-        .key("profileName");
-      const profileNameValue = profileName.get() as unknown;
-      if (
-        typeof profileNameValue === "string" && profileNameValue.length > 0
-      ) {
+      // Prefer the LIVE profile name (`initialNameApplied` tracks edits made via
+      // the profile's setName handler). Fall back to the home `profileName`
+      // creation mirror only while the profile link is still resolving (so the
+      // name shows immediately during creation latency); the mirror is not
+      // updated on later edits, so it must not take precedence.
+      const profileDefault = getProfileDefaultCell(ctx);
+      const liveName = profileDefault.key("initialNameApplied")
+        .get() as unknown;
+      if (typeof liveName === "string" && liveName.length > 0) {
         return [{
-          cell: profileName,
-          pathPrefix: [],
+          cell: profileDefault,
+          pathPrefix: ["initialNameApplied"],
         }];
       }
       return [{
-        cell: getProfileDefaultCell(ctx),
-        pathPrefix: ["initialNameApplied"],
+        cell: getHomeSpaceCell(ctx).key("defaultPattern")
+          .resolveAsCell()
+          .key("profileName"),
+        pathPrefix: [],
       }];
     }
 

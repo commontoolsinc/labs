@@ -28,7 +28,7 @@ const handleSend = handler<
 export default pattern<Input>(({ title }) => {
   const topic = new Writable("");
 
-  const profile = wish<Cell<string>>({ query: "#profile" });
+  const profile = wish<Cell<string>>({ query: "#learnedSummary" });
 
   const systemPrompt = computed(() => {
     const profileText = profile.result!.get();
