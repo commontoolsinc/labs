@@ -92,6 +92,26 @@ describe("computeModuleHashes", () => {
     expect(after.get("/a.ts")).not.toBe(before.get("/a.ts"));
   });
 
+  it('counts inline import-type edges (import("./schema").Foo)', () => {
+    // A type referenced via an import-type expression, with no import
+    // declaration — still load-bearing for schema generation.
+    const a = `export const a = (x: import("./schema.ts").Foo) => x.n;`;
+    const s1 = `export interface Foo { n: number }`;
+    const s2 = `export interface Foo { n: string }`;
+
+    const before = computeModuleHashes(
+      program("/a.ts", { "/a.ts": a, "/schema.ts": s1 }),
+      { runtimeFingerprint: RFP },
+    );
+    const after = computeModuleHashes(
+      program("/a.ts", { "/a.ts": a, "/schema.ts": s2 }),
+      { runtimeFingerprint: RFP },
+    );
+
+    expect(after.get("/schema.ts")).not.toBe(before.get("/schema.ts"));
+    expect(after.get("/a.ts")).not.toBe(before.get("/a.ts"));
+  });
+
   it("is deterministic and stable for import cycles", () => {
     const a = `import { b } from "./b.ts"; export const a = () => b();`;
     const b = `import { a } from "./a.ts"; export const b = () => a();`;

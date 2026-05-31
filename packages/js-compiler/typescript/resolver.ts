@@ -104,23 +104,30 @@ function resolveSpecifier(specifier: string, from: Source): string {
 }
 
 /**
- * Collect every static import/`export … from` specifier referenced by a
- * source file, including type-only imports (`import type`, type-only named
- * specifiers). Type edges are intentionally retained: in Common Fabric the
- * transformer lowers types into generated schemas, so a changed imported type
- * can change runtime behavior. Dynamic `import()` and `require()` are not
- * supported and are ignored.
+ * Collect every import/`export … from` specifier referenced by a source file,
+ * including type-only imports (`import type`, type-only named specifiers) and
+ * inline import-type references (`import("./mod").Foo`). Type edges are
+ * intentionally retained: in Common Fabric the transformer lowers types into
+ * generated schemas, so a changed imported type can change runtime behavior.
+ * Dynamic `import()` *expressions* and `require()` are not supported and are
+ * ignored.
+ *
+ * This is a superset of {@link resolveProgram}'s graph discovery: it adds
+ * inline import-type edges so module identity does not miss schema-bearing type
+ * dependencies. It deliberately does not influence which sources are fetched
+ * for compilation.
  */
 export function collectImportSpecifiers(
   source: Source,
   target: ts.ScriptTarget,
 ): string[] {
-  return getImports(source, target);
+  return getImports(source, target, { includeImportTypeNodes: true });
 }
 
 function getImports(
   source: Source,
   target: ts.ScriptTarget,
+  options: { includeImportTypeNodes?: boolean } = {},
 ): string[] {
   const sourceFile = ts.createSourceFile(
     source.name,
@@ -145,6 +152,17 @@ function getImports(
       const moduleSpecifier = node.moduleSpecifier;
       if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)) {
         imports.push(moduleSpecifier.text);
+      }
+    }
+    // Inline import-type references in type position: `import("./mod").Foo`.
+    // These are load-bearing for schema generation but are not module-graph
+    // edges for resolution, so only the identity collector opts in.
+    if (options.includeImportTypeNodes && ts.isImportTypeNode(node)) {
+      const argument = node.argument;
+      if (
+        ts.isLiteralTypeNode(argument) && ts.isStringLiteral(argument.literal)
+      ) {
+        imports.push(argument.literal.text);
       }
     }
     ts.forEachChild(node, visit);
