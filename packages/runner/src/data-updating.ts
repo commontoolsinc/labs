@@ -256,6 +256,20 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
 };
 
 /**
+ * The scope at which a slot's content is stored (the write target scope). It
+ * shares its precedence with the read follow-cap (see
+ * `ContextualFlowControl.getSchemaScopeCap`) so writes and reads agree on which
+ * scoped instance a slot addresses. `any`/no constraint yields `undefined` —
+ * i.e. no narrowing. Distinct from the link's own base scope.
+ */
+function declaredCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  const cap = ContextualFlowControl.getSchemaScopeCap(schema);
+  return isCellScope(cap) ? cap : undefined;
+}
+
+/**
  * Traverses newValue and updates `current` and any relevant linked documents.
  *
  * Returns true if any changes were made.
@@ -270,24 +284,6 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
  * @param context - The context of the change.
  * @returns Whether any changes were made.
  */
-/**
- * The scope a cell's own schema declares for its content: the outermost
- * `asCell` entry scope if present, otherwise the top-level `scope`. This is the
- * scope at which the cell's data lives. It is distinct from a follow cap and
- * from the link's base scope.
- */
-function declaredCellScope(
-  schema: JSONSchema | undefined,
-): CellScope | undefined {
-  if (!isRecord(schema)) return undefined;
-  const asCellScope = ContextualFlowControl.getAsCellScope(
-    ContextualFlowControl.getAsCellValues(schema).at(0),
-  );
-  if (isCellScope(asCellScope)) return asCellScope;
-  if (isCellScope(schema.scope)) return schema.scope;
-  return undefined;
-}
-
 export function diffAndUpdate(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
@@ -387,8 +383,10 @@ export function normalizeAndDiff(
   // it already carries its own target scope. Both writes recurse back through
   // normalizeAndDiff so they get the usual diffing, no-op detection, and CFC
   // label/policy handling. Applying this at the top of normalizeAndDiff makes it
-  // compose to arbitrary depth (every nested descent re-enters here); for arrays
-  // it yields one link per element rather than a redirect of the whole array.
+  // compose to arbitrary depth (every nested descent re-enters here): narrowing
+  // fires at whatever slot declares it. Element-level scope (an array's `items`
+  // schema) therefore yields one redirect per element, while array-level scope
+  // (the array slot's own schema) redirects the whole array.
   const declaredScope = declaredCellScope(link.schema);
   if (
     declaredScope !== undefined &&

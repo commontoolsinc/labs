@@ -47,7 +47,7 @@ import {
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
+import { canFollowScopedLink } from "./scope.ts";
 import type {
   Activity,
   CommitError,
@@ -1237,20 +1237,14 @@ const schemaScopeForSelector = (selector?: SchemaPathSelector) =>
   schemaFollowScopeCap(selector?.schema);
 
 /**
- * The scope cap a schema imposes on the link it permits a read to follow.
- * Honors an explicit top-level `scope`, falling back to the outermost `asCell`
- * entry scope (so `asCell: [{ kind: "cell", scope: "session" }]` caps at
- * session). This caps *which* link scopes may be followed; it must never be
- * copied onto the followed link itself.
+ * The scope cap a schema imposes on the link it permits a read to follow (see
+ * ContextualFlowControl.getSchemaScopeCap for the precedence, e.g.
+ * `asCell: [{ kind: "cell", scope: "session" }]` caps at session). This caps
+ * *which* link scopes may be followed; it must never be copied onto the
+ * followed link itself.
  */
-const schemaFollowScopeCap = (schema: unknown): SchemaScope | undefined => {
-  if (!isRecord(schema)) return undefined;
-  if (isSchemaScope(schema.scope)) return schema.scope;
-  const entryScope = ContextualFlowControl.getAsCellScope(
-    ContextualFlowControl.getAsCellValues(schema as JSONSchema).at(0),
-  );
-  return isSchemaScope(entryScope) ? entryScope : undefined;
-};
+const schemaFollowScopeCap = (schema: unknown): SchemaScope | undefined =>
+  ContextualFlowControl.getSchemaScopeCap(schema as JSONSchema | undefined);
 
 /**
  * Get a string to use as a key for the specified address

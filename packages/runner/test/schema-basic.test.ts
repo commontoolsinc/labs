@@ -9,7 +9,38 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+// The read follow-cap (link-resolution/traverse) and the write target scope
+// (data-updating) both derive from ContextualFlowControl.getSchemaScopeCap, so
+// they can never disagree about which scoped instance a slot addresses. This
+// pins the single precedence: outermost asCell entry scope first (the immediate
+// cell/slot), then the top-level `scope` (the value when there is no wrapper).
+Deno.test("getSchemaScopeCap precedence: asCell entry before top-level scope", () => {
+  const cap = (schema: JSONSchema) =>
+    ContextualFlowControl.getSchemaScopeCap(schema);
+  assertSchemaScope(
+    cap({ type: "string", asCell: [{ kind: "cell", scope: "session" }] }),
+    "session",
+  );
+  assertSchemaScope(cap({ type: "string", scope: "user" }), "user");
+  // When both are present, the immediate (asCell) cell scope wins.
+  assertSchemaScope(
+    cap({
+      type: "object",
+      scope: "user",
+      asCell: [{ kind: "cell", scope: "session" }],
+    }),
+    "session",
+  );
+  assertSchemaScope(cap({ type: "string" }), undefined);
+  assertSchemaScope(cap({ type: "string", scope: "any" }), "any");
+});
+
+function assertSchemaScope(actual: unknown, expected: unknown) {
+  expect(actual).toBe(expected);
+}
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
