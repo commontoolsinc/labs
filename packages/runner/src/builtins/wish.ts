@@ -727,25 +727,35 @@ function resolveHomeSpaceTarget(
 
     case "#profileName": {
       // Prefer the LIVE profile name (`initialNameApplied` tracks edits made via
-      // the profile's setName handler). Fall back to the home `profileName`
-      // creation mirror only while the profile link is still resolving (so the
-      // name shows immediately during creation latency); the mirror is not
-      // updated on later edits, so it must not take precedence.
-      const profileDefault = getProfileDefaultCell(ctx);
-      const liveName = profileDefault.key("initialNameApplied")
-        .get() as unknown;
-      if (typeof liveName === "string" && liveName.length > 0) {
-        return [{
-          cell: profileDefault,
-          pathPrefix: ["initialNameApplied"],
-        }];
+      // the profile's setName handler). The home `profileName` creation mirror
+      // is used only while the profile link is still resolving (so the name
+      // shows immediately during creation latency); it is not updated on later
+      // edits, so it must not take precedence.
+      const mirror = () =>
+        getHomeSpaceCell(ctx).key("defaultPattern").resolveAsCell().key(
+          "profileName",
+        );
+      try {
+        const profileDefault = getProfileDefaultCell(ctx);
+        const liveName = profileDefault.key("initialNameApplied")
+          .get() as unknown;
+        if (typeof liveName === "string" && liveName.length > 0) {
+          return [{ cell: profileDefault, pathPrefix: ["initialNameApplied"] }];
+        }
+        // Profile resolved but no name yet — use the mirror.
+        return [{ cell: mirror(), pathPrefix: [] }];
+      } catch (error) {
+        // The profile link is unresolved. If the creation mirror has a value the
+        // profile is mid-creation, so show it; otherwise there is genuinely no
+        // profile, so re-surface the error as an error state (a consumer test
+        // asserts a missing profile space errors rather than silently resolving).
+        const mirrorCell = mirror();
+        const mirrorValue = mirrorCell.get() as unknown;
+        if (typeof mirrorValue === "string" && mirrorValue.length > 0) {
+          return [{ cell: mirrorCell, pathPrefix: [] }];
+        }
+        throw error;
       }
-      return [{
-        cell: getHomeSpaceCell(ctx).key("defaultPattern")
-          .resolveAsCell()
-          .key("profileName"),
-        pathPrefix: [],
-      }];
     }
 
     case "#profileAvatar": {
