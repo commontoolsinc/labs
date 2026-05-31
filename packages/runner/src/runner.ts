@@ -31,6 +31,7 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
+import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
   unsafe_noteParentOnPatterns,
@@ -1348,6 +1349,59 @@ export class Runner {
     });
   }
 
+  private runPatternAfterSuccessfulCommit<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    pattern: Pattern,
+    inputs: FabricValue,
+    pullOnceAfterStart = false,
+  ): void {
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) return;
+
+      const startTx = this.runtime.edit();
+      const committedResultCell = this.runtime.getCellFromLink<T>(
+        resultLink,
+        pattern.resultSchema,
+        startTx,
+      );
+      try {
+        this.run(startTx, pattern, inputs, committedResultCell);
+        this.runtime.prepareTxForCommit(startTx);
+        startTx.commit().then(({ error }) => {
+          if (error) {
+            this.stop(committedResultCell);
+            logger.error(
+              "tx-commit-error",
+              "Error committing deferred cross-space pattern transaction",
+              error,
+            );
+            return;
+          }
+          if (pullOnceAfterStart) {
+            this.pullCellOnceInPullMode(committedResultCell);
+          }
+        }).catch((error) => {
+          this.stop(committedResultCell);
+          logger.error(
+            "tx-commit-error",
+            "Deferred cross-space pattern transaction rejected",
+            error,
+          );
+        });
+      } catch (error) {
+        startTx.abort(error);
+        logger.error(
+          "runner-start",
+          "Deferred cross-space pattern failed",
+          error,
+        );
+        throw error;
+      }
+    });
+  }
+
   /**
    * Run a pattern.
    *
@@ -2361,13 +2415,50 @@ export class Runner {
     }
 
     const resultPattern = patternFromFrame(() => result);
-    const resultCell = this.handlerResultPatternMustStartAfterCommit(
+    const resultSpace = result === undefined
+      ? this.handlerResultPatternMaterializationSpace(
         resultPattern,
+        processCell.space,
       )
+      : processCell.space;
+    // navigateTo result patterns must start after the handler's transaction
+    // commits so the navigation target is durable. Cross-space children, by
+    // contrast, run inline in a multi-space transaction (below) so they keep
+    // their verified-function identity instead of being re-instantiated.
+    const deferForNavigate = this.handlerResultPatternHasNavigateTo(
+      resultPattern,
+    );
+    const crossSpace = resultSpace !== processCell.space;
+
+    if (deferForNavigate && result === undefined) {
+      const resultCell = this.runtime.getCell(
+        resultSpace,
+        { resultFor: cause },
+        undefined,
+        tx,
+      );
+      this.runPatternAfterSuccessfulCommit(
+        tx,
+        resultCell,
+        resultPattern,
+        undefined,
+        true,
+      );
+      addCancel(() => this.stop(resultCell));
+      return result;
+    }
+
+    if (crossSpace && !deferForNavigate) {
+      // Commit the child space first so the originating space's link to it is
+      // never durable before its target.
+      tx.enableMultiSpaceWrites?.([resultSpace, processCell.space]);
+    }
+
+    const resultCell = deferForNavigate
       ? this.setupDeferredHandlerResultPattern(
         tx,
         resultPattern,
-        processCell,
+        resultSpace,
         cause,
       )
       : this.run(
@@ -2375,7 +2466,7 @@ export class Runner {
         resultPattern,
         undefined,
         this.runtime.getCell(
-          processCell.space,
+          resultSpace,
           { resultFor: cause },
           undefined,
           tx,
@@ -2421,20 +2512,55 @@ export class Runner {
     return result;
   }
 
-  private handlerResultPatternMustStartAfterCommit(pattern: Pattern): boolean {
+  /**
+   * Resolves any `PatternFactory.inSpace("name")` targets that the just-finished
+   * handler/action referenced but whose space DID was not yet cached, then
+   * throws {@link RetryImmediately} so the scheduler re-runs the handler/action.
+   * On the re-run the names resolve synchronously from the runtime cache (see
+   * the pattern builder's resolveInSpaceTargetSpace), so the child results are
+   * routed into the correct spaces from the start — no link rewriting required.
+   */
+  private async resolvePendingSpaceNamesAndRetry(
+    frame: Frame,
+  ): Promise<never> {
+    const names = [...(frame.pendingSpaceNames ?? [])];
+    await Promise.all(
+      names.map((name) => this.runtime.resolveSpaceName(name)),
+    );
+    throw new RetryImmediately(
+      `Resolving in-space target spaces: ${names.join(", ")}`,
+    );
+  }
+
+  private handlerResultPatternHasNavigateTo(
+    pattern: Pattern,
+  ): boolean {
     return pattern.nodes.some(({ module }) =>
       module.type === "ref" && module.implementation === "navigateTo"
     );
   }
 
+  private handlerResultPatternMaterializationSpace(
+    pattern: Pattern,
+    fallback: MemorySpace,
+  ): MemorySpace {
+    const targetSpaces = new Set<MemorySpace>();
+    for (const { module } of pattern.nodes) {
+      if (module.targetSpace !== undefined) {
+        targetSpaces.add(module.targetSpace);
+      }
+    }
+    return targetSpaces.size === 1 ? [...targetSpaces][0] : fallback;
+  }
+
   private setupDeferredHandlerResultPattern(
     tx: IExtendedStorageTransaction,
     resultPattern: Pattern,
-    processCell: Cell<any>,
+    resultSpace: MemorySpace,
     cause: Record<string, any>,
   ): Cell<any> {
     const resultCell = this.runtime.getCell(
-      processCell.space,
+      resultSpace,
       { resultFor: cause },
       undefined,
       tx,
@@ -2667,6 +2793,7 @@ export class Runner {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
 
+      let popFrameAfterReturn = true;
       try {
         const inputsCell = this.runtime.getImmutableCell(
           processCell.space,
@@ -2743,6 +2870,9 @@ export class Runner {
         const postRun = (result: any) => {
           logger.timeStart("stream", "postRun");
           try {
+            if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
+              return this.resolvePendingSpaceNamesAndRetry(frame);
+            }
             return this.handleJavaScriptHandlerResult(
               tx,
               result,
@@ -2758,14 +2888,30 @@ export class Runner {
           }
         };
 
-        return result instanceof Promise
+        const postRunResult = result instanceof Promise
           ? result.then(postRun)
           : postRun(result);
+        if (postRunResult instanceof Promise) {
+          popFrameAfterReturn = false;
+          return postRunResult.finally(() => popFrame(frame));
+        }
+        return postRunResult;
       } catch (error) {
+        // The handler body may throw while materializing a not-yet-resolved
+        // inSpace("name") child (e.g. set into a cell). If so, resolve the
+        // pending names and retry instead of surfacing the error.
+        if (
+          !(error instanceof RetryImmediately) &&
+          frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
+        ) {
+          popFrameAfterReturn = false;
+          return this.resolvePendingSpaceNamesAndRetry(frame)
+            .finally(() => popFrame(frame));
+        }
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
       } finally {
-        popFrame(frame);
+        if (popFrameAfterReturn) popFrame(frame);
       }
     };
 
@@ -2891,6 +3037,10 @@ export class Runner {
       const resultCell = patternResultCell;
 
       const handleErrorOutput = (error: unknown) => {
+        // RetryImmediately is an internal control-flow signal: re-throw it
+        // untouched so the scheduler re-runs the action instead of writing an
+        // error result into the binding.
+        if (error instanceof RetryImmediately) throw error;
         if (
           error !== null &&
           (typeof error === "object" || typeof error === "function")
@@ -2916,6 +3066,7 @@ export class Runner {
         throw error;
       };
 
+      let popFrameAfterReturn = true;
       try {
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
@@ -2987,6 +3138,9 @@ export class Runner {
         const postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
+            if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
+              return this.resolvePendingSpaceNamesAndRetry(frame);
+            }
             return this.writeJavaScriptActionResult(
               tx,
               module.resultSchema,
@@ -3005,13 +3159,29 @@ export class Runner {
           }
         };
 
-        return result instanceof Promise
+        const postRunResult = result instanceof Promise
           ? result.then(postRun).catch(handleErrorOutput)
           : postRun(result);
+        if (postRunResult instanceof Promise) {
+          popFrameAfterReturn = false;
+          return postRunResult.finally(() => popFrame(frame));
+        }
+        return postRunResult;
       } catch (error) {
+        // The action body may throw while materializing a not-yet-resolved
+        // inSpace("name") child. If so, resolve the pending names and retry
+        // instead of surfacing the error.
+        if (
+          !(error instanceof RetryImmediately) &&
+          frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
+        ) {
+          popFrameAfterReturn = false;
+          return this.resolvePendingSpaceNamesAndRetry(frame)
+            .finally(() => popFrame(frame));
+        }
         handleErrorOutput(error);
       } finally {
-        popFrame(frame);
+        if (popFrameAfterReturn) popFrame(frame);
       }
     };
 
@@ -3521,8 +3691,11 @@ export class Runner {
       );
       sendToBindings = false;
     } else {
+      const resultScope = patternDefaultScope(patternImpl) ??
+        module.defaultScope;
+      const targetSpace = module.targetSpace ?? resultCell.space;
       const baseResultCell = this.runtime.getCell(
-        resultCell.space,
+        targetSpace,
         {
           pattern: module.implementation,
           parent: resultCell.entityId,
@@ -3532,8 +3705,6 @@ export class Runner {
         patternImpl.resultSchema,
         tx,
       );
-      const resultScope = patternDefaultScope(patternImpl) ??
-        module.defaultScope;
       resultCell = baseResultCell;
       if (resultScope !== undefined && resultScope !== "space") {
         let resultCellLink = baseResultCell.getAsNormalizedFullLink();
@@ -3553,6 +3724,13 @@ export class Runner {
       `sendToBindings=${sendToBindings}`,
     ]);
 
+    if (resultCell.space !== resultCellLink.space) {
+      // Cross-space child pattern: run it inline in a multi-space transaction
+      // (child space committed first) rather than re-instantiating it in a
+      // deferred second transaction, which would lose its verified-function
+      // identity. The journal allows the cross-space write once opted in.
+      tx.enableMultiSpaceWrites?.([resultCell.space, resultCellLink.space]);
+    }
     this.run(tx, patternImpl, inputs, resultCell);
 
     if (sendToBindings) {

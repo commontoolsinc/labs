@@ -37,7 +37,9 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
-import { isCell } from "../cell.ts";
+import { isCell, setCellUnlinkedSpace } from "../cell.ts";
+import { createRef } from "../create-ref.ts";
+import { toURI } from "../uri-utils.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { Runtime } from "../runtime.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
@@ -395,6 +397,7 @@ function factoryFromPattern<T, R>(
 
   const makePatternFactory = (
     defaultScope?: CellScope,
+    defaultSpace?: string | unknown,
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
       (inputs: Opaque<T>): OpaqueRef<R> => {
@@ -408,11 +411,19 @@ function factoryFromPattern<T, R>(
         };
 
         const outputs = opaqueRef<R>();
+        const frame = getTopFrame();
+        if (defaultSpace !== undefined) {
+          const targetSpace = resolveInSpaceTargetSpace(defaultSpace, frame);
+          if (targetSpace !== undefined) {
+            setCellUnlinkedSpace(outputs, targetSpace);
+            module.targetSpace = targetSpace;
+          }
+        }
         const node: NodeRef = {
           module,
           inputs,
           outputs,
-          frame: getTopFrame(),
+          frame,
         };
 
         connectInputAndOutputs(node);
@@ -427,7 +438,10 @@ function factoryFromPattern<T, R>(
       } as Pattern & toJSON,
     ) as PatternFactory<T, R>;
 
-    factory.asScope = (scope: CellScope) => makePatternFactory(scope);
+    factory.asScope = (scope: CellScope) =>
+      makePatternFactory(scope, defaultSpace);
+    factory.inSpace = (space?: string | unknown) =>
+      makePatternFactory(defaultScope, space ?? "");
     return factory;
   };
 
@@ -454,6 +468,53 @@ function getStableInternalPathSegment(cause: unknown): PropertyKey | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Resolves a `PatternFactory.inSpace(...)` target to a concrete space DID at
+ * graph-construction time.
+ *
+ * - A DID string or a cell resolves synchronously.
+ * - A named string (or the anonymous case below) is resolved from the runtime's
+ *   space-name cache. On a cache miss the name is recorded on the frame as
+ *   pending and `undefined` is returned; the runner resolves pending names after
+ *   the run and re-runs the handler/action (RetryImmediately), at which point
+ *   the cache hits and the target resolves synchronously.
+ * - The anonymous case (`inSpace()` / empty string) derives a stable per-call
+ *   name by hashing the frame's cause together with a per-frame counter, so each
+ *   call site gets its own deterministic space that survives re-runs — mirroring
+ *   how cell ids are derived from causes.
+ */
+function resolveInSpaceTargetSpace(
+  space: unknown,
+  frame: Frame | undefined,
+): MemorySpace | undefined {
+  if (typeof space === "string" && /^did:[^:]+:.+/.test(space)) {
+    return space as MemorySpace;
+  }
+  if (isCell(space)) {
+    return space.getAsNormalizedFullLink().space;
+  }
+  const runtime = frame?.runtime;
+  if (!runtime) return undefined;
+  const name = typeof space === "string" && space.length > 0
+    ? space
+    : anonymousSpaceName(frame!);
+  const resolved = runtime.resolveSpaceNameSync(name);
+  if (resolved !== undefined) return resolved;
+  (frame!.pendingSpaceNames ??= new Set<string>()).add(name);
+  return undefined;
+}
+
+/**
+ * Derives a stable, unique name for an anonymous `inSpace()` call from the
+ * frame's cause and a per-frame counter, so repeated calls in one run get
+ * distinct spaces while re-runs of the same call site stay deterministic.
+ */
+function anonymousSpaceName(frame: Frame): string {
+  const ordinal = frame.inSpaceCounter ?? 0;
+  frame.inSpaceCounter = ordinal + 1;
+  return toURI(createRef({ inSpace: ordinal }, frame.cause));
 }
 
 function formatStableCauseSegment(cause: unknown): string {

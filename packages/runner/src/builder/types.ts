@@ -199,6 +199,8 @@ declare module "@commonfabric/api" {
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
     /** Input paths whose writable cells should become materializer envelopes */
     materializerWriteInputPaths?: readonly (readonly string[])[];
+    /** Run this module's result in a specific space. */
+    targetSpace?: MemorySpace;
   }
 }
 
@@ -273,6 +275,14 @@ export type Frame = {
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
   sourceLocationContext?: SourceLocationContext;
+  /**
+   * Named/anonymous `PatternFactory.inSpace(...)` targets encountered during
+   * this frame whose space DID was not yet cached. The runner resolves these
+   * after the run and re-runs (see RetryImmediately).
+   */
+  pendingSpaceNames?: Set<string>;
+  /** Per-frame counter giving each anonymous `inSpace()` call a stable name. */
+  inSpaceCounter?: number;
 };
 
 // Builder functions interface
