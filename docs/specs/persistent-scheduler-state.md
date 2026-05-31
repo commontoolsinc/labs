@@ -145,6 +145,14 @@ flag before sending confirmed/pending reads to the server. That is correct for
 the current conflict model, but scheduler rehydration needs to retain the
 recursive-vs-shallow distinction in its own observation record.
 
+When a transaction reads optimistic local state produced by an earlier pending
+commit, its read activity must record the pending commit's session/local
+sequence at read time. This pending-read identity cannot be recovered reliably
+when the dependent transaction is later encoded, because the predecessor may
+have confirmed by then. Semantic commits and no-op scheduler observations both
+use that recorded pending local sequence so the memory server can resolve it to
+the durable commit sequence or reject/drop stale speculative work.
+
 ### Memory V2
 
 Memory v2 stores one SQLite database per space. The durable state is:

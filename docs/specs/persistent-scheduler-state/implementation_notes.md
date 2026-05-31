@@ -738,3 +738,29 @@
   pending read evidence. This keeps the ordering required for server
   canonicalization while avoiding a global serialization point for observations
   that only read confirmed data or unrelated pending writes.
+
+## 2026-05-31 - Pending Read Local Sequence Capture
+
+- Investigation: the remaining runner regressions were not caused by pull-mode
+  dirty propagation. `git bisect` identified the read-watermark commit, and the
+  scheduler trigger trace for `scheduler-core.test.ts` showed an extra
+  `adder2` run caused by a transaction revert/retry.
+- Root cause: a transaction could read optimistic pending state, then wait long
+  enough for the writer to confirm before the dependent transaction was encoded.
+  `buildReads()` tried to rediscover pending-read dependencies from the current
+  pending queue, so after confirmation it encoded the read as an old confirmed
+  seq. The server correctly rejected that stale confirmed read, which caused
+  the speculative retry and extra scheduler work.
+- Decision: V2 read activities now capture `pendingLocalSeq` at read time when
+  the visible document includes pending local state. Commit construction uses
+  that recorded pending dependency before falling back to the current pending
+  queue. This applies to semantic commits and scheduler observations, and lets
+  the server resolve the pending dependency even if it confirmed before the
+  dependent transaction is sent.
+- Validation:
+  - red/green regression:
+    `deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git packages/runner/test/memory-v2-confirm-pending.test.ts`
+  - targeted prior failures:
+    `deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git packages/runner/test/scheduler-core.test.ts packages/runner/test/scheduler-pull.test.ts packages/runner/test/scheduler-pull-references.test.ts packages/runner/test/pattern-scope.test.ts`
+  - full runner suite:
+    `deno task test` in `packages/runner`

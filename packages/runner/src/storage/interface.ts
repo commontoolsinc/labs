@@ -1193,6 +1193,7 @@ export interface IReadActivity extends IMemorySpaceAddress {
   meta: Metadata;
   nonRecursive?: boolean;
   seq?: number;
+  pendingLocalSeq?: number;
 }
 
 /**

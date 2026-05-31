@@ -35,6 +35,7 @@ import type {
   ReaderError,
   ReadError,
   Result,
+  State,
   StorageTransactionFailed,
   StorageTransactionRejected,
   StorageTransactionStatus,
@@ -81,6 +82,7 @@ const DOCUMENT_MIME = "application/json" as const;
 type ReadDocumentEntry = {
   initial: RootAttestation;
   seq?: number;
+  pendingLocalSeq?: number;
   validated: boolean;
   current?: RootAttestation;
   frozenReads?: PathKeyMap<FabricValue | undefined>;
@@ -92,6 +94,7 @@ type WritableDocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
   seq?: number;
+  pendingLocalSeq?: number;
   validated: boolean;
   frozenReads: PathKeyMap<FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
@@ -958,6 +961,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         meta: readMeta,
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
         ...(typeof doc.seq === "number" ? { seq: doc.seq } : {}),
+        ...(typeof doc.pendingLocalSeq === "number"
+          ? { pendingLocalSeq: doc.pendingLocalSeq }
+          : {}),
       };
       this.#readActivities.push(readActivity);
       this.invalidateReactivityLog();
@@ -1774,7 +1780,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private document(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
-  ): { doc: DocumentEntry; meta: { seq?: number } } {
+  ): { doc: DocumentEntry; meta: { seq?: number; pendingLocalSeq?: number } } {
     const scope = normalizeCellScope(address.scope);
     if (
       this.#lastDocument?.branch === branch &&
@@ -1788,6 +1794,9 @@ export class V2StorageTransaction implements IStorageTransaction {
           ...(typeof this.#lastDocument.doc.seq === "number"
             ? { seq: this.#lastDocument.doc.seq }
             : {}),
+          ...(typeof this.#lastDocument.doc.pendingLocalSeq === "number"
+            ? { pendingLocalSeq: this.#lastDocument.doc.pendingLocalSeq }
+            : {}),
         },
       };
     }
@@ -1796,10 +1805,14 @@ export class V2StorageTransaction implements IStorageTransaction {
     let doc = branch.docs.get(key);
     if (!doc) {
       const loaded = this.loadRoot(branch, address);
-      const seq = this.readSeq(branch, address);
+      const { seq, pendingLocalSeq } = this.readVisibleRevision(
+        branch,
+        address,
+      );
       doc = {
         initial: loaded,
         seq,
+        pendingLocalSeq,
         validated: false,
       };
       branch.docs.set(key, doc);
@@ -1813,7 +1826,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
     return {
       doc,
-      meta: { ...(typeof doc.seq === "number" ? { seq: doc.seq } : {}) },
+      meta: {
+        ...(typeof doc.seq === "number" ? { seq: doc.seq } : {}),
+        ...(typeof doc.pendingLocalSeq === "number"
+          ? { pendingLocalSeq: doc.pendingLocalSeq }
+          : {}),
+      },
     };
   }
 
@@ -1850,19 +1868,29 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
-  private readSeq(
+  private readVisibleRevision(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
-  ): number | undefined {
+  ): { seq?: number; pendingLocalSeq?: number } {
     if (address.id.startsWith("data:")) {
-      return undefined;
+      return {};
     }
     const state = branch.replica.get({
       id: address.id,
       type: address.type ?? DOCUMENT_MIME,
       scope: address.scope,
-    }) as { since?: number } | undefined;
-    return typeof state?.since === "number" ? state.since : undefined;
+    }) as
+      | (State & {
+        since?: number;
+        pendingLocalSeq?: number;
+      })
+      | undefined;
+    return {
+      ...(typeof state?.since === "number" ? { seq: state.since } : {}),
+      ...(typeof state?.pendingLocalSeq === "number"
+        ? { pendingLocalSeq: state.pendingLocalSeq }
+        : {}),
+    };
   }
 
   private validate(): Result<Unit, IStorageTransactionInconsistent> {

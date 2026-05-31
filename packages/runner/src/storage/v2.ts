@@ -156,6 +156,11 @@ type PendingMaterializationCache = {
   prefixes: PendingMaterializedPrefix[];
 };
 
+type VisibleState = State & {
+  since?: number;
+  pendingLocalSeq?: number;
+};
+
 type DocumentRecord = {
   confirmed: ConfirmedVersion;
   pending: PendingVersion[];
@@ -1723,9 +1728,12 @@ class SpaceReplica implements ISpaceReplica {
 
       const scope = normalizeCellScope(read.scope);
       const record = this.#docs.get(docKey(read.id as URI, scope));
-      const pendingLocalSeq = record?.pending
-        .filter((version) => version.localSeq < localSeq)
-        .at(-1)?.localSeq;
+      const pendingLocalSeq = typeof read.pendingLocalSeq === "number" &&
+          read.pendingLocalSeq < localSeq
+        ? read.pendingLocalSeq
+        : record?.pending
+          .filter((version) => version.localSeq < localSeq)
+          .at(-1)?.localSeq;
       if (pendingLocalSeq !== undefined) {
         pending.push({
           id: read.id as URI,
@@ -1986,7 +1994,10 @@ class SpaceReplica implements ISpaceReplica {
       }),
       scope: normalizeCellScope(scope),
       since: visible.record.confirmed.seq,
-    } as State;
+      ...("localSeq" in visible.version
+        ? { pendingLocalSeq: visible.version.localSeq }
+        : {}),
+    } as VisibleState;
   }
 
   private visibleDocument(

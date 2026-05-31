@@ -124,6 +124,47 @@ describe("concurrent commits via emulated v2 storage", () => {
     assert(resultB.ok, "commit B should succeed independently");
   });
 
+  it("preserves a pending read dependency after the writer confirms", async () => {
+    const source = "of:pending-read-source" as const;
+    const target = "of:pending-read-target" as const;
+    const seed = storage.edit();
+    seed.write(
+      { space, id: source, type, path: [] },
+      { value: 0 },
+    );
+    seed.write(
+      { space, id: target, type, path: [] },
+      { seen: 0 },
+    );
+    const seedResult = await seed.commit();
+    assert(seedResult.ok, "seed commit should succeed");
+
+    const writer = storage.edit();
+    writer.write(
+      { space, id: source, type, path: ["value"] },
+      1,
+    );
+    const writerCommit = writer.commit();
+
+    const reader = storage.edit();
+    const readResult = reader.read({ space, id: source, type, path: [] });
+    assert(readResult.ok, "reader should see the pending source value");
+    assertEquals(readResult.ok.value, { value: 1 });
+    reader.write(
+      { space, id: target, type, path: ["seen"] },
+      1,
+    );
+
+    const writerResult = await writerCommit;
+    assert(writerResult.ok, "writer commit should succeed");
+
+    const readerResult = await reader.commit();
+    assert(
+      readerResult.ok,
+      `reader commit should use its pending-read dependency: ${readerResult.error?.message}`,
+    );
+  });
+
   it("three sequential commits where middle fails — first and third are ok", async () => {
     // Seed.
     const seedTx = storage.edit();
