@@ -60,6 +60,11 @@ const ACCEPT: Case[] = [
     body:
       `const cf_1 = __importStar(require("commonfabric"));\nconst d_1 = __importDefault(require("./dep.ts"));\nexports.v = (0, cf_1.pattern)(() => ({}));`,
   },
+  {
+    name: "bare side-effect import of an allowed specifier",
+    body:
+      `require("./styles.ts");\nconst helper = (x) => x;\nexports.helper = helper;`,
+  },
 ];
 
 const REJECT: Case[] = [
@@ -113,6 +118,11 @@ const REJECT: Case[] = [
   {
     name: "require of a disallowed specifier (node:fs)",
     body: `const fs_1 = require("node:fs");\nexports.fs = fs_1;`,
+    reject: /.*/,
+  },
+  {
+    name: "bare side-effect import of a disallowed specifier",
+    body: `require("node:child_process");\nexports.x = 1;`,
     reject: /.*/,
   },
 ];

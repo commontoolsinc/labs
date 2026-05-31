@@ -40,6 +40,12 @@ const REQUIRE_IMPORT = new RegExp(
     "require\\(\\s*[\"']([^\"']+)[\"']\\s*\\)\\s*\\)?\\s*;?$",
 );
 
+// A bare side-effect import preamble statement, e.g. `require("./styles.ts");`
+// (compiled from `import "./styles.ts"`). It binds nothing; AMD treats this as
+// a plain dependency, so for parity it is allowed (when the specifier is) and
+// skipped rather than classified as executable code.
+const SIDE_EFFECT_REQUIRE = /^require\(\s*["']([^"']+)["']\s*\)\s*;?$/;
+
 /**
  * Security-classify a module's compiled-CommonJS body (Phase D2). It recognizes
  * the `const x = require("…")` import preamble — seeding `env` with import
@@ -74,23 +80,29 @@ export function verifyCompiledModuleBody(
   const env = new Map<string, BindingInfo>();
   const classifiable: typeof parsed.body.statements = [];
   parsed.body.statements.forEach((statement, index) => {
-    const match = requireShadowed
-      ? null
-      : REQUIRE_IMPORT.exec(statementTexts[index]);
+    const text = statementTexts[index];
     // Only fast-path imports whose specifier is allowed (runtime module or a
     // local path); arbitrary specifiers (e.g. "node:fs") fall through and are
-    // rejected by classification, matching the AMD dependency allowlist.
-    if (match && isAllowedAuthoredImportSpecifier(match[2])) {
-      const [, binding, specifier] = match;
-      env.set(binding, {
-        kind: "import",
-        dependencySpecifier: specifier,
-        namespaceImport: true,
-        trustedRuntimeName: isRuntimeModuleIdentifier(specifier)
-          ? specifier
-          : undefined,
-      });
-      return;
+    // rejected by classification, matching the AMD dependency allowlist. The
+    // fast-path is disabled entirely when `require` is shadowed.
+    if (!requireShadowed) {
+      const bound = REQUIRE_IMPORT.exec(text);
+      if (bound && isAllowedAuthoredImportSpecifier(bound[2])) {
+        const [, binding, specifier] = bound;
+        env.set(binding, {
+          kind: "import",
+          dependencySpecifier: specifier,
+          namespaceImport: true,
+          trustedRuntimeName: isRuntimeModuleIdentifier(specifier)
+            ? specifier
+            : undefined,
+        });
+        return;
+      }
+      const sideEffect = SIDE_EFFECT_REQUIRE.exec(text);
+      if (sideEffect && isAllowedAuthoredImportSpecifier(sideEffect[1])) {
+        return; // side-effect import binds nothing
+      }
     }
     classifiable.push(statement);
   });
