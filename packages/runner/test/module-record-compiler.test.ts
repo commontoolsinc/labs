@@ -118,6 +118,38 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.run()).toBe(99);
   });
 
+  it("wires a named re-export from another module (export { x } from)", () => {
+    const sources = files({
+      "/inner.ts": `export const x = (): number => 5;`,
+      "/main.ts": `export { x } from "./inner.ts";`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { x(): number };
+    expect(ns.x()).toBe(5);
+  });
+
+  it("collects destructured variable exports", () => {
+    const sources = files({
+      "/main.ts": `const o = { a: 1, b: 2 };\nexport const { a, b } = o;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { a: number; b: number };
+    expect(ns.a).toBe(1);
+    expect(ns.b).toBe(2);
+  });
+
+  it("throws loudly on unsupported `export * from`", () => {
+    const sources = files({
+      "/inner.ts": `export const x = 1;`,
+      "/main.ts": `export * from "./inner.ts";`,
+    });
+    expect(() => compileSourcesToRecords(sources)).toThrow(/export \* from/);
+  });
+
   it("assigns content-addressed specifiers (cf:module/<hash>)", () => {
     const { specifierByPath } = compileSourcesToRecords(
       files({ "/main.ts": `export const x = 1;` }),

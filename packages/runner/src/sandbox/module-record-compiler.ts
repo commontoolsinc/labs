@@ -145,9 +145,15 @@ export function compileSourcesToRecords(
         const moduleObject = { exports: localExports };
         const requireShim = (specifier: string) =>
           compartment.importNow(resolvedImports[specifier] ?? specifier);
+        // A throw here is terminal for this module: SES caches the error and
+        // re-throws it on every subsequent importNow (the same contract as a
+        // failed AMD factory).
         factory(localExports, requireShim, moduleObject);
         const finalExports = moduleObject.exports;
         // Copy the declared exports onto the SES module namespace object.
+        // NOTE: this snapshots values at init time, so a later reassignment of
+        // an exported `let` is not reflected as a true ESM live binding. This is
+        // acceptable for compiled patterns; revisit with getters if needed.
         for (const name of exportNames) {
           moduleExports[name] = finalExports[name];
         }
@@ -159,7 +165,25 @@ export function compileSourcesToRecords(
   return { records, specifierByPath };
 }
 
-/** Statically collect the names a module exports (named + default). */
+/** Collect bound identifier names from a (possibly destructuring) binding. */
+function collectBindingNames(name: ts.BindingName, out: Set<string>): void {
+  if (ts.isIdentifier(name)) {
+    out.add(name.text);
+    return;
+  }
+  // Object/array binding patterns: `export const { a, b } = …` / `[x] = …`.
+  for (const element of name.elements) {
+    if (ts.isBindingElement(element)) {
+      collectBindingNames(element.name, out);
+    }
+  }
+}
+
+/**
+ * Statically collect the names a module exports (named, default, enum,
+ * namespace, destructured). Throws loudly on forms this adapter does not yet
+ * support, rather than producing a silently-incomplete namespace.
+ */
 function collectExportNames(source: Source): string[] {
   const sourceFile = ts.createSourceFile(
     source.name,
@@ -188,24 +212,41 @@ function collectExportNames(source: Source): string[] {
       } else if (statement.name) {
         names.add(statement.name.text);
       }
+    } else if (
+      (ts.isEnumDeclaration(statement) ||
+        ts.isModuleDeclaration(statement)) && isExported
+    ) {
+      if (statement.name && ts.isIdentifier(statement.name)) {
+        names.add(statement.name.text);
+      }
     } else if (ts.isVariableStatement(statement) && isExported) {
       for (const decl of statement.declarationList.declarations) {
-        if (ts.isIdentifier(decl.name)) {
-          names.add(decl.name.text);
-        }
+        collectBindingNames(decl.name, names);
       }
     } else if (ts.isExportAssignment(statement)) {
-      // `export default <expr>` or `export = <expr>`
-      names.add("default");
+      if (statement.isExportEquals) {
+        throw new Error(
+          `${source.name}: 'export =' is not supported by the ESM module-record adapter (authored sources must be ES modules)`,
+        );
+      }
+      names.add("default"); // `export default <expr>`
     } else if (ts.isExportDeclaration(statement)) {
       const clause = statement.exportClause;
       if (clause && ts.isNamedExports(clause)) {
+        // `export { a, b }` or `export { a } from "./m"`.
         for (const element of clause.elements) {
           names.add(element.name.text);
         }
+      } else if (clause && ts.isNamespaceExport(clause)) {
+        // `export * as ns from "./m"`.
+        names.add(clause.name.text);
+      } else if (statement.moduleSpecifier) {
+        // Bare `export * from "./m"` cannot be enumerated without resolving the
+        // target's exports; fail loudly rather than drop names silently.
+        throw new Error(
+          `${source.name}: 'export * from' re-exports are not yet supported by the ESM module-record adapter`,
+        );
       }
-      // `export * from "..."` cannot be statically enumerated here; not
-      // supported in this adapter scope.
     }
   }
 

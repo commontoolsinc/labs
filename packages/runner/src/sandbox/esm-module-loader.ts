@@ -47,6 +47,7 @@ export interface VirtualModuleRecord {
 interface SesCompartment {
   importNow(specifier: string): Record<string, unknown>;
   evaluate(source: string): unknown;
+  globalThis: Record<string, unknown>;
 }
 
 interface SesCompartmentCtor {
@@ -78,6 +79,12 @@ export interface SesModuleLoaderOptions {
 /**
  * Load `entrySpecifier` and its transitive dependencies synchronously,
  * returning the entry module's namespace.
+ *
+ * SECURITY: `verify` performs only *structural* validation. It is NOT a
+ * security boundary — the SES_SANDBOXING module-item classification has not yet
+ * been ported to records (see module-record-verifier.ts). Callers must treat
+ * the module graph as trusted/already-classified. This is why the
+ * `esmModuleLoader` flag is off and nothing in `src/` calls this yet.
  */
 export function importModuleGraphNow(
   entrySpecifier: string,
@@ -113,6 +120,10 @@ export function importModuleGraphNow(
       return record;
     },
   });
+  // SES freezes intrinsics, but compartment global bindings remain writable
+  // unless explicitly locked down, so a module could poison globals seen by
+  // siblings. Mirror createCompartment() in ses-runtime.ts.
+  Object.freeze(compartment.globalThis);
 
   return compartment.importNow(entrySpecifier);
 }
