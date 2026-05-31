@@ -95,4 +95,23 @@ describe("multi-space write transactions", () => {
       v: 7,
     });
   });
+
+  it("settles with an error when a per-space split commit throws", async () => {
+    const tx = runtime.edit();
+    tx.enableMultiSpaceWrites?.();
+    tx.writeValueOrThrow(addr(spaceA, "of:throw-a"), { v: 1 });
+    tx.writeValueOrThrow(addr(spaceB, "of:throw-b"), { v: 2 });
+
+    // A replica without commitNative() makes runSplitCommits throw (rather than
+    // return an error). The split commit must still settle the transaction with
+    // an error result instead of leaving it stuck at "pending".
+    const replicaB = storageManager.open(spaceB).replica as unknown as {
+      commitNative?: unknown;
+    };
+    replicaB.commitNative = undefined;
+
+    const result = await tx.commit();
+    expect(result.error).toBeDefined();
+    expect(tx.status().status).not.toBe("pending");
+  });
 });

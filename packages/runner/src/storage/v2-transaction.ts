@@ -1530,9 +1530,20 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const promise = this.runSplitCommits(commits);
     this.#state = { status: "pending", promise };
-    const result = await promise;
-    this.#state = { status: "done", result };
-    return result;
+    try {
+      const result = await promise;
+      this.#state = { status: "done", result };
+      return result;
+    } catch (error) {
+      // Mirror the single-space path: a rejected commit must still transition
+      // the transaction to "done" with an error rather than leaving it stuck
+      // at "pending" (e.g. if a replica lacks commitNative()).
+      const result: Result<Unit, StorageTransactionRejected> = {
+        error: toStoreError(error),
+      };
+      this.#state = { status: "done", result };
+      return result;
+    }
   }
 
   /**
