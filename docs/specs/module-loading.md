@@ -2,13 +2,21 @@
 
 ## Status
 
-Proposal. No implementation yet. This document specifies a replacement for the
-current AMD-bundle module pipeline with (1) per-module content-addressed
-identity computed as a Merkle hash over each module's authored TypeScript source
-and the transitive import graph, and (2) ES-module loading into SES
-compartments. The motivating consumer is
-[persistent scheduler state](persistent-scheduler-state.md), whose action
-implementation fingerprint is currently unstable across reloads.
+Partially implemented. This document specifies a replacement for the current
+AMD-bundle module pipeline with (1) per-module content-addressed identity
+computed as a Merkle hash over each module's authored TypeScript source and the
+transitive import graph, and (2) ES-module loading into SES compartments. The
+motivating consumer is [persistent scheduler state](persistent-scheduler-state.md),
+whose action implementation fingerprint is currently unstable across reloads.
+
+Implemented so far (see the implementation plan for the per-phase status):
+identity decoupling (Phase 1, live behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`),
+and the module-loading mechanism behind the default-off `esmModuleLoader` flag —
+a synchronous SES virtual-module-record loader, a TS→record adapter, a
+per-module compilation cache, and a structural graph verifier. Remaining: Engine
+integration with the CF transformer pipeline, the security-critical verifier
+classification port, and the default-on/AMD-removal rollout. The AMD bundle path
+remains the default.
 
 ## Last Updated
 

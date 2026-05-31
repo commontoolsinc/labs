@@ -6,7 +6,18 @@ steps with the files each touches, exit criteria, and validation commands.
 
 ## Last Updated
 
-2026-05-30
+2026-05-31
+
+## Current status
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| 0 — Loader shape confirmation | Done | SES `importNow` + virtual (third-party) module records load synchronously, incl. cycles. `ModuleSource`/`StaticModuleRecord` are not exposed by this `ses` build, so the loader uses `{ imports, exports, execute }` records. |
+| 1 — Decouple identity | Done | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
+| 2 — ESM emission + SES module loading | Mechanism done (behind `esmModuleLoader`, default off) | `importModuleGraphNow` loader + `compileSourcesToRecords` adapter load real compiled multi-module programs end-to-end. **Remaining:** wire into `Engine.evaluate`, run the CF transformer pipeline (currently bare `ts.transpileModule`), and expand `export *` re-exports. |
+| 3 — Verifier port | Structural seam done | `verifyModuleGraph` validates graph shape/wiring before load. **Remaining (security-critical):** port the SES_SANDBOXING module-item classification from the AMD parser. |
+| 4 — Per-module compilation cache | Done | `ModuleRecordCache` keyed by module hash; hit reuses the compiled artifact. **Remaining:** persist via the existing compilation-cache backends. |
+| 5 — Default-on + AMD removal | Not started (intentionally) | Gated on Phase 3 classification parity + benchmarks. Flipping the default / removing AMD cannot land while keeping the build green, so it is a deliberate later rollout. The flag stays **off**. |
 
 ## Guiding constraints
 
