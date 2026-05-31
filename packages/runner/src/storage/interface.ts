@@ -479,8 +479,12 @@ export interface IStorageTransaction {
    * a transaction may write to a single space only. When enabled, commit()
    * commits each written space's changes as a separate per-space commit, in the
    * provided order (or first-write order if omitted). The per-space commits run
-   * sequentially with NO cross-space atomicity: if a later commit fails, earlier
-   * ones are not rolled back (the failure is logged).
+   * sequentially with NO cross-space atomicity, and STOP at the first per-space
+   * failure: spaces committed before the failure are durable and not rolled back
+   * (logged), while the failing space and every space after it are left
+   * uncommitted. (Stopping preserves the requested order — e.g. a child space
+   * before the parent that links to it — and avoids double-applying later writes
+   * on retry.)
    *
    * `order` is a sequencing hint ONLY: it controls the order in which written
    * spaces are committed (spaces listed first commit first). It does NOT

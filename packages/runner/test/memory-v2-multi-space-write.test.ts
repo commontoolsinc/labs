@@ -145,4 +145,36 @@ describe("multi-space write transactions", () => {
       v: 1,
     });
   });
+
+  it("stops at the first failure and does not commit later spaces", async () => {
+    const tx = runtime.edit();
+    // Order so space A commits first; make it fail.
+    tx.enableMultiSpaceWrites?.([spaceA, spaceB]);
+    tx.writeValueOrThrow(addr(spaceA, "of:stop-a"), { v: 1 });
+    tx.writeValueOrThrow(addr(spaceB, "of:stop-b"), { v: 2 });
+
+    const replicaA = storageManager.open(spaceA).replica as unknown as {
+      commitNative: (...args: unknown[]) => Promise<unknown>;
+    };
+    replicaA.commitNative = () =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionRejected",
+          message: "space A failed",
+        },
+      });
+
+    const result = await tx.commit();
+    expect(result.error).toBeDefined();
+
+    // Space B (ordered after the failed space A) must not have been committed.
+    const verify = runtime.edit();
+    let bValue: unknown;
+    try {
+      bValue = verify.readValueOrThrow(addr(spaceB, "of:stop-b"));
+    } catch {
+      bValue = undefined;
+    }
+    expect(bValue).not.toEqual({ v: 2 });
+  });
 });

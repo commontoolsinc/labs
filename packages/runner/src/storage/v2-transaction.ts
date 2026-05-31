@@ -1574,35 +1574,42 @@ export class V2StorageTransaction implements IStorageTransaction {
   private async runSplitCommits(
     commits: { space: MemorySpace; native: NativeStorageCommit }[],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    let firstError: StorageTransactionRejected | undefined;
-    for (const { space, native } of commits) {
+    for (let i = 0; i < commits.length; i++) {
+      const { space, native } = commits[i];
       const replica = this.storage.open(space).replica;
       if (!replica.commitNative) {
         throw new Error("memory v2 replica does not support commitNative()");
       }
       const commitNative = replica.commitNative.bind(replica);
+      // Stop at the first per-space failure rather than committing the
+      // remaining spaces. The commit order is meaningful (e.g. a child space
+      // before the parent that links to it), so once an earlier space fails we
+      // must not durably apply later ones: doing so would violate the order and
+      // double-apply those writes if the transaction is retried. Spaces already
+      // committed before the failure are not rolled back (logged); the failing
+      // space and everything after it are left uncommitted.
       try {
         const result = await commitNative(native, this);
         if (result.error) {
           multiSpaceCommitLogger.error(
             "multi-space-commit-failed",
-            `Cross-space commit to ${space} failed; earlier spaces are not ` +
-              `rolled back`,
+            `Cross-space commit to ${space} failed after ${i} space(s); ` +
+              `earlier spaces are not rolled back and later spaces are skipped`,
             result.error,
           );
-          firstError ??= result.error;
+          return { error: result.error };
         }
       } catch (error) {
         multiSpaceCommitLogger.error(
           "multi-space-commit-rejected",
-          `Cross-space commit to ${space} rejected; earlier spaces are not ` +
-            `rolled back`,
+          `Cross-space commit to ${space} rejected after ${i} space(s); ` +
+            `earlier spaces are not rolled back and later spaces are skipped`,
           error,
         );
-        firstError ??= toStoreError(error);
+        return { error: toStoreError(error) };
       }
     }
-    return firstError ? { error: firstError } : { ok: {} };
+    return { ok: {} };
   }
 
   private schedulerObservationForNativeCommit(
