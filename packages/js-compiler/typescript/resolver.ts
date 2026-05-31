@@ -82,6 +82,15 @@ function isUnresolvedModuleOk(
   }
 }
 
+/**
+ * Resolve an import specifier relative to the importing source's path.
+ * Relative specifiers (`./`, `../`) are joined against the importer's
+ * directory; bare specifiers (e.g. `commonfabric`) are returned unchanged.
+ */
+export function resolveImportSpecifier(specifier: string, from: Source): string {
+  return resolveSpecifier(specifier, from);
+}
+
 function resolveSpecifier(specifier: string, from: Source): string {
   if (
     specifier.substring(0, 2) === "./" || specifier.substring(0, 3) === "../"
@@ -89,6 +98,21 @@ function resolveSpecifier(specifier: string, from: Source): string {
     return join(dirname(from.name), specifier);
   }
   return specifier;
+}
+
+/**
+ * Collect every static import/`export … from` specifier referenced by a
+ * source file, including type-only imports (`import type`, type-only named
+ * specifiers). Type edges are intentionally retained: in Common Fabric the
+ * transformer lowers types into generated schemas, so a changed imported type
+ * can change runtime behavior. Dynamic `import()` and `require()` are not
+ * supported and are ignored.
+ */
+export function collectImportSpecifiers(
+  source: Source,
+  target: ts.ScriptTarget,
+): string[] {
+  return getImports(source, target);
 }
 
 function getImports(
