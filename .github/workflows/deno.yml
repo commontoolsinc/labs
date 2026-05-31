@@ -237,7 +237,8 @@ jobs:
           TOOLSHED_PORT: 8000
         run: |
           chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
       # For Astral
@@ -323,7 +324,7 @@ jobs:
           # Set tools to path
           # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
+          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
       - name: 📦 Install CLI integration dependencies
         env:
@@ -401,7 +402,8 @@ jobs:
       - name: 🚀 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed &
 
       # For Astral
