@@ -66,6 +66,10 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   path: [...link.path],
 });
 
+// Creation-only: stamp the asCell entry's declared scope onto a newly created
+// cell's link. Never use this on a link that was followed/resolved during a
+// read — there the link's own storage-resolved scope is authoritative and
+// schema scope acts only as a follow cap (see link-resolution.ts).
 const linkWithAsCellScope = (
   link: NormalizedFullLink,
   entry:
@@ -605,6 +609,8 @@ export function processDefaultValue(
           cfcLabelView,
         );
       } else {
+        // This is a creation path (no default value to box): use the schema to
+        // set the new cell's initial scope from the asCell entry.
         return createCell(
           runtime,
           {
@@ -1176,10 +1182,14 @@ class TransformObjectCreator
           return undefined;
         }
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
+        // This is a read/materialization path: keep the link's own
+        // storage-resolved scope. The asCell entry scope is honored as a
+        // follow cap during link resolution, never copied onto the link here
+        // (doing so would re-address the value to a different scoped instance).
         return createCell(
           this.runtime,
           {
-            ...linkWithAsCellScope(link, asCellEntry),
+            ...link,
             schema: {
               ...restSchema,
               ...(asCellValues.length > 1) && { asCell: asCellValues.slice(1) },

@@ -725,7 +725,7 @@ describe("Schema - Basic Types and References", () => {
       expect(innerStringCell.get()).toBe("hello double asCell");
     });
 
-    it("should honor scoped asCell object entries", () => {
+    it("keeps the asCell entry scope on the schema, not stamped on the link", () => {
       const outer = runtime.getCell<{ current: Cell<string> }>(
         space,
         "scoped-ascell-object-entry",
@@ -742,8 +742,15 @@ describe("Schema - Basic Types and References", () => {
         tx,
       );
 
+      // key() must not stamp the asCell entry scope onto the container link: an
+      // asCell field is a reference whose link lives in the container at the
+      // container's own scope; the entry scope is a follow cap on the target
+      // (carried by the stored link). Stamping it here reads the wrong scoped
+      // instance of the container (see CT-1623).
       const currentCell = outer.key("current");
-      expect(currentCell.getAsNormalizedFullLink().scope).toBe("user");
+      expect(currentCell.getAsNormalizedFullLink().scope).toBe("space");
+      const schema = currentCell.getAsNormalizedFullLink().schema as any;
+      expect(schema?.asCell?.[0]?.scope ?? schema?.scope).toBe("user");
     });
 
     it("should preserve nested asCell wrappers through anyOf branches", () => {

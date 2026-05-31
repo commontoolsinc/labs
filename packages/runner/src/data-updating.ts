@@ -9,7 +9,14 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
+import {
+  type CellScope,
+  ID,
+  ID_FIELD,
+  type JSONSchema,
+} from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
 import {
   CellImpl,
@@ -263,6 +270,24 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
  * @param context - The context of the change.
  * @returns Whether any changes were made.
  */
+/**
+ * The scope a cell's own schema declares for its content: the outermost
+ * `asCell` entry scope if present, otherwise the top-level `scope`. This is the
+ * scope at which the cell's data lives. It is distinct from a follow cap and
+ * from the link's base scope.
+ */
+function declaredCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  if (!isRecord(schema)) return undefined;
+  const asCellScope = ContextualFlowControl.getAsCellScope(
+    ContextualFlowControl.getAsCellValues(schema).at(0),
+  );
+  if (isCellScope(asCellScope)) return asCellScope;
+  if (isCellScope(schema.scope)) return schema.scope;
+  return undefined;
+}
+
 export function diffAndUpdate(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
@@ -353,6 +378,49 @@ export function normalizeAndDiff(
         `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`,
     );
     newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
+  }
+
+  // Scope narrowing: if this slot's schema declares a scope narrower than the
+  // link's base scope, the content belongs in the narrower-scope instance and
+  // the broader-scope slot holds a link to it, so readers at the broader scope
+  // follow it to the narrower instance. A reference value (link/cell) is exempt:
+  // it already carries its own target scope. Both writes recurse back through
+  // normalizeAndDiff so they get the usual diffing, no-op detection, and CFC
+  // label/policy handling. Applying this at the top of normalizeAndDiff makes it
+  // compose to arbitrary depth (every nested descent re-enters here); for arrays
+  // it yields one link per element rather than a redirect of the whole array.
+  const declaredScope = declaredCellScope(link.schema);
+  if (
+    declaredScope !== undefined &&
+    scopeRank(declaredScope) > scopeRank(link.scope) &&
+    !isCellLink(newValue) &&
+    !isCell(newValue)
+  ) {
+    const scopedLink: NormalizedFullLink = { ...link, scope: declaredScope };
+    return [
+      // Content goes into the narrower-scope instance (its missing container
+      // structure is created by the storage write, which builds parents for the
+      // path). Diffed against the narrower instance's own current value.
+      ...normalizeAndDiff(
+        runtime,
+        tx,
+        scopedLink,
+        newValue,
+        context,
+        options,
+        seen,
+      ),
+      // The broader-scope slot points to that instance.
+      ...normalizeAndDiff(
+        runtime,
+        tx,
+        link,
+        createSigilLinkFromParsedLink(scopedLink, { base: link }) as unknown,
+        context,
+        options,
+        seen,
+      ),
+    ];
   }
 
   // ID_FIELD redirects to an existing field and we do something like DOM
