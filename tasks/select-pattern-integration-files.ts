@@ -5,24 +5,31 @@ type Shard = {
   total: number;
 };
 
+// Explicit assignments balance the four browser-integration shards by
+// wall-time. The heaviest end-to-end tests (~45-52s each) are spread one per
+// shard so no single shard dominates. `all.test.ts` is the heaviest single
+// file and gets its own shard. Approx test wall-times (excluding ~35s
+// server/browser startup per shard) keep shards within ~100-115s of each other.
 const FOUR_SHARD_ASSIGNMENTS: Record<string, number> = {
-  "all.test.ts": 1,
+  "all.test.ts": 1, // ~heavy, runs alone
 
-  "cfc-spec-gallery.test.ts": 2,
-  "default-app.test.ts": 2,
-  "chat-note.test.ts": 2,
-  "fetch-data.test.ts": 2,
-  "instantiate-pattern.test.ts": 2,
+  "cfc-group-chat-demo.test.ts": 2, // ~52s
+  "default-app.test.ts": 2, // ~47s
+  "chat-note.test.ts": 2, // tiny
+  "fetch-data.test.ts": 2, // tiny
+  "instantiate-pattern.test.ts": 2, // ~1s
 
-  "cfc-authorized-save.test.ts": 3,
-  "cfc-staged-publish.test.ts": 3,
-  "cfc-render-policy-demo.test.ts": 3,
-  "llm.test.ts": 3,
+  "cfc-authorized-save.test.ts": 3, // ~25s
+  "cfc-staged-publish.test.ts": 3, // ~24s
+  "cfc-render-policy-demo.test.ts": 3, // ~17s
+  "llm.test.ts": 3, // tiny
+  "parking-coordinator-admin-view.test.ts": 3, // ~42s
 
-  "nested-counter.test.ts": 4,
-  "counter.test.ts": 4,
-  "cfc-authorship-chat.test.ts": 4,
-  "chatbot.test.ts": 4,
+  "nested-counter.test.ts": 4, // ~21s
+  "counter.test.ts": 4, // ~21s
+  "cfc-authorship-chat.test.ts": 4, // ~22s
+  "chatbot.test.ts": 4, // tiny
+  "cfc-spec-gallery.test.ts": 4, // ~45s
 };
 
 export function parseShard(raw: string): Shard {
