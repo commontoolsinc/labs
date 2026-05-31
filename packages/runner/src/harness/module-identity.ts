@@ -116,7 +116,10 @@ export function computeModuleHashes(
         }));
       const crossDeps = node.internalDeps
         .filter((dep) => componentOf.get(dep.target) !== componentOf.get(path))
-        .map((dep) => ({ specifier: dep.specifier, hash: result.get(dep.target)! }))
+        .map((dep) => ({
+          specifier: dep.specifier,
+          hash: result.get(dep.target)!,
+        }))
         .sort(compareCrossDep);
       // Intra-component dependency *structure* is folded in so two different
       // cycle shapes over the same sources hash differently. The dependency

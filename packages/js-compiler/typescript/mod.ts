@@ -16,8 +16,8 @@ export {
 export { getCompilerOptions, TARGET } from "./options.ts";
 export {
   collectImportSpecifiers,
-  type ResolveModuleConfig,
   resolveImportSpecifier,
+  type ResolveModuleConfig,
   resolveProgram,
   type UnresolvedModuleHandling,
 } from "./resolver.ts";

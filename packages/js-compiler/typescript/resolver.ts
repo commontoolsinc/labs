@@ -87,7 +87,10 @@ function isUnresolvedModuleOk(
  * Relative specifiers (`./`, `../`) are joined against the importer's
  * directory; bare specifiers (e.g. `commonfabric`) are returned unchanged.
  */
-export function resolveImportSpecifier(specifier: string, from: Source): string {
+export function resolveImportSpecifier(
+  specifier: string,
+  from: Source,
+): string {
   return resolveSpecifier(specifier, from);
 }
 

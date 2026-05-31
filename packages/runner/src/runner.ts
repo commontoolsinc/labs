@@ -2208,7 +2208,10 @@ export class Runner {
    * then falls back to the raw source location for its implementation
    * fingerprint. See docs/specs/module-loading.md.
    */
-  private applyImplementationHash(action: Action, sourceLocation: string): void {
+  private applyImplementationHash(
+    action: Action,
+    sourceLocation: string,
+  ): void {
     const implementationHash = this.runtime.harness
       .implementationHashForSource?.(sourceLocation);
     if (implementationHash) {

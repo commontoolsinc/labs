@@ -7,7 +7,10 @@ import { computeModuleHashes } from "../src/harness/module-identity.ts";
 function program(main: string, files: Record<string, string>): Program {
   return {
     main,
-    files: Object.entries(files).map(([name, contents]) => ({ name, contents })),
+    files: Object.entries(files).map(([name, contents]) => ({
+      name,
+      contents,
+    })),
   };
 }
 
@@ -105,7 +108,8 @@ describe("computeModuleHashes", () => {
   });
 
   it("folds the runtime fingerprint into modules that import runtime modules", () => {
-    const usesRuntime = `import { h } from "commonfabric"; export const a = () => h();`;
+    const usesRuntime =
+      `import { h } from "commonfabric"; export const a = () => h();`;
     const pure = `export const z = () => 1;`;
 
     const p = program("/a.ts", { "/a.ts": usesRuntime, "/z.ts": pure });
