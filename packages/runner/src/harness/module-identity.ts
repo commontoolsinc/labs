@@ -158,8 +158,10 @@ export function computeModuleHashes(
 /**
  * Match a resolved (relative) import path against a concrete file name in the
  * program, trying TypeScript-style extension and directory-index candidates.
+ * Shared by module identity and the ESM record adapter so they agree on what
+ * counts as an internal edge.
  */
-function findInternalTarget(
+export function findInternalTarget(
   fileNames: Set<string>,
   resolved: string,
 ): string | undefined {
