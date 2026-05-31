@@ -962,6 +962,12 @@ export class Runtime {
       identity: this.storageManager.as as unknown as Identity,
       spaceName: name,
     });
+    // SECURITY INVARIANT: consume ONLY the resolved space DID. `createSession`
+    // may also derive a per-name space identity (private key); we must never
+    // adopt it as a signer here. Writes to the resolved space stay authorized
+    // as the active user (`storageManager.as`) and are gated per-space by the
+    // memory server's ACL, so resolving a name can never grant write access the
+    // caller does not already hold.
     const did = session.space as MemorySpace;
     this.spaceNameToDid.set(name, did);
     return did;

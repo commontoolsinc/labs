@@ -498,6 +498,16 @@ export class Runner {
     `${MemorySpace}/${CellScope}/${URI}`,
     string
   >();
+  // Per-transaction accumulator of cross-space child spaces, so that when a
+  // parent materializes several `Child.inSpace(...)` results into different
+  // spaces we commit ALL child spaces before the parent (the parent's link to
+  // each child must never be durable before that child's target). Each call
+  // re-supplies the full order rather than replacing it with just the latest
+  // child + parent. Keyed weakly by transaction so it is reclaimed with the tx.
+  private crossSpaceChildSpaces = new WeakMap<
+    IExtendedStorageTransaction,
+    MemorySpace[]
+  >();
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -2397,6 +2407,31 @@ export class Runner {
     );
   }
 
+  /**
+   * Opt `tx` into multi-space writes for a cross-space child, accumulating the
+   * commit order so every child space committed in this transaction is ordered
+   * before `parentSpace`. Without accumulation, a second cross-space child would
+   * replace the order with `[child2, parent]`, dropping `child1` to after the
+   * parent (orderedCommitSpaces appends unlisted written spaces), which would
+   * make the parent's link to `child1` durable before `child1`'s target.
+   */
+  private enableCrossSpaceChildCommit(
+    tx: IExtendedStorageTransaction,
+    childSpace: MemorySpace,
+    parentSpace: MemorySpace,
+  ): void {
+    let childSpaces = this.crossSpaceChildSpaces.get(tx);
+    if (childSpaces === undefined) {
+      childSpaces = [];
+      this.crossSpaceChildSpaces.set(tx, childSpaces);
+    }
+    if (childSpace !== parentSpace && !childSpaces.includes(childSpace)) {
+      childSpaces.push(childSpace);
+    }
+    // All accumulated child spaces first, parent last.
+    tx.enableMultiSpaceWrites?.([...childSpaces, parentSpace]);
+  }
+
   private handleJavaScriptHandlerResult(
     tx: IExtendedStorageTransaction,
     result: any,
@@ -2451,7 +2486,7 @@ export class Runner {
     if (crossSpace && !deferForNavigate) {
       // Commit the child space first so the originating space's link to it is
       // never durable before its target.
-      tx.enableMultiSpaceWrites?.([resultSpace, processCell.space]);
+      this.enableCrossSpaceChildCommit(tx, resultSpace, processCell.space);
     }
 
     const resultCell = deferForNavigate
@@ -3729,7 +3764,11 @@ export class Runner {
       // (child space committed first) rather than re-instantiating it in a
       // deferred second transaction, which would lose its verified-function
       // identity. The journal allows the cross-space write once opted in.
-      tx.enableMultiSpaceWrites?.([resultCell.space, resultCellLink.space]);
+      this.enableCrossSpaceChildCommit(
+        tx,
+        resultCell.space,
+        resultCellLink.space,
+      );
     }
     this.run(tx, patternImpl, inputs, resultCell);
 

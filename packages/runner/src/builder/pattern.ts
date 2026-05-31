@@ -510,6 +510,14 @@ function resolveInSpaceTargetSpace(
  * Derives a stable, unique name for an anonymous `inSpace()` call from the
  * frame's cause and a per-frame counter, so repeated calls in one run get
  * distinct spaces while re-runs of the same call site stay deterministic.
+ *
+ * Determinism caveat: the per-frame counter is position-based, so a handler
+ * must call `inSpace()` the same number of times (and in the same order) on
+ * every run for a given logical child to keep mapping to the same space. A
+ * handler that conditionally varies its anonymous `inSpace()` call count across
+ * reactive re-runs would remap a child to a different space and orphan its prior
+ * data. Deterministic handler bodies (the norm) are unaffected; name your spaces
+ * with `inSpace("name")` if call counts may vary.
  */
 function anonymousSpaceName(frame: Frame): string {
   const ordinal = frame.inSpaceCounter ?? 0;
