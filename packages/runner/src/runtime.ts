@@ -175,6 +175,13 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
+  /**
+   * Load compiled patterns as a graph of per-module records through the SES
+   * Compartment module system (synchronous `importNow`) instead of evaluating
+   * one flattened AMD bundle. Default off; the AMD path remains the default.
+   * See docs/specs/module-loading.md (Phases 2–5).
+   */
+  esmModuleLoader?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -313,6 +320,7 @@ export class Runtime {
       modernDataModel: undefined,
       persistentSchedulerState: undefined,
       schedulerHistoricalMightWrite: undefined,
+      esmModuleLoader: undefined,
       ...options.experimental,
     };
 
