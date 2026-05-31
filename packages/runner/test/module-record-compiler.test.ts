@@ -159,6 +159,26 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.run(undefined)).toBe(1);
   });
 
+  it("does not create edges for require(...) text in strings or comments", () => {
+    // `./ghost.ts` is a real sibling — a regex over the compiled text would
+    // wrongly pull it in as an eagerly-executed dependency.
+    const sources = files({
+      "/ghost.ts": `export const boom = 1;`,
+      "/main.ts": [
+        `// require("./ghost.ts") in a comment must be ignored`,
+        `export const s = 'see require("./ghost.ts") for details';`,
+        `export const run = (): number => 1;`,
+      ].join("\n"),
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const record = records.get(specifierByPath.get("/main.ts")!)!;
+    expect(record.imports).not.toContain("./ghost.ts");
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { run(): number };
+    expect(ns.run()).toBe(1);
+  });
+
   it("collects enum exports", () => {
     const sources = files({
       "/main.ts": `export enum Color { Red = 1, Blue = 2 }`,

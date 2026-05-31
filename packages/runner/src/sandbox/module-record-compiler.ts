@@ -171,14 +171,34 @@ export function compileSourcesToRecords(
  * Extract the runtime import specifiers actually emitted as `require()` calls
  * in the compiled CommonJS body. This is the precise runtime dependency set;
  * type-only imports have already been erased by the compiler.
+ *
+ * Parses the emitted JS AST and matches `require("literal")` call expressions,
+ * rather than scanning text — so a `require(...)` appearing inside a string
+ * literal, template literal, or comment in the authored source is NOT mistaken
+ * for a real dependency edge.
  */
 function extractRuntimeImports(compiled: string): string[] {
-  const re = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+  const sourceFile = ts.createSourceFile(
+    "compiled.js",
+    compiled,
+    TARGET,
+    true,
+    ts.ScriptKind.JS,
+  );
   const out = new Set<string>();
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(compiled)) !== null) {
-    out.add(match[1]);
+  function visit(node: ts.Node): void {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "require" &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteralLike(node.arguments[0])
+    ) {
+      out.add((node.arguments[0] as ts.StringLiteralLike).text);
+    }
+    ts.forEachChild(node, visit);
   }
+  visit(sourceFile);
   return [...out];
 }
 
