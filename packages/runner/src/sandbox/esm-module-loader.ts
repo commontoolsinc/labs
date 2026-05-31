@@ -1,4 +1,5 @@
 import { ensureSESLockdown } from "./ses-runtime.ts";
+import { verifyModuleGraph } from "./module-record-verifier.ts";
 
 /**
  * SES module-graph loader (Phase 2 of docs/specs/module-loading.md).
@@ -67,6 +68,11 @@ export interface SesModuleLoaderOptions {
   globals?: Record<string, unknown>;
   /** Optional compartment name, for diagnostics. */
   name?: string;
+  /**
+   * Run structural graph verification before loading. Default true. The deep
+   * SES classification port is still pending (see module-record-verifier.ts).
+   */
+  verify?: boolean;
 }
 
 /**
@@ -78,7 +84,11 @@ export function importModuleGraphNow(
   options: SesModuleLoaderOptions,
 ): Record<string, unknown> {
   ensureSESLockdown();
-  const { records, globals = {}, name = "cf:esm" } = options;
+  const { records, globals = {}, name = "cf:esm", verify = true } = options;
+
+  if (verify) {
+    verifyModuleGraph(records, entrySpecifier);
+  }
 
   const CompartmentCtor = (globalThis as { Compartment?: SesCompartmentCtor })
     .Compartment;
