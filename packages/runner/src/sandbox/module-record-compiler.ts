@@ -42,6 +42,23 @@ const RESOLUTION_SUFFIXES = [
   "/index.mjs",
 ];
 
+/** Per-module compiled artifact, cacheable by module hash (Phase 4). */
+export interface CompiledModuleArtifact {
+  exports: string[];
+  compiled: string;
+}
+
+/**
+ * Cache of compiled module artifacts keyed by content-addressed module hash.
+ * Because the hash already folds in the transitive import closure, a cached
+ * artifact is valid as long as its key matches — editing one file invalidates
+ * only that module (and its importers, whose hashes change).
+ */
+export interface ModuleRecordCache {
+  get(moduleHash: string): CompiledModuleArtifact | undefined;
+  set(moduleHash: string, artifact: CompiledModuleArtifact): void;
+}
+
 export interface CompileSourcesOptions {
   /**
    * Names exported by each bare runtime module specifier (e.g.
@@ -50,6 +67,8 @@ export interface CompileSourcesOptions {
    */
   runtimeModules?: Record<string, string[]>;
   runtimeFingerprint?: string;
+  /** Optional per-module compiled-artifact cache, keyed by module hash. */
+  recordCache?: ModuleRecordCache;
 }
 
 export interface CompiledModuleGraph {
@@ -93,15 +112,25 @@ export function compileSourcesToRecords(
       }
     }
 
-    const exportNames = collectExportNames(source);
-    const compiled = ts.transpileModule(source.contents, {
-      fileName: source.name,
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: TARGET,
-        esModuleInterop: true,
-      },
-    }).outputText;
+    const moduleHash = hashes.get(source.name)!;
+    const cached = options.recordCache?.get(moduleHash);
+    let exportNames: string[];
+    let compiled: string;
+    if (cached) {
+      exportNames = cached.exports;
+      compiled = cached.compiled;
+    } else {
+      exportNames = collectExportNames(source);
+      compiled = ts.transpileModule(source.contents, {
+        fileName: source.name,
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: TARGET,
+          esModuleInterop: true,
+        },
+      }).outputText;
+      options.recordCache?.set(moduleHash, { exports: exportNames, compiled });
+    }
 
     records.set(specifier, {
       imports: importSpecs,
