@@ -27,6 +27,7 @@ import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
 import { pretransformProgram } from "./pretransform.ts";
+import { computeModuleHashes } from "./module-identity.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
 import {
   ensureSESLockdown,
@@ -124,6 +125,10 @@ export class Engine extends EventTarget implements Harness {
   private sesRuntime: SESRuntime | undefined;
   private loadIds = new WeakMap<JsScript, string>();
   private nextLoadId = 0;
+  // Content-addressed module hash per prefixed source path (`/<id>/file.tsx`),
+  // populated at evaluate() time. Used to translate an action's bundle-relative
+  // source location into a stable implementation identity.
+  private moduleHashByPrefixedSource = new Map<string, string>();
   private readonly bundleValidator = new CompiledBundleValidator();
   private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
@@ -242,6 +247,7 @@ export class Engine extends EventTarget implements Harness {
       if (!options.skipBundleValidation) {
         this.bundleValidator.verify(jsScript, `${id}.js`);
       }
+      this.registerModuleHashes(id, files);
       const { runtime, runtimeExports, exportsCallback } = await this
         .getRuntimeInternals();
       const loadId = this.getLoadId(id, jsScript);
@@ -409,6 +415,26 @@ export class Engine extends EventTarget implements Harness {
     options: UnsafeHostTrustOptions,
   ): void {
     this.executableRegistry.trustHostValue(value, options);
+  }
+
+  // Record the content-addressed hash of every module in a load, keyed by its
+  // prefixed source path (`/<id>/file.tsx`) so it can be matched against the
+  // source-map `source` that appears in an action's source location.
+  private registerModuleHashes(id: string, files: Source[]): void {
+    const hashes = computeModuleHashes({ main: "", files });
+    for (const [path, hash] of hashes) {
+      this.moduleHashByPrefixedSource.set(`/${id}${path}`, hash);
+    }
+  }
+
+  // Translate a source-location string into a stable content-addressed
+  // implementation identity. See the Harness interface for the contract.
+  implementationHashForSource(sourceLocation: string): string | undefined {
+    const match = sourceLocation.match(/^(.*):(\d+):(\d+)$/);
+    const sourcePath = match ? match[1] : sourceLocation;
+    const suffix = match ? `:${match[2]}:${match[3]}` : "";
+    const hash = this.moduleHashByPrefixedSource.get(sourcePath);
+    return hash === undefined ? undefined : `cf:module/${hash}${suffix}`;
   }
 
   // Map a single position to its original source location.
