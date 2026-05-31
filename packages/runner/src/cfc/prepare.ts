@@ -549,15 +549,19 @@ const candidateSchemasByTarget = (
 };
 
 /**
- * Maps each write target cell to the list of its `schema` write-policy inputs
+ * Maps each write target cell to the list of its write-authority-bearing inputs
  * (path + the implementation identity that authored each, captured when the
- * input was recorded). `writeAuthorizedBy` is verified per field, so we must
- * keep each schema input's identity separately rather than collapsing a cell to
- * a single identity: a cell may carry several protected fields written under
- * different identities, and only `schema` inputs (not trusted-event/structural
- * ones) author the IFC entries that `writeAuthorizedBy` checks.
+ * input was recorded). `writeAuthorizedBy` is verified per field, so we keep
+ * each input's identity separately rather than collapsing a cell to a single
+ * identity: a cell may carry several protected fields written under different
+ * identities. Only `schema` and `link-write` inputs author the IFC entries that
+ * `writeAuthorizedBy` checks (a value write and a link write into a protected
+ * slot respectively); `trusted-event`, `structural-provenance` (setup markers),
+ * `custom`, and `sink-request` inputs do not, so they must not contribute an
+ * authoring identity (including them would let an unrelated input's identity be
+ * borrowed for the writeAuthorizedBy check).
  */
-const schemaInputIdentitiesByTarget = (
+const writePolicyIdentitiesByTarget = (
   inputs: readonly WritePolicyInput[],
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
@@ -575,7 +579,7 @@ const schemaInputIdentitiesByTarget = (
     >
   >();
   for (const input of inputs) {
-    if (input.kind !== "schema") {
+    if (input.kind !== "schema" && input.kind !== "link-write") {
       continue;
     }
     const key = targetKey(input.target);
@@ -2083,7 +2087,7 @@ export const prepareBoundaryCommit = (
     state.writePolicyInputs,
     identityForInput,
   );
-  const schemaIdentities = schemaInputIdentitiesByTarget(
+  const writeAuthorIdentities = writePolicyIdentitiesByTarget(
     state.writePolicyInputs,
     identityForInput,
   );
@@ -2181,7 +2185,7 @@ export const prepareBoundaryCommit = (
       tx,
       verificationSchema,
       target,
-      (path) => identityForSchemaPath(schemaIdentities.get(key), path),
+      (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
     );
     if (requirementFailure) {
       reasons.push(requirementFailure);
