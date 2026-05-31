@@ -262,6 +262,161 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
   }
 });
 
+Deno.test("memory v2 rewrites no-op scheduler pending read watermarks to resolved seqs", async () => {
+  const { engine, path } = await createEngine();
+  const sessionId = "session:scheduler-observation-pending-read";
+
+  try {
+    const write = applyCommit(engine, {
+      sessionId,
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 1 } },
+        }],
+      },
+    });
+    const beforeObservationCommits = countRows(engine, `"commit"`);
+    const pendingObservation = observationForAction(
+      "pattern.tsx:computed:pending-read",
+      {
+        reads: [sourceRead],
+        readWatermarks: [{ ...sourceRead, kind: "recursive", seq: 0 }],
+      },
+    );
+
+    const result = applyCommit(engine, {
+      sessionId,
+      space: sourceRead.space,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: sourceRead.id,
+            scope: sourceRead.scope,
+            path: toDocumentPath(sourceRead.path),
+            localSeq: 1,
+          }],
+        },
+        operations: [],
+        schedulerObservation: pendingObservation,
+      },
+    });
+
+    assertEquals(result.revisions, []);
+    assertEquals(countRows(engine, `"commit"`), beforeObservationCommits);
+    assertEquals(result.schedulerObservationResults?.[0]?.status, "kept");
+    const snapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace: sourceRead.space,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: "pattern.tsx:computed:pending-read",
+    });
+    assertEquals(snapshot?.observation.readWatermarks, [
+      { ...sourceRead, kind: "recursive", seq: write.seq },
+    ]);
+
+    const replay = applyCommit(engine, {
+      sessionId,
+      space: sourceRead.space,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: sourceRead.id,
+            scope: sourceRead.scope,
+            path: toDocumentPath(sourceRead.path),
+            localSeq: 1,
+          }],
+        },
+        operations: [],
+        schedulerObservation: pendingObservation,
+      },
+    });
+    assertEquals(replay.schedulerObservationId, result.schedulerObservationId);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 rewrites semantic scheduler pending read watermarks to resolved seqs", async () => {
+  const { engine, path } = await createEngine();
+  const sessionId = "session:scheduler-observation-semantic-pending-read";
+
+  try {
+    const write = applyCommit(engine, {
+      sessionId,
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 1 } },
+        }],
+      },
+    });
+    const pendingObservation = observationForAction(
+      "pattern.tsx:computed:semantic-pending-read",
+      {
+        reads: [sourceRead],
+        readWatermarks: [{ ...sourceRead, kind: "recursive", seq: 0 }],
+      },
+    );
+
+    const result = applyCommit(engine, {
+      sessionId,
+      space: sourceRead.space,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: sourceRead.id,
+            scope: sourceRead.scope,
+            path: toDocumentPath(sourceRead.path),
+            localSeq: 1,
+          }],
+        },
+        operations: [{
+          op: "set",
+          id: targetWrite.id,
+          scope: targetWrite.scope,
+          value: { value: { count: 2 } },
+        }],
+        schedulerObservation: pendingObservation,
+      },
+    });
+
+    assertEquals(result.revisions.length, 1);
+    const snapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace: sourceRead.space,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: "pattern.tsx:computed:semantic-pending-read",
+    });
+    assertEquals(snapshot?.commitSeq, result.seq);
+    assertEquals(snapshot?.observation.readWatermarks, [
+      { ...sourceRead, kind: "recursive", seq: write.seq },
+    ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 accepts batched no-op scheduler observations", async () => {
   const { engine, path } = await createEngine();
 

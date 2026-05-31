@@ -14,6 +14,7 @@ import {
   isEntityDocument,
   type Operation,
   type PatchOp,
+  type PendingRead,
   type Reference,
   type SchedulerActionSnapshotCursor,
   type SessionId,
@@ -3240,14 +3241,23 @@ const applyCommitTransaction = (
   }
 
   if (schedulerObservation) {
+    const canonicalSchedulerObservation =
+      rewriteSchedulerObservationPendingReadWatermarks({
+        observation: schedulerObservation,
+        reads: commit.reads,
+        pendingSeqByLocalSeq: new Map(
+          resolvedPendingReads.map(({ localSeq, seq }) => [localSeq, seq]),
+        ),
+        space,
+      });
     upsertSchedulerObservationTransaction(engine, {
       branch,
-      ownerSpace: space ?? schedulerObservation.ownerSpace,
+      ownerSpace: space ?? canonicalSchedulerObservation.ownerSpace,
       commitSeq: seq,
       observedAtSeq: seq,
       sessionId: sessionKey,
       localSeq: commit.localSeq,
-      observation: schedulerObservation,
+      observation: canonicalSchedulerObservation,
     });
   }
 
@@ -3496,7 +3506,17 @@ type SchedulerObservationDropReason = NonNullable<
   AppliedSchedulerObservationResult["reason"]
 >;
 
-const schedulerObservationReadDropReason = (
+type SchedulerObservationReadResolution =
+  | {
+    status: "ok";
+    pendingSeqByLocalSeq: Map<number, number>;
+  }
+  | {
+    status: "drop";
+    reason: SchedulerObservationDropReason;
+  };
+
+const resolveSchedulerObservationReadEvidence = (
   engine: Engine,
   {
     sessionKey,
@@ -3511,7 +3531,7 @@ const schedulerObservationReadDropReason = (
     branch: BranchName;
     reads: ClientCommit["reads"];
   },
-): SchedulerObservationDropReason | undefined => {
+): SchedulerObservationReadResolution => {
   for (const read of reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
@@ -3525,26 +3545,23 @@ const schedulerObservationReadDropReason = (
       read.path,
     );
     if (conflictSeq !== null) {
-      return "stale-confirmed-read";
+      return { status: "drop", reason: "stale-confirmed-read" };
     }
   }
 
-  const resolutions = new Map<number, { localSeq: number; seq: number }>();
+  const pendingSeqByLocalSeq = new Map<number, number>();
   for (const read of reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
+    let resolvedSeq = pendingSeqByLocalSeq.get(read.localSeq);
+    if (resolvedSeq === undefined) {
       const row = engine.statements.selectPendingResolution.get({
         session_id: sessionKey,
         local_seq: read.localSeq,
       }) as { seq: number } | undefined;
       if (!row) {
-        return "pending-read-missing";
+        return { status: "drop", reason: "pending-read-missing" };
       }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+      resolvedSeq = row.seq;
+      pendingSeqByLocalSeq.set(read.localSeq, resolvedSeq);
     }
 
     const conflictSeq = findConflictSeq(
@@ -3552,15 +3569,73 @@ const schedulerObservationReadDropReason = (
       branch,
       read.id,
       resolveScopeKey(read.scope, { principal, sessionId }),
-      resolution.seq,
+      resolvedSeq,
       read.path,
     );
     if (conflictSeq !== null) {
-      return "stale-pending-read";
+      return { status: "drop", reason: "stale-pending-read" };
     }
   }
 
-  return undefined;
+  return { status: "ok", pendingSeqByLocalSeq };
+};
+
+const rewriteSchedulerObservationPendingReadWatermarks = (
+  {
+    observation,
+    reads,
+    pendingSeqByLocalSeq,
+    space,
+  }: {
+    observation: SchedulerActionObservation;
+    reads: ClientCommit["reads"];
+    pendingSeqByLocalSeq: ReadonlyMap<number, number>;
+    space?: string;
+  },
+): SchedulerActionObservation => {
+  if (
+    pendingSeqByLocalSeq.size === 0 ||
+    !observation.readWatermarks ||
+    observation.readWatermarks.length === 0
+  ) {
+    return observation;
+  }
+
+  let changed = false;
+  const readWatermarks = observation.readWatermarks.map((watermark) => {
+    let seq = watermark.seq;
+    for (const read of reads.pending) {
+      const resolvedSeq = pendingSeqByLocalSeq.get(read.localSeq);
+      if (
+        resolvedSeq === undefined ||
+        !pendingReadOverlapsSchedulerWatermark(read, watermark, space)
+      ) {
+        continue;
+      }
+      seq = Math.max(seq, resolvedSeq);
+    }
+    if (seq === watermark.seq) {
+      return watermark;
+    }
+    changed = true;
+    return { ...watermark, seq };
+  });
+
+  return changed ? { ...observation, readWatermarks } : observation;
+};
+
+const pendingReadOverlapsSchedulerWatermark = (
+  read: PendingRead,
+  watermark: SchedulerObservedRead,
+  space?: string,
+): boolean => {
+  return (
+    (space === undefined || watermark.space === space) &&
+    read.id === watermark.id &&
+    normalizeSchedulerScope(read.scope) ===
+      normalizeSchedulerScope(watermark.scope) &&
+    pathsOverlap(read.path, watermark.path)
+  );
 };
 
 const replayedSchedulerObservationResult = (
@@ -3630,7 +3705,7 @@ const applySchedulerObservationOnlyCommit = (
   },
 ): AppliedCommit => {
   const observedAtSeq = headSeq(engine, branch);
-  const replayPayload = schedulerObservationReplayPayload({
+  const originalReplayPayload = schedulerObservationReplayPayload({
     branch,
     observedAtSeq,
     ownerSpace: space ?? schedulerObservation.ownerSpace,
@@ -3642,7 +3717,33 @@ const applySchedulerObservationOnlyCommit = (
     localSeq,
   });
   if (existingReplay) {
-    if (existingReplay.payload !== replayPayload) {
+    let replayPayloadMatches = existingReplay.payload === originalReplayPayload;
+    if (!replayPayloadMatches) {
+      const readResolution = resolveSchedulerObservationReadEvidence(engine, {
+        sessionKey,
+        sessionId,
+        principal,
+        branch,
+        reads,
+      });
+      if (readResolution.status === "ok") {
+        const canonicalObservation =
+          rewriteSchedulerObservationPendingReadWatermarks({
+            observation: schedulerObservation,
+            reads,
+            pendingSeqByLocalSeq: readResolution.pendingSeqByLocalSeq,
+            space,
+          });
+        replayPayloadMatches = existingReplay.payload ===
+          schedulerObservationReplayPayload({
+            branch,
+            observedAtSeq,
+            ownerSpace: space ?? canonicalObservation.ownerSpace,
+            observation: canonicalObservation,
+          });
+      }
+    }
+    if (!replayPayloadMatches) {
       throw new ProtocolError(
         `scheduler observation replay mismatch for session ${sessionId} localSeq ${localSeq}`,
       );
@@ -3662,22 +3763,22 @@ const applySchedulerObservationOnlyCommit = (
     };
   }
 
-  const dropReason = schedulerObservationReadDropReason(engine, {
+  const readResolution = resolveSchedulerObservationReadEvidence(engine, {
     sessionKey,
     sessionId,
     principal,
     branch,
     reads,
   });
-  if (dropReason) {
+  if (readResolution.status === "drop") {
     recordSchedulerObservationReplay(engine, {
       branch,
       sessionId: sessionKey,
       localSeq,
       status: "dropped",
-      reason: dropReason,
+      reason: readResolution.reason,
       observedAtSeq,
-      payload: replayPayload,
+      payload: originalReplayPayload,
     });
     return {
       seq: observedAtSeq,
@@ -3686,18 +3787,26 @@ const applySchedulerObservationOnlyCommit = (
       schedulerObservationResults: [{
         localSeq,
         status: "dropped",
-        reason: dropReason,
+        reason: readResolution.reason,
       }],
     };
   }
 
+  const canonicalObservation = rewriteSchedulerObservationPendingReadWatermarks(
+    {
+      observation: schedulerObservation,
+      reads,
+      pendingSeqByLocalSeq: readResolution.pendingSeqByLocalSeq,
+      space,
+    },
+  );
   const observationResult = upsertSchedulerObservationTransaction(engine, {
     branch,
-    ownerSpace: space ?? schedulerObservation.ownerSpace,
+    ownerSpace: space ?? canonicalObservation.ownerSpace,
     observedAtSeq,
     sessionId: sessionKey,
     localSeq,
-    observation: schedulerObservation,
+    observation: canonicalObservation,
   });
   return {
     seq: observedAtSeq,

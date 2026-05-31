@@ -625,12 +625,18 @@ When an action run is a no-op:
 
 1. Persist the scheduler observation without semantic revisions if its read
    watermarks are current.
-2. Drop the observation without failing the transaction if a read watermark is
-   stale or a pending read dependency is no longer valid.
-3. Replace read/write/materializer index rows for kept observations.
-4. Clear the action's direct dirty bit for kept observations.
-5. Leave existing dirty/stale/unknown state in place for dropped observations.
-6. Do not dirty downstream readers, because no actual changed writes occurred.
+2. Resolve pending read dependencies by the same session/local sequence
+   mechanism used for semantic commits. Kept observations must be persisted
+   with read watermarks rewritten to the resolved server sequence for matching
+   pending reads, so later rehydration is anchored to durable memory state, not
+   speculative client state.
+3. Drop the observation without failing the transaction if a read watermark is
+   stale, a pending read dependency is missing, or a pending read dependency is
+   no longer valid.
+4. Replace read/write/materializer index rows for kept observations.
+5. Clear the action's direct dirty bit for kept observations.
+6. Leave existing dirty/stale/unknown state in place for dropped observations.
+7. Do not dirty downstream readers, because no actual changed writes occurred.
 
 This server-side state changes the role of rehydration. Restart no longer has
 to discover from scratch whether inactive writes made the piece dirty; it loads

@@ -708,3 +708,25 @@
   hundreds seen before this fix. The remaining drops are early transient
   observations for sinks/notebook work that later receive kept observations in
   the same reload session.
+- Follow-up design correction: client-side ordering is still useful, but the
+  server should be the authority for the read watermark stored with a scheduler
+  observation. A no-op observation can cite a pending semantic write by
+  session/local sequence, and if that pending dependency resolves, memory v2 now
+  rewrites matching scheduler read watermarks to the resolved server sequence
+  before persisting the observation snapshot/replay payload.
+- Decision: use the same pending-read resolution table as semantic commits.
+  Missing or stale pending dependencies still drop the no-op observation without
+  failing the transaction. Kept observations are canonicalized so rehydration is
+  anchored to durable server state rather than the client-side speculative
+  sequence visible during the action run.
+- Validation so far:
+  - `HEADLESS=1 deno test -A packages/memory/test/v2-scheduler-state-test.ts --filter "pending read watermarks"`
+  - `HEADLESS=1 deno test -A packages/memory/test/v2-scheduler-state-test.ts`
+  - `HEADLESS=1 deno test -A packages/memory/test/v2-scheduler-state-test.ts packages/runner/test/memory-v2-stacked-commit.test.ts packages/runner/test/memory-v2-subscription.test.ts`
+  - `HEADLESS=1 PIPE_CONSOLE=1 CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 deno task integration --port-offset=912 patterns-reload`
+- Observation: the server-side rewrite canonicalizes kept observations but does
+  not make unresolved pending dependencies resolvable. The port-offset 912
+  reload run passed, but still showed noisy reload work and some
+  `pending-read-missing` drops; those are separate from the fixed case where the
+  pending semantic commit has already reached the server and can be translated
+  to a durable seq.
