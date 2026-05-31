@@ -116,6 +116,12 @@ const REJECT: Case[] = [
     reject: /.*/,
   },
   {
+    name: "shadowed require via async function declaration",
+    body:
+      `async function require(x) { return globalThis; }\nconst g = require("commonfabric");\nexports.g = g;`,
+    reject: /.*/,
+  },
+  {
     name: "require of a disallowed specifier (node:fs)",
     body: `const fs_1 = require("node:fs");\nexports.fs = fs_1;`,
     reject: /.*/,

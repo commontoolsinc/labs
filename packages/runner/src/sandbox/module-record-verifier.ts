@@ -74,7 +74,8 @@ export function verifyCompiledModuleBody(
   // a non-canonical require has no special treatment.
   const requireShadowed = statementTexts.some((t) =>
     /^(?:const|let|var)\s+require\b/.test(t) ||
-    /^function\s*\*?\s*require\b/.test(t)
+    /^(?:async\s+)?function\s*\*?\s*require\b/.test(t) ||
+    /^class\s+require\b/.test(t)
   );
 
   const env = new Map<string, BindingInfo>();
