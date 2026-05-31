@@ -128,7 +128,10 @@ describe("multi-space write transactions", () => {
     };
     replicaB.commitNative = () =>
       Promise.resolve({
-        error: { name: "StorageTransactionRejected", message: "space B failed" },
+        error: {
+          name: "StorageTransactionRejected",
+          message: "space B failed",
+        },
       });
 
     const result = await tx.commit();
