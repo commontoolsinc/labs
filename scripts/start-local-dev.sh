@@ -200,9 +200,13 @@ ensure_process_running() {
     local name=$1
     local pid=$2
     local log_file=$3
+    local process_state
 
     if kill -0 "$pid" 2>/dev/null; then
-        return
+        process_state=$(ps -p "$pid" -o stat= 2>/dev/null)
+        if [[ "$process_state" != *Z* ]]; then
+            return
+        fi
     fi
 
     wait "$pid" 2>/dev/null
@@ -218,14 +222,21 @@ wait_for_http() {
     local url=$2
     local pid=$3
     local log_file=$4
+    local deadline=$((SECONDS + LOCAL_DEV_STARTUP_TIMEOUT))
+    local remaining
     local status
 
     echo "Waiting for $name at $url..."
-    for _ in $(seq 1 "$LOCAL_DEV_STARTUP_TIMEOUT"); do
+    while (( SECONDS < deadline )); do
         ensure_process_running "$name" "$pid" "$log_file"
 
+        remaining=$((deadline - SECONDS))
+        if (( remaining > 2 )); then
+            remaining=2
+        fi
+
         status=$(
-            curl -s -o /dev/null -w "%{http_code}" --max-time 2 \
+            curl -s -o /dev/null -w "%{http_code}" --max-time "$remaining" \
                 "$url" 2>/dev/null
         )
         if [[ "$status" == "200" ]]; then
@@ -233,7 +244,9 @@ wait_for_http() {
             return
         fi
 
-        sleep 1
+        if (( SECONDS < deadline )); then
+            sleep 1
+        fi
     done
 
     fail_startup \
@@ -244,8 +257,6 @@ wait_for_http() {
 cd "$SCRIPT_DIR/../packages/shell"
 TOOLSHED_PORT="$TOOLSHED_PORT" deno task dev-local > "$SHELL_LOG" 2>&1 &
 SHELL_PID=$!
-
-wait_for_http "shell" "http://localhost:$SHELL_PORT" "$SHELL_PID" "$SHELL_LOG"
 
 # Start toolshed dev server in background
 # We pass --port= as CLI arg because deno --watch doesn't pass env vars to subprocess
@@ -267,6 +278,8 @@ SHELL_URL="http://localhost:$SHELL_PORT" \
         --env-file=.env index.ts --port="$TOOLSHED_PORT" \
         > "$TOOLSHED_LOG" 2>&1 &
 TOOLSHED_PID=$!
+
+wait_for_http "shell" "http://localhost:$SHELL_PORT" "$SHELL_PID" "$SHELL_LOG"
 
 # # Function to cleanup background processes
 # cleanup() {
