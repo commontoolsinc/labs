@@ -98,5 +98,5 @@ actual security boundary moves to CFC labels on the write paths, with the
   is the structural baseline that PR #3358's chat demo also uses (just with
   CFC-typed value wrappers).
 - [`docs/development/scoped-cells-field-notes.md`](../../../docs/development/scoped-cells-field-notes.md)
-  — session notes from the original cozy-poll-scoped build, including the OCC +
+  — session notes from the original cozy-poll build, including the OCC +
   retry guarantees the current admin-claim flow relies on.
