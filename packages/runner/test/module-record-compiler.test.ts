@@ -121,6 +121,31 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(cache.hits).toBe(1);
   });
 
+  it("prefers a precompiled body over a cached (bare-transpiled) one", () => {
+    const sources = files({
+      "/main.ts": `export const run = (): number => 1;`,
+    });
+    const cache = new MapRecordCache();
+    // Seed the cache with a stale bare-transpiled artifact.
+    compileSourcesToRecords(sources, { recordCache: cache });
+    expect(cache.store.size).toBe(1);
+
+    // With a precompiled body provided, the cache must be ignored (different
+    // compilation mode) and the precompiled body used.
+    const precompiledBodies = new Map([[
+      "/main.ts",
+      `Object.defineProperty(exports, "__esModule", { value: true });\nexports.run = () => 99;`,
+    ]]);
+    const { records, specifierByPath } = compileSourcesToRecords(sources, {
+      recordCache: cache,
+      precompiledBodies,
+    });
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { run(): number };
+    expect(ns.run()).toBe(99);
+  });
+
   it("uses the cached compiled artifact (cache is authoritative on hit)", () => {
     const sources = files({
       "/main.ts": `export const run = (): number => 1;`,

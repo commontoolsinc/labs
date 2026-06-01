@@ -280,10 +280,18 @@ export class Engine extends EventTarget implements Harness {
         },
       });
 
-      // Build records from the CF-transformed per-module bodies.
+      // Every authored (non-.d.ts) source must have an emitted body; a missing
+      // one would otherwise be silently dropped and only fail later at import.
       const moduleFiles = resolvedProgram.files.filter((f) =>
-        modules.has(f.name)
+        !f.name.endsWith(".d.ts")
       );
+      for (const file of moduleFiles) {
+        if (!modules.has(file.name)) {
+          throw new Error(
+            `ESM compile produced no module body for '${file.name}'`,
+          );
+        }
+      }
       const precompiledBodies = new Map(
         [...modules].map(([name, out]) => [name, out.js]),
       );

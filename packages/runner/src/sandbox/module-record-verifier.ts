@@ -8,6 +8,10 @@ import {
   isAllowedAuthoredImportSpecifier,
   isRuntimeModuleIdentifier,
 } from "./runtime-module-policy.ts";
+import {
+  isAllowedTsLibHelperDeclaration,
+  normalizeExact,
+} from "./bundle-preflight.ts";
 
 /**
  * Structural pre-flight verification for a module-record graph (Phase 3 of
@@ -86,6 +90,13 @@ export function verifyCompiledModuleBody(
     // local path); arbitrary specifiers (e.g. "node:fs") fall through and are
     // rejected by classification, matching the AMD dependency allowlist. The
     // fast-path is disabled entirely when `require` is shadowed.
+    // Inline TS interop helper declarations (`var __importDefault = …`, etc.)
+    // are emitted per-module for default/namespace imports and re-exports. They
+    // are canonical compiler output (byte-matched), trusted, and `var` — skip
+    // them before classification, which would otherwise reject the `var`.
+    if (isAllowedTsLibHelperDeclaration(normalizeExact(text))) {
+      return;
+    }
     if (!requireShadowed) {
       const bound = REQUIRE_IMPORT.exec(text);
       if (bound && isAllowedAuthoredImportSpecifier(bound[2])) {

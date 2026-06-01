@@ -96,16 +96,24 @@ export function compileSourcesToRecords(
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
     const moduleHash = hashes.get(source.name)!;
-    const cached = options.recordCache?.get(moduleHash);
+    const precompiled = options.precompiledBodies?.get(source.name);
     let exportNames: string[];
     let compiled: string;
-    if (cached) {
+    // A precompiled (CF-transformed) body is authoritative. Do NOT consult or
+    // populate the shared cache: it may hold a bare-transpiled body under the
+    // same content-hash key (different compilation mode), which must not mix.
+    const cached = precompiled === undefined
+      ? options.recordCache?.get(moduleHash)
+      : undefined;
+    if (precompiled !== undefined) {
+      exportNames = collectExportNames(source);
+      compiled = precompiled;
+    } else if (cached) {
       exportNames = cached.exports;
       compiled = cached.compiled;
     } else {
       exportNames = collectExportNames(source);
-      const precompiled = options.precompiledBodies?.get(source.name);
-      compiled = precompiled ?? ts.transpileModule(source.contents, {
+      compiled = ts.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
           module: ts.ModuleKind.CommonJS,

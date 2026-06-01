@@ -186,7 +186,14 @@ function isBootstrapStatement(
     isAllowedTsLibHelperDeclaration(normalized);
 }
 
-function isAllowedTsLibHelperDeclaration(normalized: string): boolean {
+/**
+ * True when `normalized` (a `normalizeExact`-normalized statement) is one of the
+ * canonical TypeScript interop helper declarations the compiler emits
+ * (`__importDefault`, `__createBinding`, `__exportStar`, `__setModuleDefault`).
+ * Shared with the per-module ESM verifier, where these helpers appear inline in
+ * each module that uses default/namespace imports or re-exports.
+ */
+export function isAllowedTsLibHelperDeclaration(normalized: string): boolean {
   const match = normalized.match(/^var([A-Za-z_$][\w$]*)=/);
   if (!match || !ALLOWED_TSLIB_HELPERS.has(match[1])) {
     return false;
@@ -234,7 +241,7 @@ function isExportMapAssignment(normalized: string): boolean {
   return /^exportMap\[(["']).+\1\]=require\((['"]).+\2\);?$/.test(normalized);
 }
 
-function normalizeExact(
+export function normalizeExact(
   source: string,
   start = 0,
   end = source.length,

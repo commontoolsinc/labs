@@ -372,7 +372,16 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const sourceByStem = new Map<string, string>();
     for (const name of sourceNames) {
       if (name.endsWith(".d.ts")) continue;
-      sourceByStem.set(name.replace(/\.[^./]+$/, ""), name);
+      const stem = name.replace(/\.[^./]+$/, "");
+      const existing = sourceByStem.get(stem);
+      if (existing !== undefined) {
+        // Two sources emit to the same `<stem>.js` (e.g. `/a.ts` and `/a.tsx`).
+        // The output→source mapping would be ambiguous; fail loudly.
+        throw new Error(
+          `Ambiguous emit target: '${existing}' and '${name}' both compile to '${stem}.js'`,
+        );
+      }
+      sourceByStem.set(stem, name);
     }
     const writes = host.getWrites();
     const result = new Map<string, { js: string; sourceMap?: SourceMap }>();
