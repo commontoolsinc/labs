@@ -540,3 +540,24 @@ rather than extending `commitOperations` directly, and (d) carries the **Q7
 watermark write** forward (Phase 6 groundwork) while deferring detect/quarantine.
 Phase 3 (reactivity: mark the handle cell dirty) and the explicit
 read-after-write guard remain separate follow-ups noted above.
+
+---
+
+## 6. Implementation note — Stages 1–3 landed; Stage 5 contract finding
+
+Stages 1–3 (engine + server) are implemented and tested (engine-layer atomicity
++ rollback; server-loopback folded commit + rollback). See IMPLEMENTATION_LOG.
+
+**Stage 5 contract decision (surfaced during implementation, not in §1–§5):**
+folding `sqliteExecute` into the commit removes the synchronous write result —
+`applyCommit` returns `seq`/revisions, not SQLite `changes`/`lastInsertRowid`.
+Before wiring Stage 5, choose:
+- **(a)** thread results: `applySqliteOperation` returns `{changes,
+  lastInsertRowid}`, collect into a new `AppliedCommit.sqliteResults` (indexed by
+  op), return through `Server.transact` → runner; the builtin writes them to its
+  result cell. Preserves today's `sqliteExecute` contract.
+- **(b)** drop counts: the folded `sqliteExecute` reports only `{pending:false}`
+  on commit success (success ⇔ commit success). Simpler; changes the
+  `sqliteExecute` result shape and its test.
+
+Recommend (a) if any pattern needs `changes`/`lastInsertRowid`; otherwise (b).

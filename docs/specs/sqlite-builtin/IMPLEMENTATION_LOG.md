@@ -256,6 +256,43 @@ remains a documented future-hardening alternative.
 (also hit by the LRU/protocol tests) — builtin/runner tests that exercise data
 must use a unique space (or unique db id) per test.
 
+### Atomic commit-folded writes — engine + server DONE (Stages 1–3)
+
+Following [plans/atomic-writes.md](./plans/atomic-writes.md):
+- `SqliteOperation` added to the wire `Operation` union (v2.ts).
+- `applyCommitTransaction` runs `sqlite` ops via `applySqliteOperation` **inside
+  the commit transaction** and **skips** them in the revision loop (they are not
+  entity revisions); `writeOperation` narrowed to exclude them; a defensive
+  default added to the stored-revision switch; `ApplyCommitOptions.sqliteAttachments`
+  carries the dbId→alias map.
+- `Server.transact` attaches the commit's cell-db(s) **before** `applyCommit`
+  (`#attachCommitSqliteDbs`, ≤1 db/commit for unqualified-name isolation), passes
+  the alias map, detaches in `finally`; `markSpaceDirty` filters `sqlite` ops.
+
+**Tested:** engine-layer (`v2-sqlite-atomic-test.ts`: cell+row land atomically;
+a failing trailing op rolls back BOTH) and server-loopback
+(`v2-sqlite-protocol-test.ts`: a folded `transact` commit applies; a failing
+folded op rolls back the whole commit). Memory suite green; runner compiles
+(it uses its own `NativeStorageCommitOperation` union, so the wire-`Operation`
+widening doesn't touch its switches).
+
+**Remaining (Stages 4–5): runner client-folding** — make the `sqliteExecute`
+builtin record the write on the transaction (a separate `sqliteOps` channel on
+`NativeStorageCommit`, merged into the wire `operations[]` at `buildCommit`,
+kept out of `applyPending`) so a *handler's* cell writes + `sqliteExecute` land
+in **one** commit. Today the builtin still uses the separate `sqlite.execute`
+RPC, so handler-level atomicity isn't wired yet (the protocol supports it).
+
+**Design finding for Stage 5 (not in the original plan):** folding `sqliteExecute`
+into the commit means the write result (`changes` / `lastInsertRowid`) is no
+longer returned synchronously — `applyCommit`'s response carries `seq`/revisions,
+not SQLite write results. Options: (a) thread results back via a new
+`AppliedCommit.sqliteResults[]` (preserves the `{changes,lastInsertRowid}`
+contract; more plumbing), or (b) V1 reports only `{pending:false}` on commit
+success (success ⇔ commit success; drop the counts). Decide before implementing;
+the current `sqliteExecute` test asserts `changes===1`, so the contract choice
+changes that test.
+
 ## Current status & handoff
 
 **Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.
