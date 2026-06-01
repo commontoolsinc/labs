@@ -101,7 +101,7 @@ import { sqliteDatabase, sqliteQuery, sqliteExecute, table, cfLink, handler, der
 
 // A database tied to this pattern's own cell (default source). Tables (and the
 // _cf_link columns) are declared once, here; the runtime owns DDL/migration.
-const db = sqliteDatabase(undefined, {
+const db = sqliteDatabase({
   tables: {
     messages: table({
       id: "integer primary key",

@@ -26,7 +26,7 @@ interface User { name: string; avatarUrl: string }
 export default pattern<{ me: Cell<User> }>(({ me }) => {
   // Cell-derived, per-space, atomic. Tables are declared once here; the runtime
   // owns creation/migration — no CREATE TABLE in pattern code.
-  const db = sqliteDatabase(undefined, {
+  const db = sqliteDatabase({
     tables: {
       messages: table({
         id: "integer primary key",

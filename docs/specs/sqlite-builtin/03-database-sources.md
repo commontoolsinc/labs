@@ -20,19 +20,23 @@ Pattern code holds an opaque handle; it never names a file or attach alias.
 ## 03.1 Cell-derived (default)
 
 ```ts
-const db = sqliteDatabase();                 // bound to the pattern's context cell
-const db = sqliteDatabase({ cell: someCell }); // bound to an explicit cell
+const db = sqliteDatabase({ tables }); // bound to a cell the runtime allocates here
 ```
 
-The database is tied to a cell, and its **name is derived from that cell's
-entity id** — which is itself causal to creation and opaque to the pattern.
+The database is tied to a cell the runtime allocates for this call, and its
+**name is derived from that cell's entity id** — which is itself causal to
+creation and opaque to the pattern.
 
+- There is **no way to point the database at an arbitrary cell**. A pattern
+  cannot pass "some other cell" as the database's identity; doing so would
+  re-introduce ambient authority (a pattern naming a cell it was never granted).
+  The handle is always the one the runtime allocates for the call (cell-derived)
+  or one injected into an input from outside (Section 03.3).
 - Cell ids are content-addressed and causally derived
   ([`packages/runner/src/create-ref.ts`](../../../packages/runner/src/create-ref.ts)).
-  When `sqliteDatabase()` is called with no argument, the runtime allocates (or
-  reuses) a handle cell in the current frame the same way other built-ins
-  allocate their result cells, so the identity is stable across re-runs and
-  rehydration but never chosen by the pattern.
+  The runtime allocates (or reuses) the handle cell in the current frame the same
+  way other built-ins allocate their result cells, so the identity is stable
+  across re-runs and rehydration but never chosen by the pattern.
 - The physical file lives in the **same space's storage directory** as the cell.
   Spaces are already stored one-SQLite-file-per-space under `engine-v3/`
   (`{encodeURIComponent(spaceDid)}.sqlite`, see
