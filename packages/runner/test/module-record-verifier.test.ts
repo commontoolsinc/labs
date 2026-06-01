@@ -64,6 +64,76 @@ describe("verifyModuleGraph", () => {
     );
   });
 
+  it("rejects an import edge resolved to a non-content-addressed target", () => {
+    // The compiler's fallback leaves an unknown specifier verbatim; the verifier
+    // must reject a target that is not a cf:module/ or cf:runtime/ specifier,
+    // rather than relying on it merely being absent from the records map.
+    const g = graph([
+      [
+        "cf:module/main",
+        rec({
+          imports: ["/cf:runtime/commonfabric"],
+          resolutions: {
+            "/cf:runtime/commonfabric": "/cf:runtime/commonfabric",
+          },
+        }),
+      ],
+      ["/cf:runtime/commonfabric", rec({ exports: ["pattern"] })],
+    ]);
+    expect(() => verifyModuleGraph(g, "cf:module/main")).toThrow(
+      /non-content-addressed import target/i,
+    );
+  });
+
+  it("rejects an import edge rewired to a foreign present record", () => {
+    // A record must not resolve one of its imports to an arbitrary other key.
+    // Here the target IS present and content-addressed, but the deeper invariant
+    // is covered by the undeclared-resolution and target-shape checks; a bare
+    // `node:fs` target (present or not) is rejected for not being cf:-addressed.
+    const g = graph([
+      [
+        "cf:module/main",
+        rec({ imports: ["node:fs"], resolutions: { "node:fs": "node:fs" } }),
+      ],
+    ]);
+    expect(() => verifyModuleGraph(g, "cf:module/main")).toThrow(
+      /non-content-addressed import target/i,
+    );
+  });
+
+  it("rejects a resolution for an undeclared import", () => {
+    const g = graph([
+      [
+        "cf:module/main",
+        rec({
+          imports: ["./util.ts"],
+          resolutions: {
+            "./util.ts": "cf:module/util",
+            "./extra.ts": "cf:module/util",
+          },
+        }),
+      ],
+      ["cf:module/util", rec({ exports: ["x"] })],
+    ]);
+    expect(() => verifyModuleGraph(g, "cf:module/main")).toThrow(
+      /undeclared import/i,
+    );
+  });
+
+  it("accepts cf:runtime/ import targets", () => {
+    const g = graph([
+      [
+        "cf:module/main",
+        rec({
+          imports: ["commonfabric"],
+          resolutions: { commonfabric: "cf:runtime/commonfabric" },
+        }),
+      ],
+      ["cf:runtime/commonfabric", rec({ exports: ["pattern"] })],
+    ]);
+    expect(() => verifyModuleGraph(g, "cf:module/main")).not.toThrow();
+  });
+
   it("rejects a record with a non-function execute", () => {
     const g = graph([[
       "cf:module/main",
