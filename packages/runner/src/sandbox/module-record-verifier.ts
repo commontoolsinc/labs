@@ -276,6 +276,21 @@ export function verifyModuleGraph(
           `Record ${specifier} has a non-content-addressed import target "${importSpecifier}" -> "${target}"`,
         );
       }
+      // A trusted runtime import must resolve to ITS matching runtime record,
+      // not an arbitrary content-addressed sibling. The body verifier marks
+      // `require("commonfabric")` as a trusted runtime binding based on the
+      // authored specifier; without this, a record could declare
+      // `imports: ["commonfabric"]` with `resolutions: { commonfabric:
+      // "cf:module/evil" }` and be handed a sibling module's namespace under a
+      // trusted-runtime binding (rewire-to-sibling for host APIs).
+      if (
+        isRuntimeModuleIdentifier(importSpecifier) &&
+        target !== `cf:runtime/${importSpecifier}`
+      ) {
+        throw new ModuleGraphVerificationError(
+          `Record ${specifier} resolves runtime import "${importSpecifier}" to "${target}" instead of "cf:runtime/${importSpecifier}"`,
+        );
+      }
       if (!records.has(target)) {
         throw new ModuleGraphVerificationError(
           `Record ${specifier} has an unresolved import "${importSpecifier}" -> "${target}"`,

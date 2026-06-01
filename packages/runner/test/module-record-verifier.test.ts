@@ -122,6 +122,25 @@ describe("verifyModuleGraph", () => {
     );
   });
 
+  it("rejects a runtime import rewired to a sibling module", () => {
+    // `require("commonfabric")` is trusted as a runtime binding by the body
+    // verifier; the edge must point at cf:runtime/commonfabric, not a sibling
+    // module's namespace, even though that sibling is content-addressed+present.
+    const g = graph([
+      [
+        "cf:module/main",
+        rec({
+          imports: ["commonfabric"],
+          resolutions: { commonfabric: "cf:module/evil" },
+        }),
+      ],
+      ["cf:module/evil", rec({ exports: ["pattern"] })],
+    ]);
+    expect(() => verifyModuleGraph(g, "cf:module/main")).toThrow(
+      /runtime import .* instead of "cf:runtime\/commonfabric"/i,
+    );
+  });
+
   it("accepts cf:runtime/ import targets", () => {
     const g = graph([
       [

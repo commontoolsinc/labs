@@ -41,7 +41,10 @@ import {
   runtimeModuleRecords,
   type VirtualModuleRecord,
 } from "../sandbox/esm-module-loader.ts";
-import { verifyCompiledModuleBody } from "../sandbox/module-record-verifier.ts";
+import {
+  verifyCompiledModuleBody,
+  verifyModuleGraph,
+} from "../sandbox/module-record-verifier.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
 import {
   ensureSESLockdown,
@@ -337,6 +340,14 @@ export class Engine extends EventTarget implements Harness {
           "ESM compile produced no record for the program entry",
         );
       }
+
+      // Structurally verify the whole record graph (content-addressed
+      // specifiers, well-formed records, and that every import edge resolves to
+      // a content-addressed target). This must run here because the loader is
+      // invoked with `verify: false` in evaluateRecordGraph — graph
+      // verification happens once, at compile time, before any module executes.
+      verifyModuleGraph(graph.records, mainSpecifier);
+
       return { id, graph, mainSpecifier };
     } finally {
       logger.timeEnd("compileToRecordGraph");
