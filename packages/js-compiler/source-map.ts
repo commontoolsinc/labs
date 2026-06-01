@@ -23,13 +23,24 @@ export type { MappedPosition };
  * Returns `undefined` if no module contributed a map.
  */
 export function composeBundleSourceMap(
-  modules: ReadonlyArray<{ body: string; map?: SourceMap }>,
+  // `source`, when set, overrides the map's recorded source path for ALL of that
+  // module's mappings. The per-module compiler maps record only the basename
+  // (e.g. `main.tsx`), but the CFC verified-source set is keyed by the full
+  // module path (e.g. `/<id>/dir/main.tsx`); overriding makes resolved
+  // coordinates match the set so verified-source identity holds.
+  modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
   bundleFilename: string,
+  // Generated-line offset applied to the FIRST module. Use this when the
+  // generated text is wrapped by a fixed prefix of N lines (e.g. the ESM
+  // loader's `(function (exports, require, module) {\n` factory wrapper adds 1
+  // line before the compiled body), so coordinates from `new Error().stack`
+  // (1-based, relative to the eval'd string) map correctly.
+  startLineOffset = 0,
 ): SourceMap | undefined {
   const generator = new SourceMapGenerator({ file: bundleFilename });
-  let lineOffset = 0;
+  let lineOffset = startLineOffset;
   let any = false;
-  for (const { body, map } of modules) {
+  for (const { body, map, source } of modules) {
     if (map) {
       const consumer = new SourceMapConsumer(map);
       consumer.eachMapping((m) => {
@@ -43,21 +54,30 @@ export function composeBundleSourceMap(
             column: m.generatedColumn,
           },
           original: { line: m.originalLine, column: m.originalColumn },
-          source: m.source,
+          source: source ?? m.source,
           name: m.name ?? undefined,
         });
         any = true;
       });
-      const sources = map.sources ?? [];
       const contents =
         (map as { sourcesContent?: (string | null)[] }).sourcesContent;
-      if (contents) {
-        sources.forEach((src, i) => {
-          const content = contents[i];
-          if (src != null && content != null) {
-            generator.setSourceContent(src, content);
-          }
-        });
+      if (source) {
+        // Source overridden to a single full module path: register that
+        // module's content under the override name so DevTools can still show
+        // the authored text (parity with the AMD bundle map). Per-module
+        // compiler maps carry exactly one source, so the first content is it.
+        const content = contents?.find((c) => c != null);
+        if (content != null) generator.setSourceContent(source, content);
+      } else {
+        const sources = map.sources ?? [];
+        if (contents) {
+          sources.forEach((src, i) => {
+            const content = contents[i];
+            if (src != null && content != null) {
+              generator.setSourceContent(src, content);
+            }
+          });
+        }
       }
     }
     // Lines this body occupies in the "\n"-joined bundle = (newlines in body)+1.
@@ -71,9 +91,20 @@ export function composeBundleSourceMap(
 /**
  * Maximum number of source maps to cache in memory.
  * When exceeded, oldest (least recently used) entries are evicted.
- * Set conservatively to prevent OOM in long-running processes.
+ *
+ * Sized for the ESM module-record loader, which registers ONE map per load —
+ * the composed `${loadId}.js` bundle map — PLUS one map per module (keyed by the
+ * module's eval `//# sourceURL`) so the browser stack path can resolve each
+ * module's eval frame. A single multi-file load therefore registers
+ * `1 + moduleCount` entries that must all stay live until `loadModuleGraph`
+ * annotates functions; a small cap (the old value was 50) would evict the bundle
+ * map — and early per-module maps — mid-load for larger graphs, regressing
+ * `fn.src` to raw bundle coordinates and breaking CFC verified-source identity.
+ * This bound comfortably exceeds realistic per-load module counts while still
+ * capping total memory across loads (stale maps from superseded loads evict via
+ * LRU; the parser is also fully cleared on runtime dispose).
  */
-const MAX_SOURCE_MAP_CACHE_SIZE = 50;
+const MAX_SOURCE_MAP_CACHE_SIZE = 1024;
 
 // Parses strings like the following into function, filename, line and columns:
 /// ```
