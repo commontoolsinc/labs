@@ -35,10 +35,21 @@ during design are marked **[resolved]** with the decision.
 
 ## Transactions & storage
 
-6. **ATTACH model.** One sibling `.sqlite` file per cell-derived db, ATTACHed
-   on demand — vs. tables inside the space's own db (namespaced), vs. one shared
-   "patterns" db per space. Per-file gives isolation and easy GC; a shared db
-   simplifies ATTACH and transaction coordination. Which wins?
+6. **[resolved] ATTACH model → one sibling `.sqlite` file per cell-derived db**
+   (Option A), ATTACHed on demand. Considered: tables inside the space's own db
+   (rejected — co-mingles untrusted pattern schema with the authoritative store),
+   and one shared per-space "patterns" db (viable, but forces full SQL
+   parse-and-rewrite for table-name namespacing). A wins because:
+   - SQLite's only namespace primitive is the attached-db alias, so the file
+     boundary gives per-pattern namespacing **for free** — unqualified names
+     resolve to the (solely) attached pattern db, **no identifier rewriting**.
+   - `@db/sqlite` exposes **no authorizer** (confirmed — see Section
+     [04](./04-server-execution-and-transactions.md)), so a shared db would need
+     a full parser anyway; A needs only a tokenizer-level guard.
+   - Best isolation, file-delete/`backup()` GC and export.
+   **Depends on** the core-table-rename flag (below) to remove `main` shadowing,
+   and an attach/detach LRU cache for the attach limit. Trade-off accepted:
+   per-file WAL reconciliation (Q7) is per-written-db rather than a single pair.
 7. **WAL crash reconciliation.** The `_cf_commit_watermark` + in-doubt rollback
    sketch (Section [04](./04-server-execution-and-transactions.md)) needs a
    precise algorithm: how to revert SQLite-side changes for an in-doubt `seq`
@@ -48,6 +59,21 @@ during design are marked **[resolved]** with the decision.
    per `Database`. Long queries block the space. Do we need a separate read
    connection (WAL readers don't block writers), a statement timeout, or a
    query cost limit for v1?
+8a. **Attach limit & core-table rename (decisions for Option A).**
+   - `@db/sqlite` exposes no `sqlite3_limit` binding, so `SQLITE_LIMIT_ATTACHED`
+     is fixed at the compiled default (10 unless their build raised it; **probe
+     to confirm**). Mitigation: an **attach/detach LRU cache** — attach a pattern
+     db on demand, evict (`DETACH DATABASE`) the least-recently-used near the
+     limit. Manage it at **transaction boundaries** (attach before `BEGIN`,
+     detach only when idle); a single commit almost always touches one pattern db
+     (2 schemas), far under the limit. Reject/split a transaction that would span
+     more than the limit at once.
+   - **Core-table rename flag:** rename the engine's core tables to include the
+     space DID (e.g. `commit__<did>`), behind a flag, to remove `main` shadowing
+     so a pattern's unqualified `messages` can never resolve to a core table.
+     Ship the rest unflagged; without the flag we tolerate shadowing temporarily
+     (pre-production). The statement guard still rejects schema-qualified
+     references, `ATTACH`/`DETACH`/`PRAGMA`, and multiple statements.
 9. **[resolved] DDL ownership.** The database owns table creation/migration via
    `sqliteDatabase({ tables })` (Section
    [01](./01-api.md#schema-ownership--the-database-owns-its-tables)); patterns do
