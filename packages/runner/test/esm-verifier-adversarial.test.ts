@@ -18,12 +18,6 @@ interface Attack {
   accept?: boolean; // default: must be rejected (verifier throws)
 }
 
-// Canonical TS interop helpers (the verifier recognizes these as trusted), so
-// fixtures that use __exportStar in a non-canonical way can be realistic.
-const EXPORT_STAR_HELPERS =
-  `var __createBinding = (this && this.__createBinding) || (function(o,m,k,k2){if(k2===undefined)k2=k;o[k2]=m[k];});\n` +
-  `var __exportStar = (this && this.__exportStar) || function(m, exports) { for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p); };`;
-
 const ATTACKS: Attack[] = [
   // --- ASI / statement-merge desync (splitter only `}`-terminates block keywords) ---
   {
@@ -82,6 +76,21 @@ const ATTACKS: Attack[] = [
     name: "shadow __exportStar with a malicious local then re-export",
     body:
       `function __exportStar(m, e) { globalThis.steal = m; }\n__exportStar(require("./m.ts"), exports);`,
+  },
+  {
+    name: "multi-declarator shadow of __exportStar (non-first declarator)",
+    body:
+      `const a = 1, __exportStar = (m, e) => { globalThis.steal = m; };\n__exportStar(require("./m.ts"), exports);`,
+  },
+  {
+    name: "multi-declarator shadow of require (non-first declarator)",
+    body:
+      `const a = 1, require = (x) => globalThis;\nconst evil = require("commonfabric");`,
+  },
+  {
+    name: "multi-declarator shadow of __importStar (non-first declarator)",
+    body:
+      `const a = 1, __importStar = (m) => globalThis;\nconst ns = __importStar(require("commonfabric"));`,
   },
 
   // --- __cf_data / schema opaque-argument boundary (shared design with AMD) ---
@@ -248,7 +257,7 @@ const ATTACKS: Attack[] = [
   },
   {
     name: "export-star require of a disallowed specifier",
-    body: `${EXPORT_STAR_HELPERS}\n__exportStar(require("node:fs"), exports);`,
+    body: `__exportStar(require("node:fs"), exports);`,
   },
   {
     name: "multi-declarator const smuggling a call in the second declarator",
