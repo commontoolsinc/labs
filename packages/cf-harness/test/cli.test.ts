@@ -753,6 +753,10 @@ Deno.test("parseCfHarnessCliArgs supports a Browser Access lease", async () => {
       "pattern-factory",
       "--browser-access-expires-at",
       "2026-05-29T22:00:00Z",
+      "--browser-access-profile-mode",
+      "transient",
+      "--browser-access-account-access",
+      "none",
     ],
     {
       cwd: "/tmp/project",
@@ -769,6 +773,8 @@ Deno.test("parseCfHarnessCliArgs supports a Browser Access lease", async () => {
     cdpUrl: "http://127.0.0.1:9363",
     owner: "pattern-factory",
     expiresAt: "2026-05-29T22:00:00Z",
+    profileMode: "transient",
+    accountAccess: "none",
   });
 });
 
@@ -825,6 +831,69 @@ Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async
       ),
     Error,
     "--browser-access-cdp-url must be an http:// local origin with an explicit port",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-profile-mode",
+          "loggedout",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-profile-mode must be one of: persistent, transient",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-profile-mode",
+          "",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-profile-mode must be one of: persistent, transient",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-account-access",
+          "",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-account-access must be one of: available, none",
   );
 });
 
@@ -1218,6 +1287,10 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   );
   assertEquals(
     capabilities.cliFlags.includes("--browser-access-cdp-url"),
+    true,
+  );
+  assertEquals(
+    capabilities.cliFlags.includes("--browser-access-profile-mode"),
     true,
   );
   assertEquals(capabilities.cliFlags.includes("--describe-capabilities"), true);
