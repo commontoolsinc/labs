@@ -1,7 +1,52 @@
 # Plan — `sqliteExecute` as a commit-folded imperative write (`db.exec` semantics)
 
-**Status:** design / test-first. **Read-only investigation; no feature code
-changed.** Every file:line below was opened and read in the
+> ## STATUS (2026-06-01)
+>
+> **Stage 1 (storage seam) — DONE + green (commit d10d37952).** The runner now
+> folds a SQLite write into the commit atomically with cell ops:
+> `IStorageTransaction.recordSqliteWrite(space, op)` + `NativeStorageCommit.sqliteOps`
+> (interface.ts); `#sqliteOps` stash + `recordSqliteWrite` (claims write space) +
+> `getNativeCommit` emission + relaxed empty-commit guards (v2-transaction.ts);
+> `commitNative`/`commitOperations` thread `sqliteOps` into `ClientCommit.operations`
+> **last**, kept out of doc-pending/touched/notify (v2.ts); both tx wrappers
+> delegate (extended-storage-transaction.ts). Tests: `sqlite-commit-fold.test.ts`
+> (cell+INSERT atomic, sqlite-only commit, failure rolls back the sibling cell
+> write). **Full runner suite 501/0.**
+>
+> **User decisions locked (this session):** imperative-only (no declarative
+> pattern-body write path); **no `reactOn` re-run** after a folded write (no `rev`
+> bump); **throw on read-after-write** in the same uncommitted tx rather than make
+> pending writes synchronously visible.
+>
+> **Stage 2 (rewrite `sqliteExecute` as imperative `db.exec`) — NOT STARTED.**
+> Deferred from Stage 1 because it's a sprawling cross-layer rewrite best done
+> fresh (a half-done version breaks the compile). Notes for the next session:
+> - **tx access confirmed:** in a handler, `db` is a tx-bound proxy; recover the
+>   cell (`toCell`/`asCellOrUndefined`) and call
+>   `cell.tx.recordSqliteWrite(cell.space, {op:"sqlite", db: readDbRef(cell.get()), sql, params: encodeParams(sql, params)})`.
+>   No runtime ref needed.
+> - **layering hazard (solve first):** the imperative `sqliteExecute` is a runtime
+>   op but must be exposed on the `cf` builder object. `built-in.ts` (builder)
+>   makes it via `createNodeFactory` today; a plain fn needs runtime helpers from
+>   `builtins/sqlite-builtins.ts`, which imports `builder/types.ts` — a potential
+>   value-level import cycle. Put the imperative fn in a leaf module (e.g.
+>   `builtins/sqlite/execute.ts`) depending only on `cell.ts` + `sqlite/cf-link.ts`
+>   + memory types, and re-export from `built-in.ts`. Verify no cycle.
+> - **"throw on read-after-write":** no synchronous in-handler read API exists
+>   today (reads are the reactive `sqliteQuery` node via post-commit RPC), so the
+>   scenario isn't reachable; add the guard if/when a sync read is introduced.
+> - **removal + test churn:** drop the reactive node/result cell/RPC/`rev` bump
+>   (§6); flip the registry entry to `reactiveOrigin:false`; tests that call
+>   `cf.sqliteExecute({...})` declaratively (`sqlite-builtins.test.ts`,
+>   `sqlite-cf-link-decode.test.ts`) move to handler calls or drive via
+>   `tx.recordSqliteWrite`. `sqlite-cf-link-roundtrip.test.ts` uses
+>   `provider.sqliteExecute!` and is unaffected.
+> - **Stage 1 is independent and shippable on its own.**
+
+---
+
+**Status:** design / test-first. Stage 1 implemented (see STATUS); Stage 2
+pending. Every file:line below was opened and read in the
 `feat/sqlite-builtin-impl` worktree.
 
 ## 0. Decision and how it differs from the prior plan

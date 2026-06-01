@@ -430,3 +430,41 @@ ALSO needs the runtime half (Piece A: builtin reads `rowSchema`, composes
 `p.resultSchema === {}`, proven in node-output-schema-propagation.md). So Piece B
 (this commit) unblocks Piece A but does not by itself flip the skipped runner
 test. Piece A remains the next step.
+
+---
+
+## 2026-06-01 — Handler-atomicity correction + Stage 1 commit-fold seam (db.exec)
+
+Corrected an earlier overstatement: I had said handler-atomicity (a handler's
+cell write + a SQL write in one commit) was "not achievable." It IS achievable —
+I had conflated the WRITE (foldable into the handler's commit, atomic) with the
+RESULT REPORTING (a separate post-commit tx, which is harmless / now dropped).
+
+Design session (Oracle) → `plans/sqlite-execute-commit-fold.md`. Decided design
+(user): `sqliteExecute` becomes a commit-folded imperative `db.exec` —
+**imperative-only** (no declarative pattern-body write), **abort-only** (SQL
+failure aborts the whole commit; no result cell), **no reactOn re-run** after a
+folded write, **throw on read-after-write** (don't make pending writes
+synchronously visible). Future CFC-safe error handling will make the abort throw
+correctly, so abort-only is forward-compatible.
+
+**Found:** `recordSqliteWrite` did NOT exist — the runner never folded a sqlite
+op into its commit (`getNativeCommit` emitted cell-doc ops only); the atomicity I
+had tested lived only at the engine/server/protocol layer (applyCommit can carry
+a sqlite op), while the builtin used a post-commit RPC.
+
+**Stage 1 (DONE, committed d10d37952, runner 501/0):** built the runner-side
+fold seam — `recordSqliteWrite(space, op)` on the tx (+ both wrappers),
+`NativeStorageCommit.sqliteOps`, emission in `getNativeCommit`, relaxed
+empty-commit guards, and `commitNative`/`commitOperations` appending the wire
+`op:"sqlite"` LAST in `ClientCommit.operations` (out of doc-pending/touched/
+notify). Test `sqlite-commit-fold.test.ts`: a cell write + folded INSERT commit
+atomically; a sqlite-only commit isn't dropped; a failing INSERT aborts the whole
+commit and rolls back the sibling cell write.
+
+**Stage 2 (NOT STARTED, handed off):** rewrite `sqliteExecute` as the imperative
+`db.exec` fn + drop the reactive node + API/registry/test churn. Deferred
+deliberately — sprawling cross-layer rewrite with a builder↔builtins import-cycle
+hazard; a half-done version breaks the compile. tx access is confirmed
+(`db.tx` via the handler's tx-bound cell). Full notes in the plan's STATUS block.
+Stage 1 is independent and shippable.
