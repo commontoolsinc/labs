@@ -5,9 +5,24 @@ phase lists its goal, the files it touches (with the integration points already
 located in the codebase), the work, tests, and exit criteria. Phases are ordered
 to land a thin vertical slice early and defer the hardest/most-deferred pieces.
 
-**Status:** not started. This plan accompanies a design that is itself in review
-([README](./README.md)); items marked **[gated]** depend on an open question
-([08-open-questions.md](./08-open-questions.md)) being resolved first.
+**Status:** in progress. Foundation + Phase 0/1 + protocol + builtins are built
+and tested (see [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md)). Items marked
+**[gated]** depend on an open question
+([08-open-questions.md](./08-open-questions.md)).
+
+## Detailed design plans (deep workstreams)
+
+The two hardest workstreams have focused, test-first design plans produced by
+dedicated investigation sessions (augmenting Phases 2/3/6 below):
+
+- **Reactivity** ([plans/reactivity.md](./plans/reactivity.md)) — `reactOn: db`
+  re-query. Key finding: the earlier "failure" was a test-isolation artifact
+  (deterministic per-`(space,id)` temp file accumulating rows), not a logic bug;
+  the client handle-bump works. Reinstate it with an isolated test.
+- **Atomic writes** ([plans/atomic-writes.md](./plans/atomic-writes.md)) — fold
+  the `sqlite` op into the cell commit (engine loop skip + server pre-attach +
+  client out-of-band channel + optimistic-apply skip), with an engine-layer
+  atomicity/rollback test first.
 
 ## Milestones at a glance
 
