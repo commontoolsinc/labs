@@ -357,4 +357,23 @@ describe("composeBundleSourceMap", () => {
     expect(pos.source).toBe("/id/dir/main.tsx");
     expect(pos.line).toBe(10);
   });
+
+  it("preserves sourcesContent under the overridden source name", () => {
+    const g = new SourceMapGenerator({ file: "a.js" });
+    g.addMapping({
+      generated: { line: 1, column: 0 },
+      original: { line: 10, column: 0 },
+      source: "main.tsx",
+    });
+    g.setSourceContent("main.tsx", "const authored = 1;");
+    const mapA = JSON.parse(g.toString());
+    const composed = composeBundleSourceMap(
+      [{ body: "x", map: mapA, source: "/id/dir/main.tsx" }],
+      "m.js",
+    )!;
+    // Content must be reachable under the OVERRIDDEN name (what the mappings
+    // now point at), so DevTools can display the authored source.
+    expect(composed.sourcesContent?.[composed.sources.indexOf("/id/dir/main.tsx")])
+      .toBe("const authored = 1;");
+  });
 });

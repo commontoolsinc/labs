@@ -59,10 +59,17 @@ export function composeBundleSourceMap(
         });
         any = true;
       });
-      if (!source) {
+      const contents =
+        (map as { sourcesContent?: (string | null)[] }).sourcesContent;
+      if (source) {
+        // Source overridden to a single full module path: register that
+        // module's content under the override name so DevTools can still show
+        // the authored text (parity with the AMD bundle map). Per-module
+        // compiler maps carry exactly one source, so the first content is it.
+        const content = contents?.find((c) => c != null);
+        if (content != null) generator.setSourceContent(source, content);
+      } else {
         const sources = map.sources ?? [];
-        const contents =
-          (map as { sourcesContent?: (string | null)[] }).sourcesContent;
         if (contents) {
           sources.forEach((src, i) => {
             const content = contents[i];
