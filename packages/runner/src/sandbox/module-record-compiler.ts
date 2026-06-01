@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { Source } from "@commonfabric/js-compiler";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler";
 import {
@@ -24,6 +25,8 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
  */
 
 const TARGET = ts.ScriptTarget.ES2023;
+
+const logger = getLogger("module-record-compiler");
 
 /**
  * Create a write-once exports target for a module body. Re-assigning,
@@ -85,10 +88,20 @@ export function populateModuleExports(
  */
 function hardenExportedValue<T>(value: T): T {
   const hardenFn = (globalThis as { harden?: <V>(v: V) => V }).harden;
-  if (typeof hardenFn !== "function") return value;
+  if (typeof hardenFn !== "function") {
+    // On the real ESM-loader path the engine calls ensureSESLockdown() before
+    // any module evaluates, so `harden` is always present. Reaching here means
+    // lockdown did not run (a regression, or a direct call outside the engine
+    // path): warn rather than silently shipping unfrozen exports.
+    logger.warn("harden() unavailable; exported value not frozen");
+    return value;
+  }
   try {
     return hardenFn(value);
-  } catch {
+  } catch (error) {
+    // harden() can reject an exotic reachable value (e.g. a Proxy it refuses).
+    // Surface it as a warning so it is observable rather than a silent gap.
+    logger.warn(`harden() failed for exported value: ${String(error)}`);
     return value;
   }
 }
