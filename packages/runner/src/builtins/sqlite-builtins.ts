@@ -11,10 +11,12 @@
 // - sqliteExecute issues a server write after commit; cell params bound to a
 //   `_cf_link` column are encoded to sigil links (Section 02).
 //
+// - `reactOn: db` re-query works via a post-commit handle `rev` bump (below).
+//
 // Known V1 gaps (tracked in IMPLEMENTATION_LOG): writes are a separate RPC, not
 // folded into the cell commit (no cells+rows atomicity yet); no multi-tab mutex
 // / cancel / narrowest-read-scope (cf. fetch-data.ts); `_cf_link` decode of
-// result rows and the post-commit `reactOn` handle-dirtying are not wired yet.
+// result rows is not yet wired (encode on write is).
 
 import { type Cell, createCell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
