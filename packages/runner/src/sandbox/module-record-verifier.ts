@@ -3,7 +3,13 @@ import {
   type BindingInfo,
   classifyModuleItems,
 } from "./compiled-bundle-verifier.ts";
-import { parseFunctionText } from "./compiled-js-parser.ts";
+import {
+  findTopLevelEquals,
+  parseFunctionText,
+  splitTopLevelCommaList,
+  type StatementChunk,
+  trimRange,
+} from "./compiled-js-parser.ts";
 import {
   isAllowedAuthoredImportSpecifier,
   isRuntimeModuleIdentifier,
@@ -57,6 +63,50 @@ const SIDE_EFFECT_REQUIRE = /^require\(\s*["']([^"']+)["']\s*\)\s*;?$/;
 const EXPORT_STAR_REQUIRE =
   /^__exportStar\(\s*require\(\s*["']([^"']+)["']\s*\)\s*,\s*exports\s*\)\s*;?$/;
 
+const SIMPLE_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * The top-level binding names a statement introduces, restricted to the simple
+ * cases the verifier would otherwise *accept* (so a shadow could go unnoticed):
+ * function/class declarations and `const`/`let`/`var` declarators. Multi-
+ * declarator lists (`const a = 1, __exportStar = …`) are split depth-aware via
+ * the shared comma/equals parsers — a leading-anchored regex would only see the
+ * first declarator and miss the rest.
+ *
+ * Malformed or destructuring declarators throw out of the parsers; those are
+ * rejected by `classifyModuleItems` regardless, so returning no names here stays
+ * fail-closed.
+ */
+function shadowNamesInStatement(
+  source: string,
+  statement: StatementChunk,
+  text: string,
+): string[] {
+  const fn = /^(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/.exec(text);
+  if (fn) return [fn[1]];
+  const cls = /^class\s+([A-Za-z_$][\w$]*)/.exec(text);
+  if (cls) return [cls[1]];
+  const kind = /^(?:const|let|var)\b/.exec(text)?.[0];
+  if (!kind) return [];
+  try {
+    const trimmed = trimRange(source, statement.start, statement.end);
+    const listStart = trimmed.start + kind.length;
+    let listEnd = trimmed.end;
+    while (listEnd > listStart && /\s/.test(source[listEnd - 1])) listEnd--;
+    if (listEnd > listStart && source[listEnd - 1] === ";") listEnd--;
+    const names: string[] = [];
+    for (const range of splitTopLevelCommaList(source, listStart, listEnd)) {
+      const equals = findTopLevelEquals(source, range.start, range.end);
+      const nameRange = trimRange(source, range.start, equals ?? range.end);
+      const name = source.slice(nameRange.start, nameRange.end);
+      if (SIMPLE_IDENTIFIER.test(name)) names.push(name);
+    }
+    return names;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Security-classify a module's compiled-CommonJS body (Phase D2). It recognizes
  * the `const x = require("…")` import preamble — seeding `env` with import
@@ -78,16 +128,31 @@ export function verifyCompiledModuleBody(
     wrapped.slice(s.start, s.end).trim()
   );
 
-  // If the body shadows `require` with its own top-level binding, the
-  // `const x = require(...)` fast-path would mis-trust an arbitrary call.
-  // Disable the fast-path entirely so those statements fall through to
-  // classifyModuleItems (which rejects the call result) — matching AMD, where
-  // a non-canonical require has no special treatment.
-  const requireShadowed = statementTexts.some((t) =>
-    /^(?:const|let|var)\s+require\b/.test(t) ||
-    /^(?:async\s+)?function\s*\*?\s*require\b/.test(t) ||
-    /^class\s+require\b/.test(t)
-  );
+  // If the body declares its own top-level binding for one of the identifiers a
+  // fast-path trusts (`require`, or the TS interop helpers `__exportStar` /
+  // `__importDefault` / `__importStar`), the corresponding fast-path would
+  // mis-trust a call into attacker-controlled code (e.g. a local
+  // `function __exportStar(m){ globalThis.steal = m; }` invoked by an
+  // `__exportStar(require("./m"), exports)` re-export). Detect such shadows and
+  // disable the affected fast-path so the statement falls through to
+  // classifyModuleItems, which rejects the call as a local-callable result —
+  // matching AMD, where a non-canonical helper has no special treatment.
+  //
+  // Canonical TS interop helper declarations (`var __exportStar = (this && …)`)
+  // are the trusted helpers themselves, not shadows, so they are excluded.
+  const shadowed = new Set<string>();
+  parsed.body.statements.forEach((statement, index) => {
+    const text = statementTexts[index];
+    if (isAllowedTsLibHelperDeclaration(normalizeExact(text))) return;
+    for (const name of shadowNamesInStatement(wrapped, statement, text)) {
+      shadowed.add(name);
+    }
+  });
+
+  const requireShadowed = shadowed.has("require");
+  const exportStarShadowed = shadowed.has("__exportStar");
+  const importDefaultShadowed = shadowed.has("__importDefault");
+  const importStarShadowed = shadowed.has("__importStar");
 
   const env = new Map<string, BindingInfo>();
   const classifiable: typeof parsed.body.statements = [];
@@ -106,7 +171,18 @@ export function verifyCompiledModuleBody(
     }
     if (!requireShadowed) {
       const bound = REQUIRE_IMPORT.exec(text);
-      if (bound && isAllowedAuthoredImportSpecifier(bound[2])) {
+      // A helper-wrapped import (`__importDefault(require(...))` /
+      // `__importStar(require(...))`) must not be fast-pathed if *that specific*
+      // helper is locally shadowed — the shadow would run instead of the
+      // trusted helper. Checked per-helper so shadowing one does not
+      // unnecessarily disable a legitimate import using the other.
+      const usesShadowedImportHelper =
+        (importDefaultShadowed && /\b__importDefault\s*\(/.test(text)) ||
+        (importStarShadowed && /\b__importStar\s*\(/.test(text));
+      if (
+        bound && !usesShadowedImportHelper &&
+        isAllowedAuthoredImportSpecifier(bound[2])
+      ) {
         const [, binding, specifier] = bound;
         env.set(binding, {
           kind: "import",
@@ -123,7 +199,10 @@ export function verifyCompiledModuleBody(
         return; // side-effect import binds nothing
       }
       const exportStar = EXPORT_STAR_REQUIRE.exec(text);
-      if (exportStar && isAllowedAuthoredImportSpecifier(exportStar[1])) {
+      if (
+        exportStar && !exportStarShadowed &&
+        isAllowedAuthoredImportSpecifier(exportStar[1])
+      ) {
         return; // `export * from "<allowed>"` re-export; binds nothing
       }
     }
