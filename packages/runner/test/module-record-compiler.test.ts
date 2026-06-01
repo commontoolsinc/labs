@@ -50,6 +50,25 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.default()).toBe(42);
   });
 
+  it("does not let a newline in a source name inject code via sourceURL", () => {
+    // A file name with a newline must not break out of the `//# sourceURL=`
+    // line comment and execute as code.
+    (globalThis as Record<string, unknown>).__esm_injection_canary = false;
+    const sources = files({
+      "/evil.ts\nglobalThis.__esm_injection_canary = true;//":
+        `export const x = 1;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const spec = specifierByPath.get(
+      "/evil.ts\nglobalThis.__esm_injection_canary = true;//",
+    )!;
+    importModuleGraphNow(spec, { records });
+    expect((globalThis as Record<string, unknown>).__esm_injection_canary).toBe(
+      false,
+    );
+    delete (globalThis as Record<string, unknown>).__esm_injection_canary;
+  });
+
   it("resolves runtime-module imports via runtimeModuleRecords", () => {
     const sources = files({
       "/main.ts":

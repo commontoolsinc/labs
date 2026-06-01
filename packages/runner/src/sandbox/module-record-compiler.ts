@@ -157,7 +157,12 @@ export function compileSourcesToRecords(
     // implementation hash / CFC verified-source check) requires SES-isolate-
     // level source-map integration and is tracked as the remaining item before
     // the flag can be enabled by default. The tag is the hook for that work.
-    const sourceUrl = source.name;
+    //
+    // SECURITY: strip JS line terminators before interpolating into the
+    // `//# sourceURL=` line comment. A newline (or U+2028/U+2029) in
+    // `source.name` would otherwise end the comment and let the remainder of
+    // the name execute as code inside the compartment.
+    const sourceUrl = source.name.replace(/[\r\n\u2028\u2029]/g, "_");
     records.set(specifier, {
       imports: importSpecs,
       exports: namespaceExports,

@@ -475,6 +475,9 @@ export class Engine extends EventTarget implements Harness {
           });
         }
       }
+      // Capture the export map too, so verified values from non-entry modules
+      // are indexed by the registry exactly as on the AMD path.
+      this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
       return { main, exportMap, loadId };
