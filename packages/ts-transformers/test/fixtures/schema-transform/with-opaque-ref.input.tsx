@@ -9,10 +9,11 @@ const model = toSchema<State>({
 });
 
 // FIXTURE: with-opaque-ref
-// Verifies: Cell<> fields generate asCell in schema and derive() gets input/output type schemas injected
+// Verifies: Cell<> fields generate asCell in schema and source-level derive()
+// lowers to lift-applied form with input/output type schemas injected.
 //   Cell<number> → { type: "number", asCell: true }
 //   toSchema<State>({default: ...}) → schema with "default" key preserved
-//   derive(cell.value, fn) → derive(inputSchema, outputSchema, cell.key("value"), fn)
+//   derive(cell.value, fn) -> lift(inputSchema, outputSchema, fn)(cell.key("value"))
 export default pattern<State, State>((cell) => {
   const doubled = derive(cell.value, (v: number) => v * 2);
 

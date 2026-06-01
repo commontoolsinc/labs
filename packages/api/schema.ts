@@ -406,7 +406,7 @@ declare module "commonfabric" {
   }
 
   // Augment DeriveFunction with schema-based overload
-  /** @deprecated Use compute() instead */
+  /** @deprecated Prefer computed() for local derived values or module-scope lift(). */
   interface DeriveFunction {
     <
       InputSchema extends JSONSchema = JSONSchema,

@@ -539,7 +539,8 @@ export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
  * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
- * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ * computed(() => expr) becomes lift(false, () => expr)() with closure
+ * extraction.
  *
  * NOTE: This function should never be called directly at runtime because the
  * CTS transformer rewrites action() calls to handler() calls. If this function

@@ -47,7 +47,7 @@ Allowed inside patterns:
 | `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `Date.now()` or `Math.random()` in authored pattern code | Use `safeDateNow()` or `nonPrivateRandom()` |
-| `safeDateNow()` or `nonPrivateRandom()` inside `computed()` or `derive()` without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
+| `safeDateNow()` or `nonPrivateRandom()` inside a re-running computation (`computed()`, `lift()`, or legacy `derive()`) without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
 | cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |

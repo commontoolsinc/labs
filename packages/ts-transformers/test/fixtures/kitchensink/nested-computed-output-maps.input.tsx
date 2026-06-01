@@ -61,9 +61,9 @@ export default pattern<{
   const selectedCommentId = new Writable<string | undefined>();
   const laneLabels = passthroughLabels(["lane", "detail", "summary"]);
 
-  // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
+  // [TRANSFORM] computed() -> lift-applied: captures state.threads, state.showFlagged
   const visibleThreads = computed(() =>
-    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this derive
+    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this computation
     state.threads.map((thread, outerIndex) => ({
       thread,
       outerIndex,
@@ -73,16 +73,16 @@ export default pattern<{
     }))
   );
 
-  // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
+  // [TRANSFORM] computed() -> lift-applied: captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
   const threadRows = computed(() =>
-    // [TRANSFORM] .map() stays plain: visibleThreads is a captured derive input, plain inside this derive
+    // [TRANSFORM] .map() stays plain: visibleThreads is a captured compute input, plain inside this computation
     visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
       // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
       const plainSeparators = ["top", "bottom"].map((edge) =>
         `${thread.title}-${edge}`
       );
       const liftedSeparators = passthroughLabels(plainSeparators);
-      // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
+      // [TRANSFORM] computed() -> lift-applied (nested): captures visibleComments from outer compute scope
       const reboundComments = computed(() => visibleComments);
 
       return (

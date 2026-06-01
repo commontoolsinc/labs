@@ -2006,7 +2006,8 @@ export interface HandlerFunction {
  * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
- * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ * computed(() => expr) becomes lift(false, () => expr)() with closure
+ * extraction.
  */
 export type ActionFunction = {
   // Overload 1: Zero-parameter callback returns Stream<void>
@@ -2031,7 +2032,8 @@ export type ActionFunction = {
  *
  * Note: Schema-based overload is available when importing from "commonfabric/schema"
  *
- * @deprecated Use compute() instead
+ * @deprecated Prefer computed() for local derived values or module-scope lift()
+ * for reusable computations.
  */
 export interface DeriveFunction {
   // Overload 1: Boolean literal union -> boolean
@@ -2378,7 +2380,7 @@ export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;
-/** @deprecated Use compute() instead */
+/** @deprecated Prefer computed() for local derived values or module-scope lift(). */
 export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
 export declare const str: StrFunction;
