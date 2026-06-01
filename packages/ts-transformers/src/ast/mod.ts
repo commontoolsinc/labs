@@ -28,6 +28,7 @@ export {
   isPatternBuilderCall,
   isReactiveOriginCall,
   isReactiveOriginExpression,
+  isReactiveOriginTaggedTemplate,
   isReactiveValueExpression,
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,

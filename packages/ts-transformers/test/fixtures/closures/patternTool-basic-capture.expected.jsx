@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { cell, computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -22,7 +22,6 @@ type Output = {
 // FIXTURE: patternTool-basic-capture
 // Verifies: patternTool captures a module-scoped cell as an extraParam
 //   patternTool(fn, { content }) → patternTool(fn, { content }) (content passed through)
-//   derive({ query }, ...) inside tool → derive({ input: { query }, content }, ...) with content captured
 // Context: Module-scoped `content` cell is referenced inside the patternTool
 //   callback. The transformer threads it through the existing extraParams object.
 export default pattern(() => {
@@ -31,37 +30,29 @@ export default pattern(() => {
         content: string;
     }) => {
         return __cfHelpers.lift<{
-            input: {
-                query: string;
-            };
+            query: string;
             content: string;
         }, string[]>({
             type: "object",
             properties: {
-                input: {
-                    type: "object",
-                    properties: {
-                        query: {
-                            type: "string"
-                        }
-                    },
-                    required: ["query"]
+                query: {
+                    type: "string"
                 },
                 content: {
                     type: "string"
                 }
             },
-            required: ["input", "content"]
+            required: ["query", "content"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "array",
             items: {
                 type: "string"
             }
-        } as const satisfies __cfHelpers.JSONSchema, ({ input: { query }, content }) => {
+        } as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
             return content.split("\n").filter((c: string) => c.includes(query));
         })({
-            input: { query },
-            content: content
+            content: content,
+            query: query
         });
     }, { content: content.for(["grepTool", 1, "content"], true) });
     return { grepTool };

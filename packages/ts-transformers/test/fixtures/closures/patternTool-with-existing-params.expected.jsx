@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { cell, computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -41,7 +41,10 @@ export default pattern(() => {
         offset: number;
         multiplier: __cfHelpers.Cell<number>;
     }) => {
-        return __cfHelpers.lift({
+        return __cfHelpers.lift<{
+            value: number;
+            offset: number;
+        }, number>({
             type: "object",
             properties: {
                 value: {
@@ -54,7 +57,10 @@ export default pattern(() => {
             required: ["value", "offset"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ value, offset });
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+            value: value,
+            offset: offset
+        });
     }, {
         multiplier: multiplier,
         offset: offset.for(["tool", 1, "offset"], true)

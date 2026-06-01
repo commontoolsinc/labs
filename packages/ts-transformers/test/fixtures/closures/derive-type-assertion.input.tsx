@@ -1,14 +1,14 @@
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: derive-type-assertion
 // Verifies: a type assertion (`as number`) in the callback body is preserved after capture extraction
-//   derive(value, fn) → derive(schema, schema, { value, multiplier }, fn)
+//   computed(() => (value.get() * multiplier.get()) as number) → lift(...)({ value, multiplier })
 // Context: the `as number` cast remains intact in the transformed callback expression
 export default pattern(() => {
   const value = new Writable(10);
   const multiplier = new Writable(2);
 
-  const result = derive(value, (v) => (v.get() * multiplier.get()) as number);
+  const result = computed(() => (value.get() * multiplier.get()) as number);
 
   return result;
 });

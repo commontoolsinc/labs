@@ -61,9 +61,9 @@ export default pattern<{
   const selectedCommentId = new Writable<string | undefined>();
   const laneLabels = passthroughLabels(["lane", "detail", "summary"]);
 
-  // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
+  // [TRANSFORM] computed() → lift(): captures state.threads, state.showFlagged
   const visibleThreads = computed(() =>
-    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this derive
+    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this computed
     state.threads.map((thread, outerIndex) => ({
       thread,
       outerIndex,
@@ -73,22 +73,22 @@ export default pattern<{
     }))
   );
 
-  // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
+  // [TRANSFORM] computed() → lift(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
   const threadRows = computed(() =>
-    // [TRANSFORM] .map() stays plain: visibleThreads is a captured derive input, plain inside this derive
+    // [TRANSFORM] .map() stays plain: visibleThreads is a captured input, plain inside this computed
     visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
       // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
       const plainSeparators = ["top", "bottom"].map((edge) =>
         `${thread.title}-${edge}`
       );
       const liftedSeparators = passthroughLabels(plainSeparators);
-      // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
+      // [TRANSFORM] computed() → lift() (nested): captures visibleComments from outer computed scope
       const reboundComments = computed(() => visibleComments);
 
       return (
         <article>
           <h2>{thread.title}</h2>
-          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured derive input */}
+          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured computed input */}
           {visibleComments.map((comment, innerIndex) => (
             <div>
               <button
@@ -121,7 +121,7 @@ export default pattern<{
               ))}
             </div>
           ))}
-          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested derive() — reactive even inside outer derive */}
+          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested computed() — reactive even inside outer computed */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {reboundComments.map((comment, reboundIndex) => (
             <aside>
@@ -130,7 +130,7 @@ export default pattern<{
                 : comment.text}
             </aside>
           ))}
-          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer derive */}
+          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer computed */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {liftedSeparators.map((edge, edgeIndex) => (
             <small>
@@ -148,13 +148,13 @@ export default pattern<{
     [UI]: (
       <div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
-        {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(derive(cond), derive(true-branch), label) */}
+        {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(lift(cond), lift(true-branch), label) */}
         {laneLabels.map((label, labelIndex) => (
           <header data-lane-label={labelIndex}>
             {labelIndex === 0 ? `${state.lane}:${label}` : label}
           </header>
         ))}
-        {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of derive() — reactive, back in pattern-owned UI */}
+        {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of computed() — reactive, back in pattern-owned UI */}
         {threadRows.map((row, rowIndex) => (
           <section data-row={rowIndex}>{row}</section>
         ))}

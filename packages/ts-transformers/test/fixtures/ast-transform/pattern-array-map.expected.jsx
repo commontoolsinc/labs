@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Cell, derive, handler, NAME, pattern, str, UI } from "commonfabric";
+import { Cell, computed, handler, NAME, pattern, str, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -31,22 +31,30 @@ const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
 // FIXTURE: pattern-array-map
 // Verifies: .map() on a reactive array is transformed to .mapWithPattern()
 //   values.map((value, index) => JSX)  → values.mapWithPattern(pattern(fn, elementSchema, outputSchema), {})
-//   derive(values, fn)                 → derive(inputSchema, outputSchema, values, fn)
+//   computed(() => { ... })            → captures `values` into lift(inputSchema, outputSchema, fn)
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<{ values: string[] }>      → pattern(fn, inputSchema, outputSchema)
-// Context: Destructured pattern parameter; combines array map transform with derive and handler schemas
+// Context: Destructured pattern parameter; combines array map transform with computed and handler schemas
 export default pattern((__cf_pattern_input) => {
     const values = __cf_pattern_input.key("values");
-    __cfHelpers.lift({
-        type: "array",
-        items: {
-            type: "unknown"
-        }
+    __cfHelpers.lift<{
+        values: unknown[];
+    }, void>({
+        type: "object",
+        properties: {
+            values: {
+                type: "array",
+                items: {
+                    type: "unknown"
+                }
+            }
+        },
+        required: ["values"]
     } as const satisfies __cfHelpers.JSONSchema, {
         asCell: ["opaque"]
-    } as const satisfies __cfHelpers.JSONSchema, (values) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ values }) => {
         console.log("values#", values?.length);
-    })(values);
+    })({ values: values });
     return {
         [NAME]: str `Simple Value: ${values.key("length")}`,
         [UI]: (<div>

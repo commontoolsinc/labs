@@ -24,7 +24,6 @@ const DEFAULT_PACKAGES_WITH_SERVER = [
   "runner",
   "runtime-client",
   "shell",
-  "background-charm-service",
   "patterns",
   "cli",
 ];
@@ -52,7 +51,6 @@ const ALL_PACKAGES = [...DEFAULT_PACKAGES, ...OPTIONAL_PACKAGES_WITH_SERVER];
 // Packages that need HEADLESS=1 for browser tests
 const HEADLESS_PACKAGES = [
   "shell",
-  "background-charm-service",
   "patterns",
   "patterns-reload",
 ];

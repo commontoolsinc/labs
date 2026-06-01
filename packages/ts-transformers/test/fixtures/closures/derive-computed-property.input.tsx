@@ -1,15 +1,15 @@
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: derive-computed-property
 // Verifies: computed property access with a dynamic key captures both the object and the key
-//   derive(value, fn) → derive(schema, schema, { value, config, key }, fn)
+//   computed(() => expr) → lift(schema, schema)({ value, config, key })
 // Context: `config[key]` requires both `config` and `key` to be captured as plain values
 export default pattern(() => {
   const value = new Writable(10);
   const config = { multiplier: 2, divisor: 5 };
   const key = "multiplier";
 
-  const result = derive(value, (v) => v.get() * config[key]);
+  const result = computed(() => value.get() * config[key]);
 
   return result;
 });

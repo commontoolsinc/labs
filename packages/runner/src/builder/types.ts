@@ -16,7 +16,6 @@ import type {
   CfDataFunction,
   CompileAndRunFunction,
   ComputedFunction,
-  DeriveFunction,
   EqualsFunction,
   FetchDataFunction,
   FetchProgramFunction,
@@ -295,7 +294,6 @@ export interface BuilderFunctionsAndConstants {
   lift: LiftFunction;
   handler: HandlerFunction;
   action: ActionFunction;
-  derive: DeriveFunction;
   computed: ComputedFunction;
 
   // Built-in modules

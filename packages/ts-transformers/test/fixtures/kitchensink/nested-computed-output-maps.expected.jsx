@@ -85,7 +85,7 @@ export default pattern((state) => {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("selectedCommentId", true);
     const laneLabels = passthroughLabels(["lane", "detail", "summary"]).for("laneLabels", true);
-    // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged
+    // [TRANSFORM] computed() → lift(): captures state.threads, state.showFlagged
     const visibleThreads = __cfHelpers.lift<{
         state: {
             threads: Thread[];
@@ -220,7 +220,7 @@ export default pattern((state) => {
             }
         }
     } as const satisfies __cfHelpers.JSONSchema, ({ state }) => 
-    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this derive
+    // [TRANSFORM] .map() stays plain: state.threads is a captured input, plain inside this computed
     state.threads.map((thread, outerIndex) => ({
         thread,
         outerIndex,
@@ -231,7 +231,7 @@ export default pattern((state) => {
             threads: state.key("threads"),
             showFlagged: state.key("showFlagged")
         } }).for("visibleThreads", true);
-    // [TRANSFORM] computed() → derive(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
+    // [TRANSFORM] computed() → lift(): captures visibleThreads (asOpaque), selectedCommentId (asCell — Writable), state.lane
     const threadRows = __cfHelpers.lift<{
         visibleThreads: {
             thread: {
@@ -351,12 +351,12 @@ export default pattern((state) => {
             }
         }
     } as const satisfies __cfHelpers.JSONSchema, ({ visibleThreads, selectedCommentId, state }) => 
-    // [TRANSFORM] .map() stays plain: visibleThreads is a captured derive input, plain inside this derive
+    // [TRANSFORM] .map() stays plain: visibleThreads is a captured input, plain inside this computed
     visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
         // [TRANSFORM] .map() stays plain: ["top","bottom"] is a literal array
         const plainSeparators = ["top", "bottom"].map((edge) => `${thread.title}-${edge}`);
         const liftedSeparators = passthroughLabels(plainSeparators).for("liftedSeparators", true);
-        // [TRANSFORM] computed() → derive() (nested): captures visibleComments from outer derive scope
+        // [TRANSFORM] computed() → lift() (nested): captures visibleComments from outer computed scope
         const reboundComments = __cfHelpers.lift<{
             visibleComments: Comment[];
         }, Comment[]>({
@@ -424,7 +424,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, ({ visibleComments }) => visibleComments)({ visibleComments: visibleComments }).for("reboundComments", true);
         return (<article>
           <h2>{thread.title}</h2>
-          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured derive input */}
+          {/* [TRANSFORM] .map() stays plain: visibleComments is destructured from captured computed input */}
           {visibleComments.map((comment, innerIndex) => (<div>
               <button type="button" onClick={jumpToComment({
                     selectedCommentId: selectedCommentId,
@@ -457,7 +457,7 @@ export default pattern((state) => {
                         : reaction}
                 </span>))}
             </div>))}
-          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested derive() — reactive even inside outer derive */}
+          {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested computed() — reactive even inside outer computed */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {reboundComments.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const comment = __cf_pattern_input.key("element");
@@ -597,7 +597,7 @@ export default pattern((state) => {
                     lane: state.lane
                 }
             })}
-          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer derive */}
+          {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer computed */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
           {liftedSeparators.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const edge = __cf_pattern_input.key("element");
@@ -731,7 +731,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
-        {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(derive(cond), derive(true-branch), label) */}
+        {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(lift(cond), lift(true-branch), label) */}
         {laneLabels.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const label = __cf_pattern_input.key("element");
                 const labelIndex = __cf_pattern_input.key("index");
@@ -839,7 +839,7 @@ export default pattern((state) => {
                     lane: state.key("lane")
                 }
             })}
-        {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of derive() — reactive, back in pattern-owned UI */}
+        {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of computed() — reactive, back in pattern-owned UI */}
         {threadRows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const row = __cf_pattern_input.key("element");
                 const rowIndex = __cf_pattern_input.key("index");

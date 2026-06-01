@@ -30,8 +30,8 @@
  * 7. Check console for any "Tried to directly access opaque value" errors (should be none)
  */
 import {
+  computed,
   Default,
-  derive,
   generateObject,
   handler,
   NAME,
@@ -98,14 +98,14 @@ export default pattern<Input>(({ items }) => {
     }),
   }));
 
-  const pendingCount = derive(
-    sentimentAnalyses.map((s) => s.analysis.pending),
-    (pendingStates) => pendingStates.filter((p) => p).length,
+  const pendingCount = computed(() =>
+    sentimentAnalyses.map((s) => s.analysis.pending).filter((p) => p).length
   );
 
-  const completedCount = derive(
-    sentimentAnalyses.map((s) => s.analysis.result),
-    (results) => results.filter((r) => r !== undefined).length,
+  const completedCount = computed(() =>
+    sentimentAnalyses.map((s) => s.analysis.result).filter((r) =>
+      r !== undefined
+    ).length
   );
 
   return {
@@ -159,88 +159,84 @@ export default pattern<Input>(({ items }) => {
                 <strong>Text:</strong> <em>{item.content}</em>
               </div>
 
-              {derive(
-                [
-                  item.analysis.pending,
-                  item.analysis.result,
-                  item.analysis.error,
-                ],
-                ([pending, result, error]) => {
-                  if (pending) {
-                    return (
-                      <div
+              {computed(() => {
+                const pending = item.analysis.pending;
+                const result = item.analysis.result;
+                const error = item.analysis.error;
+                if (pending) {
+                  return (
+                    <div
+                      style={{
+                        color: "#666",
+                        padding: "10px",
+                        background: "#fff3cd",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      <cf-loader
+                        show-elapsed
                         style={{
-                          color: "#666",
-                          padding: "10px",
-                          background: "#fff3cd",
-                          borderRadius: "4px",
+                          display: "inline-block",
+                          marginRight: "8px",
                         }}
-                      >
-                        <cf-loader
-                          show-elapsed
+                      />
+                      Analyzing sentiment...
+                    </div>
+                  );
+                }
+                if (error) {
+                  return (
+                    <div
+                      style={{
+                        color: "#d32f2f",
+                        padding: "10px",
+                        background: "#ffebee",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      <strong>Error:</strong> {String(error)}
+                    </div>
+                  );
+                }
+                const sentimentResult = result as Sentiment | undefined;
+                if (sentimentResult) {
+                  return (
+                    <div
+                      style={{
+                        padding: "10px",
+                        background: "#f5f5f5",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      <div style={{ marginBottom: "6px" }}>
+                        <strong>Sentiment:</strong>{" "}
+                        <span
                           style={{
-                            display: "inline-block",
-                            marginRight: "8px",
+                            fontSize: "16px",
+                            fontWeight: "bold",
+                            color: sentimentResult.sentiment === "positive"
+                              ? "#4CAF50"
+                              : sentimentResult.sentiment === "negative"
+                              ? "#f44336"
+                              : "#757575",
                           }}
-                        />
-                        Analyzing sentiment...
+                        >
+                          {sentimentResult.sentiment.toUpperCase()}
+                        </span>{" "}
+                        <span style={{ color: "#666", fontSize: "12px" }}>
+                          ({Math.round(sentimentResult.confidence * 100)}%
+                          confidence)
+                        </span>
                       </div>
-                    );
-                  }
-                  if (error) {
-                    return (
-                      <div
-                        style={{
-                          color: "#d32f2f",
-                          padding: "10px",
-                          background: "#ffebee",
-                          borderRadius: "4px",
-                        }}
-                      >
-                        <strong>Error:</strong> {String(error)}
+                      <div style={{ fontSize: "12px", color: "#666" }}>
+                        <strong>Keywords:</strong>{" "}
+                        {sentimentResult.keywords.join(", ")}
                       </div>
-                    );
-                  }
-                  const sentimentResult = result as Sentiment | undefined;
-                  if (sentimentResult) {
-                    return (
-                      <div
-                        style={{
-                          padding: "10px",
-                          background: "#f5f5f5",
-                          borderRadius: "4px",
-                        }}
-                      >
-                        <div style={{ marginBottom: "6px" }}>
-                          <strong>Sentiment:</strong>{" "}
-                          <span
-                            style={{
-                              fontSize: "16px",
-                              fontWeight: "bold",
-                              color: sentimentResult.sentiment === "positive"
-                                ? "#4CAF50"
-                                : sentimentResult.sentiment === "negative"
-                                ? "#f44336"
-                                : "#757575",
-                            }}
-                          >
-                            {sentimentResult.sentiment.toUpperCase()}
-                          </span>{" "}
-                          <span style={{ color: "#666", fontSize: "12px" }}>
-                            ({Math.round(sentimentResult.confidence * 100)}%
-                            confidence)
-                          </span>
-                        </div>
-                        <div style={{ fontSize: "12px", color: "#666" }}>
-                          <strong>Keywords:</strong>{" "}
-                          {sentimentResult.keywords.join(", ")}
-                        </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                },
-              )}
+                    </div>
+                  );
+                }
+                return null;
+              })}
 
               <div style={{ marginTop: "12px" }}>
                 <cf-button onClick={removeItem({ items, itemId: item.itemId })}>

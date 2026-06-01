@@ -7,13 +7,13 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-local-variable
 // Verifies: callback-local variables are not captured, but outer cells are
-//   derive(a, fn) → derive(schema, schema, { a, b, c }, fn)
+//   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → lift(...)({ a, b, c })
 // Context: `sum` is a local const inside the callback and must not appear in captures
 export default pattern(() => {
     const a = new Writable(10, {
@@ -48,11 +48,11 @@ export default pattern(() => {
         required: ["a", "b", "c"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ a: aVal, b, c }) => {
-        const sum = aVal.get() + b.get();
+    } as const satisfies __cfHelpers.JSONSchema, ({ a, b, c }) => {
+        const sum = a.get() + b.get();
         return sum * c.get();
     })({
-        a: a.for(["result", "a"], true),
+        a: a,
         b: b,
         c: c
     }).for("result", true);

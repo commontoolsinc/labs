@@ -7,13 +7,13 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-type-assertion
 // Verifies: a type assertion (`as number`) in the callback body is preserved after capture extraction
-//   derive(value, fn) → derive(schema, schema, { value, multiplier }, fn)
+//   computed(() => (value.get() * multiplier.get()) as number) → lift(...)({ value, multiplier })
 // Context: the `as number` cast remains intact in the transformed callback expression
 export default pattern(() => {
     const value = new Writable(10, {
@@ -40,8 +40,8 @@ export default pattern(() => {
         required: ["value", "multiplier"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, multiplier }) => (v.get() * multiplier.get()) as number)({
-        value: value.for(["result", "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => (value.get() * multiplier.get()) as number)({
+        value: value,
         multiplier: multiplier
     }).for("result", true);
     return result;

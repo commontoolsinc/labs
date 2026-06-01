@@ -7,15 +7,15 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-nested-callback
-// Verifies: capture extraction works with nested .map() which is itself transformed to mapWithPattern
-//   derive(numbers, fn) → derive(schema, schema, { numbers, multiplier }, fn)
-//   inner nums.map(fn) → nums.mapWithPattern(pattern(...), { multiplier })
-// Context: `multiplier` is captured by both derive and the inner map; inner map receives it via params
+// Verifies: capture extraction works with a nested .map() over a captured cell's array value
+//   computed(() => numbers.get().map(n => n * multiplier.get())) → lift(...)({ numbers, multiplier })
+//   inner numbers.get().map(fn) runs on a plain array → NOT rewritten to mapWithPattern
+// Context: both `numbers` and `multiplier` are captured cells; the inner map reads `multiplier`
 export default pattern(() => {
     const numbers = new Writable([1, 2, 3], {
         type: "array",
@@ -26,59 +26,33 @@ export default pattern(() => {
     const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
-    // Nested callback - inner array map should not capture outer multiplier
+    // Nested callback - the inner array map runs on the unwrapped plain array
     const result = __cfHelpers.lift<{
+        numbers: __cfHelpers.ReadonlyCell<number[]>;
         multiplier: __cfHelpers.ReadonlyCell<number>;
-        numbers: __cfHelpers.OpaqueCell<number[]>;
     }, number[]>({
         type: "object",
         properties: {
-            multiplier: {
-                type: "number",
-                asCell: ["readonly"]
-            },
             numbers: {
                 type: "array",
                 items: {
                     type: "number"
                 },
-                asCell: ["opaque"]
+                asCell: ["readonly"]
+            },
+            multiplier: {
+                type: "number",
+                asCell: ["readonly"]
             }
         },
-        required: ["multiplier", "numbers"]
+        required: ["numbers", "multiplier"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const n = __cf_pattern_input.key("element");
-        const multiplier = __cf_pattern_input.key("params", "multiplier");
-        return n * multiplier.get();
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number",
-                        asCell: ["readonly"]
-                    }
-                },
-                required: ["multiplier"]
-            }
-        },
-        required: ["element", "params"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema), {
-        multiplier: multiplier
-    }))({
-        numbers: numbers.for(["result", "numbers"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.get().map((n) => n * multiplier.get()))({
+        numbers: numbers,
         multiplier: multiplier
     }).for("result", true);
     return result;

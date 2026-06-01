@@ -14,8 +14,8 @@ const options = {
   },
 };
 
-Deno.test("Closure Transformer hoists nested derive callbacks that close over module-scoped helpers", async () => {
-  const source = `    import { derive, pattern, UI } from "commonfabric";
+Deno.test("Closure Transformer hoists nested computed callbacks that close over module-scoped helpers", async () => {
+  const source = `    import { computed, pattern, UI } from "commonfabric";
 
     const formatDateShort = (dateStr: string) => dateStr.toUpperCase();
 
@@ -24,10 +24,7 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
         <div>
           {state.values.map((dateStr) => (
             <span>
-              {derive(
-                { dateStr },
-                ({ dateStr }: { dateStr: string }) => formatDateShort(dateStr),
-              )}
+              {computed(() => formatDateShort(dateStr))}
             </span>
           ))}
         </div>
@@ -39,18 +36,18 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
   const normalized = output.replace(/\s+/g, " ");
 
   const hoistedMatch = normalized.match(
-    /const (\S+) = __cfHardenFn\(\(\{ dateStr \}: \{ dateStr: string; \}\) => formatDateShort\(dateStr\)\);/,
+    /const (\S+) = __cfHardenFn\(\(\{ dateStr \}\) => formatDateShort\(dateStr\)\);/,
   );
 
   assert(hoistedMatch, `expected hoisted helper in output:\n${output}`);
 
   const hoistedName = hoistedMatch[1]!;
-  // After CT-1615 Phase 1, derive calls lower to the lift-applied form:
-  // __cfHelpers.lift(argSchema, resultSchema, callback)(input)
+  // computed() closure-extracts captured reactive reads and lowers to the
+  // lift-applied form: __cfHelpers.lift(argSchema, resultSchema, callback)(input)
   assertMatch(
     normalized,
     new RegExp(
-      `__cfHelpers\\.lift\\([\\s\\S]*?, ${hoistedName}\\)\\(\\{ dateStr \\}\\)`,
+      `__cfHelpers\\.lift[\\s\\S]*?, ${hoistedName}\\)\\(\\{ dateStr: dateStr \\}\\)`,
     ),
   );
 });

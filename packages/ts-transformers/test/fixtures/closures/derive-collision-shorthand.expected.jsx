@@ -7,38 +7,30 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-collision-shorthand
-// Verifies: shorthand property `{ multiplier }` expands correctly when the capture is renamed
-//   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)
-//   shorthand `{ multiplier }` → `{ multiplier: multiplier_1 }`
-// Context: shorthand must expand to keep the property name while using the renamed capture binding
+// Verifies: a shorthand property `{ multiplier }` over a captured cell expands correctly
+//   computed(() => ({ value, data: { multiplier } })) → lift(...)({ multiplier })
+// Context: shorthand must keep the property name while binding to the captured value
 export default pattern(() => {
     const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
-    // Input name 'multiplier' collides with captured variable 'multiplier'
-    // The callback uses shorthand property { multiplier }
-    // This should expand to { multiplier: multiplier_1 } after renaming
+    // The callback uses shorthand property { multiplier } over the captured cell.
     const result = __cfHelpers.lift<{
         multiplier: __cfHelpers.ReadonlyCell<number>;
-        multiplier_1: __cfHelpers.ReadonlyCell<number>;
     }, { value: number; data: { multiplier: import("commonfabric").Cell<number>; }; }>({
         type: "object",
         properties: {
             multiplier: {
                 type: "number",
                 asCell: ["readonly"]
-            },
-            multiplier_1: {
-                type: "number",
-                asCell: ["readonly"]
             }
         },
-        required: ["multiplier", "multiplier_1"]
+        required: ["multiplier"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -57,13 +49,10 @@ export default pattern(() => {
             }
         },
         required: ["value", "data"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ multiplier: m, multiplier_1 }) => ({
-        value: m.get() * 3,
-        data: { multiplier: multiplier_1 },
-    }))({
-        multiplier: multiplier.for(["result", "multiplier"], true),
-        multiplier_1: multiplier
-    }).for("result", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ multiplier }) => ({
+        value: multiplier.get() * 3,
+        data: { multiplier: multiplier },
+    }))({ multiplier: multiplier }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

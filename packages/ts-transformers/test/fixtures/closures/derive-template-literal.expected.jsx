@@ -7,13 +7,13 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-template-literal
-// Verifies: a captured cell used inside a template literal expression is extracted
-//   derive(value, fn) → derive(schema, schema, { value, prefix }, fn)
+// Verifies: captured cells used inside a template literal expression are extracted
+//   computed(() => `${prefix.get()}${value.get()}`) → lift(...)({ value, prefix })
 export default pattern(() => {
     const value = new Writable(10, {
         type: "number"
@@ -39,9 +39,9 @@ export default pattern(() => {
         required: ["prefix", "value"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, prefix }) => `${prefix.get()}${v}`)({
-        value: value.for(["result", "value"], true),
-        prefix: prefix
+    } as const satisfies __cfHelpers.JSONSchema, ({ prefix, value }) => `${prefix.get()}${value.get()}`)({
+        prefix: prefix,
+        value: value
     }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {

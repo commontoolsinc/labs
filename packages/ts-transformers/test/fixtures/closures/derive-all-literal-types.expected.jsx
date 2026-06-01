@@ -7,14 +7,14 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // Test that all literal types are widened in closure captures
 // FIXTURE: derive-all-literal-types
 // Verifies: literal values (number, string, boolean, float) are captured and their types widened in schemas
-//   derive(value, fn) → derive(schema, schema, { value, numLiteral, floatLiteral, boolLiteral, strLiteral }, fn)
+//   computed(() => expr) → lift(schema, schema)({ value, numLiteral, floatLiteral, boolLiteral, strLiteral }) with widened types
 // Context: each literal type maps to its widened JSON schema type (e.g., 42 → "number", "hello" → "string")
 export default pattern(() => {
     const value = new Writable(10, {
@@ -50,12 +50,12 @@ export default pattern(() => {
         required: ["value", "numLiteral", "floatLiteral", "strLiteral"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
         // Use all captured literals to ensure they're all widened
-        const combined = v.get() + numLiteral + floatLiteral;
+        const combined = value.get() + numLiteral + floatLiteral;
         return boolLiteral ? strLiteral + combined : "";
     })({
-        value: value.for(["result", "value"], true),
+        value: value,
         numLiteral: numLiteral,
         floatLiteral: floatLiteral,
         boolLiteral: boolLiteral,

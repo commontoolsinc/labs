@@ -1333,14 +1333,14 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     );
   });
 
-  await t.step("allows reading opaques inside derive()", async () => {
+  await t.step("allows reading opaques inside computed()", async () => {
     const source =
-      `      import { pattern, derive, Cell, h } from "commonfabric";
+      `      import { pattern, computed, Cell, h } from "commonfabric";
 
       interface Item { name: string; price: number; }
 
       export default pattern<{ item: Item, discount: Cell<number> }>(({ item, discount }) => {
-        const finalPrice = derive(discount, (d) => item.price * (1 - d));
+        const finalPrice = computed(() => item.price * (1 - discount.get()));
         return <div>{finalPrice}</div>;
       });
     `;
@@ -1351,35 +1351,9 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     assertEquals(
       errors.length,
       0,
-      "Reading opaques inside derive() should be allowed",
+      "Reading opaques inside computed() should be allowed",
     );
   });
-
-  await t.step(
-    "allows reading opaques inside standalone derive()",
-    async () => {
-      const source = `      import { pattern, derive, h } from "commonfabric";
-
-      interface Item { name: string; price: number; }
-
-      export default pattern<{ item: Item }>(({ item }) => {
-        // Standalone derive (nullary form) - should allow opaque access
-        const isExpensive = derive(() => item.price > 100);
-        const doubled = derive(() => item.price * 2);
-        return <div>{isExpensive ? "Expensive" : "Affordable"} - {doubled}</div>;
-      });
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      assertEquals(
-        errors.length,
-        0,
-        "Reading opaques inside standalone derive() should be allowed",
-      );
-    },
-  );
 
   await t.step(
     "errors on lift() inside pattern (must be at module scope)",
@@ -1528,7 +1502,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   );
 });
 
-Deno.test("Computed/derive local reactive alias validation", async (t) => {
+Deno.test("Computed local reactive alias validation", async (t) => {
   await t.step(
     "errors on truthiness checks of locally created computed results",
     async () => {
@@ -2101,23 +2075,6 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "action() inside pattern should be allowed");
-  });
-
-  await t.step("allows derive() inside pattern", async () => {
-    const source = `      import { pattern, derive, h } from "commonfabric";
-
-      interface Item { price: number; }
-
-      export default pattern<{ item: Item }>(({ item }) => {
-        const doubled = derive(() => item.price * 2);
-        return <div>{doubled}</div>;
-      });
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    const errors = getErrors(diagnostics);
-    assertEquals(errors.length, 0, "derive() inside pattern should be allowed");
   });
 });
 
@@ -2860,31 +2817,6 @@ Deno.test("Standalone Function Validation", async (t) => {
     },
   );
 
-  await t.step(
-    "errors on derive() inside standalone function",
-    async () => {
-      const source = `      import { derive, Cell } from "commonfabric";
-
-      const value = {} as Cell<number>;
-
-      const helper = () => {
-        return derive(() => value.get() * 2);
-      };
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "standalone-function:reactive-operation");
-      assertEquals(
-        errors[0]!.message.includes("derive()"),
-        true,
-        "Error should mention derive()",
-      );
-    },
-  );
-
   const builderFactoryCases = [
     {
       name: "action()",
@@ -2968,12 +2900,12 @@ Deno.test("Standalone Function Validation", async (t) => {
     "allows reactive operations in functions passed to patternTool()",
     async () => {
       const source =
-        `      import { patternTool, derive, Cell } from "commonfabric";
+        `      import { patternTool, computed, Cell } from "commonfabric";
 
       const multiplier = {} as Cell<number>;
 
       const tool = patternTool(({ query }: { query: string }) => {
-        return derive(() => query.length * multiplier.get());
+        return computed(() => query.length * multiplier.get());
       });
     `;
       const { diagnostics } = await validateSource(source, {
@@ -3130,15 +3062,14 @@ Deno.test("Standalone Function Validation", async (t) => {
 
 Deno.test("SES Callback Self-Containment Validation", async (t) => {
   await t.step(
-    "errors when derive callback captures enclosing helper function",
+    "errors when computed callback captures enclosing helper function",
     async () => {
-      const source =
-        `      import { computed, derive, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
         const label = computed(() => {
           const helper = (value: string) => value.toUpperCase();
-          return derive("x", () => helper("x"));
+          return computed(() => helper("x"));
         });
         return { label };
       });
@@ -3152,16 +3083,15 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
   );
 
   await t.step(
-    "errors when derive callback captures forwarded enclosing helper function",
+    "errors when computed callback captures forwarded enclosing helper function",
     async () => {
-      const source =
-        `      import { computed, derive, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
         const label = computed(() => {
           const helper = (value: string) => value.toUpperCase();
           const forwarded = helper;
-          return derive("x", () => ({ helper: forwarded }));
+          return computed(() => ({ helper: forwarded }));
         });
         return { label };
       });
@@ -3175,16 +3105,15 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
   );
 
   await t.step(
-    "errors when derive callback captures forwarded function-typed pattern input",
+    "errors when computed callback captures forwarded function-typed pattern input",
     async () => {
-      const source =
-        `      import { computed, derive, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern<{
         helper: (value: string) => string;
       }>(({ helper }) => {
         const label = computed(() => {
-          return derive("x", () => ({ helper }));
+          return computed(() => ({ helper }));
         });
         return { label };
       });
@@ -3283,16 +3212,15 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
   );
 
   await t.step(
-    "allows derive callback to capture forwarded non-callable data",
+    "allows computed callback to capture forwarded non-callable data",
     async () => {
-      const source =
-        `      import { computed, derive, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       export default pattern(() => {
         const label = computed(() => {
           const value = "x";
           const forwarded = value;
-          return derive("x", () => forwarded);
+          return computed(() => forwarded);
         });
         return { label };
       });
@@ -3314,12 +3242,12 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
   await t.step(
     "allows module-scope helper functions in callbacks",
     async () => {
-      const source = `      import { derive, pattern } from "commonfabric";
+      const source = `      import { computed, pattern } from "commonfabric";
 
       const helper = (value: string) => value.toUpperCase();
 
       export default pattern(() => {
-        return { label: derive("x", () => helper("x")) };
+        return { label: computed(() => helper("x")) };
       });
     `;
       const { diagnostics } = await validateSource(source, {
@@ -3461,7 +3389,7 @@ Deno.test("Inline reactive-root chain rewrite", async (t) => {
 });
 
 Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
-  // ClosureTransformer hoists reactive callback bodies (computed/derive/etc.)
+  // ClosureTransformer hoists reactive callback bodies (computed/lift/etc.)
   // into top-level `const __cfModuleCallback_N = ...` declarations. Those
   // bodies must still receive the reactive-root lowering pass so chains like
   // `cell.result` get lowered to `cell.key("result")` — otherwise the access

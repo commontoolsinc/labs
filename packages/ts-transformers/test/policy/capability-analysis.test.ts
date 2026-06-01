@@ -1601,18 +1601,18 @@ Deno.test(
 );
 
 Deno.test(
-  "Capability analysis marks inferred derive cell equals paths as identity-cell paths",
+  "Capability analysis marks inferred lift cell equals paths as identity-cell paths",
   () => {
     const { program, sourceFile } = createProgramWithFiles({
       "/test.ts": `
-        import { derive, type Writable } from "commonfabric";
+        import { lift, type Writable } from "commonfabric";
 
         type Piece = Writable<{ name: string }>;
         const left = {} as Piece;
         const right = {} as Piece;
-        const same = derive({ left, right }, ({ left, right }) =>
+        const same = lift(({ left, right }: { left: Piece; right: Piece }) =>
           left.equals(right)
-        );
+        )({ left, right });
       `,
       "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
     });
@@ -1629,7 +1629,7 @@ Deno.test(
       };
       visit(sourceFile);
       if (!found) {
-        throw new Error("Expected derive callback.");
+        throw new Error("Expected lift callback.");
       }
       return found;
     })();

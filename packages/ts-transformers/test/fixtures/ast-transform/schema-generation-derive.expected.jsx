@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { derive } from "commonfabric";
+import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -19,27 +19,12 @@ type DeriveResult = {
 };
 declare const source: DeriveInput;
 // FIXTURE: schema-generation-derive
-// Verifies: derive() with generic type args generates input and output schemas
-//   derive<DeriveInput, DeriveResult>(source, fn) → derive(inputSchema, outputSchema, source, fn)
-export const doubledValue = __cfHelpers.__cf_data(__cfHelpers.lift<DeriveInput, DeriveResult>({
-    type: "object",
-    properties: {
-        count: {
-            type: "number"
-        }
-    },
-    required: ["count"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        doubled: {
-            type: "number"
-        }
-    },
-    required: ["doubled"]
-} as const satisfies __cfHelpers.JSONSchema, (input) => ({
-    doubled: input.count * 2,
-}))(source).for("doubledValue", true));
+// Verifies: computed() closure-extracts a captured value into a lift() with input
+// (capture) and output schemas generated from type info
+//   computed(() => ({ doubled: source.count * 2 })) → lift(captureSchema, outputSchema, { source }, fn)
+export const doubledValue = __cfHelpers.__cf_data(__cfHelpers.lift(false, (): DeriveResult => ({
+    doubled: source.count * 2,
+}))().for("doubledValue", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

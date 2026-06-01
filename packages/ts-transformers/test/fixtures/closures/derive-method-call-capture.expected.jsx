@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -18,13 +18,13 @@ interface State {
 }
 // FIXTURE: derive-method-call-capture
 // Verifies: a deep property access on a captured object is restructured into a nested capture object
-//   derive(value, fn) → derive(schema, schema, { value, state: { counter: { value: state.counter.value } } }, fn)
+//   computed(() => value.get() + state.counter.value) → lift(...)({ value, state: { counter: { value } } })
 // Context: `state.counter.value` is captured as a nested object structure, not a flat binding
 export default pattern((state: State) => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    // Capture property before method call
+    // Capture a deep property path on the pattern input
     const result = __cfHelpers.lift<{
         value: __cfHelpers.ReadonlyCell<number>;
         state: {
@@ -58,8 +58,8 @@ export default pattern((state: State) => {
         required: ["value", "state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, state }) => v.get() + state.counter.value)({
-        value: value.for(["result", "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, state }) => value.get() + state.counter.value)({
+        value: value,
         state: {
             counter: {
                 value: state.key("counter", "value")

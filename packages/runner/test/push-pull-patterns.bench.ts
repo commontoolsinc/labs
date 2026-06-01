@@ -767,14 +767,14 @@ async function setupFanoutScenario(
   const outputCells: Cell<number>[] = [];
 
   for (let i = 0; i < FANOUT_WIDTH; i++) {
-    const derive = env.lift(
+    const addOffset = env.lift(
       numberSchema,
       numberSchema,
       (value: number) => value + i + 1,
     );
     const derivePattern = env.pattern<{ value: number }>(
       ({ value }) => ({
-        result: derive(value),
+        result: addOffset(value),
       }),
       scalarInputSchema,
       scalarResultSchema,

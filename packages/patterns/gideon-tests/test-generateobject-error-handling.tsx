@@ -21,7 +21,6 @@
  */
 import {
   Default,
-  derive,
   generateObject,
   ifElse,
   NAME,
@@ -48,12 +47,12 @@ export default pattern<Input, Input>(({ userInput }) => {
     model: "anthropic:claude-sonnet-4-5",
   });
 
-  // Derive error message as string for display
-  const errorMessage = derive(
-    idea.error,
-    (err) =>
-      err ? (typeof err === "string" ? err : toIndentedDebugString(err)) : null,
-  );
+  // Error message as string for display
+  const errorMessage = idea.error
+    ? (typeof idea.error === "string"
+      ? idea.error
+      : toIndentedDebugString(idea.error))
+    : null;
 
   return {
     [NAME]: "GenerateObject Error Handling Test",

@@ -2,7 +2,6 @@ import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -218,10 +217,7 @@ export const counterWithDerivedSummary = pattern<SummaryArgs>(
     const stepValue = liftSanitizeStep(step);
     const historyView = liftSanitizeHistory(history);
     const adjustmentsView = liftSanitizeAdjustments(adjustments);
-    const sequenceView = derive(
-      sequence,
-      (count) => toInteger(count.get() ?? 0, 0),
-    );
+    const sequenceView = toInteger(sequence.get() ?? 0, 0);
 
     const summary = liftSummary({
       current: currentValue,
@@ -230,10 +226,10 @@ export const counterWithDerivedSummary = pattern<SummaryArgs>(
       adjustments: adjustmentsView,
     });
 
-    const trendText = derive(summary, (snapshot) => snapshot.trend);
-    const parityText = derive(summary, (snapshot) => snapshot.parity);
+    const trendText = summary.trend;
+    const parityText = summary.parity;
     const detail = str`Step ${stepValue} trend ${trendText}`;
-    const summaryLabel = derive(summary, (snapshot) => snapshot.label);
+    const summaryLabel = summary.label;
 
     return {
       value,

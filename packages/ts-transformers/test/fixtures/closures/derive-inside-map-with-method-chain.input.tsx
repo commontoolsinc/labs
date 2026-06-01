@@ -1,4 +1,4 @@
-import { derive, pattern, UI } from "commonfabric";
+import { computed, pattern, UI } from "commonfabric";
 
 interface SubItem {
   id: number;
@@ -17,17 +17,17 @@ interface State {
 }
 
 // FIXTURE: derive-inside-map-with-method-chain
-// Verifies: derive nested inside .map() correctly transforms outer .map() but leaves inner chains alone
+// Verifies: a computed nested inside .map() correctly transforms outer .map() but leaves inner chains alone
 //   state.items.map(fn) → state.items.mapWithPattern(pattern(...))
-//   inner .filter().map() inside derive callback → NOT transformed (plain array)
-// Context: derive is used inline in JSX within a mapWithPattern callback
+//   inner .filter().map() inside the computed callback → NOT transformed (plain array)
+// Context: computed is used inline in JSX within a mapWithPattern callback
 export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {/* Edge case: explicit derive inside mapWithPattern with method chain.
+        {/* Edge case: explicit computed inside mapWithPattern with method chain.
             The inner .filter().map() should NOT be transformed because:
-            - subs is a derive callback parameter (unwrapped at runtime)
+            - inside the computed, item.subItems unwraps to a plain JS array
             - .filter() returns a plain JS array
             - Plain arrays don't have .mapWithPattern() */}
         {state.items.map((item) => (
@@ -35,8 +35,8 @@ export default pattern<State>((state) => {
             <h2>{item.title}</h2>
             <p>
               Active items:{" "}
-              {derive(item.subItems, (subs) =>
-                subs
+              {computed(() =>
+                item.subItems
                   .filter((s) => s.active)
                   .map((s) => s.name)
                   .join(", ")

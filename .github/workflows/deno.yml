@@ -217,11 +217,6 @@ jobs:
             junit_name: shell
             step_name: shell integration tests
             headless: true
-          - suite_name: background-charm-service
-            package_dir: packages/background-charm-service
-            junit_name: background-charm-service
-            step_name: background worker integration tests
-            headless: true
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4

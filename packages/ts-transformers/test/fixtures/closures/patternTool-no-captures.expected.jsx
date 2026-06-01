@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -26,7 +26,10 @@ export default pattern(() => {
         query: string;
         content: string;
     }) => {
-        return __cfHelpers.lift({
+        return __cfHelpers.lift<{
+            query: string;
+            content: string;
+        }, string[]>({
             type: "object",
             properties: {
                 query: {
@@ -42,9 +45,12 @@ export default pattern(() => {
             items: {
                 type: "string"
             }
-        } as const satisfies __cfHelpers.JSONSchema, ({ query, content }) => {
+        } as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
             return content.split("\n").filter((c: string) => c.includes(query));
-        })({ query, content });
+        })({
+            content: content,
+            query: query
+        });
     });
     return { tool };
 }, {

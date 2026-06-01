@@ -103,9 +103,9 @@ Deno.test("detectCallKind keeps array-method as a family classification while ca
 
 Deno.test("classifyArrayMethodCallSite reports reactive ownership for reactive receivers", () => {
   const { sourceFile, checker } = createProgram(`
-    declare function derive<T>(value: T): T;
+    declare function computed<T>(callback: () => T): T;
 
-    const value = derive([1, 2, 3]).map((n: number) => n + 1);
+    const value = computed(() => [1, 2, 3]).map((n: number) => n + 1);
   `);
 
   const expression = findInitializer(sourceFile, "value");
@@ -126,9 +126,9 @@ Deno.test("classifyArrayMethodCallSite reports reactive ownership for reactive r
 
 Deno.test("classifyArrayCallbackContainerCall downgrades reactive array callbacks consumed by terminal chains", () => {
   const { sourceFile, checker } = createProgram(`
-    declare function derive<T>(value: T): T;
+    declare function computed<T>(callback: () => T): T;
 
-    const value = derive(["a", "b", "c"])
+    const value = computed(() => ["a", "b", "c"])
       .map((n: string) => n.toUpperCase())
       .join(", ");
   `);
@@ -333,55 +333,35 @@ Deno.test("getPatternBuilderCallbackArgument preserves unresolved property-acces
   assertEquals(ts.isArrowFunction(callback), true);
 });
 
-Deno.test("getCapabilitySummaryCallbackArgument recognizes derive and builder callback families", () => {
+Deno.test("getCapabilitySummaryCallbackArgument recognizes builder callback families", () => {
   const { sourceFile, checker } = createProgram(`
-    declare function derive<T, U>(input: T, callback: (value: T) => U): U;
-    declare function derive<T, U>(
-      inputSchema: unknown,
-      resultSchema: unknown,
-      input: T,
-      callback: (value: T) => U,
-    ): U;
     declare function computed<T>(callback: () => T): T;
     declare function action<T>(callback: () => T): T;
 
-    const first = derive(1, (value: number) => value + 1);
-    const second = derive({}, {}, 1, (value: number) => value + 2);
     const third = computed(() => 1);
     const fourth = action(() => 2);
   `);
 
-  const first = findInitializer(sourceFile, "first");
-  const second = findInitializer(sourceFile, "second");
   const third = findInitializer(sourceFile, "third");
   const fourth = findInitializer(sourceFile, "fourth");
 
   if (
-    !ts.isCallExpression(first) || !ts.isCallExpression(second) ||
     !ts.isCallExpression(third) || !ts.isCallExpression(fourth)
   ) {
     throw new Error("Expected call expression initializers");
   }
 
-  assertEquals(!!getCapabilitySummaryCallbackArgument(first, checker), true);
-  assertEquals(!!getCapabilitySummaryCallbackArgument(second, checker), true);
   assertEquals(!!getCapabilitySummaryCallbackArgument(third, checker), true);
   assertEquals(!!getCapabilitySummaryCallbackArgument(fourth, checker), true);
 });
 
-Deno.test("getLiftAppliedInputAndCallback recognizes derive input positions", () => {
+Deno.test("getLiftAppliedInputAndCallback recognizes lift-applied input positions", () => {
   const { sourceFile, checker } = createProgram(`
-    declare function derive<T, U>(input: T, callback: (value: T) => U): U;
-    declare function derive<T, U>(
-      inputSchema: unknown,
-      resultSchema: unknown,
-      input: T,
-      callback: (value: T) => U,
-    ): U;
+    declare function lift<T, U>(callback: (value: T) => U): (input: T) => U;
 
-    const first = derive(1, (value: number) => value + 1);
-    const second = derive({}, {}, 1, (value: number) => value + 2);
-    const third = derive(() => 3);
+    const first = lift((value: number) => value + 1)(1);
+    const second = lift((value: number) => value + 2)(1);
+    const third = lift((value: number) => value + 3);
   `);
 
   const first = findInitializer(sourceFile, "first");
@@ -398,6 +378,8 @@ Deno.test("getLiftAppliedInputAndCallback recognizes derive input positions", ()
 
   const firstArgs = getLiftAppliedInputAndCallback(first, checker);
   const secondArgs = getLiftAppliedInputAndCallback(second, checker);
+  // `third` is just `lift(cb)` — NOT applied to an input — so it is not the
+  // lift-applied shape and yields undefined.
   const thirdArgs = getLiftAppliedInputAndCallback(third, checker);
 
   assertEquals(firstArgs?.input.getText(), "1");

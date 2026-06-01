@@ -2,7 +2,6 @@ import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -155,7 +154,7 @@ export const counterWithHierarchicalKeyPath = pattern<HierarchyArgs>(
     const lastPath = cell(DEFAULT_PATH_STRING);
     const pathLog = cell<string[]>([]);
 
-    const totals = derive(hierarchy, computeClusterTotals);
+    const totals = computeClusterTotals(hierarchy);
     const overall = liftOverall(totals);
     const updates = liftUpdates(updateCount);
     const lastUpdatedPath = liftLastUpdatedPath(lastPath);

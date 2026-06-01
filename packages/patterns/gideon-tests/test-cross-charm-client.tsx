@@ -25,7 +25,6 @@
  */
 import {
   Default,
-  derive,
   handler,
   NAME,
   pattern,
@@ -110,11 +109,8 @@ export default pattern<Input, Output>(
     // Access the result from the wish (WishState has a result property)
     const serverPiece = wishResult.result;
 
-    // Extract the stream using derive
-    const serverStream = derive(
-      serverPiece,
-      (piece) => piece?.incrementCounter,
-    );
+    // Extract the stream via a plain projection (auto-wraps reactively)
+    const serverStream = serverPiece?.incrementCounter;
 
     return {
       [NAME]: "Cross-Piece Test Client",

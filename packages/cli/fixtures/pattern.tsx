@@ -1,4 +1,4 @@
-import { derive, handler, NAME, pattern, schema, str, UI } from "commonfabric";
+import { handler, NAME, pattern, schema, str, UI } from "commonfabric";
 import "commonfabric/schema";
 
 // Different way to define the same schema, using 'schema' helper function,
@@ -22,7 +22,7 @@ const decrement = handler({}, model, (_, state) => {
 export default pattern(
   (cell) => {
     return {
-      [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
+      [NAME]: str`Simple counter: ${String(cell.value)}`,
       [UI]: (
         <div>
           <button type="button" onClick={increment(cell)}>+</button>

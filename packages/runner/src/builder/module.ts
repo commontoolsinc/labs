@@ -478,50 +478,7 @@ export function handler<E, T>(
   return handlerInternal(eventSchema, stateSchema, handler);
 }
 
-export function derive<
-  InputSchema extends JSONSchema = JSONSchema,
-  ResultSchema extends JSONSchema = JSONSchema,
->(
-  argumentSchema: InputSchema,
-  resultSchema: ResultSchema,
-  input: Opaque<SchemaWithoutCell<InputSchema>>,
-  f: (
-    input: Schema<InputSchema>,
-  ) => Schema<ResultSchema>,
-  options?: DeriveSchedulerOptions,
-): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
-export function derive<In, Out>(
-  input: Opaque<In>,
-  f: (input: In) => Out,
-): OpaqueRef<Out>;
-export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
-  if (args.length >= 4) {
-    const [argumentSchema, resultSchema, input, f, options] = args as [
-      JSONSchema,
-      JSONSchema,
-      Opaque<SchemaWithoutCell<any>>,
-      (input: Schema<any>) => Schema<any>,
-      DeriveSchedulerOptions | undefined,
-    ];
-    return createNodeFactory({
-      type: "javascript",
-      argumentSchema,
-      resultSchema,
-      implementation: f as (input: Schema<any>) => Schema<any>,
-      ...(options?.materializerWriteInputPaths
-        ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
-        : {}),
-    })(input);
-  }
-
-  const [input, f] = args as [
-    Opaque<In>,
-    (input: In) => Out,
-  ];
-  return lift(f)(input);
-}
-
-// unsafe closures: like derive, but doesn't need any arguments.
+// unsafe closures: doesn't need any arguments.
 // Uses argumentSchema: false to signal "takes no input" so the action
 // validation doesn't skip it due to undefined arguments.
 export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>

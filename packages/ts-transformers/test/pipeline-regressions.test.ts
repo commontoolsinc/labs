@@ -738,14 +738,14 @@ export default pattern(() => {
 );
 
 Deno.test(
-  "Pipeline regression: derive callbacks that rely on contextual typing still receive injected schemas",
+  "Pipeline regression: computed callbacks that rely on contextual typing still receive injected schemas",
   async () => {
-    const source = `import { derive, pattern } from "commonfabric";
+    const source = `import { computed, pattern } from "commonfabric";
 
 const summarize = (values: string[]) => values.length;
 
 export default pattern<{ values: string[] }>(({ values }) => {
-  const result = derive(values, (entries) => summarize(entries.get()));
+  const result = computed(() => summarize(values.get()));
   return { result };
 });
 `;
@@ -755,11 +755,11 @@ export default pattern<{ values: string[] }>(({ values }) => {
     });
     const normalized = output.replace(/\s+/g, " ");
 
-    // After CT-1615 Phase 1, derive(values, cb) lowers to lift(cb)(values):
-    // const result = __cfHelpers.lift(argSchema, resSchema, cb)(values).for(...)
+    // computed(() => summarize(values.get())) closure-extracts `values` and
+    // lowers to lift(argSchema, resSchema, cb)({ values }).for(...)
     assertMatch(
       normalized,
-      /const result = __cfHelpers\.lift\([\s\S]*?, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\(values\)\.for\("result", true\);/,
+      /const result = __cfHelpers\.lift[\s\S]*?\)\(\{ values: values \}\)\.for\("result", true\);/,
     );
   },
 );
@@ -768,7 +768,7 @@ Deno.test(
   "Pipeline regression: local concise ternary event handlers stay function-valued",
   async () => {
     const source =
-      `import { derive, handler, pattern, UI, Writable } from "commonfabric";
+      `import { computed, handler, pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   id: string;
@@ -797,10 +797,8 @@ export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
         <div>
           {items.map((item) => {
             const iid = item.id;
-            const myVote = derive(
-              { votes, itemId: iid },
-              ({ votes, itemId }) =>
-                votes.get().find((vote) => vote.itemId === itemId)?.vote,
+            const myVote = computed(() =>
+              votes.get().find((vote) => vote.itemId === iid)?.vote
             );
 
             const onVoteYes = () =>
@@ -828,8 +826,8 @@ export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
       'boundCastVote.send({ itemId: iid, vote: "yes" })',
     );
     assert(
-      !output.includes("const onVoteYes = __cfHelpers.derive("),
-      "local event handler variable must not become a derive cell containing a function",
+      !output.includes("const onVoteYes = __cfHelpers.lift("),
+      "local event handler variable must not become a reactive cell containing a function",
     );
     assert(
       !output.includes("=> () => __cfHelpers.ifElse("),
@@ -866,8 +864,7 @@ export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
 Deno.test(
   "Pipeline regression: nullable computed capture keeps source array schema array-shaped",
   async () => {
-    const source =
-      `import { computed, derive, pattern, UI } from "commonfabric";
+    const source = `import { computed, pattern, UI } from "commonfabric";
 
 interface Option {
   title: string;
@@ -875,9 +872,8 @@ interface Option {
 }
 
 export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
-  const minimalNullable = derive(
-    options,
-    (o) => o.length > 0 ? o[0].title : null,
+  const minimalNullable = computed(() =>
+    options.length > 0 ? options[0].title : null
   );
 
   return {
@@ -896,10 +892,10 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    // After CT-1615 Phase 1, the user-authored `derive(options, ...)`
-    // lowers to `__cfHelpers.lift(...)(options)`.
+    // computed(() => options.length > 0 ? options[0].title : null) closure-
+    // extracts `options` and lowers to `__cfHelpers.lift(...)({ options })`.
     const minimalNullableStart = output.indexOf(
-      "const minimalNullable = __cfHelpers.lift(",
+      "const minimalNullable = __cfHelpers.lift",
     );
     assert(
       minimalNullableStart >= 0,

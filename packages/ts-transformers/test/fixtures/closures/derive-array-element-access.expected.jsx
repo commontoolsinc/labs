@@ -7,13 +7,13 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: derive-array-element-access
-// Verifies: an array variable accessed by index inside derive is captured as a whole array
-//   derive(value, fn) → derive(schema, schema, { value, factors }, fn)
+// Verifies: an array variable accessed by index inside a computed is captured as a whole array
+//   computed(() => expr) → lift(schema, schema)({ value, factors })
 // Context: `factors[1]!` uses bracket access; the entire `factors` array is captured
 export default pattern(() => {
     const value = new Writable(10, {
@@ -40,8 +40,8 @@ export default pattern(() => {
         required: ["value", "factors"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, factors }) => v.get() * factors[1]!)({
-        value: value.for(["result", "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, factors }) => value.get() * factors[1]!)({
+        value: value,
         factors: factors
     }).for("result", true);
     return result;

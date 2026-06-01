@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Writable, derive, pattern } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -16,9 +16,9 @@ interface Point {
     y: number;
 }
 // FIXTURE: derive-destructured-param
-// Verifies: a captured cell works alongside destructuring inside the callback body
-//   derive(point, fn) → derive(schema, schema, { point, multiplier }, fn)
-// Context: `const { x, y } = p.get()` destructures inside the body, not the parameter
+// Verifies: a captured cell works alongside destructuring inside the computed body
+//   computed(() => { const { x, y } = point.get(); ... }) → lift(...)({ point, multiplier })
+// Context: `const { x, y } = point.get()` destructures inside the body, not a parameter
 export default pattern(() => {
     const point = new Writable({ x: 10, y: 20 } as Point, {
         type: "object",
@@ -35,7 +35,7 @@ export default pattern(() => {
     const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
-    // Destructuring requires .get() first since derive doesn't unwrap Cell
+    // Destructuring requires .get() first since the captured cell is not unwrapped
     const result = __cfHelpers.lift<{
         point: __cfHelpers.ReadonlyCell<Point>;
         multiplier: __cfHelpers.ReadonlyCell<number>;
@@ -68,11 +68,11 @@ export default pattern(() => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ point: p, multiplier }) => {
-        const { x, y } = p.get();
+    } as const satisfies __cfHelpers.JSONSchema, ({ point, multiplier }) => {
+        const { x, y } = point.get();
         return (x + y) * multiplier.get();
     })({
-        point: point.for(["result", "point"], true),
+        point: point,
         multiplier: multiplier
     }).for("result", true);
     return result;

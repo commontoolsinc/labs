@@ -37,8 +37,8 @@
  */
 
 import {
+  computed,
   Default,
-  derive,
   fetchData,
   handler,
   NAME,
@@ -135,10 +135,9 @@ interface PatternState {
 
 export default pattern<PatternState>((state) => {
   // Build URL reactively from trigger - uses local /_health endpoint with delay
-  const fetchUrl = derive(
-    state.fetchTrigger,
-    (trigger) => trigger ? `/_health?delay=3000&_=${trigger}` : "",
-  );
+  const fetchUrl = state.fetchTrigger
+    ? `/_health?delay=3000&_=${state.fetchTrigger}`
+    : "";
 
   // fetchData runs in the reactive layer - doesn't block the handler
   const fetchDataResult = fetchData<Record<string, unknown>>({
@@ -146,24 +145,20 @@ export default pattern<PatternState>((state) => {
     mode: "json",
   });
 
-  const fetchStatus = derive(
-    [fetchDataResult.pending, fetchDataResult.error, state.fetchTrigger],
-    ([pending, error, trigger]) => {
-      if (pending) return "Fetching...";
-      if (error) return "Error";
-      if (trigger) return "Completed";
-      return "Ready";
-    },
-  );
+  const fetchStatus = computed(() => {
+    if (fetchDataResult.pending) return "Fetching...";
+    if (fetchDataResult.error) return "Error";
+    if (state.fetchTrigger) return "Completed";
+    return "Ready";
+  });
 
-  const fetchResultText = derive(
-    [fetchDataResult.error, fetchDataResult.result, state.fetchCount],
-    ([error, result, count]) => {
-      if (error) return String(error);
-      if (result) return `Fetched successfully (${count} triggers)`;
-      return "(none)";
-    },
-  );
+  const fetchResultText = computed(() => {
+    if (fetchDataResult.error) return String(fetchDataResult.error);
+    if (fetchDataResult.result) {
+      return `Fetched successfully (${state.fetchCount} triggers)`;
+    }
+    return "(none)";
+  });
 
   return {
     [NAME]: "Test: Await in Handlers",

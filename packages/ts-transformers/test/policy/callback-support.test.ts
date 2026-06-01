@@ -135,9 +135,9 @@ Deno.test(
   "Callback support policy: reactive array-method callbacks stay reactive-owned",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
-      declare function derive<T>(value: T): T;
+      declare function cell<T>(value: T): T;
 
-      const result = derive([1, 2, 3]).map((item) => item + 1);
+      const result = cell([1, 2, 3]).map((item) => item + 1);
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
@@ -160,9 +160,9 @@ Deno.test(
   "Callback boundary policy: non-transformed reactive array callbacks inherit parent body context",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
-      declare function derive<T>(value: T): T;
+      declare function cell<T>(value: T): T;
 
-      const result = derive([1, 2, 3]).map((item) => item + 1);
+      const result = cell([1, 2, 3]).map((item) => item + 1);
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
