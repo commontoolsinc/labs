@@ -91,12 +91,8 @@ export function shallowFabricFromNativeValueModern(
     }
 
     case NATIVE_TAGS.RegExp: {
-      // `RegExp` instances are converted to `FabricRegExp`. Extra enumerable
-      // properties cause rejection ("death before confusion") -- the
-      // constructor performs the same check, but we also reject eagerly here at
-      // conversion time. `FabricRegExp` self-freezes in its constructor
-      // (`FabricPrimitive` contract).
-      rejectExtraProperties(value as object, "RegExp");
+      // `RegExp` instances are converted to `FabricRegExp`, which rejects extra
+      // enumerable properties and self-freezes in its constructor.
       return new FabricRegExp(value as RegExp);
     }
 

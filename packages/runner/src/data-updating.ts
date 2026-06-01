@@ -844,8 +844,7 @@ export function normalizeAndDiff(
     return changes;
   }
 
-  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`)
-  // are atomic from this layer's perspective: their
+  // `FabricInstance` values are atomic from this layer's perspective: their
   // own-enumerable properties are implementation details, not
   // user-visible structure, and iterating them via the generic
   // `isRecord` branch below would walk wrapper-internal fields, which

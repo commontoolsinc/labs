@@ -315,11 +315,6 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.FabricRegExp: {
-      // `FabricRegExp` is a `FabricPrimitive` with a dedicated primitive tag
-      // byte (like `FabricBytes` / `FabricEpoch*`), so it is hashed directly
-      // rather than via the generic `TAG_INSTANCE` protocol path. The essential
-      // `source` / `flags` / `flavor` strings are fed as tagged values, so two
-      // regexps differing in any component hash differently.
       const fab = value as FabricRegExp;
       hasher.update(TAG_REGEXP_BYTES);
       feedValue(hasher, fab.source);

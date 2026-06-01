@@ -28,20 +28,26 @@ describe("FabricRegExp", () => {
 
   describe("constructor()", () => {
     it("produces an always-frozen instance", () => {
-      const re = new FabricRegExp(/abc/);
-      expect(Object.isFrozen(re)).toBe(true);
+      expect(Object.isFrozen(new FabricRegExp(/abc/))).toBe(true);
     });
 
-    it("retains the `source` and `flags` of the original `RegExp`", () => {
+    it("from a `RegExp`: retains `source`/`flags` and implies `es2025`", () => {
       const re = new FabricRegExp(/test/i);
       expect(re.source).toBe("test");
       expect(re.flags).toBe("i");
+      expect(re.flavor).toBe("es2025");
+    });
+
+    it("from explicit `flavor`/`source`/`flags`: retains all three", () => {
+      const re = new FabricRegExp("pcre2", "ab+c", "g");
+      expect(re.flavor).toBe("pcre2");
+      expect(re.source).toBe("ab+c");
+      expect(re.flags).toBe("g");
     });
 
     it("does not alias the input `RegExp`", () => {
       const original = /abc/gi;
       const re = new FabricRegExp(original);
-      // Advancing the original's `lastIndex` does not affect the value.
       original.lastIndex = 5;
       expect(re.value.lastIndex).toBe(0);
     });
@@ -52,14 +58,6 @@ describe("FabricRegExp", () => {
       expect(() => new FabricRegExp(original)).toThrow(
         "Cannot store RegExp with extra enumerable properties",
       );
-    });
-
-    it("defaults `flavor` to `es2025`", () => {
-      expect(new FabricRegExp(/abc/).flavor).toBe("es2025");
-    });
-
-    it("retains an explicit `flavor`", () => {
-      expect(new FabricRegExp(/abc/, "pcre2").flavor).toBe("pcre2");
     });
   });
 
@@ -83,21 +81,18 @@ describe("FabricRegExp", () => {
     });
 
     describe(".flavor", () => {
-      it("returns the flavor identifier", () => {
-        expect(new FabricRegExp(/abc/, "pcre2").flavor).toBe("pcre2");
+      it("defaults to `es2025` for a `RegExp` argument", () => {
+        expect(new FabricRegExp(/abc/).flavor).toBe("es2025");
       });
-    });
 
-    describe(".typeTag", () => {
-      it("is `RegExp@1`", () => {
-        expect(new FabricRegExp(/abc/).typeTag).toBe("RegExp@1");
+      it("returns an explicit flavor", () => {
+        expect(new FabricRegExp("pcre2", "abc", "g").flavor).toBe("pcre2");
       });
     });
 
     describe(".value", () => {
-      it("returns an equivalent native `RegExp`", () => {
-        const re = new FabricRegExp(/abc/gi);
-        const value = re.value;
+      it("returns an equivalent native `RegExp` for the `es2025` flavor", () => {
+        const value = new FabricRegExp(/abc/gi).value;
         expect(value).toBeInstanceOf(RegExp);
         expect(value.source).toBe("abc");
         expect(value.flags).toBe("gi");
@@ -105,17 +100,18 @@ describe("FabricRegExp", () => {
 
       it("returns a fresh clone on each call (not the stored object)", () => {
         const re = new FabricRegExp(/abc/g);
-        const first = re.value;
-        const second = re.value;
-        expect(first).not.toBe(second);
+        expect(re.value).not.toBe(re.value);
       });
 
       it("returns a `RegExp` whose mutation does not affect the value", () => {
         const re = new FabricRegExp(/abc/g);
-        const value = re.value;
-        value.lastIndex = 5;
-        // A subsequent read is unaffected by the prior caller's mutation.
+        re.value.lastIndex = 5;
         expect(re.value.lastIndex).toBe(0);
+      });
+
+      it("throws for a non-`es2025` flavor (no native representation yet)", () => {
+        const re = new FabricRegExp("pcre2", "abc", "g");
+        expect(() => re.value).toThrow("pcre2");
       });
     });
   });
@@ -130,9 +126,9 @@ describe("FabricRegExp", () => {
         expect(re.flavor).toBe("es2025");
       });
 
-      it("defaults to empty `source`, `flags`, and `es2025` flavor", () => {
+      it("defaults to empty `source`/`flags` and `es2025` flavor", () => {
         const re = FabricRegExp.fromState({});
-        expect(re.source).toBe("(?:)");
+        expect(re.source).toBe("");
         expect(re.flags).toBe("");
         expect(re.flavor).toBe("es2025");
       });
@@ -173,11 +169,11 @@ describe("FabricRegExp", () => {
       }
     });
 
-    it("round-trips a custom `flavor`", () => {
-      const original = new FabricRegExp(/abc/gi, "pcre2");
+    it("round-trips a non-`es2025` flavor faithfully (source/flags/flavor)", () => {
+      const original = new FabricRegExp("pcre2", "ab+c", "g");
       const restored = valueFromJson(jsonFromValue(original)) as FabricRegExp;
-      expect(restored.source).toBe("abc");
-      expect(restored.flags).toBe("gi");
+      expect(restored.source).toBe("ab+c");
+      expect(restored.flags).toBe("g");
       expect(restored.flavor).toBe("pcre2");
     });
   });
@@ -263,6 +259,12 @@ describe("FabricRegExp", () => {
     it("produces a different hash for different `flags`", () => {
       const h1 = hashOf(new FabricRegExp(/abc/g)).bytes;
       const h2 = hashOf(new FabricRegExp(/abc/i)).bytes;
+      expect(h1).not.toEqual(h2);
+    });
+
+    it("produces a different hash for a different `flavor`", () => {
+      const h1 = hashOf(new FabricRegExp("es2025", "abc", "g")).bytes;
+      const h2 = hashOf(new FabricRegExp("pcre2", "abc", "g")).bytes;
       expect(h1).not.toEqual(h2);
     });
   });

@@ -432,7 +432,7 @@ describe("value-debug", () => {
         .toBe("FabricPrimitive (FabricEpochNsec)");
       expect(toDebugKindString(new FabricBytes(new Uint8Array([1, 2, 3]))))
         .toBe("FabricPrimitive (FabricBytes)");
-      expect(toDebugKindString(new FabricRegExp(/abc/g, "es2025")))
+      expect(toDebugKindString(new FabricRegExp(/abc/g)))
         .toBe("FabricPrimitive (FabricRegExp)");
     });
 

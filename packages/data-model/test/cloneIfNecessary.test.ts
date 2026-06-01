@@ -561,7 +561,7 @@ describe("cloneIfNecessary", () => {
     },
     {
       name: "FabricRegExp",
-      factory: () => new FabricRegExp(/abc/g, "es2025"),
+      factory: () => new FabricRegExp(/abc/g),
       deepCloneImplemented: false,
     },
     {

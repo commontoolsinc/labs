@@ -1,71 +1,94 @@
 import { FabricPrimitive } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+
+/** The only regex flavor currently representable as a native `RegExp`. */
+const DEFAULT_FLAVOR = "es2025";
 
 /**
- * Immutable regular-expression value in the fabric type system. Extends
- * `FabricPrimitive` -- treated like a primitive (always frozen, passes through
- * conversion unchanged). Direct member of `FabricValue` via the
- * `FabricPrimitive` arm.
+ * Immutable regular-expression value in the fabric type system.
  *
  * The essential state is `{ source, flags, flavor }` -- the values needed to
- * (re)construct an equivalent `RegExp`. A `FabricRegExp` is a leaf type with
+ * (re)construct an equivalent regex. A `FabricRegExp` is a leaf type with
  * respect to references (it holds no nested `FabricValue`s) and is reasonably
  * conceived of as stateless: although a JS `RegExp` carries mutable internal
- * state (notably `lastIndex`), the stored `RegExp` is **never handed out
- * un-cloned**, so no mutable `RegExp` state is exposed. The `value` getter
- * returns a fresh clone on each call (mirroring `FabricBytes`, which copies on
- * `slice()` rather than handing back its private `#bytes`).
+ * state (notably `lastIndex`), the stored `RegExp` is never handed out
+ * un-cloned, so no mutable state is exposed -- `value` returns a fresh clone on
+ * each call.
  *
- * Internally the constructor builds and retains a `RegExp` in a hard-private
- * field: this validates the pattern syntax eagerly (a bad `source`/`flags`
- * combination throws at construction) and makes cloning cheap (`new
- * RegExp(this.#value)` copies the compiled pattern and resets `lastIndex`
- * without re-parsing).
+ * `flavor` identifies the regex dialect. Only `"es2025"` (the default) is
+ * currently representable as a native JS `RegExp`; for that flavor the
+ * constructor proactively builds and retains a private `RegExp`, which both
+ * validates the pattern syntax eagerly and makes `value` cheap. Other flavors
+ * are stored faithfully (`source` / `flags` / `flavor`) but cannot yet produce
+ * a native `RegExp`, so `value` throws for them -- leaving room to represent
+ * other regex syntaxes in the future.
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricRegExp extends FabricPrimitive {
-  /**
-   * The wrapped pattern, retained for eager syntax validation and cheap
-   * cloning. Never handed out directly -- `value` returns a fresh clone.
-   */
-  readonly #value: RegExp;
+  /** The pattern source text. */
+  readonly #source: string;
+
+  /** The flags string (e.g. `"gi"`). */
+  readonly #flags: string;
 
   /** Regex flavor/dialect identifier (e.g. `"es2025"`). */
   readonly #flavor: string;
 
   /**
-   * Constructs a `FabricRegExp` from a native `RegExp`. The `source` and
-   * `flags` are retained via a fresh internal `RegExp` (which also validates
-   * the pattern eagerly); the input `RegExp` object itself is not aliased. A
-   * `RegExp` with extra enumerable own properties is rejected (the built-in
-   * `.lastIndex` is non-enumerable, so `Object.keys()` only sees user-added
-   * properties).
-   *
-   * @param regex - The native `RegExp` to wrap (only its `source`/`flags` are
-   *   retained, via a fresh internal `RegExp`).
-   * @param flavor - Regex flavor/dialect identifier (default `"es2025"`).
+   * The native `RegExp`, built eagerly for the `"es2025"` flavor (and only
+   * that flavor). `undefined` for other flavors, which cannot yet produce a
+   * native `RegExp`. Never handed out directly -- `value` returns a fresh
+   * clone.
    */
-  constructor(regex: RegExp, flavor: string = "es2025") {
-    super();
-    rejectExtraRegExpProperties(regex);
-    this.#value = new RegExp(regex.source, regex.flags);
-    this.#flavor = flavor;
-    Object.freeze(this);
-  }
+  readonly #value: RegExp | undefined;
 
-  /** The wire-format type tag (`RegExp@1`). */
-  get typeTag(): string {
-    return TAGS.RegExp;
+  /**
+   * Constructs a `FabricRegExp`, either from a native `RegExp` (implying the
+   * `"es2025"` flavor) or from explicit `flavor` / `source` / `flags`.
+   *
+   * When the resulting flavor is `"es2025"`, the `source` and `flags` are
+   * validated eagerly by building the retained native `RegExp`. A native
+   * `RegExp` argument with extra enumerable own properties is rejected (the
+   * built-in `.lastIndex` is non-enumerable, so `Object.keys()` only sees
+   * user-added properties).
+   */
+  constructor(regex: RegExp);
+  constructor(flavor: string, source: string, flags: string);
+  constructor(
+    regexOrFlavor: RegExp | string,
+    source?: string,
+    flags?: string,
+  ) {
+    super();
+
+    if (regexOrFlavor instanceof RegExp) {
+      rejectExtraRegExpProperties(regexOrFlavor);
+      this.#source = regexOrFlavor.source;
+      this.#flags = regexOrFlavor.flags;
+      this.#flavor = DEFAULT_FLAVOR;
+    } else {
+      this.#flavor = regexOrFlavor;
+      this.#source = source ?? "";
+      this.#flags = flags ?? "";
+    }
+
+    // Only `"es2025"` is representable as a native `RegExp`; build it eagerly
+    // (which also validates the pattern). Other flavors store their strings but
+    // have no native form yet.
+    this.#value = (this.#flavor === DEFAULT_FLAVOR)
+      ? new RegExp(this.#source, this.#flags)
+      : undefined;
+
+    Object.freeze(this);
   }
 
   /** The pattern source text. */
   get source(): string {
-    return this.#value.source;
+    return this.#source;
   }
 
   /** The flags string (e.g. `"gi"`). */
   get flags(): string {
-    return this.#value.flags;
+    return this.#flags;
   }
 
   /** Regex flavor/dialect identifier (e.g. `"es2025"`). */
@@ -74,21 +97,23 @@ export class FabricRegExp extends FabricPrimitive {
   }
 
   /**
-   * A fresh native `RegExp` equivalent to this value. A new instance is
-   * returned on every call -- the stored `RegExp` is never aliased out
-   * (mirroring why `FabricBytes` returns a copy from `slice()` rather than its
-   * private bytes), so the caller cannot reach this instance's internal state
-   * (`lastIndex` etc.). The returned `RegExp` is mutable; mutating it has no
-   * effect on this `FabricRegExp`.
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out (the caller cannot
+   * reach its `lastIndex` etc.). Throws when the flavor is not `"es2025"`,
+   * which has no native `RegExp` representation.
    */
   get value(): RegExp {
+    if (this.#value === undefined) {
+      throw new Error(
+        `Cannot represent flavor \`${this.#flavor}\` as a native \`RegExp\`.`,
+      );
+    }
     return new RegExp(this.#value);
   }
 
   /**
    * Reconstructs a `FabricRegExp` from its essential state
-   * (`{ source, flags, flavor }`). Reconstruction goes through the constructor,
-   * so the eager syntax-validation path covers decoding too.
+   * (`{ source, flags, flavor }`).
    *
    * @param state - The essential state, with optional `source`, `flags`, and
    *   `flavor` string fields.
@@ -96,8 +121,8 @@ export class FabricRegExp extends FabricPrimitive {
   static fromState(state: Record<string, unknown>): FabricRegExp {
     const source = (state.source as string) ?? "";
     const flags = (state.flags as string) ?? "";
-    const flavor = (state.flavor as string) ?? "es2025";
-    return new FabricRegExp(new RegExp(source, flags), flavor);
+    const flavor = (state.flavor as string) ?? DEFAULT_FLAVOR;
+    return new FabricRegExp(flavor, source, flags);
   }
 }
 
