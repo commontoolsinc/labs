@@ -78,16 +78,32 @@ export function verifyCompiledModuleBody(
     wrapped.slice(s.start, s.end).trim()
   );
 
-  // If the body shadows `require` with its own top-level binding, the
-  // `const x = require(...)` fast-path would mis-trust an arbitrary call.
-  // Disable the fast-path entirely so those statements fall through to
-  // classifyModuleItems (which rejects the call result) — matching AMD, where
-  // a non-canonical require has no special treatment.
-  const requireShadowed = statementTexts.some((t) =>
-    /^(?:const|let|var)\s+require\b/.test(t) ||
-    /^(?:async\s+)?function\s*\*?\s*require\b/.test(t) ||
-    /^class\s+require\b/.test(t)
-  );
+  // If the body declares its own top-level binding for one of the identifiers a
+  // fast-path trusts (`require`, or the TS interop helpers `__exportStar` /
+  // `__importDefault` / `__importStar`), the corresponding fast-path would
+  // mis-trust a call into attacker-controlled code (e.g. a local
+  // `function __exportStar(m){ globalThis.steal = m; }` invoked by an
+  // `__exportStar(require("./m"), exports)` re-export). Detect such shadows and
+  // disable the affected fast-path so the statement falls through to
+  // classifyModuleItems, which rejects the call as a local-callable result —
+  // matching AMD, where a non-canonical helper has no special treatment.
+  //
+  // Canonical TS interop helper declarations (`var __exportStar = (this && …)`)
+  // are the trusted helpers themselves, not shadows, so they are excluded.
+  const declaresLocalBinding = (name: string): boolean =>
+    statementTexts.some((t) => {
+      if (isAllowedTsLibHelperDeclaration(normalizeExact(t))) return false;
+      return (
+        new RegExp(`^(?:const|let|var)\\s+${name}\\b`).test(t) ||
+        new RegExp(`^(?:async\\s+)?function\\s*\\*?\\s*${name}\\b`).test(t) ||
+        new RegExp(`^class\\s+${name}\\b`).test(t)
+      );
+    });
+
+  const requireShadowed = declaresLocalBinding("require");
+  const exportStarShadowed = declaresLocalBinding("__exportStar");
+  const importHelperShadowed = declaresLocalBinding("__importDefault") ||
+    declaresLocalBinding("__importStar");
 
   const env = new Map<string, BindingInfo>();
   const classifiable: typeof parsed.body.statements = [];
@@ -106,7 +122,15 @@ export function verifyCompiledModuleBody(
     }
     if (!requireShadowed) {
       const bound = REQUIRE_IMPORT.exec(text);
-      if (bound && isAllowedAuthoredImportSpecifier(bound[2])) {
+      // A helper-wrapped import (`__importDefault(require(...))` /
+      // `__importStar(require(...))`) must not be fast-pathed if that helper is
+      // locally shadowed — the shadow would run instead of the trusted helper.
+      const usesShadowedImportHelper = importHelperShadowed &&
+        /\b(?:__importDefault|__importStar)\s*\(/.test(text);
+      if (
+        bound && !usesShadowedImportHelper &&
+        isAllowedAuthoredImportSpecifier(bound[2])
+      ) {
         const [, binding, specifier] = bound;
         env.set(binding, {
           kind: "import",
@@ -123,7 +147,10 @@ export function verifyCompiledModuleBody(
         return; // side-effect import binds nothing
       }
       const exportStar = EXPORT_STAR_REQUIRE.exec(text);
-      if (exportStar && isAllowedAuthoredImportSpecifier(exportStar[1])) {
+      if (
+        exportStar && !exportStarShadowed &&
+        isAllowedAuthoredImportSpecifier(exportStar[1])
+      ) {
         return; // `export * from "<allowed>"` re-export; binds nothing
       }
     }
