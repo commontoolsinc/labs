@@ -23,7 +23,12 @@ export type { MappedPosition };
  * Returns `undefined` if no module contributed a map.
  */
 export function composeBundleSourceMap(
-  modules: ReadonlyArray<{ body: string; map?: SourceMap }>,
+  // `source`, when set, overrides the map's recorded source path for ALL of that
+  // module's mappings. The per-module compiler maps record only the basename
+  // (e.g. `main.tsx`), but the CFC verified-source set is keyed by the full
+  // module path (e.g. `/<id>/dir/main.tsx`); overriding makes resolved
+  // coordinates match the set so verified-source identity holds.
+  modules: ReadonlyArray<{ body: string; map?: SourceMap; source?: string }>,
   bundleFilename: string,
   // Generated-line offset applied to the FIRST module. Use this when the
   // generated text is wrapped by a fixed prefix of N lines (e.g. the ESM
@@ -35,7 +40,7 @@ export function composeBundleSourceMap(
   const generator = new SourceMapGenerator({ file: bundleFilename });
   let lineOffset = startLineOffset;
   let any = false;
-  for (const { body, map } of modules) {
+  for (const { body, map, source } of modules) {
     if (map) {
       const consumer = new SourceMapConsumer(map);
       consumer.eachMapping((m) => {
@@ -49,21 +54,23 @@ export function composeBundleSourceMap(
             column: m.generatedColumn,
           },
           original: { line: m.originalLine, column: m.originalColumn },
-          source: m.source,
+          source: source ?? m.source,
           name: m.name ?? undefined,
         });
         any = true;
       });
-      const sources = map.sources ?? [];
-      const contents =
-        (map as { sourcesContent?: (string | null)[] }).sourcesContent;
-      if (contents) {
-        sources.forEach((src, i) => {
-          const content = contents[i];
-          if (src != null && content != null) {
-            generator.setSourceContent(src, content);
-          }
-        });
+      if (!source) {
+        const sources = map.sources ?? [];
+        const contents =
+          (map as { sourcesContent?: (string | null)[] }).sourcesContent;
+        if (contents) {
+          sources.forEach((src, i) => {
+            const content = contents[i];
+            if (src != null && content != null) {
+              generator.setSourceContent(src, content);
+            }
+          });
+        }
       }
     }
     // Lines this body occupies in the "\n"-joined bundle = (newlines in body)+1.

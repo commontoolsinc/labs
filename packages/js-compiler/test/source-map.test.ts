@@ -343,4 +343,18 @@ describe("composeBundleSourceMap", () => {
   it("returns undefined when no module has a map", () => {
     expect(composeBundleSourceMap([{ body: "x" }], "m.js")).toBe(undefined);
   });
+
+  it("overrides the recorded source path when `source` is given", () => {
+    // Compiler maps record only the basename; the override rewrites it to the
+    // full module path so resolved coordinates match the verified-source set.
+    const mapA = buildMap("a.js", [{ gen: 1, src: "main.tsx", orig: 10 }]);
+    const composed = composeBundleSourceMap(
+      [{ body: "x", map: mapA, source: "/id/dir/main.tsx" }],
+      "m.js",
+    )!;
+    const consumer = new SourceMapConsumer(composed);
+    const pos = consumer.originalPositionFor({ line: 1, column: 0 });
+    expect(pos.source).toBe("/id/dir/main.tsx");
+    expect(pos.line).toBe(10);
+  });
 });

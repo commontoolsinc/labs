@@ -423,10 +423,17 @@ export class Engine extends EventTarget implements Harness {
       // `fn.src` / CFC verified-source coordinates (resolved against `script`)
       // map back to the original authored sources — without this the ESM loader
       // yields raw bundle coordinates and CFC verified-source fails closed.
+      // Full module path per specifier (the verified-source set is keyed by
+      // these, not the basename the compiler records in the map's `sources`).
+      const sourceNameBySpecifier = new Map<string, string>();
+      for (const [name, specifier] of graph.specifierByPath) {
+        sourceNameBySpecifier.set(specifier, name);
+      }
       const bundleSourceMap = composeBundleSourceMap(
         [...graph.compiledBodies].map(([specifier, body]) => ({
           body,
           map: graph.moduleSourceMaps.get(specifier),
+          source: sourceNameBySpecifier.get(specifier),
         })),
         `${loadId}.js`,
       );
@@ -446,7 +453,7 @@ export class Engine extends EventTarget implements Harness {
         if (!map) continue;
         const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
         const moduleMap = composeBundleSourceMap(
-          [{ body: "", map }],
+          [{ body: "", map, source: name }],
           sourceUrl,
           1, // the `(function (exports, require, module) {` wrapper line
         );
