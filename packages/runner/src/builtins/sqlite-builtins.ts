@@ -29,6 +29,9 @@ import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 type SqliteDbRef = { id: string; tables?: Record<string, unknown> };
 type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
 
+const errMsg = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 /** Allocate a result cell linked to the parent/pattern cells. */
 function makeResultCell<T>(
   runtime: Runtime,
@@ -133,7 +136,12 @@ export function sqliteDatabase(
   return { action };
 }
 
-type QueryState = { pending: boolean; result?: unknown[]; error?: unknown };
+type QueryState = {
+  pending: boolean;
+  result?: unknown[];
+  error?: unknown;
+  requestHash?: string;
+};
 
 /** sqliteQuery: reactive server-side read. */
 export function sqliteQuery(
@@ -145,7 +153,6 @@ export function sqliteQuery(
   runtime: Runtime,
 ): RawBuiltinResult {
   let initialized = false;
-  let lastHash: string | undefined;
   let result: Cell<QueryState>;
   const space = parentCell.space;
 
@@ -171,18 +178,26 @@ export function sqliteQuery(
     if (!inputs?.db || typeof inputs.sql !== "string") return;
 
     const db = readDbRef(inputs.db);
+    let params: WireParams;
+    try {
+      params = encodeParams(inputs.sql, inputs.params);
+    } catch (error) {
+      result.withTx(tx).set({ pending: false, error: errMsg(error) });
+      return;
+    }
     const hash = computeInputHashFromValue({
       db,
       sql: inputs.sql,
-      params: inputs.params ?? null,
+      params: params ?? null,
       reactOn: inputs.reactOn ?? null,
     });
-    if (hash === lastHash) return;
-    lastHash = hash;
-    result.withTx(tx).set({ pending: true });
+    // Dedup against COMMITTED state: if the result cell already records this
+    // request hash, the call was issued (and survives an abort+retry, unlike an
+    // in-memory flag — see fetch-data.ts). Re-issue otherwise.
+    if (result.withTx(tx).get()?.requestHash === hash) return;
+    result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
-    const params = inputs.params;
     tx.enqueuePostCommitEffect({
       id: `sqliteQuery:${hash}`,
       idempotencyKey: `sqliteQuery:${hash}`,
@@ -192,13 +207,18 @@ export function sqliteQuery(
         try {
           const res = await provider.sqliteQuery!(db, sql, params);
           await runtime.editWithRetry((wtx) => {
-            result.withTx(wtx).set({ pending: false, result: res.rows });
+            result.withTx(wtx).set({
+              pending: false,
+              result: res.rows,
+              requestHash: hash,
+            });
           });
         } catch (error) {
           await runtime.editWithRetry((wtx) => {
             result.withTx(wtx).set({
               pending: false,
-              error: error instanceof Error ? error.message : String(error),
+              error: errMsg(error),
+              requestHash: hash,
             });
           });
         }
@@ -212,6 +232,7 @@ type ExecuteState = {
   pending: boolean;
   result?: { lastInsertRowid?: number; changes: number };
   error?: unknown;
+  requestHash?: string;
 };
 
 /** sqliteExecute: server-side write. */
@@ -224,7 +245,6 @@ export function sqliteExecute(
   runtime: Runtime,
 ): RawBuiltinResult {
   let initialized = false;
-  let lastHash: string | undefined;
   let result: Cell<ExecuteState>;
   const space = parentCell.space;
 
@@ -253,10 +273,7 @@ export function sqliteExecute(
     try {
       encodedParams = encodeParams(inputs.sql, inputs.params);
     } catch (error) {
-      result.withTx(tx).set({
-        pending: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      result.withTx(tx).set({ pending: false, error: errMsg(error) });
       return;
     }
 
@@ -265,9 +282,9 @@ export function sqliteExecute(
       sql: inputs.sql,
       params: encodedParams ?? null,
     });
-    if (hash === lastHash) return;
-    lastHash = hash;
-    result.withTx(tx).set({ pending: true });
+    // Dedup against committed state (survives abort+retry; see sqliteQuery).
+    if (result.withTx(tx).get()?.requestHash === hash) return;
+    result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
     tx.enqueuePostCommitEffect({
@@ -279,13 +296,18 @@ export function sqliteExecute(
         try {
           const res = await provider.sqliteExecute!(db, sql, encodedParams);
           await runtime.editWithRetry((wtx) => {
-            result.withTx(wtx).set({ pending: false, result: res });
+            result.withTx(wtx).set({
+              pending: false,
+              result: res,
+              requestHash: hash,
+            });
           });
         } catch (error) {
           await runtime.editWithRetry((wtx) => {
             result.withTx(wtx).set({
               pending: false,
-              error: error instanceof Error ? error.message : String(error),
+              error: errMsg(error),
+              requestHash: hash,
             });
           });
         }

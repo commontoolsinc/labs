@@ -43,6 +43,7 @@ import * as Engine from "./engine.ts";
 import {
   aliasForDbId,
   attachDatabase,
+  detachDatabase,
   ensureTables,
   runQuery,
   runWrite,
@@ -179,6 +180,17 @@ const toError = (name: string, message: string): V2Error => ({
   name,
   message,
 });
+
+/** Deterministic, collision-resistant-enough token for a filename component
+ *  (FNV-1a 32-bit + length). Used to derive cell-db file names from (space,id). */
+function hashToken(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${(h >>> 0).toString(16).padStart(8, "0")}${s.length.toString(16)}`;
+}
 
 const respondTypedError = <Result>(
   requestId: string,
@@ -510,9 +522,6 @@ export class Server {
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
   #store?: URL;
-  // space -> (cell-db id -> attach alias). Cell-derived SQLite dbs are sibling
-  // files attached to the space's engine connection and kept attached.
-  #sqliteAliases = new Map<string, Map<string, string>>();
 
   constructor(
     readonly options: {
@@ -615,54 +624,58 @@ export class Server {
   }
 
   /**
-   * Ensure a cell-derived SQLite database is attached to the space engine
-   * connection (kept attached) and its declared tables are created (additive).
-   * Returns the engine and the attach alias. Attaches outside any transaction.
+   * Run `op` against a cell-derived SQLite database: ATTACH it (under an alias
+   * derived from the db id), additively create its declared tables, run `op`
+   * synchronously, then DETACH in `finally`.
    *
-   * V1 limitation: with multiple distinct cell-dbs attached in one space,
-   * unqualified table names could resolve ambiguously across them. Acceptable
-   * pre-production (same category as the core-table-rename gap, 08-Q8a); the
-   * proper fix is per-op attach with file-backed cell-dbs or alias-rewriting.
+   * Attach-one-at-a-time (rather than keeping dbs attached) is deliberate: it
+   * guarantees a pattern's unqualified table names resolve to *this* db (SQLite
+   * resolves unqualified names against attached dbs in order, so multiple
+   * simultaneously-attached cell-dbs would alias each other), and it sidesteps
+   * the connection's `SQLITE_MAX_ATTACHED` limit. `op` MUST be synchronous: the
+   * attach→op→detach block must not `await` (the engine connection is shared and
+   * single-threaded; an await between attach and detach could interleave another
+   * op's attach and reintroduce the ambiguity). ATTACH/DETACH require no open
+   * transaction — true on this RPC path. File-backed cell-dbs persist across
+   * detach.
    */
-  async #ensureSqliteDb(
+  async #onCellDb<T>(
     space: string,
     db: SqliteDbRef,
-  ): Promise<{ engine: Engine.Engine; alias: string }> {
+    op: (engine: Engine.Engine) => T,
+  ): Promise<T> {
     const engine = await this.openEngine(space);
-    let aliases = this.#sqliteAliases.get(space);
-    if (aliases === undefined) {
-      aliases = new Map();
-      this.#sqliteAliases.set(space, aliases);
+    const alias = aliasForDbId(db.id);
+    attachDatabase(
+      engine.database,
+      alias,
+      this.#cellDbPath(engine, space, db.id),
+    );
+    try {
+      if (db.tables) {
+        ensureTables(
+          engine.database,
+          db.tables as Record<string, TableSchema>,
+          alias,
+        );
+      }
+      return op(engine); // synchronous — see doc comment
+    } finally {
+      detachDatabase(engine.database, alias);
     }
-    let alias = aliases.get(db.id);
-    if (alias === undefined) {
-      alias = aliasForDbId(db.id);
-      attachDatabase(engine.database, alias, this.#cellDbPath(engine, db.id));
-      aliases.set(db.id, alias);
-    }
-    if (db.tables) {
-      ensureTables(
-        engine.database,
-        db.tables as Record<string, TableSchema>,
-        alias,
-      );
-    }
-    return { engine, alias };
   }
 
   /** Path for a cell-derived db file. Sibling of the space db for file stores;
    *  a deterministic temp file for in-memory stores (so it survives the
-   *  connection and isn't lost like an `:memory:` attach would be). */
-  #cellDbPath(engine: Engine.Engine, id: string): string {
-    const safe = id.replace(/[^A-Za-z0-9]/g, "_");
+   *  connection, unlike an `:memory:` attach). The space + id are hashed into
+   *  the filename so distinct (space, id) pairs never collide. */
+  #cellDbPath(engine: Engine.Engine, space: string, id: string): string {
+    const tag = `${hashToken(space)}-${hashToken(id)}`;
     if (engine.url.protocol === "file:") {
       const dir = Path.dirname(Path.fromFileUrl(engine.url));
-      return Path.join(dir, `cell-${safe}.sqlite`);
+      return Path.join(dir, `cell-${tag}.sqlite`);
     }
-    return Path.join(
-      Deno.env.get("TMPDIR") ?? "/tmp",
-      `cf-cell-${encodeURIComponent(engine.url.pathname)}-${safe}.sqlite`,
-    );
+    return Path.join(Deno.env.get("TMPDIR") ?? "/tmp", `cf-cell-${tag}.sqlite`);
   }
 
   async sqliteQuery(
@@ -675,8 +688,11 @@ export class Server {
       );
     }
     try {
-      const { engine } = await this.#ensureSqliteDb(message.space, message.db);
-      const rows = runQuery(engine.database, message.sql, message.params);
+      const rows = await this.#onCellDb(
+        message.space,
+        message.db,
+        (engine) => runQuery(engine.database, message.sql, message.params),
+      );
       return { type: "response", requestId: message.requestId, ok: { rows } };
     } catch (error) {
       return respondTypedError<SqliteQueryResult>(
@@ -699,8 +715,11 @@ export class Server {
       );
     }
     try {
-      const { engine } = await this.#ensureSqliteDb(message.space, message.db);
-      const result = runWrite(engine.database, message.sql, message.params);
+      const result = await this.#onCellDb(
+        message.space,
+        message.db,
+        (engine) => runWrite(engine.database, message.sql, message.params),
+      );
       return { type: "response", requestId: message.requestId, ok: result };
     } catch (error) {
       return respondTypedError<SqliteExecuteResult>(
@@ -1853,8 +1872,13 @@ export const parseClientMessage = (
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
     typeof parsed.sql === "string" &&
+    parsed.sql.length <= 100_000 &&
     isRecord(parsed.db) &&
-    typeof parsed.db.id === "string"
+    typeof parsed.db.id === "string" &&
+    parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
+    (parsed.db.tables === undefined ||
+      (isRecord(parsed.db.tables) &&
+        Object.keys(parsed.db.tables).length <= 256))
   ) {
     const db = {
       id: parsed.db.id,

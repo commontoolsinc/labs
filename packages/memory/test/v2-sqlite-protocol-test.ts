@@ -80,6 +80,20 @@ describe("sqlite protocol verbs (loopback)", () => {
       .toThrow();
   });
 
+  it("does not exhaust the attach limit across many cell-dbs (LRU evicts)", async () => {
+    // More than SQLITE_MAX_ATTACHED distinct cell-dbs in one space; each must
+    // still work (the server evicts least-recently-used attachments).
+    for (let i = 0; i < 14; i++) {
+      const db: SqliteDbRef = {
+        id: `${dbId}-lru-${i}`,
+        tables: { t: table({ id: "integer primary key", v: "text" }) },
+      };
+      await session.sqliteExecute(db, "INSERT INTO t (v) VALUES (?)", [`${i}`]);
+      const r = await session.sqliteQuery(db, "SELECT v FROM t");
+      expect(r.rows).toEqual([{ v: `${i}` }]);
+    }
+  });
+
   it("persists across separate requests (cell-db is file-backed)", async () => {
     const db = dbRef();
     await session.sqliteExecute(

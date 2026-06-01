@@ -204,6 +204,33 @@ Replaced the not-implemented stubs with real work, tested via `StorageManager.em
 - No multi-tab mutex / cancel / narrowest-read-scope yet (cf. fetch-data);
   `_cf_link` decode of result rows not yet wired (encode on write is).
 
+### Code review round 3 (subagent) — protocol + builtins — addressed
+
+- **CRITICAL — abort-stuck dedup.** The builtins deduped on an in-memory
+  `lastHash` set *before* the deferred RPC; a transaction abort left the hash set
+  but the call unsent → permanently skipped + stuck `pending`. Fixed: dedup
+  against **committed** state — store `requestHash` in the result cell and gate on
+  it (survives abort+retry, like fetch-data). 
+- **CROSS-DB AMBIGUITY (was a real isolation bug, not just a limitation).** The
+  "keep attached" model meant a pattern's unqualified `INSERT/SELECT` for db B
+  could resolve to db A (SQLite resolves unqualified names against attached dbs
+  in order). A new test (>1 db in a space) reproduced it. **Fixed by
+  attach-one-at-a-time**: `#onCellDb` attaches the target, runs the op
+  synchronously (no await between attach and detach → no interleave on the shared
+  connection), then detaches in `finally`. This also removes the attach-limit
+  exhaustion risk (review HIGH #2) — no LRU needed. File-backed cell-dbs persist
+  across detach.
+- **HIGH — sqliteQuery didn't encode `_cf_link` cell params.** Now both query and
+  execute run params through `encodeParams`.
+- **MEDIUM — cell-db path collisions.** `#cellDbPath` now folds `(space, id)`
+  through `hashToken` (FNV-1a + length) so distinct pairs never share a file.
+- **MEDIUM — input bounds.** `parseClientMessage` caps `db.id` (≤256), `sql`
+  (≤100k), and `tables` count (≤256).
+- **MEDIUM — ensureTables churn.** Now created on attach within `#onCellDb`
+  (every op attaches afresh under the new model; still idempotent/additive).
+- Remaining acknowledged: `_cf_link` decode of result rows, mutex/cancel,
+  commit-folded atomic writes, post-commit `reactOn` handle-dirtying.
+
 ## Current status & handoff
 
 **Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.
