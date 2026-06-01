@@ -13,6 +13,7 @@ import {
   MemoryCompilationCache,
 } from "../src/compilation-cache/mod.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -60,10 +61,12 @@ describe("PatternManager program persistence", () => {
     };
 
     const compiled = await runtime.patternManager.compilePattern(program);
-    expect(compiled.program).toBeDefined();
-    expect(compiled.program?.main).toEqual("/main.tsx");
+    expect(getPatternProgram(compiled)).toBeDefined();
+    expect(getPatternProgram(compiled)?.main).toEqual("/main.tsx");
     // Ensure original file names are preserved (no injected prefix leaked here)
-    const fileNames = (compiled.program?.files ?? []).map((f) => f.name).sort();
+    const fileNames = (getPatternProgram(compiled)?.files ?? []).map((f) =>
+      f.name
+    ).sort();
     expect(fileNames).toEqual(["/main.tsx", "/util.ts"].sort());
 
     const patternId = runtime.patternManager.registerPattern(compiled, program);
@@ -281,8 +284,8 @@ describe("PatternManager.compileOrGetPattern", () => {
       simpleProgram,
     );
     expect(pattern).toBeDefined();
-    expect(pattern.program).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(pattern)).toBeDefined();
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.ts");
   });
 
   it("returns cached pattern on second call (same instance)", async () => {
@@ -379,8 +382,8 @@ describe("PatternManager.compileOrGetPattern", () => {
 
     // Should be different pattern instances
     expect(second).not.toBe(first);
-    expect(first.program?.files[0].contents).toContain("doubled");
-    expect(second.program?.files[0].contents).toContain("tripled");
+    expect(getPatternProgram(first)?.files[0].contents).toContain("doubled");
+    expect(getPatternProgram(second)?.files[0].contents).toContain("tripled");
   });
 
   it("single-flight: concurrent calls share one compilation", async () => {
@@ -404,7 +407,7 @@ describe("PatternManager.compileOrGetPattern", () => {
 
     const pattern = await runtime.patternManager.compileOrGetPattern(source);
     expect(pattern).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.tsx");
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.tsx");
   });
 
   it("pattern is cached and returns same instance on subsequent calls", async () => {
@@ -419,8 +422,8 @@ describe("PatternManager.compileOrGetPattern", () => {
     expect(pattern2).toBe(pattern);
 
     // And the pattern should have its program attached
-    expect(pattern.program).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(pattern)).toBeDefined();
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.ts");
   });
 });
 
@@ -465,7 +468,7 @@ describe("PatternManager compilation cache integration", () => {
     // First compile — cache miss, should write an entry
     const first = await runtime.patternManager.compilePattern(simpleProgram);
     expect(first).toBeDefined();
-    expect(first.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(first)?.main).toEqual("/main.ts");
     expect(await cacheStorage.count()).toBe(1);
     expect(cachedCompiler.getStats().misses).toBe(1);
     expect(cachedCompiler.getStats().writes).toBe(1);
@@ -473,7 +476,7 @@ describe("PatternManager compilation cache integration", () => {
     // Second compile — cache hit, no new writes
     const second = await runtime.patternManager.compilePattern(simpleProgram);
     expect(second).toBeDefined();
-    expect(second.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(second)?.main).toEqual("/main.ts");
     expect(await cacheStorage.count()).toBe(1);
     expect(cachedCompiler.getStats().hits).toBe(1);
     expect(cachedCompiler.getStats().writes).toBe(1);

@@ -62,7 +62,6 @@ import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
-import { type RuntimeProgram } from "../harness/types.ts";
 import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
@@ -220,7 +219,6 @@ export type Node = {
 
 // Used to get back to original pattern from a JSONified representation.
 export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
-export const unsafe_verifiedLoadId = Symbol("unsafe_verifiedLoadId");
 export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
 
 declare module "@commonfabric/api" {
@@ -231,9 +229,11 @@ declare module "@commonfabric/api" {
     initial?: JSONValue;
     result: JSONValue;
     nodes: Node[];
-    program?: RuntimeProgram;
+    // NOTE: `program` (rehydration source) and the verified-load id are no
+    // longer stored on the pattern object — they live in WeakMaps in
+    // ./pattern-metadata.ts so exported patterns can be frozen. Use
+    // get/setPatternProgram and get/setVerifiedLoadId.
     [unsafe_originalPattern]?: Pattern;
-    [unsafe_verifiedLoadId]?: string;
     [unsafe_parentPattern]?: Pattern;
   }
 }

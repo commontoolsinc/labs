@@ -49,11 +49,12 @@ const TARGET = ts.ScriptTarget.ES2023;
  * - We snapshot from the write-once object directly (never `module.exports`), so
  *   the namespace can only reflect values that passed through write-once.
  *
- * We deliberately do NOT deep-freeze the exported values: SES already makes the
- * namespace *bindings* immutable, verified plain data is already frozen by
- * `__cf_data`/`schema`, and the engine attaches metadata to exported pattern
- * recipes after load (`value.program = program` in builder/factory.ts), so
- * exported builder graphs must stay extensible.
+ * Each exported value is `harden()`ed (transitive freeze) so a consumer cannot
+ * mutate the internals of an exported object/array/pattern graph either. This is
+ * only possible because the metadata the engine associates after load —
+ * `program` (rehydration source) and the CFC verified-load id — now lives in
+ * WeakMaps (see builder/pattern-metadata.ts) rather than as properties written
+ * onto the exported object, so hardening no longer blocks those associations.
  */
 export function populateModuleExports(
   moduleExports: Record<string, unknown>,
@@ -69,9 +70,27 @@ export function populateModuleExports(
   const moduleObject = Object.freeze({ exports: writeOnceExports });
   factory(writeOnceExports, requireShim, moduleObject);
   for (const name of exportNames) {
-    moduleExports[name] = writeOnceExports[name];
+    moduleExports[name] = hardenExportedValue(writeOnceExports[name]);
   }
   moduleExports.__esModule = true;
+}
+
+/**
+ * Transitively freeze an exported value. Uses SES `harden` (available after
+ * lockdown, which the ESM loader ensures) — it no-ops on already-frozen shared
+ * intrinsics, so it freezes only the value's own reachable graph. If `harden`
+ * is somehow unavailable, the value is returned unfrozen rather than failing the
+ * load (the namespace binding is still SES-immutable, and verified plain data is
+ * already frozen by `__cf_data`).
+ */
+function hardenExportedValue<T>(value: T): T {
+  const hardenFn = (globalThis as { harden?: <V>(v: V) => V }).harden;
+  if (typeof hardenFn !== "function") return value;
+  try {
+    return hardenFn(value);
+  } catch {
+    return value;
+  }
 }
 
 export function createWriteOnceExports(): Record<string, unknown> {

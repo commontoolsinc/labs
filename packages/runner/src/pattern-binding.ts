@@ -6,8 +6,11 @@ import {
   type Pattern,
   unsafe_originalPattern,
   unsafe_parentPattern,
-  unsafe_verifiedLoadId,
 } from "./builder/types.ts";
+import {
+  getVerifiedLoadId,
+  setVerifiedLoadId,
+} from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -330,8 +333,9 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       if (binding[unsafe_originalPattern]) {
         result[unsafe_originalPattern] = binding[unsafe_originalPattern];
       }
-      if (binding[unsafe_verifiedLoadId]) {
-        result[unsafe_verifiedLoadId] = binding[unsafe_verifiedLoadId];
+      const verifiedLoadId = getVerifiedLoadId(binding);
+      if (verifiedLoadId) {
+        setVerifiedLoadId(result, verifiedLoadId);
       }
       return result;
     } else return binding;

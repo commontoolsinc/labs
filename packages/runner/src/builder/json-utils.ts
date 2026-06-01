@@ -18,6 +18,7 @@ import {
   unsafe_originalPattern,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
+import { getPatternProgram } from "./pattern-metadata.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
@@ -450,6 +451,6 @@ export function patternToJSON(pattern: Pattern) {
     ...(pattern.initial ? { initial: pattern.initial } : {}),
     result: pattern.result,
     nodes: pattern.nodes,
-    program: pattern.program,
+    program: getPatternProgram(pattern),
   };
 }

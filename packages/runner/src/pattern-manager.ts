@@ -5,8 +5,13 @@ import {
   Pattern,
   Schema,
   unsafe_originalPattern,
-  unsafe_verifiedLoadId,
 } from "./builder/types.ts";
+import {
+  getPatternProgram,
+  getVerifiedLoadId,
+  setPatternProgram,
+  setVerifiedLoadId,
+} from "./builder/pattern-metadata.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Cell, createCell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
@@ -179,14 +184,10 @@ export class PatternManager {
       if (!this.patternToVerifiedLoadId.has(originalPattern)) {
         this.patternToVerifiedLoadId.set(originalPattern, verifiedLoadId);
       }
-      if (
-        Object.isExtensible(value) &&
-        (value as Pattern)[unsafe_verifiedLoadId] !== verifiedLoadId
-      ) {
-        Object.defineProperty(value, unsafe_verifiedLoadId, {
-          value: verifiedLoadId,
-          configurable: true,
-        });
+      // Side-table storage works even when `value` has been frozen by the
+      // loader (no own-property write needed).
+      if (getVerifiedLoadId(value) !== verifiedLoadId) {
+        setVerifiedLoadId(value, verifiedLoadId);
       }
     }
 
@@ -253,7 +254,7 @@ export class PatternManager {
 
     // If we don't have a stored cell yet, return whatever pending/meta we have
     const pending = this.pendingMetaById.get(patternId) ?? {};
-    const source = this.patternIdMap.get(patternId)?.program;
+    const source = getPatternProgram(this.patternIdMap.get(patternId));
     if (!source && Object.keys(pending).length === 0) {
       throw new Error(`Pattern ${patternId} has no metadata available`);
     }
@@ -272,19 +273,19 @@ export class PatternManager {
     pattern = this.findOriginalPattern(pattern as Pattern);
     const verifiedLoadId = getTopFrame()?.verifiedLoadId ??
       this.patternToVerifiedLoadId.get(pattern as Pattern) ??
-      (pattern as Pattern)[unsafe_verifiedLoadId];
+      getVerifiedLoadId(pattern as Pattern);
     if (verifiedLoadId) {
       this.seedVerifiedLoadIds(pattern as Pattern, verifiedLoadId);
     }
 
-    if (src && !pattern.program) {
+    if (src && !getPatternProgram(pattern)) {
       if (typeof src === "string") {
-        pattern.program = {
+        setPatternProgram(pattern, {
           main: "/main.tsx",
           files: [{ name: "/main.tsx", contents: src }],
-        };
+        });
       } else {
-        pattern.program = src;
+        setPatternProgram(pattern, src);
       }
     }
 
@@ -335,7 +336,7 @@ export class PatternManager {
       return true;
     }
 
-    const program = this.patternIdMap.get(patternId)?.program;
+    const program = getPatternProgram(this.patternIdMap.get(patternId));
     if (!program) return false;
 
     const pending = this.pendingMetaById.get(patternId) ?? {};
@@ -500,7 +501,7 @@ export class PatternManager {
       );
     }
     const pattern = main[exportName] as Pattern;
-    pattern.program = program;
+    setPatternProgram(pattern, program);
     if (loadId) {
       this.seedVerifiedLoadIds(pattern, loadId);
     }
@@ -657,13 +658,9 @@ export class PatternManager {
     patternId: URI,
     value: Pattern | Module,
   ): void {
-    const originalPattern = this.findOriginalPattern(value as Pattern) as
-      & Pattern
-      & {
-        program?: RuntimeProgram;
-      };
+    const originalPattern = this.findOriginalPattern(value as Pattern);
     const verifiedLoadId = this.patternToVerifiedLoadId.get(originalPattern);
-    if (!originalPattern.program && !verifiedLoadId) {
+    if (!getPatternProgram(originalPattern) && !verifiedLoadId) {
       return;
     }
     this.runtime.harness.associatePattern(

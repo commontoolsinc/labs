@@ -1,4 +1,5 @@
-import { isPattern, unsafe_verifiedLoadId } from "../builder/types.ts";
+import { isPattern } from "../builder/types.ts";
+import { setVerifiedLoadId } from "../builder/pattern-metadata.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-contract";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
@@ -303,11 +304,9 @@ export class ExecutableRegistry {
     }
     seen.add(value);
 
-    if (isPattern(value) && Object.isExtensible(value)) {
-      Object.defineProperty(value, unsafe_verifiedLoadId, {
-        value: loadId,
-        configurable: true,
-      });
+    if (isPattern(value)) {
+      // Side-table storage works on frozen patterns too (no own-property write).
+      setVerifiedLoadId(value, loadId);
     }
 
     for (const key of Reflect.ownKeys(value as object)) {

@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -57,7 +58,11 @@ describe("Pattern run via esmModuleLoader", () => {
     };
 
     const compiled = await runtime.patternManager.compilePattern(program);
-    expect(compiled.program?.main).toEqual("/main.tsx");
+    // The exported pattern is hardened (transitively frozen) at the module
+    // boundary, yet its rehydration program still associates afterward — proving
+    // the metadata moved off the (now frozen) object into the WeakMap side-table.
+    expect(Object.isFrozen(compiled)).toBe(true);
+    expect(getPatternProgram(compiled)?.main).toEqual("/main.tsx");
 
     const resultCell = runtime.getCell<{ result: number }>(
       space,
