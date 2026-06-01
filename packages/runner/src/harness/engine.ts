@@ -36,6 +36,7 @@ import {
   type CompiledModuleGraph,
   compileSourcesToRecords,
 } from "../sandbox/module-record-compiler.ts";
+import { composeBundleSourceMap } from "@commonfabric/js-compiler";
 import {
   loadModuleGraph,
   runtimeModuleRecords,
@@ -300,6 +301,13 @@ export class Engine extends EventTarget implements Harness {
       const precompiledBodies = new Map(
         [...modules].map(([name, out]) => [name, out.js]),
       );
+      // Carry per-module source maps so the ESM loader can compose a per-load
+      // bundle map (CFC verified-source / fn.src coordinate resolution).
+      const precompiledSourceMaps = new Map(
+        [...modules].flatMap(([name, out]) =>
+          out.sourceMap ? [[name, out.sourceMap] as const] : []
+        ),
+      );
       const { runtimeExports } = await this.getRuntimeInternals();
       const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
         runtimeExports?.[name]
@@ -312,6 +320,7 @@ export class Engine extends EventTarget implements Harness {
       );
       const graph = compileSourcesToRecords(moduleFiles, {
         precompiledBodies,
+        precompiledSourceMaps,
         runtimeModules: runtimeModulesOption,
       });
 
@@ -410,6 +419,20 @@ export class Engine extends EventTarget implements Harness {
         loadId,
         hashOf(script).toString(),
       );
+      // Register a composed bundle source map for `${loadId}.js` so that
+      // `fn.src` / CFC verified-source coordinates (resolved against `script`)
+      // map back to the original authored sources — without this the ESM loader
+      // yields raw bundle coordinates and CFC verified-source fails closed.
+      const bundleSourceMap = composeBundleSourceMap(
+        [...graph.compiledBodies].map(([specifier, body]) => ({
+          body,
+          map: graph.moduleSourceMaps.get(specifier),
+        })),
+        `${loadId}.js`,
+      );
+      if (bundleSourceMap) {
+        this.getSESRuntime().loadSourceMap(`${loadId}.js`, bundleSourceMap);
+      }
       // Verified-load sources: the original file names plus the prefixed module
       // paths (both normalized), so CFC's isVerifiedSourceInLoad recognizes the
       // source locations of functions defined by this load.
