@@ -165,6 +165,28 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     callKind: "runtime-call",
     reactiveOrigin: true,
   },
+  // SQLite builtins. `sqliteQuery` additionally gets dedicated type-argument
+  // schema injection in schema-injection.ts (lowering `sqliteQuery<Row>` to an
+  // injected `rowSchema`); the others are registered so the factory-injected
+  // callables are recognized reactive-origin calls (registry guard test).
+  {
+    exportName: "sqliteDatabase",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "sqliteQuery",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "sqliteExecute",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
 ] as const satisfies readonly CommonFabricRuntimeExportSpec[];
 
 export const COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME: ReadonlyMap<
