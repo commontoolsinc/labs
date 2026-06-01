@@ -251,8 +251,46 @@ export function verifyModuleGraph(
         `Record ${specifier} has a non-function execute`,
       );
     }
+    // Every resolution must remap a *declared* import — a resolution for a
+    // specifier the record never imports is a smuggled edge.
+    if (record.resolutions) {
+      for (const key of Object.keys(record.resolutions)) {
+        if (!record.imports.includes(key)) {
+          throw new ModuleGraphVerificationError(
+            `Record ${specifier} resolves an undeclared import "${key}"`,
+          );
+        }
+      }
+    }
     for (const importSpecifier of record.imports) {
       const target = record.resolutions?.[importSpecifier] ?? importSpecifier;
+      // The resolved target must itself be content-addressed (a cf:module/ or
+      // cf:runtime/ specifier), not an arbitrary string. Without this, a record
+      // could rewire an import edge to ANY present key — e.g. an unresolved
+      // `/x` / `node:fs` left verbatim by the compiler's fallback branch, or a
+      // sibling's specifier — and inherit a trusted (runtime) record's
+      // namespace. Presence alone is not enough; the edge must point into the
+      // content-addressed namespace.
+      if (!VALID_SPECIFIER.test(target)) {
+        throw new ModuleGraphVerificationError(
+          `Record ${specifier} has a non-content-addressed import target "${importSpecifier}" -> "${target}"`,
+        );
+      }
+      // A trusted runtime import must resolve to ITS matching runtime record,
+      // not an arbitrary content-addressed sibling. The body verifier marks
+      // `require("commonfabric")` as a trusted runtime binding based on the
+      // authored specifier; without this, a record could declare
+      // `imports: ["commonfabric"]` with `resolutions: { commonfabric:
+      // "cf:module/evil" }` and be handed a sibling module's namespace under a
+      // trusted-runtime binding (rewire-to-sibling for host APIs).
+      if (
+        isRuntimeModuleIdentifier(importSpecifier) &&
+        target !== `cf:runtime/${importSpecifier}`
+      ) {
+        throw new ModuleGraphVerificationError(
+          `Record ${specifier} resolves runtime import "${importSpecifier}" to "${target}" instead of "cf:runtime/${importSpecifier}"`,
+        );
+      }
       if (!records.has(target)) {
         throw new ModuleGraphVerificationError(
           `Record ${specifier} has an unresolved import "${importSpecifier}" -> "${target}"`,
