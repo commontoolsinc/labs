@@ -1,5 +1,8 @@
 import { isPattern } from "../builder/types.ts";
-import { setVerifiedLoadId } from "../builder/pattern-metadata.ts";
+import {
+  isTrustedPattern,
+  setVerifiedLoadId,
+} from "../builder/pattern-metadata.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-contract";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
@@ -294,17 +297,30 @@ export class ExecutableRegistry {
   private annotateVerifiedPatterns(
     value: unknown,
     loadId: string,
-    seen = new Set<unknown>(),
+    seen = new Map<unknown, boolean>(),
+    trusted = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
     }
-    if (seen.has(value)) {
+
+    // Trust is rooted at a builder-produced (`isTrustedPattern`) value; once
+    // inside a trusted pattern's subtree, nested (serialized, unbranded)
+    // subpatterns inherit the id via structural `isPattern`. A `__cf_data`-forged
+    // pattern-shaped value at the top level (trusted === false) is never
+    // annotated, so it cannot launder a CFC identity into the side-table.
+    const subtreeTrusted = trusted || isTrustedPattern(value);
+
+    // `seen` records the trust level a node was visited at, so a node reached
+    // first via an untrusted path is still re-processed when later reached via a
+    // trusted path — order-independent. A trusted visit is final.
+    const prior = seen.get(value);
+    if (prior === true || (prior === false && !subtreeTrusted)) {
       return;
     }
-    seen.add(value);
+    seen.set(value, subtreeTrusted);
 
-    if (isPattern(value)) {
+    if (subtreeTrusted && isPattern(value)) {
       // Side-table storage works on frozen patterns too (no own-property write).
       setVerifiedLoadId(value, loadId);
     }
@@ -314,7 +330,12 @@ export class ExecutableRegistry {
       if (!descriptor || !("value" in descriptor)) {
         continue;
       }
-      this.annotateVerifiedPatterns(descriptor.value, loadId, seen);
+      this.annotateVerifiedPatterns(
+        descriptor.value,
+        loadId,
+        seen,
+        subtreeTrusted,
+      );
     }
   }
 

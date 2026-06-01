@@ -20,6 +20,7 @@ import {
   type UnsafeBinding,
 } from "./types.ts";
 import { opaqueRef } from "./opaque-ref.ts";
+import { brandTrustedPattern } from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
@@ -442,6 +443,10 @@ function factoryFromPattern<T, R>(
       makePatternFactory(scope, defaultSpace);
     factory.inSpace = (space?: string | unknown) =>
       makePatternFactory(defaultScope, space ?? "");
+    // Provenance brand: only the trusted builder stamps a pattern. Trust-granting
+    // sites check `isTrustedPattern` so a `__cf_data`-forged pattern-shaped
+    // object cannot acquire program / verified-load-id metadata.
+    brandTrustedPattern(factory);
     return factory;
   };
 
