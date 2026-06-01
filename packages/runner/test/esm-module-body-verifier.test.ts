@@ -31,6 +31,18 @@ describe("verifyCompiledModuleBody", () => {
     expect(() => verifyCompiledModuleBody(body, "/main.tsx")).not.toThrow();
   });
 
+  it("accepts a module with a default import (inline __importDefault helper)", () => {
+    // Default imports make the compiler emit an inline `var __importDefault =
+    // …` helper; the verifier must allow that canonical declaration.
+    const body = compiledBody({
+      "/dep.ts": `const v = 7;\nexport default v;`,
+      "/main.ts":
+        `import dep from "./dep.ts";\nexport const run = (): number => dep + 1;`,
+    }, "/main.ts");
+    expect(body).toContain("__importDefault"); // sanity: the helper is present
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).not.toThrow();
+  });
+
   it("accepts the imported leaf module", () => {
     const body = compiledBody({
       "/util.ts": `export const dbl = (x: number): number => x * 2;`,
