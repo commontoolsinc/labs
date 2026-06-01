@@ -1,13 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  composeBundleSourceMap,
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
   SourceMapParser,
   TypeScriptCompiler,
 } from "../mod.ts";
 import { StaticCacheFS } from "@commonfabric/static";
-import { SourceMapConsumer } from "source-map-js";
+import { SourceMapConsumer, SourceMapGenerator } from "source-map-js";
 
 const staticCache = new StaticCacheFS();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
@@ -282,5 +283,64 @@ export default errorOnLine6;
     // External files should be preserved unchanged
     expect(parsed).toContain("other-file.js:100:50");
     expect(parsed).toContain("https://example.com/lib.js:200:30");
+  });
+});
+
+describe("composeBundleSourceMap", () => {
+  const buildMap = (
+    file: string,
+    mappings: Array<{ gen: number; src: string; orig: number }>,
+  ) => {
+    const g = new SourceMapGenerator({ file });
+    for (const m of mappings) {
+      g.addMapping({
+        generated: { line: m.gen, column: 0 },
+        original: { line: m.orig, column: 0 },
+        source: m.src,
+      });
+    }
+    return JSON.parse(g.toString());
+  };
+
+  it("offsets each module's generated lines by its start in the joined bundle", () => {
+    const mapA = buildMap("a.js", [
+      { gen: 1, src: "a.ts", orig: 10 },
+      { gen: 2, src: "a.ts", orig: 11 },
+    ]);
+    const mapB = buildMap("b.js", [{ gen: 1, src: "b.ts", orig: 20 }]);
+    // Bodies joined with "\n": A occupies bundle lines 1..3 (3 lines), so B's
+    // gen line 1 lands at bundle line 4.
+    const composed = composeBundleSourceMap(
+      [{ body: "x\ny\nz", map: mapA }, { body: "p\nq", map: mapB }],
+      "bundle.js",
+    )!;
+    const consumer = new SourceMapConsumer(composed);
+    expect(consumer.originalPositionFor({ line: 1, column: 0 }).source).toBe(
+      "a.ts",
+    );
+    expect(consumer.originalPositionFor({ line: 1, column: 0 }).line).toBe(10);
+    const b = consumer.originalPositionFor({ line: 4, column: 0 });
+    expect(b.source).toBe("b.ts");
+    expect(b.line).toBe(20);
+  });
+
+  it("applies startLineOffset to the first module (eval wrapper line)", () => {
+    const mapA = buildMap("a.js", [{ gen: 1, src: "a.ts", orig: 10 }]);
+    // startLineOffset 1 mirrors the `(function (...) {` wrapper: the body's
+    // gen line 1 maps to bundle line 2.
+    const composed = composeBundleSourceMap(
+      [{ body: "x", map: mapA }],
+      "m.js",
+      1,
+    )!;
+    const consumer = new SourceMapConsumer(composed);
+    expect(consumer.originalPositionFor({ line: 2, column: 0 }).source).toBe(
+      "a.ts",
+    );
+    expect(consumer.originalPositionFor({ line: 2, column: 0 }).line).toBe(10);
+  });
+
+  it("returns undefined when no module has a map", () => {
+    expect(composeBundleSourceMap([{ body: "x" }], "m.js")).toBe(undefined);
   });
 });

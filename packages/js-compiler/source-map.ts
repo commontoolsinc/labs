@@ -25,9 +25,15 @@ export type { MappedPosition };
 export function composeBundleSourceMap(
   modules: ReadonlyArray<{ body: string; map?: SourceMap }>,
   bundleFilename: string,
+  // Generated-line offset applied to the FIRST module. Use this when the
+  // generated text is wrapped by a fixed prefix of N lines (e.g. the ESM
+  // loader's `(function (exports, require, module) {\n` factory wrapper adds 1
+  // line before the compiled body), so coordinates from `new Error().stack`
+  // (1-based, relative to the eval'd string) map correctly.
+  startLineOffset = 0,
 ): SourceMap | undefined {
   const generator = new SourceMapGenerator({ file: bundleFilename });
-  let lineOffset = 0;
+  let lineOffset = startLineOffset;
   let any = false;
   for (const { body, map } of modules) {
     if (map) {

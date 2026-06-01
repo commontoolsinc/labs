@@ -433,6 +433,25 @@ export class Engine extends EventTarget implements Harness {
       if (bundleSourceMap) {
         this.getSESRuntime().loadSourceMap(`${loadId}.js`, bundleSourceMap);
       }
+      // ALSO register each module's map under its eval `//# sourceURL` (its
+      // sanitized source name). The browser surfaces the per-module eval frame
+      // in `new Error().stack`, and `annotateFunctionDebugMetadata` resolves
+      // `fn.src` from that frame FIRST (the indexOf-into-`script` fallback that
+      // `${loadId}.js` covers only wins when the stack frame is absent, e.g.
+      // under Deno's tamed SES stacks). The frame is keyed on the per-module
+      // sourceURL with eval-relative line numbers, so register the per-module
+      // map shifted by the factory-wrapper line (`(function (...) {\n` = +1).
+      for (const [name, specifier] of graph.specifierByPath) {
+        const map = graph.moduleSourceMaps.get(specifier);
+        if (!map) continue;
+        const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
+        const moduleMap = composeBundleSourceMap(
+          [{ body: "", map }],
+          sourceUrl,
+          1, // the `(function (exports, require, module) {` wrapper line
+        );
+        if (moduleMap) this.getSESRuntime().loadSourceMap(sourceUrl, moduleMap);
+      }
       // Verified-load sources: the original file names plus the prefixed module
       // paths (both normalized), so CFC's isVerifiedSourceInLoad recognizes the
       // source locations of functions defined by this load.
