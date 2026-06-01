@@ -18,11 +18,13 @@ describe("esm-loader-config", () => {
     expect(getEsmModuleLoaderConfig()).toBe(false);
   });
 
-  it("an explicit option overrides; undefined is a no-op", () => {
+  it("an explicit option overrides; undefined falls back to the env default", () => {
     setEsmModuleLoaderConfig(true);
     expect(getEsmModuleLoaderConfig()).toBe(true);
-    setEsmModuleLoaderConfig(undefined); // keep the current value
-    expect(getEsmModuleLoaderConfig()).toBe(true);
+    // No prior-value inheritance: undefined re-reads the env default (off here),
+    // so a Runtime without the option never sees a stale override.
+    setEsmModuleLoaderConfig(undefined);
+    expect(getEsmModuleLoaderConfig()).toBe(false);
     setEsmModuleLoaderConfig(false);
     expect(getEsmModuleLoaderConfig()).toBe(false);
   });
