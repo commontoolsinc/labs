@@ -96,13 +96,18 @@ function hardenExportedValue<T>(value: T): T {
     logger.warn("harden() unavailable; exported value not frozen");
     return value;
   }
+  // Fail CLOSED: if hardening throws (e.g. an exotic reachable value harden
+  // refuses), we cannot guarantee the export is immutable, so reject the module
+  // rather than silently shipping a mutable (corruptible) export. A throw here
+  // is terminal for the module — SES caches it and re-throws on every
+  // subsequent importNow, matching a failed factory.
   try {
     return hardenFn(value);
   } catch (error) {
-    // harden() can reject an exotic reachable value (e.g. a Proxy it refuses).
-    // Surface it as a warning so it is observable rather than a silent gap.
-    logger.warn(`harden() failed for exported value: ${String(error)}`);
-    return value;
+    throw new Error(
+      `Failed to harden exported module value: ${String(error)}`,
+      { cause: error },
+    );
   }
 }
 
