@@ -45,6 +45,7 @@ describe("ExperimentalOptions", () => {
         modernDataModel: false,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
+        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -63,6 +64,7 @@ describe("ExperimentalOptions", () => {
         modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
+        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -81,6 +83,7 @@ describe("ExperimentalOptions", () => {
         modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
+        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
