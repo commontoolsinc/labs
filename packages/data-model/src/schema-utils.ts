@@ -300,11 +300,21 @@ export function emptySchemaObject() {
 }
 
 /**
- * Returns the given `SchemaPathSelector` with its `schema` (if any) interned
- * and with both its `path` array and the selector object itself deep-frozen
- * in place. The input reference is returned — this function does not clone.
- * Idempotent on repeat calls:
- * `internPathSelector(internPathSelector(x)) === internPathSelector(x)`.
+ * Returns a deep-frozen `SchemaPathSelector` whose `schema` (if any) is the
+ * canonical interned instance and whose `path` array is frozen.
+ *
+ * Usually the input reference itself is canonicalized in place — its `schema`
+ * replaced with the interned instance if needed, then it and its `path` frozen
+ * — and returned. The one exception: when the input is **already frozen** and
+ * its `schema` is not the canonical interned instance, the schema cannot be
+ * written back, so a new deep-frozen selector is allocated and returned.
+ * Therefore the result is NOT guaranteed to be `===` to the input. (It is `===`
+ * whenever the input is mutable, or its `schema` is already interned or
+ * `undefined`.)
+ *
+ * Idempotent: re-interning a result returns that same result
+ * (`internPathSelector(internPathSelector(x)) === internPathSelector(x)`),
+ * since a returned selector's `schema` is already canonical.
  *
  * Exists so that callers who feed selectors into `MapSetStringToPathSelectors`
  * (or any other cache keyed on `hashStringOf()` of a selector) can hand in an
@@ -315,8 +325,26 @@ export function emptySchemaObject() {
 export function internPathSelector(
   selector: SchemaPathSelector,
 ): SchemaPathSelector {
-  if (selector.schema !== undefined) internSchema(selector.schema);
-  Object.freeze(selector.path);
+  const { path, schema } = selector;
+
+  if (schema !== undefined) {
+    const interned = internSchema(schema);
+    if (interned !== schema) {
+      // Canonical schema differs from what the selector holds. Swap it in place
+      // if the selector is mutable; if it's frozen, we can't, so allocate a new
+      // deep-frozen selector carrying the canonical schema (sharing the now-
+      // frozen `path` array).
+      if (Object.isFrozen(selector)) {
+        return Object.freeze({
+          path: Object.freeze(path),
+          schema: interned,
+        }) as SchemaPathSelector;
+      }
+      selector.schema = interned;
+    }
+  }
+
+  Object.freeze(path);
   Object.freeze(selector);
   return selector;
 }
