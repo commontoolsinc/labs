@@ -26,11 +26,7 @@ import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { encodeCfLinkValue } from "./sqlite/cf-link.ts";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 
-type SqliteDbRef = {
-  id: string;
-  tables?: Record<string, unknown>;
-  rev?: number;
-};
+type SqliteDbRef = { id: string; tables?: Record<string, unknown> };
 type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
 
 const errMsg = (error: unknown): string =>
@@ -132,9 +128,7 @@ export function sqliteDatabase(
         | { tables?: Record<string, unknown> }
         | undefined;
       const id = handle.entityId?.["/"] ?? JSON.stringify(handle.getAsLink());
-      // `rev` is a reactivity token bumped by sqliteExecute after a committed
-      // write; `reactOn: db` queries re-run when it changes (spec Section 05).
-      handle.withTx(tx).set({ id, tables: options?.tables, rev: 0 });
+      handle.withTx(tx).set({ id, tables: options?.tables });
       sendResult(tx, handle);
       initialized = true;
     }
@@ -293,9 +287,6 @@ export function sqliteExecute(
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
-    // The db handle cell (so we can bump its `rev` post-commit to re-run
-    // `reactOn: db` queries — spec Section 05 reactivity).
-    const dbCell = inputsCell.key("db");
     tx.enqueuePostCommitEffect({
       id: `sqliteExecute:${hash}`,
       idempotencyKey: `sqliteExecute:${hash}`,
@@ -309,15 +300,6 @@ export function sqliteExecute(
               pending: false,
               result: res,
               requestHash: hash,
-            });
-            // Bump the handle's reactivity token so `reactOn: db` queries re-run
-            // against the now-committed write.
-            const cur = dbCell.withTx(wtx).get() as
-              | { rev?: number }
-              | undefined;
-            dbCell.withTx(wtx).set({
-              ...(cur ?? {}),
-              rev: (cur?.rev ?? 0) + 1,
             });
           });
         } catch (error) {
