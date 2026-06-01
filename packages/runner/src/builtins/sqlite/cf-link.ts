@@ -18,13 +18,9 @@ import {
 } from "../../link-utils.ts";
 import type { NormalizedFullLink } from "../../link-types.ts";
 
-export const CF_LINK_SUFFIX = "_cf_link";
-
-/** A column/parameter is a link column iff its name ends in `_cf_link` (with a
- *  non-empty prefix). */
-export function isCfLinkColumn(name: string): boolean {
-  return name.length > CF_LINK_SUFFIX.length && name.endsWith(CF_LINK_SUFFIX);
-}
+// Pure column-name helpers live in the memory package (server-authoritative,
+// lower pace-layer) and are re-exported here for client-side use.
+export { CF_LINK_SUFFIX, isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 
 /** Recover a Cell from a value that is a cell or carries a `toCell` back-pointer. */
 function asCellOrUndefined(value: unknown): Cell<unknown> | undefined {

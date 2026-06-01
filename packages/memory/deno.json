@@ -39,7 +39,12 @@
     "./v2/storage-path": "./v2/storage-path.ts",
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
-    "./schema": "./schema.ts"
+    "./schema": "./schema.ts",
+    "./sqlite": "./v2/sqlite/mod.ts",
+    "./sqlite/columns": "./v2/sqlite/columns.ts",
+    "./sqlite/guard": "./v2/sqlite/guard.ts",
+    "./sqlite/schema": "./v2/sqlite/schema.ts",
+    "./sqlite/exec": "./v2/sqlite/exec.ts"
   },
   "imports": {
     "@commonfabric/leb128": "jsr:@commonfabric/leb128",

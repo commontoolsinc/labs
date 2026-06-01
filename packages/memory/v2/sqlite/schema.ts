@@ -7,7 +7,7 @@
 // These helpers compile to plain data; the transformer/runtime do not special-
 // case them.
 
-import { CF_LINK_SUFFIX, isCfLinkColumn } from "./cf-link.ts";
+import { CF_LINK_SUFFIX, isCfLinkColumn } from "./columns.ts";
 
 export interface ColumnSchema {
   type: string;

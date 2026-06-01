@@ -9,7 +9,7 @@ import {
   createTableSQL,
   linkColumnsOf,
   table,
-} from "../src/builtins/sqlite/schema.ts";
+} from "../v2/sqlite/schema.ts";
 
 describe("cfLink", () => {
   it("emits a string column marked as a cf link", () => {

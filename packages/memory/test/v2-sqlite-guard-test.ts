@@ -12,7 +12,7 @@ import {
   assertWriteSafe,
   classifyStatement,
   GuardError,
-} from "../src/builtins/sqlite/guard.ts";
+} from "../v2/sqlite/guard.ts";
 
 describe("classifyStatement", () => {
   it("classifies a plain SELECT as a read", () => {

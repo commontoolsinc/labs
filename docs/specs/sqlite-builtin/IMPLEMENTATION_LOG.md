@@ -43,4 +43,41 @@ sequence can be reconciled.
 
 ## Phase log
 
-(entries appended as work proceeds)
+### Foundation (guard, cf-link codec, schema/DDL, engine exec)
+
+- **Statement guard** — tokenizer-level (mask literals/comments; reject non-SELECT
+  reads, DDL-in-write-path, schema-qualified refs, PRAGMA/ATTACH/DETACH, multiple
+  statements, core-table refs). Green.
+- **`_cf_link` codec** — encode cell → absolute sigil string; decode → Cell;
+  throw conditions. Round-trips through the real runtime. Green.
+- **`table()`/`cfLink()` + `createTableSQL`/`linkColumnsOf`** — pure schema/DDL
+  helpers; enforce `_cf_link` = TEXT + named `*_cf_link`. Green.
+- **Engine exec** — `runQuery`/`runWrite`/`ensureTables` against a real
+  `@db/sqlite` Database (`:memory:` in tests). Green (8 files / 22 steps across
+  memory + runner).
+
+#### Decision — package placement (pace layers)
+
+The spec says SQL executes **server-side** in toolshed, and `@db/sqlite` + the
+`Database` live in `packages/memory` (a Foundation pace-layer below `runner`).
+`runner` already imports `@commonfabric/memory/*` (e.g. `acl-manager.ts`), and
+`memory` must not depend on `runner`. So:
+
+- Server-side / pure shared logic → `packages/memory/v2/sqlite/`
+  (`columns.ts`, `guard.ts`, `schema.ts` [table/cfLink/DDL], `exec.ts`), exported
+  as `@commonfabric/memory/sqlite{,/columns,/guard,/schema,/exec}`.
+- Client-side `_cf_link` codec (needs the runtime to build Cells) stays in
+  `packages/runner/src/builtins/sqlite/cf-link.ts`, re-exporting the pure
+  `CF_LINK_SUFFIX`/`isCfLinkColumn` from `@commonfabric/memory/sqlite/columns`.
+- `mod.ts` barrel pulls in `exec.ts` → `@db/sqlite` (FFI); client code imports the
+  narrow subpaths instead to avoid the FFI dependency.
+
+This corrects an initial mistaken placement under `packages/runner` (guard/schema
+were first written there, then `git mv`'d to memory).
+
+#### Spec gaps / corrections noted
+
+- Spec implied helpers under `packages/runner/src/builtins/sqlite/`; correct
+  pace-layer for server-side + pure logic is `packages/memory` (above).
+- Runtime constructor option is `apiUrl` (a `URL`), not `blobbyServerUrl` — the
+  plan's test sketch was imprecise.
