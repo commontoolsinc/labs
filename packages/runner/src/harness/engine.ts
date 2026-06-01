@@ -2,6 +2,7 @@ import { Console } from "./console.ts";
 import {
   type CompileResult,
   type EvaluateOptions,
+  type EvaluateResult,
   type Exports,
   type Harness,
   type HarnessedFunction,
@@ -36,6 +37,7 @@ import {
   compileSourcesToRecords,
 } from "../sandbox/module-record-compiler.ts";
 import {
+  loadModuleGraph,
   runtimeModuleRecords,
   type VirtualModuleRecord,
 } from "../sandbox/esm-module-loader.ts";
@@ -338,6 +340,149 @@ export class Engine extends EventTarget implements Harness {
       return { id, graph, mainSpecifier };
     } finally {
       logger.timeEnd("compileToRecordGraph");
+    }
+  }
+
+  /**
+   * Compile + evaluate a program through the ESM module-record path (the
+   * `esmModuleLoader` route). Returns the same `{ main, exportMap, loadId }`
+   * shape as {@link evaluate}, so callers can branch on the flag and treat the
+   * result identically.
+   */
+  async compileAndEvaluateModules(
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<EvaluateResult> {
+    // Ensure runtime exports + exportsCallback are initialized.
+    await this.getRuntimeInternals();
+    const { id, graph, mainSpecifier } = await this.compileToRecordGraph(
+      program,
+      options,
+    );
+    return this.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
+  }
+
+  /**
+   * Evaluate a verified ESM record graph: load it synchronously via `importNow`
+   * in a locked-down compartment whose globals are the hardened runtime globals
+   * (runtime-module records, already in the graph, supply the trusted host
+   * APIs), and return the entry namespace as `main` plus the per-module export
+   * map. The graph was security-verified at compile time, so verification is
+   * not repeated.
+   */
+  private evaluateRecordGraph(
+    id: string,
+    graph: CompiledModuleGraph,
+    mainSpecifier: string,
+    files: Source[],
+  ): EvaluateResult {
+    logger.timeStart("evaluateRecordGraph");
+    try {
+      const loadId = `${id}:esm:${this.nextLoadId++}`;
+      this.executableRegistry.beginVerifiedLoad(loadId);
+      // Register per-module content hashes for parity with the AMD evaluate
+      // path. This wires the scheduler's content-addressed implementation hash;
+      // it becomes effective once source-location resolution under the ESM
+      // loader is wired (see the sourceURL note in module-record-compiler.ts).
+      this.registerModuleHashes(id, files);
+
+      const globals = createModuleCompartmentGlobals({
+        console: this.consoleShim,
+      });
+      // Concatenated module bodies give the source-location frame a `script`
+      // for fn.src `indexOf` resolution. (Insertion order need not match the
+      // import-execution order; resolveLocationFromFunctionSource falls back to
+      // a from-zero scan, and any mis-attribution degrades fail-closed at the
+      // CFC identity layer — see the fn.src note in the design doc.)
+      const script = [...graph.compiledBodies.values()].join("\n");
+      this.executableRegistry.setVerifiedLoadBundleId(
+        loadId,
+        hashOf(script).toString(),
+      );
+      // Verified-load sources: the original file names plus the prefixed module
+      // paths (both normalized), so CFC's isVerifiedSourceInLoad recognizes the
+      // source locations of functions defined by this load.
+      const verifiedSources = new Set<string>();
+      const addVerifiedSource = (value: string | undefined) => {
+        if (typeof value !== "string" || value.length === 0) return;
+        verifiedSources.add(normalizeVerifiedSource(value));
+        const prefixed = `/${id}/`;
+        if (value.startsWith(prefixed)) {
+          verifiedSources.add(
+            normalizeVerifiedSource(value.slice(id.length + 1)),
+          );
+        }
+      };
+      for (const file of files) addVerifiedSource(file.name);
+      for (const path of graph.specifierByPath.keys()) addVerifiedSource(path);
+      this.executableRegistry.setVerifiedLoadSources(loadId, verifiedSources);
+
+      // Register functions defined during this load as verified, mirroring the
+      // AMD path's verified-execution model.
+      const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
+        this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
+      );
+      const frame = pushFrame({
+        runtime: this.ctRuntime,
+        verifiedLoadId: loadId,
+        sourceLocationContext: {
+          script,
+          filename: `${loadId}.js`,
+          nextSearchOffset: 0,
+        },
+      });
+
+      let loaded: ReturnType<typeof loadModuleGraph>;
+      try {
+        loaded = loadModuleGraph(mainSpecifier, {
+          records: graph.records,
+          globals,
+          verify: false, // already verified at compile time
+        });
+      } finally {
+        popFrame(frame);
+        restoreVerifiedFunctionRegistrar();
+      }
+
+      const main = loaded.namespace as Exports;
+      this.executableRegistry.captureVerifiedValue(loadId, main);
+
+      // Build the per-module export map (keyed by original source path, prefix
+      // stripped) from the SAME load, and map each exported value back to its
+      // RuntimeProgram for sub-pattern resolution.
+      const prefix = `/${id}`;
+      const exportMap: Record<string, Exports> = {};
+      const exportsByValue = new Map<unknown, RuntimeProgram>();
+      for (const [path, specifier] of graph.specifierByPath) {
+        const namespace = loaded.importNow(specifier) as Exports;
+        const fileName = path.startsWith(prefix)
+          ? path.slice(prefix.length)
+          : path;
+        exportMap[fileName] = namespace;
+        for (const [exportName, value] of Object.entries(namespace)) {
+          // Only object/function exports are sub-pattern candidates. Skip the
+          // `__esModule` flag and primitives, which would otherwise collide in
+          // this value-keyed map (e.g. every module's `true`).
+          if (exportName === "__esModule") continue;
+          if (typeof value !== "object" && typeof value !== "function") {
+            continue;
+          }
+          if (value === null) continue;
+          exportsByValue.set(value, {
+            main: fileName,
+            mainExport: exportName,
+            files,
+          });
+        }
+      }
+      // Capture the export map too, so verified values from non-entry modules
+      // are indexed by the registry exactly as on the AMD path.
+      this.executableRegistry.captureVerifiedValue(loadId, exportMap);
+      this.runtimeInternals?.exportsCallback(exportsByValue);
+
+      return { main, exportMap, loadId };
+    } finally {
+      logger.timeEnd("evaluateRecordGraph");
     }
   }
 

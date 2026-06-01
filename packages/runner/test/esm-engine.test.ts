@@ -45,6 +45,40 @@ describe("Engine.compileToRecordGraph", () => {
     // here means all authored bodies passed the ESM security verifier.)
   });
 
+  it("compiles + evaluates a program through the ESM path", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents:
+          "export const answer = 42;\nexport const make = () => answer;\nexport default make;",
+      }],
+    };
+    const { main, loadId } = await engine.compileAndEvaluateModules(program);
+    expect(loadId).toBeTruthy();
+    expect(main).toBeDefined();
+    expect((main as { answer: number }).answer).toBe(42);
+    expect((main as { make(): number }).make()).toBe(42);
+    // default export resolves to the same function.
+    expect((main as { default(): number }).default()).toBe(42);
+  });
+
+  it("evaluates a multi-module program across an internal import", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/dep.ts", contents: "export const base = (): number => 20;" },
+        {
+          name: "/main.tsx",
+          contents:
+            `import { base } from "./dep.ts";\nexport const total = () => base() + 22;\nexport default total;`,
+        },
+      ],
+    };
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as { total(): number }).total()).toBe(42);
+  });
+
   it("rejects a program whose module contains disallowed top-level code", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

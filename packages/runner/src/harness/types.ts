@@ -74,6 +74,14 @@ export interface Harness extends EventTarget {
     options?: EvaluateOptions,
   ): Promise<EvaluateResult>;
 
+  // Compile + evaluate a program through the ESM module-record path (the
+  // `esmModuleLoader` flag route), returning the same shape as `evaluate`.
+  // Optional: present only on harnesses that implement the ESM loader.
+  compileAndEvaluateModules?(
+    program: RuntimeProgram,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<EvaluateResult>;
+
   // Resolves a `ProgramResolver` into a `Program` using the engine's
   // configuration.
   resolve(

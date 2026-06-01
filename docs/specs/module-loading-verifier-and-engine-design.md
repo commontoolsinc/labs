@@ -236,9 +236,17 @@ ESM-emit variant); whether `export *` (Part C) needs a classification rule.
 - **Verifier parity is security-critical.** A missed classification = sandbox
   escape. Mitigation: the differential oracle is a hard release gate; do not flip
   the default until AMD and ESM verdicts match across the corpus.
-- **`fn.src` resolution under ESM.** If the executed artifact doesn't contain
-  function source verbatim / in order, both identity consumers silently degrade.
-  Mitigation: the dedicated differential `fn.src` test in Part B.
+- **`fn.src` resolution under ESM — KNOWN GAP (remaining before default-on).**
+  The ESM evaluate path loads each module via a bare `compartment.evaluate`; SES
+  `errorTaming` strips the `//# sourceURL` from stack traces, so `fn.src` does
+  not resolve and both identity consumers (scheduler implementation hash, CFC
+  verified-source) degrade gracefully (fall back / telemetry id) rather than
+  fail — patterns still compile, load, and run correctly. Full fidelity needs
+  SES-isolate-level source-map integration (load per-module maps + map eval
+  positions), the design's highest-risk piece. The record `sourceURL` tag and
+  `registerModuleHashes` wiring are in place as hooks; this is the last item to
+  close before the flag can be enabled by default. It does not block the
+  flag-off, manual-testing milestone.
 - **Shared-code drift.** Any edit to the transformer pipeline or source-location
   code risks the AMD path. Mitigation: keep ESM additive; rely on existing AMD
   tests as the regression guard.

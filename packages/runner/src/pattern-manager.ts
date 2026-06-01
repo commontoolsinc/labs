@@ -11,7 +11,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Cell, createCell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
-import type { CompileResult } from "./harness/types.ts";
+import type { CompileResult, EvaluateResult } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTopFrame } from "./builder/pattern.ts";
@@ -435,6 +435,18 @@ export class PatternManager {
       program = input;
     }
 
+    // ESM module-record loader path (experimental, default off). Bypasses the
+    // AMD bundle compile/evaluate and the persistent compile cache.
+    if (
+      this.runtime.experimental.esmModuleLoader === true &&
+      this.runtime.harness.compileAndEvaluateModules
+    ) {
+      const result = await this.runtime.harness.compileAndEvaluateModules(
+        program,
+      );
+      return this.patternFromEvaluation(result, program);
+    }
+
     const { cachedCompiler } = this.runtime;
     if (cachedCompiler) {
       const programHash = createRef(
@@ -464,12 +476,20 @@ export class PatternManager {
     program: RuntimeProgram,
     options?: { skipBundleValidation?: boolean },
   ): Promise<Pattern> {
-    const { main, loadId } = await this.runtime.harness.evaluate(
+    const result = await this.runtime.harness.evaluate(
       id,
       jsScript,
       program.files,
       options,
     );
+    return this.patternFromEvaluation(result, program);
+  }
+
+  // Resolve a Pattern from an evaluate result (shared by the AMD and ESM paths).
+  private patternFromEvaluation(
+    { main, loadId }: EvaluateResult,
+    program: RuntimeProgram,
+  ): Pattern {
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
     }

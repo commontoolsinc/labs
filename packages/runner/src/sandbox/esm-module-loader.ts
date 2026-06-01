@@ -90,6 +90,22 @@ export function importModuleGraphNow(
   entrySpecifier: string,
   options: SesModuleLoaderOptions,
 ): Record<string, unknown> {
+  return loadModuleGraph(entrySpecifier, options).namespace;
+}
+
+/**
+ * Like {@link importModuleGraphNow} but returns the loaded entry namespace plus
+ * an `importNow` bound to the SAME compartment, so additional already-loaded
+ * module specifiers can be retrieved (as singletons) without re-instantiating
+ * the graph. Used by the Engine to build the per-module export map from one load.
+ */
+export function loadModuleGraph(
+  entrySpecifier: string,
+  options: SesModuleLoaderOptions,
+): {
+  namespace: Record<string, unknown>;
+  importNow: (specifier: string) => Record<string, unknown>;
+} {
   ensureSESLockdown();
   const { records, globals = {}, name = "cf:esm", verify = true } = options;
 
@@ -125,7 +141,10 @@ export function importModuleGraphNow(
   // siblings. Mirror createCompartment() in ses-runtime.ts.
   Object.freeze(compartment.globalThis);
 
-  return compartment.importNow(entrySpecifier);
+  return {
+    namespace: compartment.importNow(entrySpecifier),
+    importNow: (specifier: string) => compartment.importNow(specifier),
+  };
 }
 
 /**
