@@ -85,11 +85,13 @@ describe("verifyModuleGraph", () => {
     );
   });
 
-  it("rejects an import edge rewired to a foreign present record", () => {
-    // A record must not resolve one of its imports to an arbitrary other key.
-    // Here the target IS present and content-addressed, but the deeper invariant
-    // is covered by the undeclared-resolution and target-shape checks; a bare
-    // `node:fs` target (present or not) is rejected for not being cf:-addressed.
+  it("rejects an import edge targeting a bare/builtin specifier (node:fs)", () => {
+    // A `node:`/bare target left verbatim by the compiler's fallback is not
+    // content-addressed, so it is rejected regardless of presence — closing the
+    // capability-reach via a smuggled non-cf edge. (Reaching another *present*
+    // cf:module record is not a privilege crossing: all authored modules share
+    // one trust level, and a cf:module/<hash> target is, by content-addressing,
+    // exactly the module whose source hashes to it.)
     const g = graph([
       [
         "cf:module/main",
