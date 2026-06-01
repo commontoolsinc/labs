@@ -1,5 +1,48 @@
 # Plan — runtime-determined node output schema (unblocks `_cf_link` decode + `sqliteQuery<Row>`)
 
+> ## VERDICT (2026-06-01, after implementing + testing Option A)
+>
+> **Option A does NOT work, and no runner-only change can.** Implemented the
+> recommended Option A end to end — built the per-query `asCell` result schema,
+> generalized `resultForRawBuiltinOutputBinding` (allow-set incl. `sqliteQuery`,
+> sourcing the schema from the result cell), tried BOTH a regular link
+> (`getAsLink`) and a **write-redirect** link (`getAsWriteRedirectLink`), and
+> decoded stored strings to sigil objects. The RED test
+> (`packages/runner/test/sqlite-cf-link-decode.test.ts`) stayed RED across every
+> realistic consumer read path: `.key().get()` leaf, full-tree `result.get()`
+> proxy, and `.get()` at the `q` boundary. The column read back as the resolved
+> target VALUE (`{name:"Ada"}`), never a `Cell`.
+>
+> **Why (the corrected root cause).** §1.4's premise — that `combineSchema`
+> would carry the link's `asCell` to the reader — is not how reads actually
+> resolve a *deep* path. Runtime navigation derives a child's schema **top-down
+> from the CONSUMER's own schema**; an untyped `sqliteQuery` lowers to an empty
+> (`{}`) consumer schema (verified: `p.resultSchema === {}`), so descending
+> `q → result → [i] → author_cf_link` never carries `asCell`. A deeper link's
+> schema is only honored when the effective schema **already** `hasAsCell`
+> (`schema.ts:978` gate; `hasAsCell` is top-level only, `traverse.ts:3245`) — a
+> chicken-and-egg the node-output link cannot break. Proof it's a CONSUMER-schema
+> problem, not a storage problem: applying `.asSchema({… author_cf_link:
+> {asCell}})` **at the reading cell** rehydrates the stored sigil object to a
+> live Cell (the "EXPLICIT" probe passed).
+>
+> **Consequence.** `_cf_link` auto-decode and typed `sqliteQuery<Row>` are the
+> **same** change and it lives in the **ts-transformer**, not the runner: the
+> `Row` type argument must lower to an `asCell`-bearing result schema injected at
+> the *call site* (Piece B, [result-decode-and-row-types.md §2](./result-decode-and-row-types.md)).
+> For an untyped query the call site cannot know which columns are links, so
+> untyped auto-decode is impossible by construction. Piece B is therefore a
+> **prerequisite** for decode, not an independent nicety. Options A/C/D below are
+> superseded; Option B's instinct (consumer-side typing) was directionally right
+> but must come from the transformer, not a loosened return type.
+>
+> All speculative runner/builtin edits were reverted; the branch is green. The
+> RED test now documents current behavior (raw sigil string + `decodeCfLinkValue`
+> + NULL→null) and carries a `skip` pinning the blocked target.
+
+---
+
+
 Test-first design for ONE change: let a builtin declare that **its output schema
 is determined at runtime** so a per-invocation, `asCell`-bearing schema attached
 to the result cell survives a downstream read. This is the single root cause that

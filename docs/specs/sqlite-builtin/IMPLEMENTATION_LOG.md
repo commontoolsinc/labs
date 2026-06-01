@@ -339,3 +339,54 @@ CI-equivalent locally (fmt/lint/check + affected tests) instead.
    encode/decode at the boundary, and post-commit handle-cell dirtying for
    `reactOn`.
 5. `sqliteQuery<Row>` transformer lowering; injected on-disk source via `cf`; CFC.
+
+---
+
+## 2026-06-01 — node-output-schema propagation: attempted, disproven, documented
+
+Ran the endorsed design→test-first→implement loop on the highest-leverage
+remaining item (`_cf_link` result decode to live Cells, the root-cause shared
+with typed `sqliteQuery<Row>`). Oracle design session →
+`plans/node-output-schema-propagation.md` (recommended Option A: generalize
+`resultForRawBuiltinOutputBinding` to source the per-query schema from the result
+cell).
+
+**RED:** `packages/runner/test/sqlite-cf-link-decode.test.ts` — a pattern SELECTs
+a `*_cf_link` column; assert `q.result[0].author_cf_link` is a live `Cell`.
+Seeded with a pre-encoded sigil STRING (encode is already proven) to isolate
+decode-on-read.
+
+**GREEN attempt (Option A, fully implemented then REVERTED):** built the
+per-query `asCell` result schema (link cols detected by the enforced `_cf_link`
+suffix), stamped it on the result cell, generalized the runner seam (allow-set
+incl. `sqliteQuery`, schema sourced from `result.schema`), decoded stored strings
+to sigil objects, and tried BOTH `getAsLink` and `getAsWriteRedirectLink`.
+
+**Result: does not work, and no runner-only change can.** The column kept reading
+as the resolved target VALUE (`{name:"Ada"}`), never a `Cell`, across every
+realistic consumer path (`.key().get()`, full-tree `result.get()` proxy, `.get()`
+at the `q` boundary).
+
+**Corrected root cause (supersedes the earlier "static schema shadows via
+combineSchema" framing):** runtime reads derive a child's schema TOP-DOWN from
+the CONSUMER's own schema. An untyped `sqliteQuery` lowers to an empty `{}`
+consumer schema (verified `p.resultSchema === {}`), so descending
+`q → result → [i] → author_cf_link` never carries `asCell`; a deeper link's
+schema is only honored once the effective schema ALREADY `hasAsCell`
+(`schema.ts:978`, top-level-only `hasAsCell` at `traverse.ts:3245`). Applying
+`.asSchema({… asCell})` AT the reading cell DOES rehydrate (the "EXPLICIT" probe
+passed) — proving the markers must live on the CONSUMER's schema.
+
+**Decision / where the spec was wrong:** `_cf_link` auto-decode and typed
+`sqliteQuery<Row>` are the SAME change and it belongs in the **ts-transformer**,
+not the runner — the `Row` type arg must lower to an `asCell`-bearing result
+schema injected at the call site (Piece B). For an untyped query the call site
+cannot know which columns are links, so untyped auto-decode is impossible by
+construction. Piece B is a PREREQUISITE for decode, not independent. The plan's
+recommended Option A (and C/D) are superseded; full analysis + the empirical
+trace are in `plans/node-output-schema-propagation.md` (VERDICT block).
+
+**Left behind (green):** `sqlite-cf-link-decode.test.ts` now pins CURRENT
+behavior — a link column reads back as the sigil-link STRING, decodes via
+`decodeCfLinkValue`, and NULL → null — plus an `it.skip` documenting the blocked
+auto-decode target. All speculative src edits reverted (no `src/` diff).
