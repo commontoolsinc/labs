@@ -17,6 +17,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` ([type-errors](type-errors.md)) |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([gotchas/onclick-inside-computed](gotchas/onclick-inside-computed.md)) |
 | Piece hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([gotchas/ifelse-composed-pattern-cells](gotchas/ifelse-composed-pattern-cells.md)) |
+| Piece body renders empty on cold load (slug/id URL) but fine via in-app nav; no console error | `[UI]` is a bare pattern instance, or a helper-returned VNode (re-materializes for the deployed root, not a re-run sub-piece) | Author `[UI]` as inline DOM-rooted JSX; nest child patterns inside DOM ([gotchas/piece-ui-must-be-vnode](gotchas/piece-ui-must-be-vnode.md)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([reactivity-issues](reactivity-issues.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([reactivity-issues](reactivity-issues.md)) |
 | lift() returns 0/empty | Passing cell directly to lift() | Use `computed()` or pass as object param ([gotchas/lift-returns-stale-data](gotchas/lift-returns-stale-data.md)) |
