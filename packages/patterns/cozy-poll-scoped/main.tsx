@@ -1101,6 +1101,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       })),
                     },
                   });
+                  // Real generated image URL once ready; "" while generating or
+                  // on failure. NOTE: a large data-URI *constant* returned from
+                  // a lifted computed doesn't survive serialization (renders
+                  // broken), so this computed only ever returns runtime data —
+                  // the bundled fallback is a static background-image instead.
+                  const artUrl = computed(() => {
+                    const u = art.result?.choices?.[0]?.message?.images?.[0]
+                      ?.image_url?.url;
+                    return typeof u === "string" && u.length > 0 ? u : "";
+                  });
                   // The castVote handler toggles per-color: clicking your
                   // active color clears, a different color updates, none
                   // pushes. JSX dispatches one event per click; the handler
@@ -1121,12 +1131,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         gap: "10px",
                       }}
                     >
-                      {
-                        /* Pen-and-ink cuisine illustration (~1in square). No
-                          interactive handlers here, so a computed-returned
-                          VNode is safe; it doubles as the loading/fallback
-                          state while the image generates. */
-                      }
+                      {/* Pen-and-ink cuisine illustration (~1in square). */}
                       <div
                         style={{
                           width: "96px",
@@ -1135,43 +1140,25 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           borderRadius: "8px",
                           overflow: "hidden",
                           backgroundColor: "#f9fafb",
+                          backgroundImage: `url("${FOOD_FALLBACK_IMAGE}")`,
+                          backgroundSize: "cover",
+                          backgroundPosition: "center",
                           border: "1px solid #eee",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
                         }}
                       >
-                        {computed(() => {
-                          const url = art.result?.choices?.[0]?.message
-                            ?.images?.[0]?.image_url?.url ?? "";
-                          // Generated image when ready; a quiet "…" while it's
-                          // still generating; the bundled neon-FOOD fallback if
-                          // generation failed (error / no image / gateway down).
-                          if (url) {
-                            return (
-                              <img
-                                src={url}
-                                alt=""
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  objectFit: "cover",
-                                }}
-                              />
-                            );
-                          }
-                          if (art.pending) {
-                            return (
-                              <span
-                                style={{ fontSize: "22px", color: "#cbd5e1" }}
-                              >
-                                …
-                              </span>
-                            );
-                          }
-                          return (
+                        {
+                          /* The bundled FOOD sign is the container's static
+                            background (above); overlay the generated dish only
+                            once it's actually ready, so the FOOD sign shows
+                            through while generating and on failure. */
+                        }
+                        {artUrl
+                          ? (
                             <img
-                              src={FOOD_FALLBACK_IMAGE}
+                              src={artUrl}
                               alt=""
                               style={{
                                 width: "100%",
@@ -1179,8 +1166,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 objectFit: "cover",
                               }}
                             />
-                          );
-                        })}
+                          )
+                          : null}
                       </div>
                       <span
                         style={{
