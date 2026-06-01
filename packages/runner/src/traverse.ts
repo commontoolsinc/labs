@@ -4,6 +4,7 @@ import {
   hashSchema,
   internSchema,
   internSchemaAsTaggedHashString,
+  isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type {
@@ -328,7 +329,14 @@ export const schemaTrackerCoversSelector = (
   key: string,
   selector: SchemaPathSelector,
 ): boolean => {
+  // Fast path: reuse `selector` as-is only when it is genuinely a proper
+  // interned selector — i.e. its schema is the canonical interned instance (not
+  // merely frozen) and both the object and its path are frozen. `Object.isFrozen`
+  // alone is not enough: a frozen selector can hold a frozen-yet-non-canonical
+  // schema, which would miss the frozen-object hash cache (and break dedup under
+  // reference equality). Otherwise, canonicalize via `internPathSelector`.
   const internedSelector = selector.schema !== undefined &&
+      isInternedSchema(selector.schema) &&
       Object.isFrozen(selector) && Object.isFrozen(selector.path)
     ? selector
     : internPathSelector({
