@@ -373,7 +373,9 @@ describe("composeBundleSourceMap", () => {
     )!;
     // Content must be reachable under the OVERRIDDEN name (what the mappings
     // now point at), so DevTools can display the authored source.
-    expect(composed.sourcesContent?.[composed.sources.indexOf("/id/dir/main.tsx")])
+    expect(
+      composed.sourcesContent?.[composed.sources.indexOf("/id/dir/main.tsx")],
+    )
       .toBe("const authored = 1;");
   });
 });
