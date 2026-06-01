@@ -1,14 +1,17 @@
 /**
  * Cross-transformer communication registries.
  *
- * The pipeline creates nine shared registries in CommonFabricTransformerPipeline
+ * The pipeline creates eight shared registries in CommonFabricTransformerPipeline
  * (cf-pipeline.ts). Each is keyed by AST node or symbol identity, which is
  * preserved when transformers are applied in sequence via ts.transform().
  *
- * (A former member, syntheticLiftAppliedCallRegistry, was removed in the
- * registry-unification effort — it was verified functionally inert. See
- * docs/scratch/12-registry-unification-design.md. The current ninth member is
- * schemaInjectedRegistry, added in CT-1621 — see its entry below.)
+ * (Two former members no longer exist: `syntheticLiftAppliedCallRegistry`, removed
+ * in the registry-unification effort after being verified functionally inert (see
+ * docs/scratch/12-registry-unification-design.md); and `narrowedWrapperTypeRegistry`,
+ * removed in PR #3788 by detecting and short-circuiting the synthetic
+ * capability-wrapper re-entry in schema-injection that was its sole consumer —
+ * see the `schemaInjectedRegistry` entry below for the current idempotency model.
+ * The current eighth member is `schemaInjectedRegistry`, added in CT-1621.)
  *
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
  *   Preserves and recovers synthetic typing across the pipeline. Serves three
@@ -31,9 +34,6 @@
  *   reachable bug, while adding churn the reads can't even exploit (the shared
  *   read helpers — getTypeAtLocationWithFallback, ensureTypeNodeRegistered —
  *   are node-kind-agnostic and would have to consult all three anyway).
- *   The one genuine cross-consumer hazard CT-1615 hit (schema generator pulling
- *   a *pre-shrink* type meant for a different consumer) is already solved by
- *   the separate narrowedWrapperTypeRegistry channel — see its entry below.
  *   Writers: closure strategies, builtins/lift-applied, expression rewrites,
  *            type-building/schema-factory/type-shrinking, schema-injection
  *   Readers: lift-lowering transformer, schema-generator, type-inference,
@@ -77,41 +77,6 @@
  *   Writers: pattern-callback lowering (registerCapabilitySummary)
  *   Readers: schema-injection (findCapabilitySummaryForParameter)
  *
- * narrowedWrapperTypeRegistry (WeakMap<ts.TypeNode, ts.Type>)
- *   Maps synthetic wrapper TypeNodes produced by applyShrinkAndWrap back to
- *   the *pre-shrink* semantic Type that drove the narrowing. Deliberately
- *   kept separate from typeRegistry because the schema generator consults
- *   typeRegistry for wrapper-inner property recovery — registering pre-shrink
- *   types there would un-shrink carefully-narrowed inner schemas. Added in
- *   CT-1615 to support the lift-applied form's re-narrowing pass.
- *   Writers: context.markNarrowedWrapper() (called by
- *            transformers/type-shrinking.ts applyShrinkAndWrap)
- *   Readers: context.lookupNarrowedWrapper() (called by
- *            transformers/schema-injection.ts lift `isToSchemaCall` branch)
- *
- *   CT-1621 INVARIANT (why this still exists, precisely):
- *   The reader's load-bearing use is the FIRST-pass recovery of the pre-shrink
- *   type for a synthetic wrapper whose lift input is a runtime VALUE that was
- *   capability-shrunk (the checker resolves such a synthetic wrapper TypeNode
- *   to `any`, so without this the inner `type:` is lost and only the `asCell`
- *   capability wrapper survives). That value-as-input shape is produced ONLY by
- *   the `derive`/`computed`→lift-applied lowering's value-input path — and in
- *   practice ONLY by `derive`: `computed(fn)` lowers to the no-input
- *   `lift(false, fn)()` form (no input wrapper at all), and a `computed`
- *   capturing cells reifies those captures into an input OBJECT whose member
- *   nodes carry checker-resolvable types via `typeRegistry` (verified: a
- *   capturing-computed golden made with this registry matches with it neutered).
- *   User-authored `lift` cannot express value-as-input (LiftFunction's leading
- *   args are JSONSchema/fn, never a value), and the user `lift(toSchema<T>(),…)`
- *   form has a real source TypeNode the checker resolves — so neither needs this.
- *   The redundant SELF-RE-ENTRY consumer that CT-1621 originally targeted was
- *   removed (schemaInjectedRegistry now skips re-processing our own output).
- *   What remains is derive-bound. REMOVE THIS REGISTRY when `derive` is
- *   deprecated/removed: drop the writer (applyShrinkAndWrap markNarrowedWrapper),
- *   the reader (schema-injection isToSchemaCall lookup), this map + its methods,
- *   the context shims, and this entry. Until then it is a principled,
- *   single-purpose channel, not an ad-hoc workaround.
- *
  * schemaInjectedRegistry (WeakSet<ts.Node>)
  *   Marks builder call/new nodes that SchemaInjection has already finalized.
  *   The single top-of-visit guard in SchemaInjectionTransformer skips
@@ -144,17 +109,10 @@
  * (createDataFlowAnalyzer's `analysisCache`) lives inside its closure and
  * would otherwise return stale pre-mutation verdicts after a registry write.
  *
- * `narrowedWrapperTypeRegistry` is accessed only through
- * `context.markNarrowedWrapper()` / `context.lookupNarrowedWrapper()` (no
- * cache-invalidation needed because no analysis cache depends on it, but
- * routing through the methods centralises the contract — Berni's review
- * §3.4 on CT-1615).
- *
  * schemaHints and capabilitySummaryRegistry are accessed through context
  * record/lookup methods (recordSchemaHint/lookupSchemaHint,
- * recordCapabilitySummary/lookupCapabilitySummary) but, like
- * narrowedWrapperTypeRegistry, do not invalidate caches (no analysis cache
- * depends on them). typeRegistry is still mutated via direct .set() at call
+ * recordCapabilitySummary/lookupCapabilitySummary) but do not invalidate
+ * caches (no analysis cache depends on them). typeRegistry is still mutated via direct .set() at call
  * sites; same caveat applies. If you add a cache that depends on any of these,
  * route the mutation through a method that invalidates it (or extend
  * invalidateReactiveAnalysisCaches).
@@ -176,9 +134,15 @@
  *   2. (done — NO-OP, by investigation) Splitting typeRegistry into three
  *      maps was on the plan, but the split fixes no reachable bug: the three
  *      uses are already isolated by key node-kind (see the TypeRegistry note
- *      above), and the one real CT-1615 cross-consumer hazard is already
- *      handled by narrowedWrapperTypeRegistry. Documented the invariant
- *      instead of splitting.
+ *      above). The one real CT-1615 cross-consumer hazard (schema generator vs.
+ *      schema injection needing different types for a synthetic wrapper node)
+ *      was retired in CT-1621: PR #3716 added the `schemaInjectedRegistry`
+ *      marker that catches re-entries on nodes whose mark survived. PR #3788
+ *      then closed the residual case — synthetic capability-wrapper re-entries
+ *      whose mark did not survive — by detecting them structurally
+ *      (`argumentType.pos < 0 && isCellLikeTypeNode(argumentType)`) and
+ *      short-circuiting the re-shrink, which left the channel without a
+ *      consumer and let `narrowedWrapperTypeRegistry` be deleted entirely.
  *   3. (done) Lifted schemaHints + capabilitySummaryRegistry to context
  *      record/lookup methods. typeRegistry stays on direct .set (its split
  *      was dropped in step 2, so there's no per-use method to route through).

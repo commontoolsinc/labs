@@ -41,7 +41,6 @@ export class CrossStageState {
     SyntheticReactiveCollectionRegistry = new WeakSet();
   readonly schemaHints: SchemaHints = new WeakMap();
   readonly capabilitySummaryRegistry: CapabilitySummaryRegistry = new WeakMap();
-  readonly narrowedWrapperTypeRegistry = new WeakMap<ts.TypeNode, ts.Type>();
   readonly schemaInjectedRegistry = new WeakSet<ts.Node>();
 
   // --- mapCallbackRegistry ---
@@ -115,18 +114,6 @@ export class CrossStageState {
 
   lookupCapabilitySummary(fn: ts.Node): FunctionCapabilitySummary | undefined {
     return this.capabilitySummaryRegistry.get(fn);
-  }
-
-  // --- narrowedWrapperTypeRegistry ---
-
-  markNarrowedWrapper(wrapperNode: ts.TypeNode, preShrinkType: ts.Type): void {
-    if (!this.narrowedWrapperTypeRegistry.has(wrapperNode)) {
-      this.narrowedWrapperTypeRegistry.set(wrapperNode, preShrinkType);
-    }
-  }
-
-  lookupNarrowedWrapper(wrapperNode: ts.TypeNode): ts.Type | undefined {
-    return this.narrowedWrapperTypeRegistry.get(wrapperNode);
   }
 
   // --- schemaInjectedRegistry ---
