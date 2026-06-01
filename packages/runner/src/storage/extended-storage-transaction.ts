@@ -33,6 +33,7 @@ import type {
   WriterError,
 } from "./interface.ts";
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
+import type { SqliteOperation } from "@commonfabric/memory/v2";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -342,6 +343,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   getSchedulerObservation(): unknown {
     return this.tx.getSchedulerObservation?.();
+  }
+
+  recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    if (!this.tx.recordSqliteWrite) {
+      throw new Error(
+        "storage transaction does not support recordSqliteWrite()",
+      );
+    }
+    this.tx.recordSqliteWrite(space, op);
   }
 
   getReadActivities(): Iterable<IReadActivity> {
@@ -819,6 +829,15 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   getSchedulerObservation(): unknown {
     return this.wrapped.getSchedulerObservation?.();
+  }
+
+  recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    if (!this.wrapped.recordSqliteWrite) {
+      throw new Error(
+        "storage transaction does not support recordSqliteWrite()",
+      );
+    }
+    this.wrapped.recordSqliteWrite(space, op);
   }
 
   getReadActivities(): Iterable<IReadActivity> {

@@ -29,6 +29,7 @@ import {
   type SessionSync,
   type SqliteDbRef,
   type SqliteExecuteResult,
+  type SqliteOperation,
   type SqliteParamsWire,
   type SqliteQueryResult,
   toDocumentPath,
@@ -1254,13 +1255,24 @@ class SpaceReplica implements ISpaceReplica {
           ),
     );
 
-    if (operations.length === 0 && schedulerObservation === undefined) {
+    const sqliteOps = transaction.sqliteOps ?? [];
+
+    if (
+      operations.length === 0 && schedulerObservation === undefined &&
+      sqliteOps.length === 0
+    ) {
       return { ok: {} };
     }
 
     return await withCommitTiming(
       ["commitNative", "commitOperations"],
-      () => this.commitOperations(operations, source, schedulerObservation),
+      () =>
+        this.commitOperations(
+          operations,
+          source,
+          schedulerObservation,
+          sqliteOps,
+        ),
     );
   }
 
@@ -1489,8 +1501,9 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
     schedulerObservation?: unknown,
+    sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    if (operations.length === 0) {
+    if (operations.length === 0 && sqliteOps.length === 0) {
       if (schedulerObservation === undefined) {
         return { ok: {} };
       }
@@ -1506,26 +1519,31 @@ class SpaceReplica implements ISpaceReplica {
       (): ClientCommit => ({
         localSeq,
         reads: this.buildReads(source, localSeq),
-        operations: operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
+        // Cell ops first, folded SQLite ops last (applied in array order by the
+        // engine; sqlite ops are not entity revisions and carry no id/scope).
+        operations: [
+          ...operations.map((operation) => {
+            switch (operation.op) {
+              case "delete":
+                return operation;
+              case "patch":
+                return {
+                  op: "patch" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  patches: operation.patches,
+                };
+              case "set":
+                return {
+                  op: "set" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  value: operation.value,
+                };
+            }
+          }),
+          ...sqliteOps,
+        ],
         ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
       }),
     );

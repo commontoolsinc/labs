@@ -7,6 +7,7 @@ import type {
   SchedulerSnapshotListResult,
   SqliteDbRef,
   SqliteExecuteResult,
+  SqliteOperation,
   SqliteParamsWire,
   SqliteQueryResult,
 } from "@commonfabric/memory/v2";
@@ -548,6 +549,16 @@ export interface IStorageTransaction {
    */
   setSchedulerObservation?(observation: unknown): void;
   getSchedulerObservation?(): unknown;
+
+  /**
+   * Optional: record a folded SQLite write onto this transaction so it commits
+   * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
+   * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
+   * write target (same write-isolation rules as a cell write) and throws if the
+   * tx is not writable. See
+   * docs/specs/sqlite-builtin/plans/sqlite-execute-commit-fold.md.
+   */
+  recordSqliteWrite?(space: MemorySpace, op: SqliteOperation): void;
 
   /**
    * Optional raw read observations recorded by this transaction.
@@ -1176,6 +1187,12 @@ export type NativeStorageCommitOperation =
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
   schedulerObservation?: unknown;
+  /**
+   * Folded SQLite write ops, applied in the same wire commit as `operations`
+   * (appended last). They are NOT entity revisions and stay out of the
+   * doc-pending / touched / notify machinery.
+   */
+  sqliteOps?: readonly SqliteOperation[];
 }
 
 export interface ITransaction {
