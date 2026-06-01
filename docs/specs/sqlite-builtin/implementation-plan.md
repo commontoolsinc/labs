@@ -167,11 +167,17 @@ cells + rows commit atomically.
      uncommitted `sqlite` writes in the same transaction, reject with
      `read-after-write-unsupported` (spec Section 04).
 
-4. **DDL / migration from `tables`.**
-   - Runtime creates/migrates tables from `sqliteDatabase({ tables })` on first
-     server-side open of the db: `CREATE TABLE` when absent; **add-column**
-     migrations. Validate `_cf_link` columns are `TEXT`. Unsupported changes
-     (drop/rename/retype) fail loudly. **[gated on Q9 — migration scope.]**
+4. **DDL / migration from `tables` — additive-only (Q9 → V1 cut).**
+   - On first server-side open, diff declared `tables` vs `PRAGMA table_info`:
+     `CREATE TABLE` when absent, `ALTER TABLE ADD COLUMN` for new
+     nullable/defaulted columns, validate `_cf_link` columns are `TEXT`.
+   - **Destructive/ambiguous changes** (drop/rename/retype, constraint/PK change)
+     → **refuse to open the db** with an explicit "unsupported migration" error
+     (a declarative diff can't tell rename from drop+add). Document that
+     `ADD COLUMN` can't add `NOT NULL` without a default.
+   - *Deferred (post-V1):* opt-in **migration callback** — keep erroring by
+     default, but let a db supply author logic invoked when the on-disk schema
+     version is older than the declared one, to perform the reshape explicitly.
 
 **Tests**
 
@@ -272,24 +278,40 @@ decode case from Example 07-#2.
 
 ---
 
-## Phase 6 — WAL crash reconciliation
+## Phase 6 — WAL crash safety: detect + quarantine (Q7 → V1 cut)
 
-**Goal (M4a):** cells and rows agree after a crash mid-commit despite WAL's
-cross-file gap. **[gated on Q7 — reconciliation algorithm.]**
+**Goal (M4a):** never serve divergent cell/row state after a crash mid-commit.
+V1 detects and quarantines; auto-repair is a fast-follow.
+
+Two pieces of Phase 6 land **early, in Phase 2**, so they don't require a later
+migration: writing the watermark in-txn, and persisting each commit's `sqlite`
+ops in the commit record.
 
 **Files & work**
 
-- [`packages/memory/v2/engine.ts`](../../../packages/memory/v2/engine.ts) — add a
-  `_cf_commit_watermark` table in each attached db; record the in-doubt `seq`
-  before the SQLite write and clear it on commit. On `open()` (~line 1335),
-  compare the space's committed `seq` (`commit` table) against the attached
-  watermark and roll back the in-doubt range on whichever side raced ahead.
-- Decide reconciliation vs. single-lock checkpoint+fsync per commit (Q7).
+- [`packages/memory/v2/engine.ts`](../../../packages/memory/v2/engine.ts):
+  - Add a `_cf_commit_watermark(seq)` row in each attached db, written **inside**
+    the commit txn and advanced on commit (done in Phase 2; no hot-path cost).
+  - **Persist the commit's `sqlite` ops** in the commit record (Phase 2) so a
+    behind db can later be replayed without a schema migration.
+  - On `open()` (~line 1335), compare the space's committed `seq` (`commit`
+    table) against each attached db's watermark. **On mismatch → quarantine**
+    that pattern db: fail its queries with a clear error and log loudly. Do
+    **not** serve it.
+- Rejected alternative: per-commit checkpoint+fsync of both files under a lock —
+  doesn't close the crash window and kills WAL throughput.
 
-**Tests:** fault-injection test that interleaves WAL frames and asserts
-post-open agreement.
+**Deferred (fast-follow): auto-repair.** Replay the persisted ops for the missing
+seqs when a pattern db is *behind*; truncate orphaned in-doubt writes when it is
+*ahead* (needs per-row seq tagging or a rebuild). Lifts the quarantine
+automatically.
 
-**Exit:** no divergence between cells and rows after simulated crash.
+**Tests:** fault-injection that interleaves WAL durability across the two files
+and asserts (V1) the db is quarantined, not silently divergent; (later) that
+auto-repair restores agreement.
+
+**Exit:** a crash never yields silently divergent cells/rows — the affected
+pattern db is quarantined and flagged.
 
 ---
 
@@ -383,9 +405,9 @@ remain deferred).
 | Risk / decision | Gates | Open question |
 | --- | --- | --- |
 | ATTACH model → **resolved: one file per db (A)** | — | Q6 |
-| Attach-limit probe + core-table-rename flag | Phase 1, 2 | Q8a |
-| Migration scope (SQLite `ALTER` limits) | Phase 2 | Q9 |
-| WAL reconciliation algorithm vs. single-lock fsync | Phase 6 | Q7 |
+| Attach limit (LRU cache, probe-and-log) + shadowing guards; DID-rename deferred behind flag | Phase 1, 2 | Q8a |
+| Migration → **resolved: additive-only**; callback deferred | Phase 2 | Q9 |
+| WAL crash safety → **resolved: detect + quarantine**; auto-repair deferred | Phase 2, 6 | Q7 |
 | On-disk co-location & cross-space dirty | Phase 7 | Q12, Q13, Q14 |
 | Connection contention / timeouts | Cross-cutting | Q8 |
 | Row-label projection expressiveness; read filtering | Phase 9 | Q16, Q17 |

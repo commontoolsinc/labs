@@ -50,37 +50,59 @@ during design are marked **[resolved]** with the decision.
    **Depends on** the core-table-rename flag (below) to remove `main` shadowing,
    and an attach/detach LRU cache for the attach limit. Trade-off accepted:
    per-file WAL reconciliation (Q7) is per-written-db rather than a single pair.
-7. **WAL crash reconciliation.** The `_cf_commit_watermark` + in-doubt rollback
-   sketch (Section [04](./04-server-execution-and-transactions.md)) needs a
-   precise algorithm: how to revert SQLite-side changes for an in-doubt `seq`
-   when only forward WAL frames exist. Do we instead checkpoint+fsync both files
-   under a single coordinating lock per commit and accept the latency?
+7. **[resolved — V1 cut] WAL crash reconciliation → detect + quarantine.** Normal
+   operation is atomic; only a crash *during* a multi-file COMMIT can leave
+   `main` and a pattern db disagreeing for one `seq`. V1: write a
+   `_cf_commit_watermark(seq)` inside the same txn (no hot-path cost) and
+   **persist each commit's `sqlite` ops in the commit record** (small, avoids a
+   later migration). On open, compare the watermark to the space's committed
+   `seq`; on mismatch, **quarantine that pattern db** (fail its queries with a
+   clear error + loud log) rather than serve divergent data.
+   *Deferred (fast-follow):* auto-repair — replay missing seqs' persisted ops for
+   a behind db, truncate orphaned in-doubt writes for an ahead one. Rejected:
+   per-commit checkpoint+fsync of both files (doesn't actually close the crash
+   window and kills WAL throughput).
 8. **Connection contention.** `@db/sqlite` is a single synchronous connection
    per `Database`. Long queries block the space. Do we need a separate read
    connection (WAL readers don't block writers), a statement timeout, or a
    query cost limit for v1?
-8a. **Attach limit & core-table rename (decisions for Option A).**
-   - `@db/sqlite` exposes no `sqlite3_limit` binding, so `SQLITE_LIMIT_ATTACHED`
-     is fixed at the compiled default (10 unless their build raised it; **probe
-     to confirm**). Mitigation: an **attach/detach LRU cache** — attach a pattern
-     db on demand, evict (`DETACH DATABASE`) the least-recently-used near the
-     limit. Manage it at **transaction boundaries** (attach before `BEGIN`,
-     detach only when idle); a single commit almost always touches one pattern db
-     (2 schemas), far under the limit. Reject/split a transaction that would span
-     more than the limit at once.
-   - **Core-table rename flag:** rename the engine's core tables to include the
-     space DID (e.g. `commit__<did>`), behind a flag, to remove `main` shadowing
-     so a pattern's unqualified `messages` can never resolve to a core table.
-     Ship the rest unflagged; without the flag we tolerate shadowing temporarily
-     (pre-production). The statement guard still rejects schema-qualified
-     references, `ATTACH`/`DETACH`/`PRAGMA`, and multiple statements.
-9. **[resolved] DDL ownership.** The database owns table creation/migration via
-   `sqliteDatabase({ tables })` (Section
+8a. **[resolved — V1 cut] Attach limit & core-table shadowing (Option A).**
+   - **Attach limit:** `@db/sqlite` exposes no `sqlite3_limit` binding, so
+     `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10). V1:
+     design within 10 with an **attach/detach LRU cache** — attach a pattern db
+     on demand, evict (`DETACH DATABASE`) the least-recently-used near the limit,
+     managed at **transaction boundaries** (attach before `BEGIN`, detach only
+     when idle). A commit almost always touches one pattern db (2 schemas), far
+     under the limit; reject/split a transaction that would span more at once.
+     A one-time startup **probe only logs** the real limit (no dependency on
+     headroom).
+   - **Core-table shadowing:** V1 ships **without** the core-table rename. Cheap
+     mitigations now: the statement guard rejects schema-qualified references,
+     `ATTACH`/`DETACH`/`PRAGMA`, and multiple statements; patterns may **not
+     declare** a table whose name collides with the core set, and the guard
+     **rejects statements that reference a core-table identifier**. Residual,
+     documented pre-production gap: tokenizer-level reference checking has minor
+     false positives/negatives (e.g. a column literally named `commit`).
+     *Deferred (production hardening, behind a flag):* rename the engine's core
+     tables to include the space DID (e.g. `commit__<did>`), which removes
+     shadowing structurally and drops the name-based guarding. Kept out of the
+     feature's critical path because it's an invasive core-store migration.
+9. **[resolved — V1 cut] DDL ownership + migration scope → additive-only.** The
+   database owns DDL via `sqliteDatabase({ tables })` (Section
    [01](./01-api.md#schema-ownership--the-database-owns-its-tables)); patterns do
-   not run `CREATE TABLE`. **Still open:** the *migration* algorithm — how far to
-   reconcile a changed `tables` declaration given SQLite's limited `ALTER`
-   (add-column is easy; drop/rename/retype need table-rebuild). Define the
-   supported migration set and the failure mode for unsupported changes.
+   not run `CREATE TABLE`. On open, the runtime diffs declared `tables` against
+   `PRAGMA table_info`: **create missing tables**, **`ADD COLUMN`** for new
+   nullable/defaulted columns, and validate `_cf_link` columns are `TEXT`. Any
+   **destructive or ambiguous** change (drop/rename/retype, constraint/PK change)
+   → **refuse to open the db with an explicit "unsupported migration" error**.
+   Rationale: a *declarative* diff can't distinguish a rename from a drop+add, so
+   auto-applying destructive ops is unsafe; `ADD COLUMN` also can't add `NOT
+   NULL` without a default (documented).
+   *Deferred (post-V1):* keep erroring by default, but let a database opt in to a
+   **migration callback** — author-supplied logic invoked when the on-disk schema
+   version is older than the declared one, to perform the reshape (table-rebuild,
+   data copy) explicitly. This preserves "no silent destructive migration" while
+   giving an escape hatch for evolving older databases.
 
 ## Reactivity
 

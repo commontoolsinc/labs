@@ -166,27 +166,25 @@ Goal: transactions are **atomic across cells and the attached SQLite database**.
   `PRAGMAS`). With WAL, cross-file atomic commit is **not guaranteed across a
   crash** mid-commit: one file's WAL frame may be durable while the other's is
   not. In normal (no-crash) operation the commit is atomic.
-- **Post-crash reconciliation.** To preserve the invariant despite the WAL
-  caveat, each cross-store commit records an **in-doubt marker** keyed by the
-  space `seq` before the SQLite write, cleared on successful commit. On startup,
-  the engine scans for in-doubt markers and **rolls back** any SQLite-side
-  changes for a `seq` that did not also land on the space side (and vice
-  versa), bringing the two stores back into agreement. This is the
-  "rollback things that are in doubt, just in case" flow.
-
-  Concretely: the commit table already records each `seq`
-  ([`packages/memory/v2/engine.ts`](../../../packages/memory/v2/engine.ts)
-  `insertCommit`). The attached db gets a small `_cf_commit_watermark` table
-  recording the last `seq` whose SQLite writes are known-durable. On open, if the
-  space's committed `seq` and the attached watermark disagree, the in-doubt
-  range is reverted on whichever side raced ahead.
+- **Post-crash safety (V1: detect + quarantine).** Each attached db carries a
+  small `_cf_commit_watermark(seq)` row, written **inside** the commit txn and
+  advanced on commit; the commit also **persists its `sqlite` ops** in the commit
+  record. On open, the engine compares the space's committed `seq` (the `commit`
+  table, [`packages/memory/v2/engine.ts`](../../../packages/memory/v2/engine.ts)
+  `insertCommit`) against each attached db's watermark. If they **disagree** —
+  the only thing the WAL crash window can cause — the engine **quarantines** that
+  pattern db: it fails the db's queries with a clear error and logs loudly,
+  rather than serving divergent data. It does **not** silently proceed.
+- **Auto-repair is deferred** (fast-follow): replay the persisted ops for a db
+  that is *behind*, truncate orphaned in-doubt writes for one that is *ahead*,
+  then lift the quarantine. Persisting ops + the watermark in V1 means this needs
+  no later schema migration.
 
 > Implementation reality check: `@db/sqlite` exposes a single synchronous
-> connection per `Database`; ATTACH + shared-connection transactions are the
-> mechanism that buys normal-operation atomicity here. The watermark/in-doubt
-> scan is the safety net for the crash window WAL leaves open. The exact
-> revert-on-open algorithm is sketched, not finalized — see
-> [08-open-questions.md](./08-open-questions.md).
+> connection per `Database`; ATTACH + shared-connection transactions buy
+> normal-operation atomicity. Per-commit checkpoint+fsync of both files was
+> rejected — it doesn't close the crash window and kills WAL throughput. See
+> [08-open-questions.md](./08-open-questions.md) Q7.
 
 ## Concurrency
 
