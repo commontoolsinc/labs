@@ -55,11 +55,12 @@ creation and opaque to the pattern.
 
 Lifecycle:
 
-- **Create/migrate from the declared schema.** The runtime creates the file and
-  reconciles tables from `sqliteDatabase({ tables })` (Section
-  [01](./01-api.md#schema-ownership--the-database-owns-its-tables)) — patterns do
-  not run `CREATE TABLE`. Migration scope and SQLite `ALTER` limits are tracked
-  in [08-open-questions.md](./08-open-questions.md).
+- **Create/migrate from the declared schema (additive-only in V1).** The runtime
+  creates the file and reconciles tables from `sqliteDatabase({ tables })`
+  (Section [01](./01-api.md#schema-ownership--the-database-owns-its-tables)) —
+  patterns do not run `CREATE TABLE`. V1 creates missing tables and adds new
+  columns; destructive/ambiguous changes refuse to open the db (post-V1 opt-in
+  migration callback). See [08-open-questions.md](./08-open-questions.md) Q9.
 - **GC.** Because the file is keyed to a cell, its lifetime can later be tied to
   that cell's lifetime. v1 does not garbage-collect; this is noted in
   [08-open-questions.md](./08-open-questions.md).

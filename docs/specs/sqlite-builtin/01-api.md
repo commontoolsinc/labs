@@ -131,9 +131,14 @@ with no per-query annotation.
 Leaving DDL to the database (rather than the old manual `CREATE TABLE IF NOT
 EXISTS` in pattern code) avoids silent drift: `CREATE TABLE IF NOT EXISTS`
 no-ops when a table already exists with a *different* shape, hiding mismatches.
-Runtime-owned migration reconciles the declared schema instead. (Migration
-scope and SQLite `ALTER` limits are tracked in
-[08-open-questions.md](./08-open-questions.md).)
+Runtime-owned migration reconciles the declared schema instead. **V1 migration
+is additive-only:** create missing tables and `ADD COLUMN` for new
+nullable/defaulted columns; any destructive or ambiguous change (drop/rename/
+retype, constraint/PK change) **refuses to open the db** with an explicit error,
+because a declarative diff can't tell a rename from a drop+add. A post-V1 opt-in
+**migration callback** will let a database supply explicit reshape logic for
+older on-disk versions while still erroring by default. (See
+[08-open-questions.md](./08-open-questions.md) Q9.)
 
 ## `sqliteQuery<Row>(params)` — reactive read
 
