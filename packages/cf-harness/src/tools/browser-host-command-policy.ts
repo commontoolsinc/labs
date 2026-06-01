@@ -132,6 +132,8 @@ const AGENT_BROWSER_LOCAL_COMMANDS = new Set([
 const AGENT_BROWSER_PAGE_COMMANDS = new Set([
   "check",
   "click",
+  "console",
+  "errors",
   "fill",
   "get",
   "open",
@@ -290,6 +292,9 @@ const validateAgentBrowserPageCommand = (
       return validateAgentBrowserSnapshot(args);
     case "get":
       return validateAgentBrowserGet(args);
+    case "console":
+    case "errors":
+      return validateAgentBrowserReadOnlyDiagnostic(commandName, args);
     case "wait":
       return validateAgentBrowserWait(args);
     case "click":
@@ -348,6 +353,14 @@ const validateAgentBrowserGet = (
   }
   return "agent-browser get only allows title, url, or text";
 };
+
+const validateAgentBrowserReadOnlyDiagnostic = (
+  commandName: string,
+  args: readonly string[],
+): string | undefined =>
+  args.length === 0
+    ? undefined
+    : `agent-browser ${commandName} only allows read-only inspection without flags`;
 
 const validateAgentBrowserWait = (
   args: readonly string[],
