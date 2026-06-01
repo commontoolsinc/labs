@@ -112,6 +112,46 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     expect(q.error).toBeUndefined();
     expect(q.result).toEqual([]);
   });
+
+  it("re-runs a reactOn:db query after a write (reactive loop)", async () => {
+    const p = cf.pattern(() => {
+      const db = cf.sqliteDatabase({
+        tables: {
+          notes: cf.table({ id: "integer primary key", body: "text" }),
+        },
+      });
+      const q = cf.sqliteQuery({
+        db,
+        sql: "SELECT body FROM notes ORDER BY id",
+        reactOn: db, // re-run when the db handle's rev bumps (post-write)
+      });
+      cf.sqliteExecute({
+        db,
+        sql: "INSERT INTO notes (body) VALUES (?)",
+        params: ["reactive"],
+      });
+      return q;
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "sqlite-reactive",
+      p.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, p, {}, resultCell);
+    tx.commit();
+
+    // Initial query is empty; after the write commits it bumps db.rev, which
+    // re-runs the reactOn:db query and the row appears.
+    const q = await waitUntil<QueryState>(
+      runtime,
+      () => result.get() as QueryState,
+      (v) =>
+        v.pending === false && Array.isArray(v.result) && v.result.length === 1,
+    );
+    expect(q.error).toBeUndefined();
+    expect(q.result).toEqual([{ body: "reactive" }]);
+  });
 });
 
 type ExecState = {

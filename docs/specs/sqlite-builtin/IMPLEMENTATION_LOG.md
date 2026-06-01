@@ -231,6 +231,19 @@ Replaced the not-implemented stubs with real work, tested via `StorageManager.em
 - Remaining acknowledged: `_cf_link` decode of result rows, mutex/cancel,
   commit-folded atomic writes, post-commit `reactOn` handle-dirtying.
 
+### Reactivity loop (reactOn: db) — WORKING end-to-end
+
+`sqliteDatabase` seeds a `rev` token in the handle cell; `sqliteExecute` bumps
+`rev` in its post-commit `editWithRetry` after a committed write. A `sqliteQuery`
+with `reactOn: db` reads the handle whole, so the bump changes its input hash and
+re-runs the query against the now-committed data. Tested in `sqlite-builtins.test.ts`
+("re-runs a reactOn:db query after a write") — write → reactive re-query → row
+appears. This closes the user-facing feature loop (write + reactive read).
+
+Note: this is the post-commit *client-side* bump (mechanism 2 in spec Section
+05). The server-driven `markSpaceDirty` variant (mechanism 1) remains a possible
+refinement. Commit-folded atomicity is still separate (below).
+
 ## Current status & handoff
 
 **Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.
