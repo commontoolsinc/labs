@@ -2,6 +2,7 @@ import { FabricEpochDays } from "./fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "./fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "./fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
+import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
 /**
@@ -33,6 +34,7 @@ export const NATIVE_TAGS = Object.freeze(
     ContentHash: "ContentHash",
     HasToJSON: "HasToJSON",
     FabricBytes: "FabricBytes",
+    FabricRegExp: "FabricRegExp",
     FabricInstance: "FabricInstance",
     Primitive: "Primitive",
   } as const,
@@ -89,6 +91,8 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.ContentHash;
     case FabricBytes:
       return NATIVE_TAGS.FabricBytes;
+    case FabricRegExp:
+      return NATIVE_TAGS.FabricRegExp;
 
     default:
       // Catch exotic `Error` subclasses (e.g. custom subclasses with

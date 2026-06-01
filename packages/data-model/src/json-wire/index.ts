@@ -32,4 +32,5 @@ export { EpochDaysHandler } from "./EpochDaysHandler.ts";
 export { SpecialNumberHandler } from "./SpecialNumberHandler.ts";
 export { SymbolHandler } from "./SymbolHandler.ts";
 export { BytesHandler } from "./BytesHandler.ts";
+export { RegExpHandler } from "./RegExpHandler.ts";
 export { FabricInstanceHandler } from "./FabricInstanceHandler.ts";

@@ -2280,8 +2280,8 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
-  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
-  // `FabricRegExp`) are immutable wrappers with class-defined identity.
+  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`)
+  // are immutable wrappers with class-defined identity.
   // Their own-enumerable properties are implementation details, not
   // user-visible structure; iterating them via the generic walker would
   // descend into wrapper internals meaninglessly. Instead, walk the
