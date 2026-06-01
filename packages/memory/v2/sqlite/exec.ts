@@ -17,21 +17,38 @@ export function assertSafeAlias(alias: string): void {
   }
 }
 
-/** ATTACH a cell-derived database file under an internal alias. */
+/**
+ * ATTACH a cell-derived database file under an internal alias.
+ *
+ * Must be called OUTSIDE any open transaction — SQLite rejects ATTACH/DETACH
+ * while a transaction is active. The commit-folded write path must therefore
+ * attach the db *before* `BEGIN`.
+ *
+ * Caller owns attach/detach pairing: re-attaching an in-use alias throws, and
+ * there is a connection-global limit (`SQLITE_MAX_ATTACHED`, default ~10) — an
+ * LRU attach/detach cache manages this (spec 08-open-questions Q8a).
+ */
 export function attachDatabase(
   db: Database,
   alias: string,
   path: string,
 ): void {
   assertSafeAlias(alias);
+  if (db.inTransaction) {
+    throw new Error("attachDatabase must be called outside a transaction");
+  }
   // Path is bound as a parameter; the alias is a validated literal (it cannot be
   // a bind parameter in ATTACH).
   db.exec(`ATTACH DATABASE ? AS ${alias}`, path);
 }
 
-/** DETACH a previously attached database alias. */
+/** DETACH a previously attached alias. Must be called outside a transaction and
+ *  only when the alias is not in use (SQLite throws otherwise). */
 export function detachDatabase(db: Database, alias: string): void {
   assertSafeAlias(alias);
+  if (db.inTransaction) {
+    throw new Error("detachDatabase must be called outside a transaction");
+  }
   db.exec(`DETACH DATABASE ${alias}`);
 }
 

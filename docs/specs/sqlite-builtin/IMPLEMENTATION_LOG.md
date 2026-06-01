@@ -126,6 +126,18 @@ tests (`v2-sqlite-guard-test.ts` "guard hardening"):
   `table()`, and quote identifiers at emit time.
 - **lastInsertRowId** (LOW): documented the single-connection assumption.
 
+### Code review round 2 (subagent) — Phase 0 wiring + ATTACH
+
+No exploitable bugs found (path-as-param + validated-literal-alias + DDL quoting
+all confirmed sound). Addressed:
+- **MEDIUM:** `attachDatabase`/`detachDatabase` would throw if called inside a
+  transaction (SQLite forbids ATTACH/DETACH in a txn). Added an `inTransaction`
+  guard + doc comment (must attach before `BEGIN`), plus a note on attach/detach
+  pairing ownership and the connection-global attach limit.
+- **LOW (TODOs):** when real execution + `reactOn` land, result cells need
+  fetch-data's narrowest-read-scope handling and the Actions need `addCancel` to
+  abort transport / clear `pending`. Marked with a TODO at `makeResultCell`.
+
 ## Current status & handoff
 
 **Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.

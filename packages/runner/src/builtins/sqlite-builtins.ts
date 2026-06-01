@@ -22,7 +22,11 @@ import { setPatternCell, setResultCell } from "../result-utils.ts";
 const NOT_IMPLEMENTED =
   "sqlite: server-side execution not implemented yet (protocol pending)";
 
-/** Allocate a space-scoped result cell linked to the parent/pattern cells. */
+// TODO(sqlite-protocol): when real server execution + `reactOn` land, results
+// that depend on scoped input cells need fetch-data's narrowest-read-scope
+// handling (see scopedCell / fetch-data.ts), and the query/execute Actions need
+// `addCancel` to abort in-flight transport and clear `pending` on pattern stop.
+/** Allocate a result cell linked to the parent/pattern cells. */
 function makeResultCell<T>(
   runtime: Runtime,
   parentCell: Cell<any>,
