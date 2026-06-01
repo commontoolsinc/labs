@@ -16,8 +16,8 @@ const userCount = users.length;
 ```
 
 ```typescript
-// CORRECT - wrap in derive
-const userCount = derive(users, (u) => u.length);
+// CORRECT - wrap in computed
+const userCount = computed(() => users.length);
 ```
 
 Nested property access through an object cell (e.g. `conversation.rooms.length`
@@ -141,7 +141,7 @@ rewrite happens). The very guard that's correct at the top level is the thing
 that breaks it nested. See
 [closure-capture-in-nested-map.md](./closure-capture-in-nested-map.md) for
 the three idiomatic alternatives (map the cell directly; pre-bake into a
-top-level `computed`; explicit `derive({deps}, …)` per row).
+top-level `computed`; local `computed()` bridge per row).
 
 ## 6. `Math.random()` throws under SES
 

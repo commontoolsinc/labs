@@ -73,7 +73,7 @@ export default pattern((state) => {
     const hoveredSectionId = new Writable<string | undefined>(undefined, {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("hoveredSectionId", true);
-    // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
+    // [TRANSFORM] computed() -> lift(): captures state.sections (asCell — Writable<Section[]>)
     const hasSections = __cfHelpers.lift<{
         state: {
             sections: __cfHelpers.ReadonlyCell<unknown[]>;

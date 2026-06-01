@@ -64,8 +64,8 @@ const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
 /**
  * Schema Injection Transformer - TypeRegistry Integration
  *
- * This transformer injects JSON schemas for Common Fabric core functions (pattern, derive,
- * pattern, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
+ * This transformer injects JSON schemas for Common Fabric core functions (pattern,
+ * handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
  *
  * ## TypeRegistry Integration (Unified Approach)
  *
@@ -89,7 +89,6 @@ const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
  * ## Pattern-Specific Behavior
  *
  * - **Handler**: Checks TypeRegistry for type arguments, uses `unknown` fallback
- * - **Derive**: Checks TypeRegistry for type arguments, preserves shorthand property types
  * - **Pattern**: Checks TypeRegistry before inferring, registers inferred types
  * - **Pattern**: Checks TypeRegistry for type arguments
  * - **Lift**: Checks TypeRegistry for type arguments and inferred types

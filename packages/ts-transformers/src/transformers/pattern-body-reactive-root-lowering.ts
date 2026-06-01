@@ -860,7 +860,7 @@ function rewriteTrackedOpaquePatternBody(
           reportOnce(
             visited,
             "receiver-method",
-            "Method calls on reactive values are not yet supported directly in non-JSX pattern bodies. Move this call into computed(() => ...), derive(...), or another safe wrapper.",
+            "Method calls on reactive values are not yet supported directly in non-JSX pattern bodies. Move this call into computed(() => ...), module-scope lift(), or another safe wrapper.",
           );
         } else {
           reportOnce(

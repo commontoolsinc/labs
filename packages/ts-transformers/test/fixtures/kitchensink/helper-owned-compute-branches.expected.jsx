@@ -42,7 +42,7 @@ export default pattern((state) => {
             type: "string"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("fallbackMembers", true);
-    // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
+    // [TRANSFORM] computed() -> lift(): captures state.showArchived, state.projects
     const visibleProjects = __cfHelpers.lift<{
         state: {
             showArchived: boolean;
@@ -128,7 +128,7 @@ export default pattern((state) => {
             showArchived: state.key("showArchived"),
             projects: state.key("projects")
         } }).for("visibleProjects", true);
-    // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
+    // [TRANSFORM] computed() -> lift(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
     const rows = __cfHelpers.lift<{
         visibleProjects: {
             name: string;
@@ -217,7 +217,7 @@ export default pattern((state) => {
             }
         }
     } as const satisfies __cfHelpers.JSONSchema, ({ visibleProjects, state, fallbackMembers }) => 
-    // [TRANSFORM] .map() stays plain: visibleProjects is a captured derive input, plain inside this compute
+    // [TRANSFORM] .map() stays plain: visibleProjects is a captured computed input, plain inside this compute
     visibleProjects.map((project, projectIndex) => {
         // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
         const plainPreview = ["alpha", "beta"].map((label, labelIndex) => `${project.name}-${labelIndex}-${label}`);
@@ -236,7 +236,7 @@ export default pattern((state) => {
                 }]
         } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, project.badges.length > 0, <div>
           <h3>{project.name}</h3>
-          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside derive */}
+          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside computed */}
           {project.badges.map((badge, badgeIndex) => (<span>
               {badge.active
                     ? `${state.prefix}${badge.text}-${projectIndex}`
@@ -244,7 +244,7 @@ export default pattern((state) => {
                         ? `${project.name}:${badge.text}`
                         : ""}
             </span>))}
-          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
+          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside computed */}
           {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const member = __cf_pattern_input.key("element");
                 const memberIndex = __cf_pattern_input.key("index");
@@ -355,7 +355,7 @@ export default pattern((state) => {
           {/* [TRANSFORM] .map() stays plain: plainPreview is a local literal array */}
           {plainPreview.map((label) => <i>{label}</i>)}
         </div>, <div>
-          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside derive */}
+          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside computed */}
           {project.members.map((member, memberIndex) => (<span>
               {memberIndex === projectIndex
                     ? `${state.prefix}${member}`
