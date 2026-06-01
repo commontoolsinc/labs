@@ -1,7 +1,7 @@
 /**
  * Repro: investigate rendering failures with reactive composition
  *
- * Three suspected runtime warts surfaced while rewriting cozy-poll-scoped's UI
+ * Three suspected runtime warts surfaced while rewriting cozy-poll's UI
  * (see branch `scoped-cells-cozy-poll`, commit 93d545ad6):
  *
  *   W1. `style={derive(...)}` returning a style object — pattern renders blank

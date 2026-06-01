@@ -1,36 +1,36 @@
-# Deploying & sharing cozy-poll-scoped state
+# Deploying & sharing cozy-poll state
 
 This pattern's data lives in **`PerSpace` cells** (`users`, `options`, `votes`,
-`history`, `adminName`, `question`). That state belongs to **one deployed piece
-instance** in one space — addressed by `(space, causal-cell-id)` — not to "the
-pattern" in the abstract. So "share the state" means "everyone points at the
-same piece," and "copy the state" means "move those cell values into a new
-piece." This doc covers both, plus the identity caveat that bites first.
+`adminName`, `question`). That state belongs to **one deployed piece instance**
+in one space — addressed by `(space, causal-cell-id)` — not to "the pattern" in
+the abstract. So "share the state" means "everyone points at the same piece,"
+and "copy the state" means "move those cell values into a new piece." This doc
+covers both, plus the identity caveat that bites first.
 
 ## The canonical piece
 
-There is one shared instance everyone should iterate on. **These values are a
-deployment pointer, not a stable identifier — current as of 2026-06-01.** A
-piece is tied to one space/server and can be reset or wedged; if it 404s,
-`inspect` fails, or it stops responding to clicks, re-establish it (see
-"Re-establishing" / "Recovering a wedged piece" below) and update this block.
-(The prior `lunch-2026-05-26` piece went stale — `inspect` reported "missing
-pattern ID" — and was superseded by the `lunch-2026-05-29` instance below.)
+This is a freshly forked **generic** poll — it has **no shared canonical
+instance yet**. Whoever deploys it first establishes one; record the space,
+piece id, and URL here so everyone iterates on the same instance. **Those values
+are a deployment pointer, not a stable identifier.** A piece is tied to one
+space/server and can be reset or wedged; if it 404s, `inspect` fails, or it
+stops responding to clicks, re-establish it (see "Re-establishing" / "Recovering
+a wedged piece" below) and update this block.
 
 ```
-space:  lunch-2026-05-29
-piece:  fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE
-url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-29/fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE
+space:  <your-space, e.g. cozy-poll-2026-06-01>
+piece:  <fid1:… printed by `cf piece new`>
+url:    https://<your-toolshed-host>/<space>/<piece>
 ```
 
 Set these once so you don't repeat flags (substitute your own identity key path
-and the current piece/space):
+and your piece/space):
 
 ```bash
-export CF_API_URL=https://toolshed.saga-castor.ts.net/
+export CF_API_URL=https://<your-toolshed-host>/
 export CF_IDENTITY=/path/to/your-identity.key   # e.g. ~/.config/commonfabric/identity.key
-PIECE=fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE   # current as of 2026-06-01
-SPACE=lunch-2026-05-29
+PIECE=<fid1:… from `cf piece new`>
+SPACE=<your-space>
 ```
 
 ## Option A — deploy your version onto the shared state (recommended)
@@ -41,12 +41,12 @@ empty instance.
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
-  packages/patterns/cozy-poll-scoped/main.tsx
+  packages/patterns/cozy-poll/main.tsx
 ```
 
 Why this preserves state: cell ids are derived from the causal generation chain,
 not from contents, and scope is excluded from that computation. Swapping the
-program with `setsrc` keeps the same result cell, so `users`/`votes`/`history`
+program with `setsrc` keeps the same result cell, so `users`/`votes`/`options`
 survive. **Adding a new `PerSpace` field is safe** — on an existing piece it
 just hydrates to its `Default<>` while the populated fields keep their data.
 
@@ -64,12 +64,12 @@ experiment without touching the shared poll):
 
 ```bash
 # 1. Create your own empty piece (note the new ID it prints).
-MINE=$(deno task cf piece new packages/patterns/cozy-poll-scoped/main.tsx \
+MINE=$(deno task cf piece new packages/patterns/cozy-poll/main.tsx \
   -s "$SPACE" | grep '^fid1:')
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
 #    `--input` reads/writes the input cell where these live.
-for field in question users options votes history adminName; do
+for field in question users options votes adminName; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
@@ -119,7 +119,6 @@ echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --inpu
 echo '""' | deno task cf piece set --piece "$PIECE" -s "$SPACE" adminName --input -q
 echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
 echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
-echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" history   --input -q
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 ```
 
@@ -129,7 +128,7 @@ browser identity.
 ## Re-establishing the canonical piece (if it's lost)
 
 ```bash
-deno task cf piece new packages/patterns/cozy-poll-scoped/main.tsx -s "$SPACE"
+deno task cf piece new packages/patterns/cozy-poll/main.tsx -s "$SPACE"
 # → prints a new fid1:… — update PIECE above and the "canonical piece" section.
 ```
 
@@ -149,7 +148,7 @@ cell, so the bad reactive state persists. The cure is a fresh process:
 ```bash
 # 1. Confirm it's instance-specific: deploy the same code to a NEW piece and
 #    open it. If the fresh piece works, the old one's process is wedged.
-NEW=$(deno task cf piece new packages/patterns/cozy-poll-scoped/main.tsx \
+NEW=$(deno task cf piece new packages/patterns/cozy-poll/main.tsx \
   -s "$SPACE" | grep '^fid1:')
 
 # 2. The data usually survives in the old piece's cells — copy it across with

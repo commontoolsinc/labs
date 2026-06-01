@@ -1,8 +1,8 @@
 # Lunch Coordinator: roadmap
 
-`cozy-poll-scoped` started life as a collaborative "where should we eat?" poll
-(🟢 love it / 🟡 OK / 🔴 veto, fewest-reds-wins). The next evolution turns it
-into a full **Lunch Coordinator** — the poll stays at the core, but it grows the
+`lunch-poll` started life as a collaborative "where should we eat?" poll (🟢
+love it / 🟡 OK / 🔴 veto, fewest-reds-wins). The next evolution turns it into a
+full **Lunch Coordinator** — the poll stays at the core, but it grows the
 context a group actually needs to pick a place and go.
 
 This doc tracks the features we plan to add. Feature #1 below is now built; the

@@ -167,6 +167,6 @@ const newId = () =>
 - `docs/specs/scoped-cell-instances.md` — the underlying scope model
 - `packages/patterns/scoped-group-chat/` — canonical scope-aware pattern
 - `packages/patterns/scrabble/scrabble.tsx` — name-as-identity idiom
-- `packages/patterns/cozy-poll-scoped/` — applies all of the above
+- `packages/patterns/cozy-poll/` — applies all of the above
 - `packages/patterns/scoped-user-directory/` — verification of the link-pointer
   technique (per-user pointer into a per-space array)
