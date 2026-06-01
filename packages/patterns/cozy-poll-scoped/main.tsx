@@ -610,6 +610,12 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const recentHistory = computed(() =>
       [...history].sort((a, b) => b.wentAt - a.wentAt).slice(0, 8)
     );
+    // Resolve the viewer's name ONCE here at the top level. PerUser `myName`
+    // resolves in this scope, but NOT inside the per-option `options.map(...)`
+    // lift — there `trimmedName(myName)` was handed an unresolved ref and threw
+    // `(n ?? "").trim is not a function`, silently nulling out each option's
+    // `myVote` (so nothing dimmed). Passing this resolved value down avoids it.
+    const me = trimmedName(myName);
     const isJoined = trimmedName(myName) !== "";
     const isAdmin = trimmedName(myName) !== "" &&
       trimmedName(myName) === trimmedName(adminName);
@@ -1073,7 +1079,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 {options.map((option) => {
                   const oid = option.id;
                   const optionTitle = option.title;
-                  const myVote = myVoteFor(votes, trimmedName(myName), oid);
+                  // Use the top-level-resolved `me`, not `trimmedName(myName)`:
+                  // the raw PerUser ref doesn't resolve inside this per-option
+                  // lift (see `me` above).
+                  const myVote = myVoteFor(votes, me, oid);
                   const rank = computed(() => {
                     const idx = ranked.findIndex(
                       (t) => t.option.id === oid,
