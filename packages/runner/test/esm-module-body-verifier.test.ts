@@ -43,6 +43,23 @@ describe("verifyCompiledModuleBody", () => {
     expect(() => verifyCompiledModuleBody(body, "/main.ts")).not.toThrow();
   });
 
+  it("accepts an `export * from` module (export-star require form)", () => {
+    const body = compiledBody({
+      "/inner.ts": `export const a = (): number => 1;`,
+      "/main.ts":
+        `export * from "./inner.ts";\nexport const own = (): number => 2;`,
+    }, "/main.ts");
+    expect(body).toContain("__exportStar(require("); // sanity
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).not.toThrow();
+  });
+
+  it("rejects export-star require of a disallowed specifier", () => {
+    // Hand-built body: __exportStar from a non-local, non-runtime specifier.
+    const body =
+      `Object.defineProperty(exports, "__esModule", { value: true });\n__exportStar(require("node:fs"), exports);`;
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).toThrow();
+  });
+
   it("accepts the imported leaf module", () => {
     const body = compiledBody({
       "/util.ts": `export const dbl = (x: number): number => x * 2;`,

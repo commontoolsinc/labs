@@ -50,6 +50,13 @@ const REQUIRE_IMPORT = new RegExp(
 // skipped rather than classified as executable code.
 const SIDE_EFFECT_REQUIRE = /^require\(\s*["']([^"']+)["']\s*\)\s*;?$/;
 
+// `export * from "./m"` compiles to `__exportStar(require("./m"), exports);`
+// (require inline, unlike AMD where the dep is a param). This re-export form
+// binds nothing; allow it when the specifier is allowed, otherwise let it fall
+// through to classification (which rejects it).
+const EXPORT_STAR_REQUIRE =
+  /^__exportStar\(\s*require\(\s*["']([^"']+)["']\s*\)\s*,\s*exports\s*\)\s*;?$/;
+
 /**
  * Security-classify a module's compiled-CommonJS body (Phase D2). It recognizes
  * the `const x = require("…")` import preamble — seeding `env` with import
@@ -114,6 +121,10 @@ export function verifyCompiledModuleBody(
       const sideEffect = SIDE_EFFECT_REQUIRE.exec(text);
       if (sideEffect && isAllowedAuthoredImportSpecifier(sideEffect[1])) {
         return; // side-effect import binds nothing
+      }
+      const exportStar = EXPORT_STAR_REQUIRE.exec(text);
+      if (exportStar && isAllowedAuthoredImportSpecifier(exportStar[1])) {
+        return; // `export * from "<allowed>"` re-export; binds nothing
       }
     }
     classifiable.push(statement);
