@@ -5,6 +5,10 @@ import type {
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerSnapshotListResult,
+  SqliteDbRef,
+  SqliteExecuteResult,
+  SqliteParamsWire,
+  SqliteQueryResult,
 } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
@@ -232,6 +236,20 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   listSchedulerActionSnapshots?(
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
+
+  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  sqliteQuery?(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult>;
+
+  /** Run a server-side SQLite write against a cell-derived db. */
+  sqliteExecute?(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteExecuteResult>;
 }
 
 /**

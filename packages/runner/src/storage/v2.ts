@@ -27,6 +27,10 @@ import {
   type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
   type SessionSync,
+  type SqliteDbRef,
+  type SqliteExecuteResult,
+  type SqliteParamsWire,
+  type SqliteQueryResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
@@ -856,6 +860,22 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.listSchedulerActionSnapshots(query);
   }
 
+  sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    return this.replica.sqliteQuery(db, sql, params);
+  }
+
+  sqliteExecute(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteExecuteResult> {
+    return this.replica.sqliteExecute(db, sql, params);
+  }
+
   get(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.replica.getDocument(uri, scope);
   }
@@ -1022,6 +1042,24 @@ class SpaceReplica implements ISpaceReplica {
       await this.flushSchedulerObservationBatch();
     }
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  async sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    const { session } = await this.sessionHandle();
+    return await session.sqliteQuery(db, sql, params);
+  }
+
+  async sqliteExecute(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteExecuteResult> {
+    const { session } = await this.sessionHandle();
+    return await session.sqliteExecute(db, sql, params);
   }
 
   async listSchedulerActionSnapshots(
