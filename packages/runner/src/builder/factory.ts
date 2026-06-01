@@ -48,6 +48,7 @@ import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
+import { setPatternProgram } from "./pattern-metadata.ts";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -130,8 +131,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
     for (const [value, program] of exports) {
       if (isPattern(value)) {
-        // This will associate the program with the pattern
-        value.program = program;
+        // Associate the program with the pattern via the side-table so it works
+        // even when the exported pattern has been frozen by the loader.
+        setPatternProgram(value, program);
       }
     }
   };

@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { Source } from "@commonfabric/js-compiler";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler";
 import {
@@ -25,6 +26,8 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 const TARGET = ts.ScriptTarget.ES2023;
 
+const logger = getLogger("module-record-compiler");
+
 /**
  * Create a write-once exports target for a module body. Re-assigning,
  * redefining, or deleting a property that already holds a real (non-`undefined`)
@@ -49,11 +52,12 @@ const TARGET = ts.ScriptTarget.ES2023;
  * - We snapshot from the write-once object directly (never `module.exports`), so
  *   the namespace can only reflect values that passed through write-once.
  *
- * We deliberately do NOT deep-freeze the exported values: SES already makes the
- * namespace *bindings* immutable, verified plain data is already frozen by
- * `__cf_data`/`schema`, and the engine attaches metadata to exported pattern
- * recipes after load (`value.program = program` in builder/factory.ts), so
- * exported builder graphs must stay extensible.
+ * Each exported value is `harden()`ed (transitive freeze) so a consumer cannot
+ * mutate the internals of an exported object/array/pattern graph either. This is
+ * only possible because the metadata the engine associates after load —
+ * `program` (rehydration source) and the CFC verified-load id — now lives in
+ * WeakMaps (see builder/pattern-metadata.ts) rather than as properties written
+ * onto the exported object, so hardening no longer blocks those associations.
  */
 export function populateModuleExports(
   moduleExports: Record<string, unknown>,
@@ -69,9 +73,42 @@ export function populateModuleExports(
   const moduleObject = Object.freeze({ exports: writeOnceExports });
   factory(writeOnceExports, requireShim, moduleObject);
   for (const name of exportNames) {
-    moduleExports[name] = writeOnceExports[name];
+    moduleExports[name] = hardenExportedValue(writeOnceExports[name]);
   }
   moduleExports.__esModule = true;
+}
+
+/**
+ * Transitively freeze an exported value. Uses SES `harden` (available after
+ * lockdown, which the ESM loader ensures) — it no-ops on already-frozen shared
+ * intrinsics, so it freezes only the value's own reachable graph. If `harden`
+ * is somehow unavailable, the value is returned unfrozen rather than failing the
+ * load (the namespace binding is still SES-immutable, and verified plain data is
+ * already frozen by `__cf_data`).
+ */
+function hardenExportedValue<T>(value: T): T {
+  const hardenFn = (globalThis as { harden?: <V>(v: V) => V }).harden;
+  if (typeof hardenFn !== "function") {
+    // On the real ESM-loader path the engine calls ensureSESLockdown() before
+    // any module evaluates, so `harden` is always present. Reaching here means
+    // lockdown did not run (a regression, or a direct call outside the engine
+    // path): warn rather than silently shipping unfrozen exports.
+    logger.warn("harden() unavailable; exported value not frozen");
+    return value;
+  }
+  // Fail CLOSED: if hardening throws (e.g. an exotic reachable value harden
+  // refuses), we cannot guarantee the export is immutable, so reject the module
+  // rather than silently shipping a mutable (corruptible) export. A throw here
+  // is terminal for the module — SES caches it and re-throws on every
+  // subsequent importNow, matching a failed factory.
+  try {
+    return hardenFn(value);
+  } catch (error) {
+    throw new Error(
+      `Failed to harden exported module value: ${String(error)}`,
+      { cause: error },
+    );
+  }
 }
 
 export function createWriteOnceExports(): Record<string, unknown> {
