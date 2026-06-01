@@ -1,35 +1,36 @@
 # Deploying & sharing cozy-poll state
 
 This pattern's data lives in **`PerSpace` cells** (`users`, `options`, `votes`,
-`adminName`, `question`). That state belongs to **one deployed piece
-instance** in one space — addressed by `(space, causal-cell-id)` — not to "the
-pattern" in the abstract. So "share the state" means "everyone points at the
-same piece," and "copy the state" means "move those cell values into a new
-piece." This doc covers both, plus the identity caveat that bites first.
+`adminName`, `question`). That state belongs to **one deployed piece instance**
+in one space — addressed by `(space, causal-cell-id)` — not to "the pattern" in
+the abstract. So "share the state" means "everyone points at the same piece,"
+and "copy the state" means "move those cell values into a new piece." This doc
+covers both, plus the identity caveat that bites first.
 
 ## The canonical piece
 
-There is one shared instance everyone should iterate on. **These values are a
-deployment pointer, not a stable identifier — current as of 2026-06-01.** A
-piece is tied to one space/server and can be reset or wedged; if it 404s,
-`inspect` fails, or it stops responding to clicks, re-establish it (see
-"Re-establishing" / "Recovering a wedged piece" below) and update this block.
-(Prior pieces that went stale — `inspect` reported "missing pattern ID" — are superseded by the current instance below.)
+This is a freshly forked **generic** poll — it has **no shared canonical
+instance yet**. Whoever deploys it first establishes one; record the space,
+piece id, and URL here so everyone iterates on the same instance. **Those values
+are a deployment pointer, not a stable identifier.** A piece is tied to one
+space/server and can be reset or wedged; if it 404s, `inspect` fails, or it
+stops responding to clicks, re-establish it (see "Re-establishing" / "Recovering
+a wedged piece" below) and update this block.
 
 ```
-space:  lunch-2026-05-29
-piece:  fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE
-url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-29/fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE
+space:  <your-space, e.g. cozy-poll-2026-06-01>
+piece:  <fid1:… printed by `cf piece new`>
+url:    https://<your-toolshed-host>/<space>/<piece>
 ```
 
 Set these once so you don't repeat flags (substitute your own identity key path
-and the current piece/space):
+and your piece/space):
 
 ```bash
-export CF_API_URL=https://toolshed.saga-castor.ts.net/
+export CF_API_URL=https://<your-toolshed-host>/
 export CF_IDENTITY=/path/to/your-identity.key   # e.g. ~/.config/commonfabric/identity.key
-PIECE=fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE   # current as of 2026-06-01
-SPACE=lunch-2026-05-29
+PIECE=<fid1:… from `cf piece new`>
+SPACE=<your-space>
 ```
 
 ## Option A — deploy your version onto the shared state (recommended)
