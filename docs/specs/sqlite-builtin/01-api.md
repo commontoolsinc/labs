@@ -70,25 +70,29 @@ Why a branded value rather than `Cell<SqliteDatabase>` or `OpaqueCell<…>`:
   handle gets `{}` + `[toCell]`, never the file path. The brand is truthful, not
   cosmetic.
 
-## `sqliteDatabase(source?, options?)`
+## `sqliteDatabase(options?, source?)`
 
-Builder factory returning a handle. With no argument it binds to a cell derived
-from the current pattern context (the default, cell-derived source). The
-database's **table schema and DDL are owned here** (see "Schema ownership").
+Builder factory returning a handle. The **table schema and DDL are owned here**
+(see "Schema ownership") — passed first because they are the common case. The
+optional **source** comes second because it is rarely non-default; with no
+source the handle binds to a cell allocated for it in the current pattern
+context (the default, cell-derived source).
 
 ```ts
 export declare function sqliteDatabase(
-  source?: SqliteDatabaseSource,
   options?: { tables?: TableSchemas },
+  source?: SqliteDatabaseSource,
 ): SqliteDatabase; // OpaqueRef<SqliteDatabase> in builder position
 
 type SqliteDatabaseSource =
-  | undefined // default: cell-derived (Section 03.1)
-  | { cell: OpaqueRef<unknown> } // explicit cell-derived
+  | undefined // default: cell-derived from the pattern's own context (Section 03.1)
   | { vm: OpaqueRef<VmHandle>; path: string }; // VM file (stub, Section 03.2)
-// NOTE: there is no `{ disk }` variant. On-disk databases are *injected* as a
-// pattern input via `cf piece link <piece> <field> sqlite:<path>` (Section 03.3),
-// not selected by the pattern.
+// NOTE: there is no way to point a database at an arbitrary cell. The
+// cell-derived handle is always the one the runtime allocates for this call —
+// targeting some other cell would re-introduce ambient authority. There is also
+// no `{ disk }` variant: on-disk databases are *injected* as a pattern input via
+// `cf piece link <piece> <field> sqlite:<path>` (Section 03.3), not selected by
+// the pattern.
 ```
 
 The underlying database identity (file name / attach alias) is **opaque to the
@@ -106,7 +110,7 @@ per-column CFC labels in one place.
 ```tsx
 import { table, cfLink, sqliteDatabase } from "commonfabric";
 
-const db = sqliteDatabase(undefined, {
+const db = sqliteDatabase({
   tables: {
     messages: table({
       id: "integer primary key",
