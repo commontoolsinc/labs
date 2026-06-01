@@ -92,12 +92,19 @@ builtin plumbing.
 2. **Server execution & ATTACH.**
    - [`packages/memory/v2/engine.ts`](../../../packages/memory/v2/engine.ts) —
      `Server.sqliteQuery` calls `openEngine(space)` (~line 1456), ATTACHes the
-     cell-derived db file if not already attached for the connection, enforces a
-     **read-only guard** (single `SELECT`/read-only CTE; reject DML/DDL/PRAGMA/
-     multi-statement), then `engine.database.prepare(sql).all(params)`.
+     cell-derived db file via the attach/detach cache, applies the **statement
+     guard** (single `SELECT`/read-only CTE; reject DML/DDL, schema-qualified
+     refs, `PRAGMA`/`ATTACH`/`DETACH`, multi-statement), then
+     `engine.database.prepare(sql).all(params)`. The guard is tokenizer-level —
+     **confirmed: `@db/sqlite@0.12.0` exposes no authorizer** (Section
+     [04](./04-server-execution-and-transactions.md#isolation-namespacing--the-statement-guard)).
    - [`packages/memory/v2/storage-path.ts`](../../../packages/memory/v2/storage-path.ts)
      — add sibling-file naming `cell-<entityhash>.sqlite` next to the space file
-     (`engine-v3/…`). **[gated on Q6 — ATTACH model.]**
+     (`engine-v3/…`). (Q6 resolved → Option A, one file per db.)
+   - **Attach/detach LRU cache** + **core-table-rename flag** (Q6/Q8a): probe the
+     compiled `SQLITE_LIMIT_ATTACHED` (no `sqlite3_limit` binding to set it);
+     manage attaches at transaction boundaries; rename core tables to include the
+     space DID behind a flag (ship unflagged pre-production).
 
 3. **Runner builtin — `sqlite-query.ts`.**
    - Read `db`, `sql`, `params` from `inputsCell`. Recover the handle cell from
@@ -339,15 +346,22 @@ remain deferred).
   write-policy sink ([`sink-request.ts`](../../../packages/runner/src/cfc/sink-request.ts)).
 - **9b — per-row:** declarative row-label projection evaluated server-side at
   commit and on read; row-level filtering / fail-closed reads. **[gated on
-  Q16/Q17.]**
+  Q16/Q17.]** Implementation note: `@db/sqlite` exposes custom scalar/aggregate
+  function registration (`function()`/`aggregate()`), so projection helpers like
+  `principal(field)` (`"did:mailto:" + field`) can be **registered SQL
+  functions** evaluated in-engine at commit — no separate expression interpreter.
 
 ---
 
 ## Cross-cutting work
 
-- **Read-only enforcement** must be robust against statement smuggling (comments,
-  multiple statements, PRAGMA). Prefer SQLite's `authorizer`/`prepare`-level
-  checks over string parsing where possible.
+- **Statement guard** must be robust against smuggling (comments, multiple
+  statements, `PRAGMA`, schema-qualified references). `@db/sqlite` exposes **no
+  authorizer**, so this is a tokenizer-level guard (Section
+  [04](./04-server-execution-and-transactions.md#isolation-namespacing--the-statement-guard)),
+  not a `prepare`-time authorizer. Future hardening: bind
+  `sqlite3_set_authorizer` via Deno FFI against `Database.unsafeHandle` for
+  defense-in-depth.
 - **Concurrency:** `@db/sqlite` is one synchronous connection per `Database`;
   long queries block the space. Add a statement timeout, and evaluate a separate
   WAL read connection. **[gated on Q8.]**
@@ -368,7 +382,8 @@ remain deferred).
 
 | Risk / decision | Gates | Open question |
 | --- | --- | --- |
-| ATTACH-per-file vs shared/namespaced db | Phase 1, 2 | Q6 |
+| ATTACH model → **resolved: one file per db (A)** | — | Q6 |
+| Attach-limit probe + core-table-rename flag | Phase 1, 2 | Q8a |
 | Migration scope (SQLite `ALTER` limits) | Phase 2 | Q9 |
 | WAL reconciliation algorithm vs. single-lock fsync | Phase 6 | Q7 |
 | On-disk co-location & cross-space dirty | Phase 7 | Q12, Q13, Q14 |

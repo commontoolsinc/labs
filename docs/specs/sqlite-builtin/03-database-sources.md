@@ -37,15 +37,21 @@ creation and opaque to the pattern.
   The runtime allocates (or reuses) the handle cell in the current frame the same
   way other built-ins allocate their result cells, so the identity is stable
   across re-runs and rehydration but never chosen by the pattern.
-- The physical file lives in the **same space's storage directory** as the cell.
-  Spaces are already stored one-SQLite-file-per-space under `engine-v3/`
+- **One file per database** (Q6 → Option A). The physical file lives in the
+  **same space's storage directory** as the cell. Spaces are already stored
+  one-SQLite-file-per-space under `engine-v3/`
   (`{encodeURIComponent(spaceDid)}.sqlite`, see
   [`packages/memory/v2/storage-path.ts`](../../../packages/memory/v2/storage-path.ts)).
   A cell-derived database is a **sibling file** in that directory, named from
-  the cell id, e.g. `cell-<entityhash>.sqlite`.
-- It is **ATTACHed** to the space engine's connection for the duration of any
-  transaction that writes to it, which is what makes cells-plus-rows atomic
-  (Section [04](./04-server-execution-and-transactions.md)).
+  the cell id, e.g. `cell-<entityhash>.sqlite`. Per-file gives the cleanest
+  isolation, lets the file boundary act as the SQL namespace (no identifier
+  rewriting), and makes GC/export a file operation (`backup()` / delete).
+- It is **ATTACHed** to the space engine's connection (via an attach/detach LRU
+  cache) for the duration of any transaction that touches it — which is what
+  makes cells-plus-rows atomic. Isolation against the core store relies on the
+  file boundary, the core-table-rename flag, and a tokenizer-level statement
+  guard, all detailed in Section
+  [04](./04-server-execution-and-transactions.md#isolation-namespacing--the-statement-guard).
 
 Lifecycle:
 

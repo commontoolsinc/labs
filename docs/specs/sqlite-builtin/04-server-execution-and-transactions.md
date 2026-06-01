@@ -16,13 +16,47 @@ and `session.watch.*`.
   ([`packages/toolshed/routes/storage/memory/memory.routes.ts`](../../../packages/toolshed/routes/storage/memory/memory.routes.ts)),
   authorized via UCAN on session open.
 - Cell-derived SQLite databases (Section [03](./03-database-sources.md)) are
-  sibling files in the same storage directory and are **ATTACHed** to
-  `engine.database` so SQL statements against them share the engine's
-  connection and transactions.
+  **one sibling file per database** in the same storage directory (Q6 → Option
+  A) and are **ATTACHed** to `engine.database` so SQL statements against them
+  share the engine's connection and transactions.
 
 Because we ride the same connection, queries inherit the session's existing
 authorization; no new auth surface is added in v1. (CFC will later refine *what*
 within the space a query may touch — Section [06](./06-cfc.md).)
+
+## Isolation, namespacing & the statement guard
+
+A pattern's SQL runs on the same connection as the authoritative memory store,
+so isolation is load-bearing. The design relies on three things, none of which
+needs a full SQL parser:
+
+- **File boundary = namespace.** SQLite's only namespace primitive is the
+  attached-database alias, so one file per cell-derived db *is* the namespace.
+  We ATTACH only the handle's own db for a given statement/commit; an unqualified
+  `messages` resolves to it (SQLite resolves `main → temp → attached-in-order`),
+  with **no identifier rewriting**.
+- **Core-table rename flag.** To remove the risk that an unqualified pattern name
+  shadows/leaks a core table (`commit`, `revision`, `head`, `snapshot`,
+  `branch`, `scheduler_*`, `blob_store`), rename the engine's core tables to
+  include the space DID (e.g. `commit__<did>`), behind a flag. Pre-production we
+  may ship unflagged and tolerate shadowing temporarily.
+- **Tokenizer-level statement guard.** `@db/sqlite` exposes **no authorizer**
+  (`sqlite3_set_authorizer` is not bound — confirmed against the library), so we
+  cannot get SQLite to enumerate accessed objects for us. Instead the guard
+  rejects: any **schema-qualified** reference (`other.table`), `ATTACH`/`DETACH`/
+  `PRAGMA`, and **multiple statements**; `sqliteQuery` additionally requires a
+  single `SELECT`/read-only CTE. Because we never rewrite identifiers, this is a
+  tokenizer-level check, not full resolution. (A future hardening option: bind
+  `sqlite3_set_authorizer` ourselves via Deno FFI against the `unsafeHandle`
+  pointer — defense-in-depth, not required for v1.)
+
+**Attach/detach cache.** `@db/sqlite` exposes no `sqlite3_limit` binding, so
+`SQLITE_LIMIT_ATTACHED` stays at the compiled default (≈10). An **LRU
+attach/detach cache** attaches a db on demand and `DETACH`es the least-recently-
+used near the limit. Manage it at **transaction boundaries** (ATTACH before
+`BEGIN`; DETACH only when idle — a db in use / inside a transaction cannot be
+detached). A single commit almost always touches one pattern db (2 schemas),
+far under the limit; a transaction that would span more is rejected or split.
 
 ## Protocol extension
 
@@ -56,10 +90,11 @@ Server handling (mirrors `Server.transact` / `Server.queryGraph`):
 1. Route the new `type` in `Connection.receiveOrdered`, guarded by
    `requireSession`.
 2. `const engine = await this.openEngine(space)`.
-3. ATTACH the db file if not already attached for this connection.
-4. **Reject non-read statements.** Parse/inspect to confirm a single `SELECT` or
-   read-only CTE; reject `INSERT`/`UPDATE`/`DELETE`/`PRAGMA`/`ATTACH`/multiple
-   statements with a `read-only-violation` error.
+3. ATTACH the db file via the attach/detach cache (above) if not already
+   attached.
+4. **Apply the statement guard** (above): single `SELECT`/read-only CTE; reject
+   DML/DDL, schema-qualified references, `PRAGMA`/`ATTACH`/`DETACH`, and multiple
+   statements, with a `read-only-violation` / `guard-violation` error.
 5. `engine.database.prepare(sql).all(params)` → rows.
 6. Reply with `{ type: "response", requestId, ok: { rows } }`.
 
