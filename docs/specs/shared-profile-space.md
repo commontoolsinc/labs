@@ -424,25 +424,6 @@ Add focused runner tests for `wish()`:
   of the scheduler action
 - `wish({ query: "#profile" })` returns the profile default pattern
 
-## Implementation Plan
-
-1. Add schemas and helper types for the profile default-pattern link and
-   `ProfileDefaultPattern` / `ProfileElement`.
-2. Add `PatternFactory.inSpace(...)` and use it for profile-space creation.
-3. Add the profile default pattern at
-   `packages/patterns/system/profile-home.tsx`.
-4. Add profile default-pattern creation in `packages/piece` for explicit
-   profile-space controller flows.
-5. Update the home pattern to render missing and linked profile states.
-6. Update `WishParams.scope`, `wish()` parsing, and hashtag search for
-   `"profile"`.
-7. Add explicit profile well-known targets: `#profileSpace`, `#profileName`,
-   and `#profileAvatar`.
-8. Add runner tests for wish behavior.
-9. Add the browser integration test and demo pattern.
-10. Update `docs/common/conventions/wish.md` and
-    `docs/common/conventions/HOME_SPACE.md` after behavior lands.
-
 ## Open Questions
 
 - Should profile spaces be readable by all collaborators by default, or private
