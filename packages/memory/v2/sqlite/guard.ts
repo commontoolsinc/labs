@@ -53,11 +53,6 @@ export class GuardError extends Error {
 
 const WRITE_LEADING = new Set(["INSERT", "UPDATE", "DELETE", "REPLACE"]);
 
-/**
- * Remove SQL comments and replace the contents of string/quoted-identifier
- * literals with spaces, so subsequent regexes don't trip on `;`, keywords, or
- * table names that appear inside literals.
- */
 function sanitizeIdent(inner: string): string {
   // Keep identifier word chars so table-name checks still match (e.g. "commit"
   // -> commit); neutralize any other char (`;`, keywords-with-symbols, etc.) so
@@ -97,7 +92,10 @@ function normalizeForGuard(sql: string): string {
       i++;
       while (i < n) {
         if (sql[i] === "'") {
-          if (sql[i + 1] === "'") { i += 2; continue; } // '' escape
+          if (sql[i + 1] === "'") {
+            i += 2;
+            continue;
+          } // '' escape
           i++;
           break;
         }
@@ -112,7 +110,11 @@ function normalizeForGuard(sql: string): string {
       let inner = "";
       while (i < n) {
         if (sql[i] === quote) {
-          if (sql[i + 1] === quote) { inner += quote; i += 2; continue; }
+          if (sql[i + 1] === quote) {
+            inner += quote;
+            i += 2;
+            continue;
+          }
           i++;
           break;
         }
@@ -125,7 +127,10 @@ function normalizeForGuard(sql: string): string {
     if (ch === "[") { // bracketed identifier -> keep contents
       i++;
       let inner = "";
-      while (i < n && sql[i] !== "]") { inner += sql[i]; i++; }
+      while (i < n && sql[i] !== "]") {
+        inner += sql[i];
+        i++;
+      }
       i++;
       out += sanitizeIdent(inner);
       continue;
@@ -148,7 +153,9 @@ const TABLE_POS_QUALIFIED_RE =
 // Core tables, sqlite_* / pragma_* introspection (sqlite_master, sqlite_schema,
 // pragma_table_info table-valued functions, etc.).
 const CORE_REF_RE = new RegExp(
-  `\\b(?:${CORE_TABLE_NAMES.join("|")}|sqlite_[A-Za-z0-9_]*|pragma_[A-Za-z0-9_]*)\\b`,
+  `\\b(?:${
+    CORE_TABLE_NAMES.join("|")
+  }|sqlite_[A-Za-z0-9_]*|pragma_[A-Za-z0-9_]*)\\b`,
   "i",
 );
 
@@ -183,7 +190,9 @@ export function classifyStatement(sql: string): StatementClassification {
 }
 
 function assertCommon(c: StatementClassification, sql: string): void {
-  if (c.multiple) throw new GuardError("multiple statements are not allowed", sql);
+  if (c.multiple) {
+    throw new GuardError("multiple statements are not allowed", sql);
+  }
   if (c.forbidden) {
     throw new GuardError("PRAGMA/ATTACH/DETACH are not allowed", sql);
   }

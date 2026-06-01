@@ -7,11 +7,7 @@ import { Database } from "@db/sqlite";
 
 import { GuardError } from "../v2/sqlite/guard.ts";
 import { cfLink, table } from "../v2/sqlite/schema.ts";
-import {
-  ensureTables,
-  runQuery,
-  runWrite,
-} from "../v2/sqlite/exec.ts";
+import { ensureTables, runQuery, runWrite } from "../v2/sqlite/exec.ts";
 
 describe("engine-side exec", () => {
   let db: Database;
@@ -35,7 +31,10 @@ describe("engine-side exec", () => {
   it("creates declared tables (additive)", () => {
     // The table exists iff querying it succeeds (sqlite_master is blocked by the
     // guard, which is correct — patterns must not introspect the schema catalog).
-    const rows = runQuery<{ n: number }>(db, "SELECT count(*) AS n FROM messages");
+    const rows = runQuery<{ n: number }>(
+      db,
+      "SELECT count(*) AS n FROM messages",
+    );
     expect(rows).toEqual([{ n: 0 }]);
   });
 

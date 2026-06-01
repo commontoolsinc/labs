@@ -32,7 +32,10 @@ describe("table", () => {
       "body",
       "ts",
     ]);
-    expect(t.properties!.id).toEqual({ type: "integer", sqlType: "integer primary key" });
+    expect(t.properties!.id).toEqual({
+      type: "integer",
+      sqlType: "integer primary key",
+    });
     expect(t.properties!.body).toEqual({ type: "string", sqlType: "text" });
     expect((t.properties!.author_cf_link as Record<string, unknown>).cfLink)
       .toBe(true);

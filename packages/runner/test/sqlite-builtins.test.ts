@@ -37,14 +37,23 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
   });
 
   it("table()/cfLink() are exposed and produce schemas", () => {
-    const t = cf.table({ id: "integer primary key", author_cf_link: cf.cfLink() });
+    const t = cf.table({
+      id: "integer primary key",
+      author_cf_link: cf.cfLink(),
+    });
     expect((t as { type: string }).type).toBe("object");
-    expect(cf.cfLink()).toEqual({ type: "string", cfLink: true, sqlType: "text" });
+    expect(cf.cfLink()).toEqual({
+      type: "string",
+      cfLink: true,
+      sqlType: "text",
+    });
   });
 
   it("wires sqliteQuery through to a result cell (server exec pending)", async () => {
     const queryPattern = cf.pattern(() => {
-      const db = cf.sqliteDatabase({ tables: { t: cf.table({ id: "integer" }) } });
+      const db = cf.sqliteDatabase({
+        tables: { t: cf.table({ id: "integer" }) },
+      });
       return cf.sqliteQuery({ db, sql: "SELECT id FROM t", reactOn: db });
     });
     const resultCell = runtime.getCell(
@@ -64,7 +73,9 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
 
   it("wires sqliteExecute through to a result cell (commit-folded exec pending)", async () => {
     const execPattern = cf.pattern(() => {
-      const db = cf.sqliteDatabase({ tables: { t: cf.table({ id: "integer" }) } });
+      const db = cf.sqliteDatabase({
+        tables: { t: cf.table({ id: "integer" }) },
+      });
       return cf.sqliteExecute({ db, sql: "INSERT INTO t (id) VALUES (1)" });
     });
     const resultCell = runtime.getCell(

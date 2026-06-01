@@ -29,7 +29,9 @@ describe("classifyStatement", () => {
   });
 
   it("classifies INSERT/UPDATE/DELETE as writes", () => {
-    expect(classifyStatement("INSERT INTO t (a) VALUES (1)").kind).toBe("write");
+    expect(classifyStatement("INSERT INTO t (a) VALUES (1)").kind).toBe(
+      "write",
+    );
     expect(classifyStatement("UPDATE t SET a = 1").kind).toBe("write");
     expect(classifyStatement("DELETE FROM t").kind).toBe("write");
   });
@@ -59,9 +61,13 @@ describe("assertReadOnly", () => {
   });
 
   it("rejects writes, PRAGMA, ATTACH, and multiple statements", () => {
-    expect(() => assertReadOnly("INSERT INTO t VALUES (1)")).toThrow(GuardError);
+    expect(() => assertReadOnly("INSERT INTO t VALUES (1)")).toThrow(
+      GuardError,
+    );
     expect(() => assertReadOnly("PRAGMA table_info(t)")).toThrow(GuardError);
-    expect(() => assertReadOnly("ATTACH DATABASE 'x' AS y")).toThrow(GuardError);
+    expect(() => assertReadOnly("ATTACH DATABASE 'x' AS y")).toThrow(
+      GuardError,
+    );
     expect(() => assertReadOnly("SELECT 1; DROP TABLE t")).toThrow(GuardError);
   });
 
@@ -100,7 +106,9 @@ describe("guard hardening (review findings)", () => {
     expect(() => assertReadOnly("SELECT * FROM [commit]")).toThrow(GuardError);
     expect(() => assertReadOnly("SELECT * FROM `commit`")).toThrow(GuardError);
     expect(() => assertWriteSafe('DELETE FROM "commit"')).toThrow(GuardError);
-    expect(() => assertWriteSafe('UPDATE "head" SET x = 1')).toThrow(GuardError);
+    expect(() => assertWriteSafe('UPDATE "head" SET x = 1')).toThrow(
+      GuardError,
+    );
     expect(() => assertWriteSafe("INSERT INTO [revision] VALUES (1)")).toThrow(
       GuardError,
     );
@@ -110,9 +118,10 @@ describe("guard hardening (review findings)", () => {
     expect(() => assertReadOnly('SELECT * FROM "main"."commit"')).toThrow(
       GuardError,
     );
-    expect(() => assertReadOnly('SELECT sql FROM "main".sqlite_master')).toThrow(
-      GuardError,
-    );
+    expect(() => assertReadOnly('SELECT sql FROM "main".sqlite_master'))
+      .toThrow(
+        GuardError,
+      );
     expect(() => assertWriteSafe('INSERT INTO "main"."commit" VALUES (1)'))
       .toThrow(GuardError);
   });

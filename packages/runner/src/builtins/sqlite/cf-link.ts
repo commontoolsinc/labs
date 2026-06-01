@@ -12,15 +12,15 @@ import type { Cell } from "../../cell.ts";
 import { isCell } from "../../cell.ts";
 import { toCell } from "../../back-to-cell.ts";
 import type { IExtendedStorageTransaction } from "../../storage/interface.ts";
-import {
-  createSigilLinkFromParsedLink,
-  isCellLink,
-} from "../../link-utils.ts";
+import { createSigilLinkFromParsedLink, isCellLink } from "../../link-utils.ts";
 import type { NormalizedFullLink } from "../../link-types.ts";
 
 // Pure column-name helpers live in the memory package (server-authoritative,
 // lower pace-layer) and are re-exported here for client-side use.
-export { CF_LINK_SUFFIX, isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
+export {
+  CF_LINK_SUFFIX,
+  isCfLinkColumn,
+} from "@commonfabric/memory/sqlite/columns";
 
 /** Recover a Cell from a value that is a cell or carries a `toCell` back-pointer. */
 function asCellOrUndefined(value: unknown): Cell<unknown> | undefined {

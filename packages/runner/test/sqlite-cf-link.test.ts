@@ -90,7 +90,9 @@ describe("_cf_link codec", () => {
   });
 
   it("throws when decoding malformed or non-sigil strings", () => {
-    expect(() => decodeCfLinkValue("not json", runtime, undefined, tx)).toThrow();
-    expect(() => decodeCfLinkValue('{"foo":1}', runtime, undefined, tx)).toThrow();
+    expect(() => decodeCfLinkValue("not json", runtime, undefined, tx))
+      .toThrow();
+    expect(() => decodeCfLinkValue('{"foo":1}', runtime, undefined, tx))
+      .toThrow();
   });
 });
