@@ -26,8 +26,20 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
-import { pretransformProgram } from "./pretransform.ts";
+import {
+  pretransformProgram,
+  pretransformProgramForModules,
+} from "./pretransform.ts";
 import { computeModuleHashes } from "./module-identity.ts";
+import {
+  type CompiledModuleGraph,
+  compileSourcesToRecords,
+} from "../sandbox/module-record-compiler.ts";
+import {
+  runtimeModuleRecords,
+  type VirtualModuleRecord,
+} from "../sandbox/esm-module-loader.ts";
+import { verifyCompiledModuleBody } from "../sandbox/module-record-verifier.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
 import {
   ensureSESLockdown,
@@ -228,6 +240,96 @@ export class Engine extends EventTarget implements Harness {
       return { id, jsScript, sesValidated: true };
     } finally {
       logger.timeEnd("compile");
+    }
+  }
+
+  /**
+   * Compile a program to a verified ESM module-record graph (the
+   * `esmModuleLoader` compile path). Runs the same resolution + CF transformer
+   * pipeline as {@link compile}, emits per-module CommonJS via
+   * `compileToModules`, assembles content-addressed records (plus runtime-
+   * module records), and security-verifies every authored module body with
+   * the ESM verifier. Returns the graph and the entry specifier for evaluation.
+   */
+  async compileToRecordGraph(
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<
+    { id: string; graph: CompiledModuleGraph; mainSpecifier: string }
+  > {
+    logger.timeStart("compileToRecordGraph");
+    try {
+      const id = options.identifier ?? computeId(program);
+      const mappedProgram = pretransformProgramForModules(program, id);
+      const resolver = new EngineProgramResolver(
+        mappedProgram,
+        this.ctRuntime.staticCache,
+      );
+      const { compiler } = await this.getCompilerInternals();
+      const resolvedProgram = await this.resolve(resolver);
+
+      const modules = compiler.compileToModules(resolvedProgram, {
+        noCheck: options.noCheck,
+        runtimeModules: Engine.runtimeModuleNames(),
+        beforeTransformers: (program) => {
+          const pipeline = new CommonFabricTransformerPipeline();
+          return {
+            factories: pipeline.toFactories(program),
+            getDiagnostics: () => pipeline.getDiagnostics(),
+          };
+        },
+      });
+
+      // Build records from the CF-transformed per-module bodies.
+      const moduleFiles = resolvedProgram.files.filter((f) =>
+        modules.has(f.name)
+      );
+      const precompiledBodies = new Map(
+        [...modules].map(([name, out]) => [name, out.js]),
+      );
+      const { runtimeExports } = await this.getRuntimeInternals();
+      const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
+        runtimeExports?.[name]
+      );
+      const runtimeModulesOption = Object.fromEntries(
+        runtimeNames.map((name) => [
+          name,
+          Object.keys(runtimeExports?.[name] ?? {}),
+        ]),
+      );
+      const graph = compileSourcesToRecords(moduleFiles, {
+        precompiledBodies,
+        runtimeModules: runtimeModulesOption,
+      });
+
+      // Register runtime-module records so cf:runtime/* imports resolve.
+      const runtimeRecordExports: Record<string, Record<string, unknown>> = {};
+      for (const name of runtimeNames) {
+        runtimeRecordExports[name] = runtimeExports?.[name] as Record<
+          string,
+          unknown
+        >;
+      }
+      for (
+        const [spec, record] of runtimeModuleRecords(runtimeRecordExports)
+      ) {
+        graph.records.set(spec, record as VirtualModuleRecord);
+      }
+
+      // Security-verify every authored module body before it can execute.
+      for (const [specifier, body] of graph.compiledBodies) {
+        verifyCompiledModuleBody(body, specifier);
+      }
+
+      const mainSpecifier = graph.specifierByPath.get(mappedProgram.main);
+      if (mainSpecifier === undefined) {
+        throw new Error(
+          "ESM compile produced no record for the program entry",
+        );
+      }
+      return { id, graph, mainSpecifier };
+    } finally {
+      logger.timeEnd("compileToRecordGraph");
     }
   }
 
