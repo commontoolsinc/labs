@@ -29,6 +29,7 @@ export {
   InMemoryProgram,
 } from "./program.ts";
 export {
+  composeBundleSourceMap,
   isSourceMap,
   type MappedPosition,
   parseSourceMap,

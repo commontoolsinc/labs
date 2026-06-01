@@ -1,8 +1,72 @@
 import { SourceMap } from "./interface.ts";
-import { MappedPosition, SourceMapConsumer } from "source-map-js";
+import {
+  MappedPosition,
+  SourceMapConsumer,
+  SourceMapGenerator,
+} from "source-map-js";
 import { LRUCache } from "@commonfabric/utils/cache";
 
 export type { MappedPosition };
+
+/**
+ * Compose a single bundle source map for the concatenated module bodies
+ * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
+ * module's generated lines by its starting line in the concatenation.
+ *
+ * The ESM module-record loader resolves a function's location by `indexOf`-ing
+ * its source into the concatenated bundle `script`, then calling
+ * `mapPosition(bundleFilename, line, col)`. Without a registered map that stays
+ * a raw bundle coordinate (`<loadId>.js:..`), which CFC verified-source identity
+ * rejects. Registering this composed map resolves it back to the original
+ * authored source (e.g. `/main.tsx:6:2`) — parity with the AMD isolate path.
+ *
+ * Returns `undefined` if no module contributed a map.
+ */
+export function composeBundleSourceMap(
+  modules: ReadonlyArray<{ body: string; map?: SourceMap }>,
+  bundleFilename: string,
+): SourceMap | undefined {
+  const generator = new SourceMapGenerator({ file: bundleFilename });
+  let lineOffset = 0;
+  let any = false;
+  for (const { body, map } of modules) {
+    if (map) {
+      const consumer = new SourceMapConsumer(map);
+      consumer.eachMapping((m) => {
+        if (
+          m.source == null || m.originalLine == null ||
+          m.originalColumn == null
+        ) return;
+        generator.addMapping({
+          generated: {
+            line: m.generatedLine + lineOffset,
+            column: m.generatedColumn,
+          },
+          original: { line: m.originalLine, column: m.originalColumn },
+          source: m.source,
+          name: m.name ?? undefined,
+        });
+        any = true;
+      });
+      const sources = map.sources ?? [];
+      const contents =
+        (map as { sourcesContent?: (string | null)[] }).sourcesContent;
+      if (contents) {
+        sources.forEach((src, i) => {
+          const content = contents[i];
+          if (src != null && content != null) {
+            generator.setSourceContent(src, content);
+          }
+        });
+      }
+    }
+    // Lines this body occupies in the "\n"-joined bundle = (newlines in body)+1.
+    // Robust to trailing newlines, unlike split().length.
+    lineOffset += (body.match(/\n/g)?.length ?? 0) + 1;
+  }
+  if (!any) return undefined;
+  return JSON.parse(generator.toString()) as SourceMap;
+}
 
 /**
  * Maximum number of source maps to cache in memory.

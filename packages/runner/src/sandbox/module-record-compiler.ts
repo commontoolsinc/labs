@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { getLogger } from "@commonfabric/utils/logger";
-import type { Source } from "@commonfabric/js-compiler";
+import type { Source, SourceMap } from "@commonfabric/js-compiler";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler";
 import {
   computeModuleHashes,
@@ -181,6 +181,13 @@ export interface CompileSourcesOptions {
    * generation, `__cf_data` wrapping) cannot be produced by transpileModule.
    */
   precompiledBodies?: Map<string, string>;
+  /**
+   * Per-source source map (from `compileToModules`), keyed by source name. Used
+   * to compose a per-load bundle source map so `fn.src` / CFC verified-source
+   * coordinates resolve back to the original authored files under the ESM
+   * loader (the AMD path registers the bundle map via the isolate).
+   */
+  precompiledSourceMaps?: Map<string, SourceMap>;
 }
 
 export interface CompiledModuleGraph {
@@ -189,6 +196,8 @@ export interface CompiledModuleGraph {
   specifierByPath: Map<string, string>;
   /** Compiled CommonJS body per specifier — the text the verifier classifies. */
   compiledBodies: Map<string, string>;
+  /** Per-specifier source map (compiled body → original source), when available. */
+  moduleSourceMaps: Map<string, SourceMap>;
 }
 
 export function compileSourcesToRecords(
@@ -265,9 +274,12 @@ export function compileSourcesToRecords(
 
   const records = new Map<string, VirtualModuleRecord>();
   const compiledBodies = new Map<string, string>();
+  const moduleSourceMaps = new Map<string, SourceMap>();
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
     const moduleHash = hashes.get(source.name)!;
+    const sourceMap = options.precompiledSourceMaps?.get(source.name);
+    if (sourceMap) moduleSourceMaps.set(specifier, sourceMap);
     const precompiled = options.precompiledBodies?.get(source.name);
     let exportNames: string[];
     let compiled: string;
@@ -374,7 +386,7 @@ export function compileSourcesToRecords(
     });
   }
 
-  return { records, specifierByPath, compiledBodies };
+  return { records, specifierByPath, compiledBodies, moduleSourceMaps };
 }
 
 /**
