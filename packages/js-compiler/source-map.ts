@@ -84,9 +84,20 @@ export function composeBundleSourceMap(
 /**
  * Maximum number of source maps to cache in memory.
  * When exceeded, oldest (least recently used) entries are evicted.
- * Set conservatively to prevent OOM in long-running processes.
+ *
+ * Sized for the ESM module-record loader, which registers ONE map per load —
+ * the composed `${loadId}.js` bundle map — PLUS one map per module (keyed by the
+ * module's eval `//# sourceURL`) so the browser stack path can resolve each
+ * module's eval frame. A single multi-file load therefore registers
+ * `1 + moduleCount` entries that must all stay live until `loadModuleGraph`
+ * annotates functions; a small cap (the old value was 50) would evict the bundle
+ * map — and early per-module maps — mid-load for larger graphs, regressing
+ * `fn.src` to raw bundle coordinates and breaking CFC verified-source identity.
+ * This bound comfortably exceeds realistic per-load module counts while still
+ * capping total memory across loads (stale maps from superseded loads evict via
+ * LRU; the parser is also fully cleared on runtime dispose).
  */
-const MAX_SOURCE_MAP_CACHE_SIZE = 50;
+const MAX_SOURCE_MAP_CACHE_SIZE = 1024;
 
 // Parses strings like the following into function, filename, line and columns:
 /// ```
