@@ -86,7 +86,24 @@ export interface DeleteOperation {
   scope?: CellScope;
 }
 
-export type Operation = SetOperation | PatchOperation | DeleteOperation;
+/**
+ * A SQLite write folded into the commit, applied inside the same transaction as
+ * the cell ops (atomic). It is NOT an entity revision — it has no `id` and never
+ * enters the revision/head/snapshot/dirty machinery (see SqliteDbRef below /
+ * docs/specs/sqlite-builtin/plans/atomic-writes.md).
+ */
+export interface SqliteOperation {
+  op: "sqlite";
+  db: SqliteDbRef;
+  sql: string;
+  params?: SqliteParamsWire;
+}
+
+export type Operation =
+  | SetOperation
+  | PatchOperation
+  | DeleteOperation
+  | SqliteOperation;
 
 export interface ConfirmedRead {
   id: EntityId;

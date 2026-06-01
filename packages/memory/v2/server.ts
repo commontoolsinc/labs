@@ -13,6 +13,7 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerSnapshotListRequest,
@@ -665,6 +666,50 @@ export class Server {
     }
   }
 
+  /**
+   * Attach the cell-db(s) referenced by a commit's `sqlite` ops and create their
+   * tables, returning a dbId→alias map for `Engine.applyCommit`. Must run BEFORE
+   * applyCommit (ATTACH can't run in a transaction); the caller detaches after.
+   * Enforces ≤1 cell-db per commit so unqualified names stay unambiguous
+   * (decision 1.3.A in plans/atomic-writes.md).
+   */
+  #attachCommitSqliteDbs(
+    engine: Engine.Engine,
+    space: string,
+    operations: readonly Operation[],
+  ): Map<string, string> {
+    const map = new Map<string, string>();
+    const tablesById = new Map<string, Record<string, unknown> | undefined>();
+    for (const op of operations) {
+      if (op.op !== "sqlite") continue;
+      const id = op.db.id;
+      if (map.has(id)) continue;
+      if (map.size >= 1) {
+        throw new Engine.ProtocolError(
+          "a commit may write to at most one sqlite database",
+        );
+      }
+      map.set(id, aliasForDbId(id));
+      tablesById.set(id, op.db.tables);
+    }
+    for (const [id, alias] of map) {
+      attachDatabase(
+        engine.database,
+        alias,
+        this.#cellDbPath(engine, space, id),
+      );
+      const tables = tablesById.get(id);
+      if (tables) {
+        ensureTables(
+          engine.database,
+          tables as Record<string, TableSchema>,
+          alias,
+        );
+      }
+    }
+    return map;
+  }
+
   /** Path for a cell-derived db file. Sibling of the space db for file stores;
    *  a deterministic temp file for in-memory stores (so it survives the
    *  connection, unlike an `:memory:` attach). The space + id are hashed into
@@ -856,34 +901,51 @@ export class Server {
           ),
         );
       }
-      const commit = Engine.applyCommit(engine, {
-        sessionId: message.sessionId,
-        space: message.space,
-        principal: session.principal,
-        commit: commitPayload,
-      });
-      await this.runPostCommitSchedulerSideEffects(
+      // Fold-in SQLite writes: ATTACH their cell-db(s) BEFORE applyCommit (ATTACH
+      // cannot run inside a transaction); the engine executes them inside the
+      // commit txn (atomic with cell ops). Detach in finally.
+      const sqliteAttachments = this.#attachCommitSqliteDbs(
+        engine,
         message.space,
-        commit,
-        schedulerObservations,
-        previousReadSpaces,
-        session,
+        commitPayload.operations,
       );
-      this.markSpaceDirty(
-        message.space,
-        message.commit.operations.map((operation) =>
-          toDirtyKey(operation.id, declaredScope(operation.scope))
-        ),
-        {
+      try {
+        const commit = Engine.applyCommit(engine, {
           sessionId: message.sessionId,
-          seq: commit.seq,
-        },
-      );
-      return {
-        type: "response",
-        requestId: message.requestId,
-        ok: commit,
-      };
+          space: message.space,
+          principal: session.principal,
+          commit: commitPayload,
+          sqliteAttachments,
+        });
+        await this.runPostCommitSchedulerSideEffects(
+          message.space,
+          commit,
+          schedulerObservations,
+          previousReadSpaces,
+          session,
+        );
+        this.markSpaceDirty(
+          message.space,
+          message.commit.operations
+            .filter((operation) => operation.op !== "sqlite")
+            .map((operation) =>
+              toDirtyKey(operation.id, declaredScope(operation.scope))
+            ),
+          {
+            sessionId: message.sessionId,
+            seq: commit.seq,
+          },
+        );
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: commit,
+        };
+      } finally {
+        for (const alias of sqliteAttachments.values()) {
+          detachDatabase(engine.database, alias);
+        }
+      }
     } catch (error) {
       if (error instanceof Engine.ConflictError) {
         this.stageConflictRefreshDirtyIds(message.space, message.commit);
@@ -1466,6 +1528,7 @@ export class Server {
   ): void {
     const ids = new Set<string>();
     for (const operation of commit.operations) {
+      if (operation.op === "sqlite") continue; // no entity id
       ids.add(toDirtyKey(operation.id, declaredScope(operation.scope)));
     }
     for (const read of commit.reads.confirmed) {

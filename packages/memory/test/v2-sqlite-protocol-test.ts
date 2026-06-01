@@ -80,6 +80,52 @@ describe("sqlite protocol verbs (loopback)", () => {
       .toThrow();
   });
 
+  it("applies a sqlite write folded into a transact commit (atomic path)", async () => {
+    const db = dbRef();
+    // A commit with a cell `set` AND a `sqlite` op — the server attaches the
+    // cell-db before applyCommit and the engine runs the write inside the same
+    // transaction.
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: "of:entity-x", value: { value: { ok: true } } },
+        {
+          op: "sqlite",
+          db,
+          sql: "INSERT INTO messages (body) VALUES (?)",
+          params: ["folded"],
+        },
+      ],
+    });
+    const r = await session.sqliteQuery(db, "SELECT body FROM messages");
+    expect(r.rows).toEqual([{ body: "folded" }]);
+  });
+
+  it("rolls back the whole commit when a folded sqlite op fails", async () => {
+    const db = dbRef();
+    await expect(session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: "of:entity-y", value: { value: { ok: true } } },
+        {
+          op: "sqlite",
+          db,
+          sql: "INSERT INTO messages (body) VALUES (?)",
+          params: ["doomed"],
+        },
+        { op: "sqlite", db, sql: "DROP TABLE messages" }, // guard throws -> rollback
+      ],
+    })).rejects.toThrow();
+    // The good INSERT rolled back with the rest of the commit.
+    const r = await session.sqliteQuery(
+      db,
+      "SELECT count(*) AS n FROM messages",
+    );
+    expect(r.rows).toEqual([{ n: 0 }]);
+  });
+
   it("does not exhaust the attach limit across many cell-dbs (LRU evicts)", async () => {
     // More than SQLITE_MAX_ATTACHED distinct cell-dbs in one space; each must
     // still work (the server evicts least-recently-used attachments).
