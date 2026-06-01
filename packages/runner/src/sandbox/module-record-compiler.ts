@@ -34,6 +34,46 @@ const TARGET = ts.ScriptTarget.ES2023;
  * corruption smuggled into the evaluation of an otherwise-accepted expression,
  * which the (deliberately AST-free) verifier cannot detect.
  */
+/**
+ * Run a compiled module factory against a write-once exports object and snapshot
+ * the declared exports onto `moduleExports` (the SES namespace target).
+ *
+ * Hardening:
+ * - The body writes into a WRITE-ONCE exports object (see
+ *   {@link createWriteOnceExports}), so a write smuggled into the evaluation of
+ *   an otherwise-accepted expression (e.g. `__cf_data((exports.x = evil, 1))`)
+ *   cannot overwrite an already-assigned export before the snapshot.
+ * - The `module` wrapper is frozen, so the wholesale twin
+ *   `__cf_data((module.exports = evil, 1))` throws in strict mode rather than
+ *   swapping out the write-once object behind our back.
+ * - We snapshot from the write-once object directly (never `module.exports`), so
+ *   the namespace can only reflect values that passed through write-once.
+ *
+ * We deliberately do NOT deep-freeze the exported values: SES already makes the
+ * namespace *bindings* immutable, verified plain data is already frozen by
+ * `__cf_data`/`schema`, and the engine attaches metadata to exported pattern
+ * recipes after load (`value.program = program` in builder/factory.ts), so
+ * exported builder graphs must stay extensible.
+ */
+export function populateModuleExports(
+  moduleExports: Record<string, unknown>,
+  exportNames: string[],
+  factory: (
+    exports: Record<string, unknown>,
+    require: (specifier: string) => Record<string, unknown>,
+    module: { exports: Record<string, unknown> },
+  ) => void,
+  requireShim: (specifier: string) => Record<string, unknown>,
+): void {
+  const writeOnceExports = createWriteOnceExports();
+  const moduleObject = Object.freeze({ exports: writeOnceExports });
+  factory(writeOnceExports, requireShim, moduleObject);
+  for (const name of exportNames) {
+    moduleExports[name] = writeOnceExports[name];
+  }
+  moduleExports.__esModule = true;
+}
+
 export function createWriteOnceExports(): Record<string, unknown> {
   const target: Record<string, unknown> = {};
   const locked = new Set<string | symbol>();
@@ -282,29 +322,17 @@ export function compileSourcesToRecords(
         // already-populated export throw, so the smuggle fails closed. A `void 0`
         // forward declaration is treated as a placeholder, so the canonical
         // `exports.x = void 0; … exports.x = real;` compiler shape is allowed.
-        const writeOnceExports = createWriteOnceExports();
-        const moduleObject = { exports: writeOnceExports };
         const requireShim = (specifier: string) =>
           compartment.importNow(resolvedImports[specifier] ?? specifier);
-        // A throw here is terminal for this module: SES caches the error and
-        // re-throws it on every subsequent importNow (the same contract as a
-        // failed AMD factory).
-        factory(writeOnceExports, requireShim, moduleObject);
-        const finalExports = moduleObject.exports;
-        // Copy the declared exports onto the SES module namespace object. SES
-        // already makes the namespace *bindings* immutable (a sibling cannot
-        // reassign or add `ns.x`), and verified plain data is already deep-frozen
-        // by `__cf_data`/`schema` (`freezeVerifiedPlainData`), so exported data
-        // internals are immutable too. We deliberately do NOT freeze the values
-        // here: the engine attaches metadata to exported pattern recipes after
-        // load (`value.program = program` in builder/factory.ts), so exported
-        // builder graphs must stay extensible. Snapshots values at init time, so
-        // a later reassignment of an exported `let` is not reflected as a true
-        // ESM live binding — acceptable for compiled patterns.
-        for (const name of exportNames) {
-          moduleExports[name] = finalExports[name];
-        }
-        moduleExports.__esModule = true;
+        // A throw inside the factory is terminal for this module: SES caches the
+        // error and re-throws it on every subsequent importNow (the same
+        // contract as a failed AMD factory).
+        populateModuleExports(
+          moduleExports,
+          exportNames,
+          factory,
+          requireShim,
+        );
       },
     });
   }

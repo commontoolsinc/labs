@@ -1,7 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { createWriteOnceExports } from "../src/sandbox/module-record-compiler.ts";
+import {
+  createWriteOnceExports,
+  populateModuleExports,
+} from "../src/sandbox/module-record-compiler.ts";
+
+const noRequire = (s: string): Record<string, unknown> => {
+  throw new Error(`unexpected require(${s})`);
+};
 
 // The ESM loader hands the module body a write-once exports object so a write
 // smuggled into the evaluation of an otherwise-accepted expression (e.g. a
@@ -88,5 +95,79 @@ describe("createWriteOnceExports", () => {
     expect(() => {
       exports.a = 3;
     }).toThrow();
+  });
+});
+
+describe("populateModuleExports", () => {
+  it("snapshots only the declared exports onto the namespace", () => {
+    const ns: Record<string, unknown> = {};
+    populateModuleExports(ns, ["a"], (exports) => {
+      exports.a = "data";
+      // A non-declared stash is written to the throwaway write-once object…
+      exports.secret = () => "pwned";
+    }, noRequire);
+    expect(ns.a).toBe("data");
+    // …but is never lifted onto the namespace.
+    expect("secret" in ns).toBe(false);
+    expect(ns.__esModule).toBe(true);
+  });
+
+  it("fails closed on `module.exports = evil` under strict mode (frozen wrapper)", () => {
+    const ns: Record<string, unknown> = {};
+    // The `__cf_data((module.exports = evil, 1))` twin. Compiled module bodies
+    // are strict (TS emits "use strict"), so assigning to the frozen module
+    // wrapper throws — the module fails closed. Strict directive must be the
+    // first statement to take effect.
+    const strictFactory = function (
+      exports: Record<string, unknown>,
+      _require: unknown,
+      module: { exports: Record<string, unknown> },
+    ) {
+      "use strict";
+      exports.x = "verified";
+      module.exports = { x: () => "pwned" };
+    };
+    expect(() => {
+      populateModuleExports(
+        ns,
+        ["x"],
+        strictFactory as Parameters<typeof populateModuleExports>[2],
+        noRequire,
+      );
+    }).toThrow();
+  });
+
+  it("snapshots from write-once even if `module.exports` is swapped (sloppy mode)", () => {
+    const ns: Record<string, unknown> = {};
+    // Even where the reassignment does not throw (sloppy mode: the frozen-object
+    // write silently no-ops), the namespace snapshots from the write-once object
+    // directly, never `module.exports`, so the swap cannot corrupt it.
+    populateModuleExports(ns, ["x"], (exports, _require, module) => {
+      exports.x = "verified";
+      try {
+        module.exports = { x: () => "pwned" };
+      } catch { /* frozen wrapper in strict mode */ }
+    }, noRequire);
+    expect(ns.x).toBe("verified");
+  });
+
+  it("snapshots from the write-once object, not module.exports", () => {
+    const ns: Record<string, unknown> = {};
+    populateModuleExports(ns, ["x"], (exports, _require, module) => {
+      exports.x = "verified";
+      // Reading module.exports is fine and returns the write-once object.
+      expect(module.exports).toBe(exports);
+    }, noRequire);
+    expect(ns.x).toBe("verified");
+  });
+
+  it("propagates a write-once violation as a module load failure", () => {
+    const ns: Record<string, unknown> = {};
+    expect(() => {
+      populateModuleExports(ns, ["x"], (exports) => {
+        exports.x = "verified";
+        exports.x = () => "pwned"; // smuggled overwrite
+      }, noRequire);
+    }).toThrow(/write-once/);
   });
 });
