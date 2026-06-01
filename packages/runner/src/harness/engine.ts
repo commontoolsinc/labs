@@ -387,6 +387,33 @@ export class Engine extends EventTarget implements Harness {
       // Concatenated module bodies give the source-location frame a `script`
       // for fn.src `indexOf` resolution.
       const script = [...graph.compiledBodies.values()].join("\n");
+      this.executableRegistry.setVerifiedLoadBundleId(
+        loadId,
+        hashOf(script).toString(),
+      );
+      // Verified-load sources: the original file names plus the prefixed module
+      // paths (both normalized), so CFC's isVerifiedSourceInLoad recognizes the
+      // source locations of functions defined by this load.
+      const verifiedSources = new Set<string>();
+      const addVerifiedSource = (value: string | undefined) => {
+        if (typeof value !== "string" || value.length === 0) return;
+        verifiedSources.add(normalizeVerifiedSource(value));
+        const prefixed = `/${id}/`;
+        if (value.startsWith(prefixed)) {
+          verifiedSources.add(
+            normalizeVerifiedSource(value.slice(id.length + 1)),
+          );
+        }
+      };
+      for (const file of files) addVerifiedSource(file.name);
+      for (const path of graph.specifierByPath.keys()) addVerifiedSource(path);
+      this.executableRegistry.setVerifiedLoadSources(loadId, verifiedSources);
+
+      // Register functions defined during this load as verified, mirroring the
+      // AMD path's verified-execution model.
+      const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
+        this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
+      );
       const frame = pushFrame({
         runtime: this.ctRuntime,
         verifiedLoadId: loadId,
@@ -406,6 +433,7 @@ export class Engine extends EventTarget implements Harness {
         });
       } finally {
         popFrame(frame);
+        restoreVerifiedFunctionRegistrar();
       }
 
       const main = loaded.namespace as Exports;
