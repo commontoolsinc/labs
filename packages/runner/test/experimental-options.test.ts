@@ -39,12 +39,16 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: false,
+          // Explicit so the assertion is deterministic regardless of the
+          // CF_ESM_MODULE_LOADER env (e.g. during the flag-on cross-check).
+          esmModuleLoader: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
+        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -57,12 +61,14 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: true,
+          esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
+        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -75,12 +81,14 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: true,
+          esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
+        esmModuleLoader: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -303,6 +311,7 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: true,
+          esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
 

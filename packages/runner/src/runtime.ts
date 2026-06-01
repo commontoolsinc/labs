@@ -24,6 +24,11 @@ import {
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
+import {
+  getEsmModuleLoaderConfig,
+  resetEsmModuleLoaderConfig,
+  setEsmModuleLoaderConfig,
+} from "./sandbox/esm-loader-config.ts";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -354,6 +359,9 @@ export class Runtime {
     );
     this.experimental.persistentSchedulerState =
       getPersistentSchedulerStateConfig();
+    // Env-seeded default (CF_ESM_MODULE_LOADER) unless an explicit option is set.
+    setEsmModuleLoaderConfig(this.experimental.esmModuleLoader);
+    this.experimental.esmModuleLoader = getEsmModuleLoaderConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
@@ -532,6 +540,7 @@ export class Runtime {
     // Reset experimental config to defaults.
     resetDataModelConfig();
     resetPersistentSchedulerStateConfig();
+    resetEsmModuleLoaderConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
