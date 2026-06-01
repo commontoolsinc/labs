@@ -16,11 +16,11 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
  * whose `execute` evaluates the compiled body inside the SES compartment with a
  * `require` shim that delegates to `compartment.importNow`.
  *
- * Scope: this adapter handles the common module shapes (named `export`s,
- * `export default`, relative imports, and bare runtime-module imports). It does
- * not yet run the Common Fabric transformer pipeline (that wiring is staged
- * with the Engine integration) and does not statically expand `export *`
- * re-exports.
+ * Scope: this adapter handles the common module shapes — named `export`s,
+ * `export default`, `export * from` (statically expanded, transitively), inline
+ * type-only imports, relative imports, and bare runtime-module imports. The
+ * Engine drives it with CF-transformer-pipeline output via `precompiledBodies`;
+ * the bare `ts.transpileModule` fallback is for the standalone/test path.
  */
 
 const TARGET = ts.ScriptTarget.ES2023;
@@ -90,6 +90,61 @@ export function compileSourcesToRecords(
   for (const source of sources) {
     specifierByPath.set(source.name, `cf:module/${hashes.get(source.name)}`);
   }
+  const sourceByName = new Map(sources.map((s) => [s.name, s]));
+
+  // Pre-pass: each module's direct export names + its `export *` targets, then
+  // resolve the full export set (unioning `export *` targets transitively).
+  // `export *` does not re-export the `default` binding. Module hashes already
+  // fold in transitive import content, so per-module caching stays valid.
+  const rawExports = new Map<string, ModuleExports>();
+  for (const source of sources) {
+    rawExports.set(source.name, collectModuleExports(source));
+  }
+  const fullExportsMemo = new Map<string, string[]>();
+  const resolveFullExports = (name: string): string[] => {
+    const memo = fullExportsMemo.get(name);
+    if (memo) return memo;
+    // Walk the transitive closure of `export *` edges first (worklist with a
+    // visited set, so cycles of any length terminate and contribute fully),
+    // then union the reachable modules' direct export names. Computing the full
+    // closure before unioning avoids the memo-poisoning a recursive
+    // partial-result scheme would suffer inside a cycle.
+    const reachableInternal = new Set<string>();
+    const runtimeNames = new Set<string>();
+    const stack = [name];
+    const walked = new Set<string>();
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (walked.has(current)) continue;
+      walked.add(current);
+      const raw = rawExports.get(current);
+      const source = sourceByName.get(current);
+      if (!raw || !source) continue;
+      for (const targetSpec of raw.starTargets) {
+        const resolved = resolveImportSpecifier(targetSpec, source);
+        const internal = findInternalTarget(fileNames, resolved);
+        if (internal !== undefined) {
+          reachableInternal.add(internal);
+          stack.push(internal);
+        } else {
+          for (const n of runtimeModules[targetSpec] ?? []) runtimeNames.add(n);
+        }
+      }
+    }
+    // Own direct exports (default kept); re-exported names exclude `default`.
+    const names = new Set<string>(rawExports.get(name)?.names ?? []);
+    for (const target of reachableInternal) {
+      for (const n of rawExports.get(target)?.names ?? []) {
+        if (n !== "default") names.add(n);
+      }
+    }
+    for (const n of runtimeNames) {
+      if (n !== "default") names.add(n);
+    }
+    const result = [...names];
+    fullExportsMemo.set(name, result);
+    return result;
+  };
 
   const records = new Map<string, VirtualModuleRecord>();
   const compiledBodies = new Map<string, string>();
@@ -106,13 +161,13 @@ export function compileSourcesToRecords(
       ? options.recordCache?.get(moduleHash)
       : undefined;
     if (precompiled !== undefined) {
-      exportNames = collectExportNames(source);
+      exportNames = resolveFullExports(source.name);
       compiled = precompiled;
     } else if (cached) {
       exportNames = cached.exports;
       compiled = cached.compiled;
     } else {
-      exportNames = collectExportNames(source);
+      exportNames = resolveFullExports(source.name);
       compiled = ts.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
@@ -255,7 +310,13 @@ function collectBindingNames(name: ts.BindingName, out: Set<string>): void {
  * namespace, destructured). Throws loudly on forms this adapter does not yet
  * support, rather than producing a silently-incomplete namespace.
  */
-function collectExportNames(source: Source): string[] {
+/** Direct export names of a module plus the specifiers it `export *`s from. */
+interface ModuleExports {
+  names: string[];
+  starTargets: string[];
+}
+
+function collectModuleExports(source: Source): ModuleExports {
   const sourceFile = ts.createSourceFile(
     source.name,
     source.contents,
@@ -263,6 +324,7 @@ function collectExportNames(source: Source): string[] {
     true,
   );
   const names = new Set<string>();
+  const starTargets: string[] = [];
 
   for (const statement of sourceFile.statements) {
     const isExported = ts.canHaveModifiers(statement) &&
@@ -317,15 +379,16 @@ function collectExportNames(source: Source): string[] {
       } else if (clause && ts.isNamespaceExport(clause)) {
         // `export * as ns from "./m"`.
         names.add(clause.name.text);
-      } else if (statement.moduleSpecifier) {
-        // Bare `export * from "./m"` cannot be enumerated without resolving the
-        // target's exports; fail loudly rather than drop names silently.
-        throw new Error(
-          `${source.name}: 'export * from' re-exports are not yet supported by the ESM module-record adapter`,
-        );
+      } else if (
+        statement.moduleSpecifier &&
+        ts.isStringLiteral(statement.moduleSpecifier)
+      ) {
+        // Bare `export * from "./m"`: record the target so its export names can
+        // be unioned in (resolved transitively by the caller).
+        starTargets.push(statement.moduleSpecifier.text);
       }
     }
   }
 
-  return [...names];
+  return { names: [...names], starTargets };
 }

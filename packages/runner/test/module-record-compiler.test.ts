@@ -272,12 +272,41 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.run()).toBe(1);
   });
 
-  it("throws loudly on unsupported `export * from`", () => {
+  it("expands `export * from` re-exports (including transitively)", () => {
     const sources = files({
-      "/inner.ts": `export const x = 1;`,
-      "/main.ts": `export * from "./inner.ts";`,
+      "/leaf.ts": `export const a = (): number => 1;`,
+      "/inner.ts":
+        `export * from "./leaf.ts";\nexport const b = (): number => 2;`,
+      "/main.ts":
+        `export * from "./inner.ts";\nexport const c = (): number => 3;`,
     });
-    expect(() => compileSourcesToRecords(sources)).toThrow(/export \* from/);
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { a(): number; b(): number; c(): number };
+    expect(ns.a()).toBe(1); // transitively re-exported from leaf via inner
+    expect(ns.b()).toBe(2); // re-exported from inner
+    expect(ns.c()).toBe(3); // own export
+    // `export *` does not re-export the default binding.
+    const record = records.get(specifierByPath.get("/main.ts")!)!;
+    expect(record.exports).not.toContain("default");
+  });
+
+  it("computes complete declared exports for an `export *` cycle (>= 3)", () => {
+    // a -> b -> c -> a re-export ring; every module's declared namespace must
+    // include all three names (regression for memo-poisoning on >=3 cycles).
+    const sources = files({
+      "/a.ts": `export * from "./b.ts";\nexport const a = 1;`,
+      "/b.ts": `export * from "./c.ts";\nexport const b = 2;`,
+      "/c.ts": `export * from "./a.ts";\nexport const c = 3;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    for (const name of ["/a.ts", "/b.ts", "/c.ts"]) {
+      const record = records.get(specifierByPath.get(name)!)!;
+      expect(new Set(record.exports)).toEqual(
+        new Set(["a", "b", "c", "__esModule"]),
+      );
+    }
   });
 
   it("assigns content-addressed specifiers (cf:module/<hash>)", () => {
