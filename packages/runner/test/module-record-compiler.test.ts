@@ -7,7 +7,10 @@ import {
   compileSourcesToRecords,
   type ModuleRecordCache,
 } from "../src/sandbox/module-record-compiler.ts";
-import { importModuleGraphNow } from "../src/sandbox/esm-module-loader.ts";
+import {
+  importModuleGraphNow,
+  runtimeModuleRecords,
+} from "../src/sandbox/esm-module-loader.ts";
 
 class MapRecordCache implements ModuleRecordCache {
   store = new Map<string, CompiledModuleArtifact>();
@@ -45,6 +48,28 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
 
     expect(ns.run()).toBe(42);
     expect(ns.default()).toBe(42);
+  });
+
+  it("resolves runtime-module imports via runtimeModuleRecords", () => {
+    const sources = files({
+      "/main.ts":
+        `import { dbl } from "commonfabric";\nexport const run = (): number => dbl(21);`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources, {
+      runtimeModules: { commonfabric: ["dbl"] },
+    });
+    // Merge the runtime-module record built from the host's runtime exports.
+    for (
+      const [spec, rec] of runtimeModuleRecords({
+        commonfabric: { dbl: (x: number) => x * 2 },
+      })
+    ) {
+      records.set(spec, rec);
+    }
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { run(): number };
+    expect(ns.run()).toBe(42);
   });
 
   it("resolves a default import across modules (esModuleInterop)", () => {

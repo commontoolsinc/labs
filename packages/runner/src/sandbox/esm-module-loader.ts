@@ -127,3 +127,33 @@ export function importModuleGraphNow(
 
   return compartment.importNow(entrySpecifier);
 }
+
+/**
+ * Build virtual module records for the runtime modules (`commonfabric`, …) from
+ * the host's `runtimeExports` map, keyed by `cf:runtime/<specifier>` to match
+ * the content-addressed specifiers the adapter resolves runtime imports to.
+ * Each record simply copies the (already frozen) runtime namespace onto its
+ * module exports — these are the trusted host APIs, not authored code.
+ */
+export function runtimeModuleRecords(
+  runtimeExports: Record<string, Record<string, unknown>>,
+): Map<string, VirtualModuleRecord> {
+  const records = new Map<string, VirtualModuleRecord>();
+  for (const [specifier, namespace] of Object.entries(runtimeExports)) {
+    const exportNames = Object.keys(namespace);
+    const declared = exportNames.includes("__esModule")
+      ? exportNames
+      : [...exportNames, "__esModule"];
+    records.set(`cf:runtime/${specifier}`, {
+      imports: [],
+      exports: declared,
+      execute: (moduleExports) => {
+        for (const name of exportNames) {
+          moduleExports[name] = namespace[name];
+        }
+        moduleExports.__esModule = true;
+      },
+    });
+  }
+  return records;
+}
