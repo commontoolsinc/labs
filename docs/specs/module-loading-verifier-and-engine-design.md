@@ -207,16 +207,23 @@ ESM-emit variant); whether `export *` (Part C) needs a classification rule.
    equal scheduler implementation fingerprints, and a working verified-load
    identity.
 
-## Part C — Smaller items (no further planning needed)
+## Part C — Smaller items (DONE)
 
-- **`export *` expansion** — resolve re-export targets' export names and union
-  them into the record's exports (currently throws). Add a multi-hop test.
-- **Live bindings** — decide getters-delegating-to-`finalExports` vs the current
-  snapshot. Recommendation: keep the snapshot for v1 (documented), revisit only
-  if a real pattern needs live `let` re-export semantics.
-- **Benchmarks** — compartment construction + `importNow` vs AMD single-eval,
-  cold and warm, at representative module counts; plus the cold-start metric the
-  spec promised (graph load + first render). Run in the flag-on CI lane.
+- **`export *` expansion** — DONE. `collectModuleExports` returns direct names +
+  `export *` targets; `compileSourcesToRecords` unions targets transitively
+  (memoized, cycle-safe), excluding `default`. Multi-hop test added.
+- **Live bindings** — DECIDED: keep the snapshot for v1. Exported values are
+  copied onto the namespace at module-init time. A later reassignment of an
+  exported `let` is not reflected as a true ESM live binding; acceptable for
+  compiled patterns. Revisit (getters delegating to `finalExports`) only if a
+  real pattern needs live `let` re-export semantics.
+- **Benchmarks** — DONE (`packages/runner/test/esm-loader.bench.ts`): AMD bundle
+  compile+evaluate vs the ESM module-record loader for a representative
+  multi-file pattern. Local result: ESM ~45 ms vs AMD ~142 ms (~3.1× faster),
+  reflecting per-module CommonJS + content-addressed records vs AMD bundling +
+  full bundle verification. (Cold-start graph-load + first-render metrics, and a
+  flag-on CI lane, belong with the eventual default-on rollout — out of scope
+  while the flag stays off.)
 
 ## Part D — Phased PR sequence (each green, behind the flag)
 
