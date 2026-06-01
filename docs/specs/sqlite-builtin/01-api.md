@@ -195,11 +195,11 @@ For a straightforward `SELECT … FROM <declared table>`, omit `Row` and let the
 database's table schema drive decoding. Reach for `<Row>` when the projection
 diverges (joins, aliases, computed columns).
 
-> **Transformer dependency.** `sqliteQuery<Row>` requires the ts-transformer to
-> lower its type argument into a schema (alongside `toSchema<T>`). Without that
-> support the generic is erased and carries no runtime decode/CFC info. This is
-> a transformer feature, not just a signature — confirm with the
-> ts-transformers owner. See [08-open-questions.md](./08-open-questions.md).
+> **Transformer note.** `sqliteQuery<Row>` relies on the ts-transformer lowering
+> its type argument into a runtime schema (alongside `toSchema<T>`,
+> `generateObject`, `lift`). This is a routine addition — register the export and
+> add a schema-injection rule per
+> [`packages/ts-transformers/docs/adding-type-arg-schema-lowering.md`](../../../packages/ts-transformers/docs/adding-type-arg-schema-lowering.md).
 
 ## `sqliteExecute(params)` — write
 

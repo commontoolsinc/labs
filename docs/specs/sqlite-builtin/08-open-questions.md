@@ -13,13 +13,12 @@ during design are marked **[resolved]** with the decision.
 2. **Multi-statement writes.** Should `sqliteExecute` accept multiple statements
    in one `sql`, or one statement per call (clearer atomicity story, easier
    `_cf_link` param mapping)?
-3. **Transformer support for `sqliteQuery<Row>`.** Result typing relies on the
-   ts-transformer lowering the `Row` type argument into a runtime schema, the
-   way `toSchema<T>()` works (Section
-   [01](./01-api.md#sqlitequeryrowparams--reactive-read)). This must be added to
-   the transformer's type-arg-lowering list — confirm feasibility and effort
-   with the ts-transformers owner. Without it the generic is erased and carries
-   no runtime decode/CFC info.
+3. **[resolved] Transformer support for `sqliteQuery<Row>`.** Routine: the
+   transformer already lowers type arguments to schemas for `toSchema<T>`,
+   `generateObject`, and `lift`. Add a registry entry + a schema-injection rule —
+   see [`packages/ts-transformers/docs/adding-type-arg-schema-lowering.md`](../../../packages/ts-transformers/docs/adding-type-arg-schema-lowering.md)
+   and Phase 5 of the [implementation plan](./implementation-plan.md). Not a
+   gating risk.
 
 ## `_cf_link`
 
