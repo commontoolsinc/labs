@@ -272,12 +272,24 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(ns.run()).toBe(1);
   });
 
-  it("throws loudly on unsupported `export * from`", () => {
+  it("expands `export * from` re-exports (including transitively)", () => {
     const sources = files({
-      "/inner.ts": `export const x = 1;`,
-      "/main.ts": `export * from "./inner.ts";`,
+      "/leaf.ts": `export const a = (): number => 1;`,
+      "/inner.ts":
+        `export * from "./leaf.ts";\nexport const b = (): number => 2;`,
+      "/main.ts":
+        `export * from "./inner.ts";\nexport const c = (): number => 3;`,
     });
-    expect(() => compileSourcesToRecords(sources)).toThrow(/export \* from/);
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    const ns = importModuleGraphNow(specifierByPath.get("/main.ts")!, {
+      records,
+    }) as { a(): number; b(): number; c(): number };
+    expect(ns.a()).toBe(1); // transitively re-exported from leaf via inner
+    expect(ns.b()).toBe(2); // re-exported from inner
+    expect(ns.c()).toBe(3); // own export
+    // `export *` does not re-export the default binding.
+    const record = records.get(specifierByPath.get("/main.ts")!)!;
+    expect(record.exports).not.toContain("default");
   });
 
   it("assigns content-addressed specifiers (cf:module/<hash>)", () => {
