@@ -44,6 +44,11 @@ import type {
   SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
+  SqliteCfLinkFunction,
+  SqliteDatabaseFunction,
+  SqliteExecuteFunction,
+  SqliteQueryFunction,
+  SqliteTableFunction,
   StreamDataFunction,
   StrFunction,
   UiActionProps,
@@ -309,6 +314,11 @@ export interface BuilderFunctionsAndConstants {
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
+  sqliteDatabase: SqliteDatabaseFunction;
+  sqliteQuery: SqliteQueryFunction;
+  sqliteExecute: SqliteExecuteFunction;
+  table: SqliteTableFunction;
+  cfLink: SqliteCfLinkFunction;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
 

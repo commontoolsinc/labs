@@ -33,11 +33,10 @@ describe("engine-side exec", () => {
   });
 
   it("creates declared tables (additive)", () => {
-    const rows = runQuery(
-      db,
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messages'",
-    );
-    expect(rows.length).toBe(1);
+    // The table exists iff querying it succeeds (sqlite_master is blocked by the
+    // guard, which is correct — patterns must not introspect the schema catalog).
+    const rows = runQuery<{ n: number }>(db, "SELECT count(*) AS n FROM messages");
+    expect(rows).toEqual([{ n: 0 }]);
   });
 
   it("writes and reads back rows with positional params", () => {

@@ -60,6 +60,19 @@ function normalizeColumn(name: string, spec: ColumnSpec): ColumnSchema {
     ? { type: jsonTypeForSql(spec), sqlType: spec }
     : { ...spec, sqlType: spec.sqlType ?? "text" };
 
+  // Validate identifiers and the verbatim sqlType so a hostile/buggy table
+  // declaration can't smuggle DDL (e.g. `text); DROP TABLE x;--`) through
+  // createTableSQL's interpolation. Column names are quoted at emit time; sqlType
+  // is constrained to type keywords, constraints, numbers, parens and commas.
+  if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(name)) {
+    throw new TypeError(`invalid column name "${name}"`);
+  }
+  if (!/^[A-Za-z0-9_ (),'-]*$/.test(col.sqlType)) {
+    throw new TypeError(
+      `invalid sqlType for column "${name}": ${col.sqlType}`,
+    );
+  }
+
   const looksLink = col.cfLink === true;
   const namedLink = isCfLinkColumn(name);
 
@@ -100,10 +113,15 @@ export function linkColumnsOf(t: TableSchema): string[] {
     .map(([name]) => name);
 }
 
-/** Additive DDL for a table (Phase 2: create-only). */
+const quoteIdent = (id: string) => `"${id.replace(/"/g, '""')}"`;
+
+/** Additive DDL for a table (Phase 2: create-only). Column names are quoted and
+ *  sqlType is validated by `table()` (see normalizeColumn). */
 export function createTableSQL(name: string, t: TableSchema): string {
   const cols = Object.entries(t.properties).map(
-    ([col, schema]) => `  ${col} ${schema.sqlType}`,
+    ([col, schema]) => `  ${quoteIdent(col)} ${schema.sqlType}`,
   );
-  return `CREATE TABLE IF NOT EXISTS "${name}" (\n${cols.join(",\n")}\n)`;
+  return `CREATE TABLE IF NOT EXISTS ${quoteIdent(name)} (\n${
+    cols.join(",\n")
+  }\n)`;
 }

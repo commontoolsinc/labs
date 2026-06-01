@@ -2069,6 +2069,61 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
+// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+
+declare const __sqliteDb: unique symbol;
+/**
+ * Opaque database handle. Empty to pattern code; a cell reference to the runtime
+ * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
+ * / sqliteExecute / reactOn), never read it.
+ */
+export type SqliteDatabase = { readonly [__sqliteDb]: true };
+
+/** A map of table name -> one-row JSON Schema (see `table()`). */
+export type SqliteTableSchemas = Record<string, JSONSchema>;
+
+/** Non-default database source. Cell-derived (default) needs no source; on-disk
+ *  databases are injected as a pattern input, not selected here. */
+export type SqliteDatabaseSource = {
+  vm: OpaqueRef<unknown>;
+  path: string;
+};
+
+export type SqliteDatabaseFunction = (
+  options?: { tables?: SqliteTableSchemas },
+  source?: SqliteDatabaseSource,
+) => OpaqueRef<SqliteDatabase>;
+
+export type SqliteQueryParams = {
+  db: Opaque<SqliteDatabase>;
+  sql: string;
+  params?: ReadonlyArray<unknown> | Record<string, unknown>;
+  reactOn?: unknown;
+};
+export type SqliteQueryFunction = <Row = Record<string, unknown>>(
+  params: Opaque<SqliteQueryParams>,
+) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+
+export type SqliteExecuteParams = {
+  db: Opaque<SqliteDatabase>;
+  sql: string;
+  params?: ReadonlyArray<unknown> | Record<string, unknown>;
+};
+export type SqliteExecuteFunction = (
+  params: Opaque<SqliteExecuteParams>,
+) => OpaqueRef<{
+  pending: boolean;
+  result?: { lastInsertRowid?: number; changes: number };
+  error?: any;
+}>;
+
+/** Column spec for `table()`: a shorthand SQL type string or a column schema. */
+export type SqliteColumnSpec = string | JSONSchema;
+export type SqliteTableFunction = (
+  columns: Record<string, SqliteColumnSpec>,
+) => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+
 export type WishTag = `/${string}` | `#${string}`;
 
 export type DID = `did:${string}:${string}`;
@@ -2319,6 +2374,11 @@ export declare const fetchData: FetchDataFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const sqliteDatabase: SqliteDatabaseFunction;
+export declare const sqliteQuery: SqliteQueryFunction;
+export declare const sqliteExecute: SqliteExecuteFunction;
+export declare const table: SqliteTableFunction;
+export declare const cfLink: SqliteCfLinkFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;

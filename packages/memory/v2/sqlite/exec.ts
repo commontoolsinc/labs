@@ -40,6 +40,8 @@ export function runWrite(
 ): WriteResult {
   assertWriteSafe(sql);
   const changes = db.prepare(sql).run(...bindArgs(params));
+  // `lastInsertRowId` is connection-global; correct here because the engine uses
+  // one synchronous connection per space (no interleaving between run and read).
   return { changes, lastInsertRowid: db.lastInsertRowId };
 }
 

@@ -58,38 +58,46 @@ const WRITE_LEADING = new Set(["INSERT", "UPDATE", "DELETE", "REPLACE"]);
  * literals with spaces, so subsequent regexes don't trip on `;`, keywords, or
  * table names that appear inside literals.
  */
-function maskLiteralsAndComments(sql: string): string {
+function sanitizeIdent(inner: string): string {
+  // Keep identifier word chars so table-name checks still match (e.g. "commit"
+  // -> commit); neutralize any other char (`;`, keywords-with-symbols, etc.) so
+  // injected separators can't fool statement-count/keyword detection. This can
+  // over-reject but never under-rejects (fail-closed).
+  return ` ${inner.replace(/[^A-Za-z0-9_$]/g, "_")} `;
+}
+
+/**
+ * Normalize SQL for tokenizer-level inspection:
+ * - strip comments,
+ * - blank `'...'` STRING LITERALS (their contents are data, never identifiers),
+ * - UNQUOTE `"..."`, `` `...` ``, and `[...]` IDENTIFIERS (their contents ARE
+ *   identifiers in SQLite — they must remain visible to the table-name checks),
+ * sanitizing identifier contents to word chars.
+ */
+function normalizeForGuard(sql: string): string {
   let out = "";
   let i = 0;
   const n = sql.length;
   while (i < n) {
     const ch = sql[i];
     const next = sql[i + 1];
-    // line comment
-    if (ch === "-" && next === "-") {
+    if (ch === "-" && next === "-") { // line comment
       while (i < n && sql[i] !== "\n") i++;
+      out += " ";
       continue;
     }
-    // block comment
-    if (ch === "/" && next === "*") {
+    if (ch === "/" && next === "*") { // block comment
       i += 2;
       while (i < n && !(sql[i] === "*" && sql[i + 1] === "/")) i++;
       i += 2;
       out += " ";
       continue;
     }
-    // string / quoted identifier literals: ' " `  and [ ... ]
-    if (ch === "'" || ch === '"' || ch === "`") {
-      const quote = ch;
+    if (ch === "'") { // string literal -> blank
       i++;
-      out += " ";
       while (i < n) {
-        if (sql[i] === quote) {
-          // doubled quote = escaped quote, stays inside the literal
-          if (sql[i + 1] === quote) {
-            i += 2;
-            continue;
-          }
+        if (sql[i] === "'") {
+          if (sql[i + 1] === "'") { i += 2; continue; } // '' escape
           i++;
           break;
         }
@@ -98,12 +106,28 @@ function maskLiteralsAndComments(sql: string): string {
       out += " ";
       continue;
     }
-    if (ch === "[") {
+    if (ch === '"' || ch === "`") { // quoted identifier -> keep contents
+      const quote = ch;
       i++;
-      out += " ";
-      while (i < n && sql[i] !== "]") i++;
+      let inner = "";
+      while (i < n) {
+        if (sql[i] === quote) {
+          if (sql[i + 1] === quote) { inner += quote; i += 2; continue; }
+          i++;
+          break;
+        }
+        inner += sql[i];
+        i++;
+      }
+      out += sanitizeIdent(inner);
+      continue;
+    }
+    if (ch === "[") { // bracketed identifier -> keep contents
       i++;
-      out += " ";
+      let inner = "";
+      while (i < n && sql[i] !== "]") { inner += sql[i]; i++; }
+      i++;
+      out += sanitizeIdent(inner);
       continue;
     }
     out += ch;
@@ -112,14 +136,30 @@ function maskLiteralsAndComments(sql: string): string {
   return out;
 }
 
+// Forbidden schema qualifiers: a pattern never knows its own attach alias, so
+// ANY schema qualifier to these is rejected (whitespace around the dot allowed).
+const FORBIDDEN_SCHEMA_RE =
+  /\b(?:main|temp|sqlite_[A-Za-z0-9_]*|pragma_[A-Za-z0-9_]*)\s*\./i;
+
+// Generic schema-qualified table reference in a table position.
+const TABLE_POS_QUALIFIED_RE =
+  /\b(?:FROM|JOIN|INTO|UPDATE)\s+[A-Za-z_][\w$]*\s*\.\s*[A-Za-z_][\w$]*/i;
+
+// Core tables, sqlite_* / pragma_* introspection (sqlite_master, sqlite_schema,
+// pragma_table_info table-valued functions, etc.).
+const CORE_REF_RE = new RegExp(
+  `\\b(?:${CORE_TABLE_NAMES.join("|")}|sqlite_[A-Za-z0-9_]*|pragma_[A-Za-z0-9_]*)\\b`,
+  "i",
+);
+
 export function classifyStatement(sql: string): StatementClassification {
-  const masked = maskLiteralsAndComments(sql);
-  const trimmed = masked.replace(/;[\s;]*$/, "").trim();
+  const norm = normalizeForGuard(sql);
+  const trimmed = norm.replace(/;[\s;]*$/, "").trim();
 
   const multiple = /;/.test(trimmed);
 
   const firstKeyword = (trimmed.match(/[A-Za-z]+/)?.[0] ?? "").toUpperCase();
-  const hasTopLevelWrite = /\b(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(masked);
+  const hasTopLevelWrite = /\b(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(norm);
 
   let kind: StatementKind;
   if (WRITE_LEADING.has(firstKeyword)) {
@@ -132,15 +172,12 @@ export function classifyStatement(sql: string): StatementClassification {
     kind = "other";
   }
 
-  const qualified =
-    /\b(?:FROM|JOIN|INTO|UPDATE)\s+[A-Za-z_][\w$]*\.[A-Za-z_][\w$]*/i.test(
-      masked,
-    );
+  const qualified = FORBIDDEN_SCHEMA_RE.test(norm) ||
+    TABLE_POS_QUALIFIED_RE.test(norm);
 
-  const forbidden = /\b(?:PRAGMA|ATTACH|DETACH)\b/i.test(masked);
+  const forbidden = /\b(?:PRAGMA|ATTACH|DETACH)\b/i.test(norm);
 
-  const coreRe = new RegExp(`\\b(?:${CORE_TABLE_NAMES.join("|")})\\b`, "i");
-  const coreRef = coreRe.test(masked);
+  const coreRef = CORE_REF_RE.test(norm);
 
   return { kind, multiple, qualified, forbidden, coreRef };
 }

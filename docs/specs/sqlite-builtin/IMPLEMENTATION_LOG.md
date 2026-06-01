@@ -81,3 +81,47 @@ were first written there, then `git mv`'d to memory).
   pace-layer for server-side + pure logic is `packages/memory` (above).
 - Runtime constructor option is `apiUrl` (a `URL`), not `blobbyServerUrl` — the
   plan's test sketch was imprecise.
+
+### Phase 0 wiring (API surface + builder + registration)
+
+- api/index.ts: branded `SqliteDatabase` + params/state + function types +
+  `export declare const` for sqliteDatabase/sqliteQuery/sqliteExecute/table/cfLink.
+- builder/built-in.ts: `createNodeFactory` factories cast to the api function
+  types (not inline shapes — keeps the `BuilderFunctionsAndConstants` cast sound).
+- builder/types.ts: added the five members to `BuilderFunctionsAndConstants`.
+- builder/factory.ts: exposes them on `commonfabric`; `table`/`cfLink` imported
+  from `@commonfabric/memory/sqlite/schema`.
+- builtins/index.ts: registered Actions (`sqlite-builtins.ts`). Runtime execution
+  is **not wired yet** (needs the protocol); query/execute resolve to a structured
+  `not-implemented` error, sqliteDatabase yields an empty opaque handle.
+- Smoke test `runner/test/sqlite-builtins.test.ts` exercises builder → registry →
+  result cells end to end in-process. Green.
+
+#### Decision — sqliteQuery is an effect
+
+Registered `sqliteQuery` with `isEffect: true`. A reactive query does a server
+round-trip and writes results back (like `generateText`/`llm`, which are
+effects), and effects re-run when inputs change — matching the `reactOn`
+semantics. (As a lazy computation it also wasn't pulled by a direct `.get()` in
+tests.) Noted as a deviation from treating it like `fetchData` (which is not an
+effect); revisit if pull-based reactivity for queries proves preferable.
+
+### Code review round 1 (subagent) — addressed
+
+A code-review subagent found CRITICAL guard bypasses; all fixed with regression
+tests (`v2-sqlite-guard-test.ts` "guard hardening"):
+
+- **Quoted/bracketed identifiers** (`"commit"`, `[commit]`, `` `commit` ``) were
+  masked like string literals, blanking the very names the guard inspects →
+  core-store read/write bypass. Fix: `'...'` is the only string literal; `"..."`/
+  `` `...` ``/`[...]` are **identifiers** — now unquoted (contents kept,
+  sanitized to word chars) so the core-table/qualified checks see them.
+- **`sqlite_master`/`sqlite_schema`/`pragma_*`** introspection was not blocked.
+  Fix: reject `sqlite_*` and `pragma_*` prefixes (table-valued functions too).
+- **Qualified-ref** regex missed whitespace-around-dot and forbidden-schema
+  prefixes. Fix: reject `main.`/`temp.`/`sqlite_*.`/`pragma_*.` anywhere +
+  whitespace-tolerant dotted refs in table positions.
+- **DDL injection** (MEDIUM) via unquoted column names / verbatim `sqlType` in
+  `createTableSQL`. Fix: validate column names + constrain `sqlType` chars in
+  `table()`, and quote identifiers at emit time.
+- **lastInsertRowId** (LOW): documented the single-connection assumption.

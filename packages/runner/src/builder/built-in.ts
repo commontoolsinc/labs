@@ -26,6 +26,9 @@ import type {
   FetchOptions,
   PatternToolFunction,
   PatternToolResult,
+  SqliteDatabaseFunction,
+  SqliteExecuteFunction,
+  SqliteQueryFunction,
   WishParams,
   WishState,
 } from "commonfabric";
@@ -167,6 +170,21 @@ export const streamData = createNodeFactory({
     result?: T;
   }>,
 ) => OpaqueRef<{ pending: boolean; result: T; error?: unknown }>;
+
+export const sqliteDatabase = createNodeFactory({
+  type: "ref",
+  implementation: "sqliteDatabase",
+}) as SqliteDatabaseFunction;
+
+export const sqliteQuery = createNodeFactory({
+  type: "ref",
+  implementation: "sqliteQuery",
+}) as SqliteQueryFunction;
+
+export const sqliteExecute = createNodeFactory({
+  type: "ref",
+  implementation: "sqliteExecute",
+}) as SqliteExecuteFunction;
 
 // ifElse with optional schema arguments (backward compatible)
 // See SIGNATURE_ARGS documentation above for why we use arguments.length

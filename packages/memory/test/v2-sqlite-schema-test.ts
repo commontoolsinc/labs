@@ -76,10 +76,15 @@ describe("createTableSQL", () => {
     const sql = createTableSQL("messages", t);
     expect(sql).toBe(
       'CREATE TABLE IF NOT EXISTS "messages" (\n' +
-        "  id integer primary key,\n" +
-        "  author_cf_link text,\n" +
-        "  body text\n" +
+        '  "id" integer primary key,\n' +
+        '  "author_cf_link" text,\n' +
+        '  "body" text\n' +
         ")",
     );
+  });
+
+  it("rejects DDL-injection via column name or sqlType", () => {
+    expect(() => table({ "evil) ; DROP TABLE x --": "integer" })).toThrow();
+    expect(() => table({ id: "text); DROP TABLE secret;--" })).toThrow();
   });
 });

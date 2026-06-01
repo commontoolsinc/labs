@@ -92,3 +92,52 @@ describe("assertWriteSafe", () => {
     expect(() => assertWriteSafe("DELETE FROM commit")).toThrow(GuardError);
   });
 });
+
+// Regression tests for guard bypasses found in code review.
+describe("guard hardening (review findings)", () => {
+  it("rejects quoted/bracketed core-table identifiers (read + write)", () => {
+    expect(() => assertReadOnly('SELECT * FROM "commit"')).toThrow(GuardError);
+    expect(() => assertReadOnly("SELECT * FROM [commit]")).toThrow(GuardError);
+    expect(() => assertReadOnly("SELECT * FROM `commit`")).toThrow(GuardError);
+    expect(() => assertWriteSafe('DELETE FROM "commit"')).toThrow(GuardError);
+    expect(() => assertWriteSafe('UPDATE "head" SET x = 1')).toThrow(GuardError);
+    expect(() => assertWriteSafe("INSERT INTO [revision] VALUES (1)")).toThrow(
+      GuardError,
+    );
+  });
+
+  it("rejects quoted schema-qualified references", () => {
+    expect(() => assertReadOnly('SELECT * FROM "main"."commit"')).toThrow(
+      GuardError,
+    );
+    expect(() => assertReadOnly('SELECT sql FROM "main".sqlite_master')).toThrow(
+      GuardError,
+    );
+    expect(() => assertWriteSafe('INSERT INTO "main"."commit" VALUES (1)'))
+      .toThrow(GuardError);
+  });
+
+  it("rejects sqlite_master / sqlite_schema / pragma_* introspection", () => {
+    expect(() => assertReadOnly("SELECT * FROM sqlite_master")).toThrow(
+      GuardError,
+    );
+    expect(() => assertReadOnly("SELECT * FROM sqlite_schema")).toThrow(
+      GuardError,
+    );
+    expect(() => assertReadOnly("SELECT * FROM pragma_table_info('messages')"))
+      .toThrow(GuardError);
+  });
+
+  it("rejects whitespace-around-dot and forbidden-schema prefixes", () => {
+    expect(() => assertReadOnly("SELECT * FROM main . messages")).toThrow(
+      GuardError,
+    );
+    expect(() => assertReadOnly("SELECT * FROM temp.x")).toThrow(GuardError);
+  });
+
+  it("still allows table.column references and plain table names", () => {
+    assertReadOnly("SELECT t.a FROM messages t");
+    assertReadOnly("SELECT * FROM messages");
+    assertWriteSafe('INSERT INTO "messages" (a) VALUES (?)');
+  });
+});
