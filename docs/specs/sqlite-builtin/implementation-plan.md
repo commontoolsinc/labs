@@ -236,17 +236,26 @@ cross-space; every throw condition; `NULL` → `null`.
 ## Phase 5 — `sqliteQuery<Row>` transformer support
 
 **Goal (M3b):** the `Row` type argument is lowered to a runtime schema; `Cell<T>`
-fields drive decode through aliases/joins. **[gated on Q3 — transformer owner.]**
+fields drive decode through aliases/joins.
+
+This is a **routine, well-trodden change**, not a research item: the transformer
+already lowers type arguments to schemas for `toSchema<T>`, `generateObject`, and
+`lift`. Follow the existing path — see
+[`packages/ts-transformers/docs/adding-type-arg-schema-lowering.md`](../../../packages/ts-transformers/docs/adding-type-arg-schema-lowering.md)
+(added alongside this spec).
 
 **Files & work**
 
+- [`packages/ts-transformers/src/core/commonfabric-runtime-registry.ts`](../../../packages/ts-transformers/src/core/commonfabric-runtime-registry.ts)
+  — register `sqliteQuery` (a `runtime-call` entry is enough).
 - [`packages/ts-transformers/src/transformers/schema-injection.ts`](../../../packages/ts-transformers/src/transformers/schema-injection.ts)
-  and [`schema-generator.ts`](../../../packages/ts-transformers/src/transformers/schema-generator.ts)
-  — extend the `toSchema<T>` lowering machinery to recognize `sqliteQuery<Row>`
-  and inject the lowered schema as a runtime argument (the runtime stub pattern
-  is [`packages/runner/src/builder/factory.ts`](../../../packages/runner/src/builder/factory.ts) line 73).
+  — recognize the `sqliteQuery<Row>` call (`detectCallKind` + single type arg)
+  and inject the lowered schema via `createSchemaCallWithRegistryTransfer`,
+  exactly as `generate-object` injects its result schema. `schema-generator.ts`
+  emits the literal off the registry transfer; no change expected there.
 - `sqlite-query.ts` — accept the injected `Row` schema; use it as the
   highest-precedence source for `_cf_link` decode and result shaping.
+- Add a `test/fixtures/schema-transform/` fixture pair for `sqliteQuery<Row>`.
 
 **Tests:** transformer fixture pair (`input.tsx` → `expected.jsx`) under
 `packages/ts-transformers/test/fixtures/`; runtime test of the aliased-column
@@ -361,7 +370,6 @@ remain deferred).
 | --- | --- | --- |
 | ATTACH-per-file vs shared/namespaced db | Phase 1, 2 | Q6 |
 | Migration scope (SQLite `ALTER` limits) | Phase 2 | Q9 |
-| Transformer lowering of `sqliteQuery<Row>` | Phase 5 | Q3 |
 | WAL reconciliation algorithm vs. single-lock fsync | Phase 6 | Q7 |
 | On-disk co-location & cross-space dirty | Phase 7 | Q12, Q13, Q14 |
 | Connection contention / timeouts | Cross-cutting | Q8 |
