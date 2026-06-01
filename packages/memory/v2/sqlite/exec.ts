@@ -7,6 +7,34 @@ import { type BindValue, Database } from "@db/sqlite";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
 
+// Reserved schema names that may never be used as a pattern-db attach alias.
+const RESERVED_ALIASES = new Set(["main", "temp"]);
+
+/** Validate an attach alias: a plain SQL identifier, not a reserved schema. */
+export function assertSafeAlias(alias: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias) || RESERVED_ALIASES.has(alias)) {
+    throw new TypeError(`invalid attach alias: ${alias}`);
+  }
+}
+
+/** ATTACH a cell-derived database file under an internal alias. */
+export function attachDatabase(
+  db: Database,
+  alias: string,
+  path: string,
+): void {
+  assertSafeAlias(alias);
+  // Path is bound as a parameter; the alias is a validated literal (it cannot be
+  // a bind parameter in ATTACH).
+  db.exec(`ATTACH DATABASE ? AS ${alias}`, path);
+}
+
+/** DETACH a previously attached database alias. */
+export function detachDatabase(db: Database, alias: string): void {
+  assertSafeAlias(alias);
+  db.exec(`DETACH DATABASE ${alias}`);
+}
+
 export type SqliteParams = readonly unknown[] | Record<string, unknown>;
 
 export interface WriteResult {
@@ -54,8 +82,10 @@ export function runWrite(
 export function ensureTables(
   db: Database,
   tables: Record<string, TableSchema>,
+  alias?: string,
 ): void {
+  if (alias !== undefined) assertSafeAlias(alias);
   for (const [name, schema] of Object.entries(tables)) {
-    db.exec(createTableSQL(name, schema));
+    db.exec(createTableSQL(name, schema, alias));
   }
 }

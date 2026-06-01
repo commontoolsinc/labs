@@ -115,13 +115,24 @@ export function linkColumnsOf(t: TableSchema): string[] {
 
 const quoteIdent = (id: string) => `"${id.replace(/"/g, '""')}"`;
 
-/** Additive DDL for a table (Phase 2: create-only). Column names are quoted and
- *  sqlType is validated by `table()` (see normalizeColumn). */
-export function createTableSQL(name: string, t: TableSchema): string {
+/**
+ * Additive DDL for a table (Phase 2: create-only). Column names are quoted and
+ * sqlType is validated by `table()` (see normalizeColumn). When `schema` (an
+ * attach alias) is given, the table is created in that attached database —
+ * required for the per-cell-db ATTACH model, since unqualified `CREATE TABLE`
+ * always targets `main` (SQLite has no default-schema switch). The alias must be
+ * a validated identifier (see `assertSafeAlias`).
+ */
+export function createTableSQL(
+  name: string,
+  t: TableSchema,
+  schema?: string,
+): string {
   const cols = Object.entries(t.properties).map(
-    ([col, schema]) => `  ${quoteIdent(col)} ${schema.sqlType}`,
+    ([col, col_schema]) => `  ${quoteIdent(col)} ${col_schema.sqlType}`,
   );
-  return `CREATE TABLE IF NOT EXISTS ${quoteIdent(name)} (\n${
-    cols.join(",\n")
-  }\n)`;
+  const target = schema
+    ? `${quoteIdent(schema)}.${quoteIdent(name)}`
+    : quoteIdent(name);
+  return `CREATE TABLE IF NOT EXISTS ${target} (\n${cols.join(",\n")}\n)`;
 }
