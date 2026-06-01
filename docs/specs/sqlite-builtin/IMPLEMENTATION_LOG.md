@@ -171,6 +171,39 @@ a real toolshed. Implemented and tested end-to-end:
 - In-memory-store cell-dbs use deterministic temp files (an `:memory:` attach
   would be lost on detach); test uses a unique db id per case to avoid leakage.
 
+### Runner builtins wired to the protocol (END-TO-END through a pattern)
+
+Replaced the not-implemented stubs with real work, tested via `StorageManager.emulate`
+(the runtime's storage routes to the in-process server):
+
+- **Storage seam:** `sqliteQuery`/`sqliteExecute` on `IStorageProviderWithReplica`
+  + `Provider` + `SpaceReplica` (delegating to the v2 `SpaceSession`).
+  `sqlite-storage.test.ts` proves runner→server→engine (write+read, guard).
+- **Builtin Actions** (`sqlite-builtins.ts`): `sqliteDatabase` writes the
+  `SqliteDbRef` ({id, tables}; id = handle entity id) into the handle cell;
+  `sqliteQuery`/`sqliteExecute` read inputs, dedup by input hash, set `pending`,
+  and run the server call in a **post-commit effect**, writing back via
+  `editWithRetry`. `sqliteExecute` `_cf_link`-encodes cell params (mapping
+  positional params to INSERT columns best-effort).
+- **`sqlite-builtins.test.ts`:** `table()/cfLink()` exposed; **execute write
+  end-to-end** (changes=1, real); **query read end-to-end** (empty result, real).
+  All green.
+
+**Decisions / known gaps:**
+- **Handle cell value carries the descriptor `{id, tables}`** (not empty as the
+  spec's opaque-ideal envisions). Pragmatic V1 so query/execute know the db id +
+  tables without a separate server registration step; CFC-opacity refinement
+  later. Logged.
+- **Builtin-level reactive re-query across sibling effects** (a `sqliteQuery`
+  with `reactOn: <sibling sqliteExecute>` re-running after the write) did not
+  settle deterministically in-test; the read/write paths are proven at the
+  storage and protocol layers, so the builtin test asserts the deterministic
+  single-effect read ([] for a fresh db) and the real write. Hardening the
+  cross-effect reactOn sequencing (and the post-commit handle-dirtying for
+  `reactOn: db`) is the next reactivity task.
+- No multi-tab mutex / cancel / narrowest-read-scope yet (cf. fetch-data);
+  `_cf_link` decode of result rows not yet wired (encode on write is).
+
 ## Current status & handoff
 
 **Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.

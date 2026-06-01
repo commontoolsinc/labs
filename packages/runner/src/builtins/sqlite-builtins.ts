@@ -1,31 +1,34 @@
-// Runtime Actions for the SQLite builtins (Phase 0 wiring).
+// Runtime Actions for the SQLite builtins.
 //
-// These wire the builder factories (sqliteDatabase / sqliteQuery / sqliteExecute)
-// through the module registry to result cells, so the public API exists and is
-// smoke-testable end to end in-process.
+// Wire the builder factories (sqliteDatabase / sqliteQuery / sqliteExecute)
+// through the module registry to the server-side SQLite verbs over the storage
+// provider (which routes the v2 protocol to the engine, real or emulated).
 //
-// NOTE: the actual server-side execution (the `sqlite.query` protocol verb and
-// the commit-folded `sqlite` write op) is the next build increment and requires
-// the memory v2 protocol + a live toolshed integration harness. Until that lands,
-// sqliteQuery/sqliteExecute resolve to a structured `not-implemented` error
-// rather than fabricating results. sqliteDatabase yields an (empty) opaque handle
-// cell now — its entity id is the database identity (server registration of
-// tables/source is deferred with the protocol).
+// - sqliteDatabase yields an opaque handle cell whose value is the SqliteDbRef
+//   ({ id, tables }); the id is the handle cell's own (causal, opaque) entity id.
+// - sqliteQuery issues a server read after commit and writes { pending, result,
+//   error } back; re-runs when its `reactOn`/inputs change (it is an effect).
+// - sqliteExecute issues a server write after commit; cell params bound to a
+//   `_cf_link` column are encoded to sigil links (Section 02).
+//
+// Known V1 gaps (tracked in IMPLEMENTATION_LOG): writes are a separate RPC, not
+// folded into the cell commit (no cells+rows atomicity yet); no multi-tab mutex
+// / cancel / narrowest-read-scope (cf. fetch-data.ts); `_cf_link` decode of
+// result rows and the post-commit `reactOn` handle-dirtying are not wired yet.
 
-import { type Cell, createCell } from "../cell.ts";
+import { type Cell, createCell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { encodeCfLinkValue } from "./sqlite/cf-link.ts";
+import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 
-const NOT_IMPLEMENTED =
-  "sqlite: server-side execution not implemented yet (protocol pending)";
+type SqliteDbRef = { id: string; tables?: Record<string, unknown> };
+type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
 
-// TODO(sqlite-protocol): when real server execution + `reactOn` land, results
-// that depend on scoped input cells need fetch-data's narrowest-read-scope
-// handling (see scopedCell / fetch-data.ts), and the query/execute Actions need
-// `addCancel` to abort in-flight transport and clear `pending` on pattern stop.
 /** Allocate a result cell linked to the parent/pattern cells. */
 function makeResultCell<T>(
   runtime: Runtime,
@@ -47,9 +50,60 @@ function makeResultCell<T>(
   return cell as Cell<T>;
 }
 
-/** sqliteDatabase: yields an opaque handle cell (empty value; id = db identity). */
+/**
+ * Encode bound params for the wire: a cell bound to a `_cf_link` parameter is
+ * turned into a sigil-link string; a cell bound elsewhere throws (cells may only
+ * be persisted via link columns). For positional params we use the SQL's named
+ * columns when available; lacking column info, a cell param is treated as a link
+ * (encoded) — refined once column mapping lands.
+ */
+function encodeParams(sql: string, params: WireParams): WireParams {
+  if (params === undefined) return undefined;
+  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+    if (isCell(value)) {
+      if (!isLinkCol) {
+        throw new TypeError("cells may only be bound to _cf_link columns");
+      }
+      return encodeCfLinkValue(value);
+    }
+    return value;
+  };
+  if (Array.isArray(params)) {
+    // Map positional params to the INSERT column list when present.
+    const cols = parseInsertColumns(sql);
+    return params.map((v, i) =>
+      encodeOne(v, cols ? isCfLinkColumn(cols[i] ?? "") : isCell(v))
+    );
+  }
+  const rec = params as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rec)) {
+    out[k] = encodeOne(v, isCfLinkColumn(k));
+  }
+  return out;
+}
+
+/** Best-effort parse of the column list from `INSERT INTO t (a, b, c) ...`. */
+function parseInsertColumns(sql: string): string[] | undefined {
+  const m = sql.match(/insert\s+into\s+[^(]+\(([^)]*)\)/i);
+  if (!m) return undefined;
+  return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
+}
+
+function readDbRef(value: unknown): SqliteDbRef {
+  if (
+    value && typeof value === "object" &&
+    typeof (value as SqliteDbRef).id === "string"
+  ) {
+    const ref = value as SqliteDbRef;
+    return { id: ref.id, tables: ref.tables };
+  }
+  throw new TypeError("sqlite: invalid database handle");
+}
+
+/** sqliteDatabase: yields an opaque handle cell whose value is the SqliteDbRef. */
 export function sqliteDatabase(
-  _inputsCell: Cell<any>,
+  inputsCell: Cell<any>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
@@ -57,19 +111,21 @@ export function sqliteDatabase(
   runtime: Runtime,
 ): RawBuiltinResult {
   let initialized = false;
-  let handle: Cell<Record<string, never>>;
+  let handle: Cell<SqliteDbRef>;
   const action: Action = (tx: IExtendedStorageTransaction) => {
     if (!initialized) {
-      handle = makeResultCell<Record<string, never>>(
+      handle = makeResultCell<SqliteDbRef>(
         runtime,
         parentCell,
         cause,
         "sqliteDatabase",
         tx,
       );
-      // Empty readable value: the handle is opaque; the source descriptor is
-      // server-side state keyed by this cell's id (deferred with the protocol).
-      handle.withTx(tx).set({});
+      const options = inputsCell.withTx(tx).get() as
+        | { tables?: Record<string, unknown> }
+        | undefined;
+      const id = handle.entityId?.["/"] ?? JSON.stringify(handle.getAsLink());
+      handle.withTx(tx).set({ id, tables: options?.tables });
       sendResult(tx, handle);
       initialized = true;
     }
@@ -79,9 +135,9 @@ export function sqliteDatabase(
 
 type QueryState = { pending: boolean; result?: unknown[]; error?: unknown };
 
-/** sqliteQuery: reactive read (server execution pending). */
+/** sqliteQuery: reactive server-side read. */
 export function sqliteQuery(
-  _inputsCell: Cell<any>,
+  inputsCell: Cell<any>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
@@ -89,7 +145,10 @@ export function sqliteQuery(
   runtime: Runtime,
 ): RawBuiltinResult {
   let initialized = false;
+  let lastHash: string | undefined;
   let result: Cell<QueryState>;
+  const space = parentCell.space;
+
   const action: Action = (tx: IExtendedStorageTransaction) => {
     if (!initialized) {
       result = makeResultCell<QueryState>(
@@ -99,10 +158,52 @@ export function sqliteQuery(
         "sqliteQuery",
         tx,
       );
-      result.withTx(tx).set({ pending: false, error: NOT_IMPLEMENTED });
       sendResult(tx, result);
       initialized = true;
     }
+
+    const inputs = inputsCell.withTx(tx).get() as {
+      db?: unknown;
+      sql?: string;
+      params?: WireParams;
+      reactOn?: unknown;
+    } | undefined;
+    if (!inputs?.db || typeof inputs.sql !== "string") return;
+
+    const db = readDbRef(inputs.db);
+    const hash = computeInputHashFromValue({
+      db,
+      sql: inputs.sql,
+      params: inputs.params ?? null,
+      reactOn: inputs.reactOn ?? null,
+    });
+    if (hash === lastHash) return;
+    lastHash = hash;
+    result.withTx(tx).set({ pending: true });
+
+    const sql = inputs.sql;
+    const params = inputs.params;
+    tx.enqueuePostCommitEffect({
+      id: `sqliteQuery:${hash}`,
+      idempotencyKey: `sqliteQuery:${hash}`,
+      kind: "sqlite-query",
+      async flush() {
+        const provider = runtime.storageManager.open(space);
+        try {
+          const res = await provider.sqliteQuery!(db, sql, params);
+          await runtime.editWithRetry((wtx) => {
+            result.withTx(wtx).set({ pending: false, result: res.rows });
+          });
+        } catch (error) {
+          await runtime.editWithRetry((wtx) => {
+            result.withTx(wtx).set({
+              pending: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+        }
+      },
+    });
   };
   return { action };
 }
@@ -113,9 +214,9 @@ type ExecuteState = {
   error?: unknown;
 };
 
-/** sqliteExecute: write (commit-folded execution pending). */
+/** sqliteExecute: server-side write. */
 export function sqliteExecute(
-  _inputsCell: Cell<any>,
+  inputsCell: Cell<any>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
@@ -123,7 +224,10 @@ export function sqliteExecute(
   runtime: Runtime,
 ): RawBuiltinResult {
   let initialized = false;
+  let lastHash: string | undefined;
   let result: Cell<ExecuteState>;
+  const space = parentCell.space;
+
   const action: Action = (tx: IExtendedStorageTransaction) => {
     if (!initialized) {
       result = makeResultCell<ExecuteState>(
@@ -133,10 +237,60 @@ export function sqliteExecute(
         "sqliteExecute",
         tx,
       );
-      result.withTx(tx).set({ pending: false, error: NOT_IMPLEMENTED });
       sendResult(tx, result);
       initialized = true;
     }
+
+    const inputs = inputsCell.withTx(tx).get() as {
+      db?: unknown;
+      sql?: string;
+      params?: WireParams;
+    } | undefined;
+    if (!inputs?.db || typeof inputs.sql !== "string") return;
+
+    const db = readDbRef(inputs.db);
+    let encodedParams: WireParams;
+    try {
+      encodedParams = encodeParams(inputs.sql, inputs.params);
+    } catch (error) {
+      result.withTx(tx).set({
+        pending: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    const hash = computeInputHashFromValue({
+      db,
+      sql: inputs.sql,
+      params: encodedParams ?? null,
+    });
+    if (hash === lastHash) return;
+    lastHash = hash;
+    result.withTx(tx).set({ pending: true });
+
+    const sql = inputs.sql;
+    tx.enqueuePostCommitEffect({
+      id: `sqliteExecute:${hash}`,
+      idempotencyKey: `sqliteExecute:${hash}`,
+      kind: "sqlite-execute",
+      async flush() {
+        const provider = runtime.storageManager.open(space);
+        try {
+          const res = await provider.sqliteExecute!(db, sql, encodedParams);
+          await runtime.editWithRetry((wtx) => {
+            result.withTx(wtx).set({ pending: false, result: res });
+          });
+        } catch (error) {
+          await runtime.editWithRetry((wtx) => {
+            result.withTx(wtx).set({
+              pending: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+        }
+      },
+    });
   };
   return { action };
 }

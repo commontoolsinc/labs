@@ -49,47 +49,91 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     });
   });
 
-  it("wires sqliteQuery through to a result cell (server exec pending)", async () => {
-    const queryPattern = cf.pattern(() => {
-      const db = cf.sqliteDatabase({
-        tables: { t: cf.table({ id: "integer" }) },
-      });
-      return cf.sqliteQuery({ db, sql: "SELECT id FROM t", reactOn: db });
-    });
-    const resultCell = runtime.getCell(
-      space,
-      "sqlite-query-wiring",
-      queryPattern.resultSchema,
-      tx,
-    );
-    const result = runtime.run(tx, queryPattern, {}, resultCell);
-    tx.commit();
-    await runtime.idle();
-
-    const q = result.get() as { pending: boolean; error?: unknown };
-    expect(q.pending).toBe(false);
-    expect(typeof q.error).toBe("string"); // not-implemented marker, not a fabricated result
-  });
-
-  it("wires sqliteExecute through to a result cell (commit-folded exec pending)", async () => {
+  it("executes a write through the builtin against the emulated server", async () => {
     const execPattern = cf.pattern(() => {
       const db = cf.sqliteDatabase({
-        tables: { t: cf.table({ id: "integer" }) },
+        tables: {
+          notes: cf.table({ id: "integer primary key", body: "text" }),
+        },
       });
-      return cf.sqliteExecute({ db, sql: "INSERT INTO t (id) VALUES (1)" });
+      return cf.sqliteExecute({
+        db,
+        sql: "INSERT INTO notes (body) VALUES (?)",
+        params: ["hi"],
+      });
     });
     const resultCell = runtime.getCell(
       space,
-      "sqlite-exec-wiring",
+      "sqlite-exec-real",
       execPattern.resultSchema,
       tx,
     );
     const result = runtime.run(tx, execPattern, {}, resultCell);
     tx.commit();
-    await runtime.idle();
 
-    const e = result.get() as { pending: boolean; error?: unknown };
-    expect(e.pending).toBe(false);
-    expect(typeof e.error).toBe("string");
+    const e = await waitUntil<ExecState>(
+      runtime,
+      () => result.get() as ExecState,
+      (v) => v.pending === false,
+    );
+    expect(e.error).toBeUndefined();
+    expect(e.result?.changes).toBe(1);
+  });
+
+  it("reads through the query builtin (full builder->server->engine path)", async () => {
+    // Deterministic single-effect read: a fresh db's declared table is created
+    // server-side (ensureTables) and the query returns an empty result. Reading
+    // non-empty data written by a *sibling* sqliteExecute in the same pattern
+    // depends on cross-effect reactОn sequencing, which is proven at the storage
+    // (sqlite-storage.test) and protocol (v2-sqlite-protocol-test) layers;
+    // builtin-level reactive re-query is tracked in IMPLEMENTATION_LOG.
+    const queryPattern = cf.pattern(() => {
+      const db = cf.sqliteDatabase({
+        tables: {
+          notes: cf.table({ id: "integer primary key", body: "text" }),
+        },
+      });
+      return cf.sqliteQuery({ db, sql: "SELECT body FROM notes", reactOn: db });
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "sqlite-query-real",
+      queryPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, queryPattern, {}, resultCell);
+    tx.commit();
+
+    const q = await waitUntil<QueryState>(
+      runtime,
+      () => result.get() as QueryState,
+      (v) => v.pending === false,
+    );
+    expect(q.error).toBeUndefined();
+    expect(q.result).toEqual([]);
   });
 });
+
+type ExecState = {
+  pending: boolean;
+  result?: { changes: number; lastInsertRowid?: number };
+  error?: unknown;
+};
+type QueryState = { pending: boolean; result?: unknown[]; error?: unknown };
+
+// Pump the runtime (idle) and poll the result cell until `pred` holds. This
+// drives the post-commit async flush + any reactOn re-runs to completion.
+async function waitUntil<T>(
+  runtime: Runtime,
+  read: () => T,
+  pred: (v: T) => boolean,
+  iterations = 100,
+): Promise<T> {
+  for (let i = 0; i < iterations; i++) {
+    await runtime.idle();
+    const v = read();
+    if (pred(v)) return v;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error("timeout waiting for sqlite result");
+}
