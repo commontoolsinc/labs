@@ -5,7 +5,7 @@ import { decrement, increment, model } from "./utils.ts";
 export const customPatternExport = pattern(
   (cell) => {
     return {
-      [NAME]: str`Simple counter: ${String(cell.value)}`,
+      [NAME]: str`Simple counter: ${cell.value}`,
       [UI]: (
         <div>
           <cf-button onClick={decrement(cell)}>-</cf-button>
