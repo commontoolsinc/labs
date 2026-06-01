@@ -16,7 +16,6 @@ import {
   FS,
   ID,
   ID_FIELD,
-  isPattern,
   NAME,
   schema as schemaIdentity,
   SELF,
@@ -48,7 +47,7 @@ import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
-import { setPatternProgram } from "./pattern-metadata.ts";
+import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -130,7 +129,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   // instantiated. This way they get saved with a way to rehydrate them.
   const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
     for (const [value, program] of exports) {
-      if (isPattern(value)) {
+      // `isTrustedPattern` (not the structural `isPattern`): only a value the
+      // trusted builder produced may acquire a rehydration program, so a
+      // `__cf_data`-forged pattern-shaped export cannot launder trust metadata.
+      if (isTrustedPattern(value)) {
         // Associate the program with the pattern via the side-table so it works
         // even when the exported pattern has been frozen by the loader.
         setPatternProgram(value, program);

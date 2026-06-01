@@ -1,4 +1,5 @@
 import type { RuntimeProgram } from "../harness/types.ts";
+import { isPattern, type Pattern } from "./types.ts";
 
 /**
  * Side-table storage for pattern metadata that is associated *after* a pattern
@@ -21,6 +22,17 @@ import type { RuntimeProgram } from "../harness/types.ts";
 
 const programByPattern = new WeakMap<object, RuntimeProgram>();
 const verifiedLoadIdByValue = new WeakMap<object, string>();
+
+// Provenance brand: a value is added here ONLY by the trusted `pattern()`
+// builder (see builder/pattern.ts). `isPattern` is a purely structural check
+// (`{argumentSchema, resultSchema, nodes}`), so an attacker can forge that shape
+// via `__cf_data({...})` — a frozen plain object that passes `isPattern`.
+// Trust-granting sites (program / verified-load-id association, entry-pattern
+// selection) must use `isTrustedPattern` instead, so forged pattern-shaped data
+// cannot launder itself into the trust side-tables. The runner's own
+// instantiation logic keeps using structural `isPattern` (it operates on
+// derivation copies and independently re-resolves node implementations).
+const trustedPatterns = new WeakSet<object>();
 
 function asKey(value: unknown): object | undefined {
   if (value === null) return undefined;
@@ -56,4 +68,22 @@ export function getVerifiedLoadId(value: unknown): string | undefined {
 export function setVerifiedLoadId(value: unknown, id: string): void {
   const key = asKey(value);
   if (key) verifiedLoadIdByValue.set(key, id);
+}
+
+/** Stamp a value as produced by the trusted `pattern()` builder. */
+export function brandTrustedPattern<T>(value: T): T {
+  const key = asKey(value);
+  if (key) trustedPatterns.add(key);
+  return value;
+}
+
+/**
+ * True only for a value that is both structurally a pattern AND was produced by
+ * the trusted builder (carries the provenance brand). Use this at trust-granting
+ * sites; a `__cf_data`-forged pattern-shaped object is `isPattern` but NOT
+ * `isTrustedPattern`.
+ */
+export function isTrustedPattern(value: unknown): value is Pattern {
+  const key = asKey(value);
+  return key !== undefined && trustedPatterns.has(key) && isPattern(value);
 }

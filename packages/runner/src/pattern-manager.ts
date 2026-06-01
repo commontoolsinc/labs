@@ -9,6 +9,7 @@ import {
 import {
   getPatternProgram,
   getVerifiedLoadId,
+  isTrustedPattern,
   setPatternProgram,
   setVerifiedLoadId,
 } from "./builder/pattern-metadata.ts";
@@ -170,6 +171,7 @@ export class PatternManager {
     value: unknown,
     verifiedLoadId: string,
     seen = new Set<unknown>(),
+    trusted = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
@@ -179,7 +181,14 @@ export class PatternManager {
     }
     seen.add(value);
 
-    if (isPattern(value)) {
+    // Trust is rooted at a builder-produced (`isTrustedPattern`) value; nested
+    // subpatterns within a trusted pattern's serialized node graph are legit
+    // (and unbranded), so once inside a trusted subtree we propagate to
+    // structurally-`isPattern` values too. A `__cf_data`-forged pattern-shaped
+    // value at the top level (trusted === false) is never seeded, so it cannot
+    // launder a CFC identity into the side-tables.
+    const subtreeTrusted = trusted || isTrustedPattern(value);
+    if (subtreeTrusted && isPattern(value)) {
       const originalPattern = this.findOriginalPattern(value);
       if (!this.patternToVerifiedLoadId.has(originalPattern)) {
         this.patternToVerifiedLoadId.set(originalPattern, verifiedLoadId);
@@ -200,6 +209,7 @@ export class PatternManager {
         descriptor.value,
         verifiedLoadId,
         seen,
+        subtreeTrusted,
       );
     }
   }
@@ -501,9 +511,14 @@ export class PatternManager {
       );
     }
     const pattern = main[exportName] as Pattern;
-    setPatternProgram(pattern, program);
-    if (loadId) {
-      this.seedVerifiedLoadIds(pattern, loadId);
+    // Only a trusted (builder-produced) entry pattern receives rehydration /
+    // verified-load metadata; a forged pattern-shaped export gets none and so
+    // cannot masquerade as a verified-loaded pattern in the side-tables.
+    if (isTrustedPattern(pattern)) {
+      setPatternProgram(pattern, program);
+      if (loadId) {
+        this.seedVerifiedLoadIds(pattern, loadId);
+      }
     }
     return pattern;
   }
