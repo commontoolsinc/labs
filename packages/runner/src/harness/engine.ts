@@ -390,7 +390,10 @@ export class Engine extends EventTarget implements Harness {
         console: this.consoleShim,
       });
       // Concatenated module bodies give the source-location frame a `script`
-      // for fn.src `indexOf` resolution.
+      // for fn.src `indexOf` resolution. (Insertion order need not match the
+      // import-execution order; resolveLocationFromFunctionSource falls back to
+      // a from-zero scan, and any mis-attribution degrades fail-closed at the
+      // CFC identity layer — see the fn.src note in the design doc.)
       const script = [...graph.compiledBodies.values()].join("\n");
       this.executableRegistry.setVerifiedLoadBundleId(
         loadId,
@@ -457,6 +460,14 @@ export class Engine extends EventTarget implements Harness {
           : path;
         exportMap[fileName] = namespace;
         for (const [exportName, value] of Object.entries(namespace)) {
+          // Only object/function exports are sub-pattern candidates. Skip the
+          // `__esModule` flag and primitives, which would otherwise collide in
+          // this value-keyed map (e.g. every module's `true`).
+          if (exportName === "__esModule") continue;
+          if (typeof value !== "object" && typeof value !== "function") {
+            continue;
+          }
+          if (value === null) continue;
           exportsByValue.set(value, {
             main: fileName,
             mainExport: exportName,
