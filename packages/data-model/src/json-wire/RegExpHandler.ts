@@ -12,10 +12,6 @@ import { makeProblematic } from "./makeProblematic.ts";
  * Handler for `FabricRegExp`. Serializes the essential state
  * `{ source, flags, flavor }` under the `RegExp@1` tag. Wire format:
  * `{ "/RegExp@1": { "flags": "<flags>", "flavor": "<flavor>", "source": "<source>" } }`.
- * `FabricRegExp` is a direct member of `FabricValue` (via `FabricPrimitive`),
- * so this handler uses `instanceof` directly. The state object is a plain
- * record of strings (no nested `FabricValue`s), so it is recursed through the
- * serializer like any other object.
  */
 export const RegExpHandler: TypeHandler = {
   tag: TAGS.RegExp,
