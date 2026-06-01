@@ -764,3 +764,370 @@
     `deno test --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git packages/runner/test/scheduler-core.test.ts packages/runner/test/scheduler-pull.test.ts packages/runner/test/scheduler-pull-references.test.ts packages/runner/test/pattern-scope.test.ts`
   - full runner suite:
     `deno task test` in `packages/runner`
+
+## 2026-05-31 - Detailed Reload Investigation Recap (Newest First)
+
+This section reconstructs the reload investigation in reverse chronological
+order. The goal is to preserve not just the fixes, but also the observations
+that made each fix necessary. The branch changed several independent things:
+piece loading order, view-schema syncing, persisted read watermarks, action-id
+stability, pending-read ordering, pending-read canonicalization, precise dirty
+paths, and pending-read capture timing. Most of the debugging confusion came
+from these concerns interacting in the same reload test.
+
+### Fresh probe: what still runs after the pending-read fixes
+
+After the pending-read local sequence capture fix, the main question was why
+the reload regression shard still reported non-zero action runs. The important
+finding is that the remaining work is not one single class of failure.
+
+Two local `patterns-reload` probes with temporary logging showed the following:
+
+- One run had roughly 5.1s from reload start to rendered state, 809 graph nodes,
+  1858 graph edges, 11 actions with stats, 18 scheduler action runs, 6
+  computation runs from stats, and 8 effect runs from stats.
+- A second run had roughly 4.4s from reload start to rendered state, the same
+  809 graph nodes and 1858 graph edges, 11 actions with stats, 23 scheduler
+  action runs, 7 computation runs from stats, and 12 effect runs from stats.
+- Rehydration in the second run classified 27 actions as clean, 21 as
+  snapshot-missing, and 10 as dirty.
+- Observation replay in those runs was mostly healthy. One probe kept 7
+  no-op observations and dropped 1; another kept 5 and dropped 1. The drop
+  reason was `pending-read-missing`, and the dropped sample was a sink
+  observation rather than one of the expensive notebook/default-app
+  computations.
+
+The snapshot-missing category was initially suspicious, but the concrete action
+labels made it less surprising. A number of missing snapshots belonged to
+auxiliary or system pieces that default-app constructs during load but does not
+necessarily demand before the test reloads: favorites, home, piece-grid,
+summary-index, and similar helpers. Backlinks-index was mixed: top-level work
+had snapshots, while nested UI/filter/map work was missing because it had not
+run before reload. In the current probes, no action-identity mismatch was
+visible for those cases. They were missing because they had not produced a
+pre-reload observation yet.
+
+The dirty/stale category was also less mysterious after inspecting the database.
+For the main notebook actions that re-ran, `scheduler_action_state` pointed at
+real later writes:
+
+- `notebook.tsx:818` had `latest_observation_id=51`,
+  `direct_dirty_seq=229`, and `stale_seq=285`.
+- `notebook.tsx:891` had `latest_observation_id=52` and `stale_seq=285`.
+- Commit seq 229 corresponded to the final rapid-create-note transaction,
+  including the flags `showNewNotePrompt=false` and
+  `usedCreateAnotherNote=false`, plus the new note/link/result documents.
+- Commit seq 285 corresponded to a later derived notebook label patch, changing
+  `parentNotebookLabel` to the seven-note label.
+
+That explains an important pull-mode behavior: an action can legitimately be
+dirty at shutdown if no later demand forced it to settle. On reload, if the UI
+now demands that action, it has to run. This is not the same as the original
+"counter says 7 but only 6 notes render" bug; it is the expected consequence of
+persisting and honoring dirty state instead of pretending every previously seen
+action is clean.
+
+There is still a remaining question around dropped scheduler-only observations.
+`scheduler_observation_replay` showed earlier drops such as:
+
+- local seq 85 dropped as `stale-confirmed-read` for `notebook.tsx:818`, with
+  the observation at server seq 50.
+- local seq 86 dropped as `stale-confirmed-read` for `notebook.tsx:891`, also
+  observed at server seq 50.
+- later local seqs for the same actions were kept at newer observed server
+  seqs.
+
+The memory engine is not dropping those because the document head merely
+advanced. `resolveSchedulerObservationReadEvidence()` uses `findConflictSeq()`,
+which checks actual conflicting set/delete/patch paths. A
+`stale-confirmed-read` therefore means the observation really was stale for an
+overlapping read. The remaining design question is whether the client should
+have built that observation against pending read evidence instead of stale
+confirmed evidence, or whether this is an expected transient drop followed by a
+newer kept observation.
+
+Two probes were useful mostly because they ruled things out:
+
+- Adding an extra `rt.synced()` after reload did not make the result cleaner.
+  It caused more loading and scheduler work and should not be considered a
+  fix.
+- Calling `getGraphSnapshot()` before reload was not neutral. It produced a lot
+  more graph/loading activity and is useful only as diagnostic instrumentation,
+  not as a measurement of normal reload behavior.
+
+Current interpretation: the large correctness holes are fixed. Remaining reload
+work is a mixture of legitimate dirty-on-reload actions, auxiliary actions that
+were never observed before reload, cheap sink/effect work, and possibly a small
+number of transient stale scheduler-only observations. The next performance
+questions should separate these categories rather than treating "non-zero
+actions after reload" as one failure mode.
+
+### `3a412b3f0` - retain pending read dependencies
+
+The last correctness fix came from a failing runner suite, not from the reload
+test directly. `git bisect` identified the read-watermark change as the point
+where some scheduler tests gained extra action runs. A trigger trace in
+`scheduler-core.test.ts` showed an extra `adder2` run caused by a transaction
+revert/retry.
+
+The root cause was a timing hole in how read evidence was encoded. A
+transaction could read optimistic pending local state, but then wait long enough
+for the writer to confirm before the dependent transaction was encoded.
+`buildReads()` rediscovered pending dependencies from the current pending queue
+at encode time. Once the writer had confirmed, that pending dependency was gone,
+so the read was encoded as an old confirmed server seq. The server then
+correctly rejected the transaction as stale, because the encoded confirmed read
+did not reflect the data the transaction had actually observed.
+
+The fix was to record `pendingLocalSeq` at read time in V2 read activities.
+Commit construction now uses the recorded pending dependency before falling
+back to the current pending queue. This applies to normal semantic commits and
+to scheduler-only observations. The key design point is that pending-read
+identity is part of the observation, not something that can always be recovered
+later from the queue.
+
+This fixed a general speculative-execution race. It also clarified why the
+server-side canonicalization work was not enough on its own: the server can
+rewrite pending reads only if the client sends a pending read reference in the
+first place.
+
+### `4ad6e575d` - narrow scheduler patch dirtying
+
+The next discovery was that scheduler dirtying had accidentally inherited
+storage-conflict path expansion rules. For patch commits, memory-v2 already has
+logic that expands writes to include parent paths. That is useful for CFC and
+semantic conflict detection, where structural parent changes must conflict with
+children in conservative ways.
+
+Scheduler dirty propagation has a different job. If an action recursively read
+one child under an object, and another commit adds or removes a sibling, dirtying
+the parent path can make the recursive sibling reader look affected even when
+the scheduler's own shallow-read logic would have handled structural changes
+more precisely.
+
+The fix added scheduler-specific patch write paths:
+
+- replace/add/remove/splice dirty the exact patch path for scheduler purposes.
+- move dirties the `from` and `to` paths.
+- parent-path expansion remains available to the storage conflict machinery,
+  but is no longer reused blindly for scheduler dirtying.
+
+This is a good example of a recurring theme in the branch: transaction evidence
+can be shared, but each layer needs path semantics that match the decision it
+is making.
+
+### `be6ad750a` - stabilize persisted subpattern source ids
+
+The previous round of debugging found unstable action identities for subpattern
+work. The symptom was that some actions could not reuse persisted scheduler
+snapshots even though their source code and position in the pattern looked
+stable.
+
+The source of instability was pattern metadata moving through cells as
+query-result proxies. Those proxies are valuable for preserving provenance and
+links, but pattern identity must be derived from concrete program contents.
+Otherwise the same subpattern can hash differently depending on whether it is
+seen through the parent `program.files` link or as concrete file contents.
+
+The fix introduced materialization of `RuntimeProgram` data before registering,
+saving, or compiling patterns. The durable identity path now hashes a plain
+program shape: `main`, optional `mainExport`, and concrete `{ name, contents }`
+file entries. That keeps subpattern source ids stable across reloads and across
+different ways of reaching the same program.
+
+This mattered for persistent scheduler state because action observations are
+only useful if the action identity is stable enough to find them again after
+restart.
+
+### `956f9d4e4` - narrow scheduler observation commit waits
+
+After adding server-side pending-read canonicalization and client-side ordering,
+the first safe implementation waited for all outstanding commits before
+flushing scheduler-only no-op observations. That was correct but too broad. It
+turned no-op observation persistence into a global serialization point.
+
+The important refinement was to wait only for commits actually referenced by
+the batch's pending read evidence. A scheduler observation that reads only
+confirmed data should not wait behind unrelated local writes. A scheduler
+observation that cites pending local seq 12 must wait for that seq to either be
+confirmed or fail so the server can canonicalize or reject it deterministically.
+
+The implementation changed commit tracking from an undifferentiated set to a
+map keyed by local seq, then computed the prerequisite commit promises for each
+no-op scheduler batch. `synced()` still waits for all outstanding sync and
+commit work; the narrowing only applies to when scheduler-only batches are
+allowed to leave the client.
+
+This reduced unnecessary waiting while preserving the ordering invariant that
+server-side pending-read rewrite depends on.
+
+### `9cece330e` - canonicalize scheduler pending read watermarks
+
+Before this fix, the client carried scheduler read watermarks, but the server
+did not take ownership of them. That made no-op observations fragile when they
+read data from pending local writes. The observation could be correct from the
+client's perspective, but its read watermark was not yet a durable server seq.
+
+The memory engine now canonicalizes kept scheduler observations. If a
+scheduler-only observation cites a pending semantic write by session/local seq,
+and that pending write has resolved, the engine rewrites matching read
+watermarks to the resolved server seq before persisting the observation payload,
+snapshot, and replay row.
+
+The important behavior is asymmetric:
+
+- If the pending dependency can be resolved, the observation is stored with
+  durable server evidence.
+- If the pending dependency is missing or stale, the observation is dropped
+  without failing the semantic data path.
+
+That makes the server authoritative for scheduler evidence while keeping
+scheduler observations best-effort metadata. This also matches the product
+expectation that outdated scheduling metadata should be discarded, not treated
+as a user-visible commit conflict.
+
+### `618fe0d89` - order no-op scheduler observations after writes
+
+This was the first fix for the `pending-read-missing` storm seen in reload
+logs. The investigation found two client ordering bugs.
+
+First, a scheduler-only no-op observation batch could transact while earlier
+semantic commits were still outstanding. If the no-op observation referenced
+one of those pending writes, the server had no durable commit to resolve it
+against yet and dropped the observation as `pending-read-missing`.
+
+Second, `pushCommit()` flushed scheduler observations before sending the current
+semantic commit. A semantic commit's optimistic notification can itself enqueue
+new scheduler observations that depend on the current commit. Those observations
+were then sent too early, before the write they referenced existed on the
+server.
+
+The fix split ordering by local sequence:
+
+- Scheduler-only batches wait for commits that were already outstanding when
+  the flush began.
+- A semantic commit may flush older queued no-op observations before the write.
+- Observations created by that semantic commit's own optimistic notification
+  have later local seqs and are flushed only after the current write can be
+  resolved by the server.
+
+This dramatically reduced `pending-read-missing` noise in the reload shard and
+made it clear that some remaining drops were different issues, not the same
+ordering bug.
+
+### `fcbe9b2cc` - stabilize persistent scheduler reloads
+
+This was the large reload stabilization commit. It combined several discoveries
+that all surfaced as "too many actions run after reload" but had different
+causes.
+
+First, persisted observations restored trigger paths but not per-read server
+watermarks. That meant a rehydrated action could say "I read doc 456", but when
+doc 456 later loaded at the same server seq, the scheduler did not know that
+this load was current-enough. It dirtied the action as if new data had arrived.
+The fix added explicit read watermarks and made pull/integrate notification
+handling seq-aware. Loading a document at a seq already covered by the action's
+read watermark can now produce a `skip-current-sync` decision instead of
+marking the action dirty. Missing or unreliable watermarks remain conservative.
+
+Second, action identity was unstable when the same pattern code was compiled
+through different routes. Notebook actions compiled through the default-app
+bundle and through the Notebook entry point had different source-map compile
+ids, so their durable action ids did not match. The fix canonicalized source
+locations back to authored file paths before hashing scheduler action identity.
+
+Third, raw builtin action identity was too sensitive to recursive redirect
+write traversal. A raw `map` action could get a different durable id because
+linked-list contents changed the write redirect traversal. For action identity,
+only declared redirect roots should matter. Recursive redirect traversal is
+still needed for scheduling evidence, but not for the durable id fingerprint.
+
+Fourth, the reload integration test itself was reworked. The test now waits for
+rendered note chips before reload, moves the reload case into its own
+`patterns-reload` shard, asserts the list fully renders after reload, and
+tracks action/computation budgets separately from the broader default-app test.
+This prevented the test from measuring catch-up work caused by reloading before
+the page had actually settled.
+
+This commit was the point where the core rehydration model became viable:
+stable action ids plus per-read watermarks let the client distinguish "data
+loaded at the version I already observed" from "new data arrived and I am now
+dirty".
+
+### `67d3ed696` - sync rendered pieces with view schema
+
+The initial piece sync fix synced the selected piece cell before starting it,
+but it used a minimal schema. That was not enough for the page-rendering path.
+The UI immediately needs the rendered piece's name and UI entry points, and
+those reads should be loaded together with the scheduler metadata that proves
+the piece is current.
+
+The fix applies the supplied view schema to the cell being synced. In practice,
+the rendering paths sync the piece with the schema that covers the data the UI
+is about to read, especially the pattern name and UI. This is intentionally
+limited to rendering paths because schema-directed sync can be much more
+expensive than a minimal read.
+
+The discovery here was that "sync before start" is only meaningful if the sync
+covers the paths the runtime will immediately pull on. A minimal piece cell can
+be synced and still leave the important source/UI documents to arrive later,
+which recreates the same hydration dirtying problem under a different name.
+
+### `e72dbba2d` - log browser reload metrics
+
+This commit added browser-side reload timing instrumentation to the integration
+test. The goal was to separate browser navigation/paint cost from runtime,
+storage, and scheduler cost.
+
+The useful finding was that browser metrics were not where most of the time
+went. Local runs showed normal browser events such as load and first contentful
+paint happening quickly relative to the several seconds needed for the app to
+reach the fully rendered notebook state. That shifted the investigation toward
+runtime phases: piece sync, scheduler rehydration, dependency collection,
+storage notification handling, and post-reload action runs.
+
+The instrumentation also made it easier to avoid over-reading a single wall
+clock number. "Reload took N seconds" can mean browser navigation, data sync,
+scheduler work, rendering work, or waiting for the test's stability condition.
+Those need to be measured separately.
+
+### `003f58da5` - sync loaded pieces before start
+
+The first commit on the branch addressed the simplest load-order problem.
+Before starting a piece loaded from the URL or the default selected piece, the
+manager now waits for the piece cell to sync. Without this, the runner could
+start while the selected piece document was still only partially available.
+
+That race was especially harmful for persistent scheduler state. The server
+could send metadata saying an action was current enough relative to some source
+document, but if that source document had not loaded yet, the later hydration
+notification looked like fresh data and dirtied the action. The intended model
+is the opposite: load the source data and scheduler metadata together, then
+start the runner with enough information to decide whether the action is still
+current.
+
+This commit did not solve the whole problem because the first sync was too
+minimal. It established the correct direction: piece startup must be ordered
+after the relevant data has arrived. The later view-schema sync and read
+watermark changes made that ordering precise enough to be useful.
+
+### Cross-cutting lessons
+
+- Stable action identity is a prerequisite. If an action's durable id changes,
+  no amount of persisted read/write evidence helps because the scheduler cannot
+  find the old observation.
+- Read evidence has to be captured at the time the action observed data. It
+  cannot always be reconstructed later from the current pending queue or the
+  current document head.
+- The memory server should canonicalize scheduler evidence to durable server
+  seqs when it can. When it cannot, dropping scheduler metadata is preferable to
+  treating it as a semantic conflict.
+- Pull-mode dirty state can legitimately persist across shutdown. A clean
+  reload optimization should avoid re-running current actions, but it should
+  not erase real dirty/stale state just because the page restarted.
+- Scheduler dirty paths and storage conflict paths are related but not
+  identical. Reusing broad storage conflict paths for scheduler propagation can
+  over-dirty readers.
+- Test instrumentation can perturb the scheduler. Probes that force graph
+  snapshots or extra syncs are useful for diagnosis, but their action counts
+  should not be treated as normal reload counts.
