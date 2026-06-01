@@ -7,31 +7,42 @@ import {
   setEsmModuleLoaderConfig,
 } from "../src/sandbox/esm-loader-config.ts";
 
-// CF_ESM_MODULE_LOADER is unset in the normal test process, so the env-seeded
-// default is `false`. (The env-on path is exercised by running the suite with
-// CF_ESM_MODULE_LOADER=1 — the regression cross-check.)
+// The env-seeded default depends on CF_ESM_MODULE_LOADER, which is unset in the
+// normal test process but SET during the flag-on cross-check
+// (CF_ESM_MODULE_LOADER=1). Compute the expected default from the env so these
+// assertions are deterministic under both — testing the set/get/reset mechanics
+// relative to whatever the env default is, not a hardcoded value.
+const envDefault: boolean = (() => {
+  try {
+    const v = (globalThis as {
+      Deno?: { env?: { get(name: string): string | undefined } };
+    }).Deno?.env?.get?.("CF_ESM_MODULE_LOADER");
+    return v === "1" || v === "true";
+  } catch {
+    return false;
+  }
+})();
+
 describe("esm-loader-config", () => {
   afterEach(() => resetEsmModuleLoaderConfig());
 
-  it("defaults off when CF_ESM_MODULE_LOADER is unset", () => {
+  it("defaults to the CF_ESM_MODULE_LOADER env value", () => {
     resetEsmModuleLoaderConfig();
-    expect(getEsmModuleLoaderConfig()).toBe(false);
+    expect(getEsmModuleLoaderConfig()).toBe(envDefault);
   });
 
   it("an explicit option overrides; undefined falls back to the env default", () => {
-    setEsmModuleLoaderConfig(true);
-    expect(getEsmModuleLoaderConfig()).toBe(true);
-    // No prior-value inheritance: undefined re-reads the env default (off here),
-    // so a Runtime without the option never sees a stale override.
-    setEsmModuleLoaderConfig(undefined);
-    expect(getEsmModuleLoaderConfig()).toBe(false);
-    setEsmModuleLoaderConfig(false);
-    expect(getEsmModuleLoaderConfig()).toBe(false);
+    setEsmModuleLoaderConfig(!envDefault); // explicit, opposite of env default
+    expect(getEsmModuleLoaderConfig()).toBe(!envDefault);
+    setEsmModuleLoaderConfig(undefined); // no stale inheritance → env default
+    expect(getEsmModuleLoaderConfig()).toBe(envDefault);
+    setEsmModuleLoaderConfig(envDefault);
+    expect(getEsmModuleLoaderConfig()).toBe(envDefault);
   });
 
   it("reset restores the env-seeded default", () => {
-    setEsmModuleLoaderConfig(true);
+    setEsmModuleLoaderConfig(!envDefault);
     resetEsmModuleLoaderConfig();
-    expect(getEsmModuleLoaderConfig()).toBe(false);
+    expect(getEsmModuleLoaderConfig()).toBe(envDefault);
   });
 });
