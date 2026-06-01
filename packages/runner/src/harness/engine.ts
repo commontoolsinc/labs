@@ -2,6 +2,7 @@ import { Console } from "./console.ts";
 import {
   type CompileResult,
   type EvaluateOptions,
+  type EvaluateResult,
   type Exports,
   type Harness,
   type HarnessedFunction,
@@ -36,6 +37,7 @@ import {
   compileSourcesToRecords,
 } from "../sandbox/module-record-compiler.ts";
 import {
+  loadModuleGraph,
   runtimeModuleRecords,
   type VirtualModuleRecord,
 } from "../sandbox/esm-module-loader.ts";
@@ -338,6 +340,102 @@ export class Engine extends EventTarget implements Harness {
       return { id, graph, mainSpecifier };
     } finally {
       logger.timeEnd("compileToRecordGraph");
+    }
+  }
+
+  /**
+   * Compile + evaluate a program through the ESM module-record path (the
+   * `esmModuleLoader` route). Returns the same `{ main, exportMap, loadId }`
+   * shape as {@link evaluate}, so callers can branch on the flag and treat the
+   * result identically.
+   */
+  async compileAndEvaluateModules(
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<EvaluateResult> {
+    // Ensure runtime exports + exportsCallback are initialized.
+    await this.getRuntimeInternals();
+    const { id, graph, mainSpecifier } = await this.compileToRecordGraph(
+      program,
+      options,
+    );
+    return this.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
+  }
+
+  /**
+   * Evaluate a verified ESM record graph: load it synchronously via `importNow`
+   * in a locked-down compartment whose globals are the hardened runtime globals
+   * (runtime-module records, already in the graph, supply the trusted host
+   * APIs), and return the entry namespace as `main` plus the per-module export
+   * map. The graph was security-verified at compile time, so verification is
+   * not repeated.
+   */
+  private evaluateRecordGraph(
+    id: string,
+    graph: CompiledModuleGraph,
+    mainSpecifier: string,
+    files: Source[],
+  ): EvaluateResult {
+    logger.timeStart("evaluateRecordGraph");
+    try {
+      const loadId = `${id}:esm:${this.nextLoadId++}`;
+      this.executableRegistry.beginVerifiedLoad(loadId);
+
+      const globals = createModuleCompartmentGlobals({
+        console: this.consoleShim,
+      });
+      // Concatenated module bodies give the source-location frame a `script`
+      // for fn.src `indexOf` resolution.
+      const script = [...graph.compiledBodies.values()].join("\n");
+      const frame = pushFrame({
+        runtime: this.ctRuntime,
+        verifiedLoadId: loadId,
+        sourceLocationContext: {
+          script,
+          filename: `${loadId}.js`,
+          nextSearchOffset: 0,
+        },
+      });
+
+      let loaded: ReturnType<typeof loadModuleGraph>;
+      try {
+        loaded = loadModuleGraph(mainSpecifier, {
+          records: graph.records,
+          globals,
+          verify: false, // already verified at compile time
+        });
+      } finally {
+        popFrame(frame);
+      }
+
+      const main = loaded.namespace as Exports;
+      this.executableRegistry.captureVerifiedValue(loadId, main);
+
+      // Build the per-module export map (keyed by original source path, prefix
+      // stripped) from the SAME load, and map each exported value back to its
+      // RuntimeProgram for sub-pattern resolution.
+      const prefix = `/${id}`;
+      const exportMap: Record<string, Exports> = {};
+      const exportsByValue = new Map<unknown, RuntimeProgram>();
+      for (const [path, specifier] of graph.specifierByPath) {
+        const namespace = loaded.importNow(specifier) as Exports;
+        const fileName = path.startsWith(prefix)
+          ? path.slice(prefix.length)
+          : path;
+        exportMap[fileName] = namespace;
+        for (const [exportName, value] of Object.entries(namespace)) {
+          exportsByValue.set(value, {
+            main: fileName,
+            mainExport: exportName,
+            files,
+          });
+        }
+      }
+      this.runtimeInternals?.exportsCallback(exportsByValue);
+
+      return { main, exportMap, loadId };
+    } finally {
+      logger.timeEnd("evaluateRecordGraph");
     }
   }
 
