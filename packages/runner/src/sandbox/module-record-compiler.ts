@@ -25,6 +25,46 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 const TARGET = ts.ScriptTarget.ES2023;
 
+/**
+ * Create a write-once exports target for a module body. Re-assigning,
+ * redefining, or deleting a property that already holds a real (non-`undefined`)
+ * value throws. A `void 0` placeholder — the TS `exports.x = void 0;` forward
+ * declaration — leaves the property unlocked so the subsequent real assignment
+ * is permitted, and the real assignment then locks it. This blocks export
+ * corruption smuggled into the evaluation of an otherwise-accepted expression,
+ * which the (deliberately AST-free) verifier cannot detect.
+ */
+export function createWriteOnceExports(): Record<string, unknown> {
+  const target: Record<string, unknown> = {};
+  const locked = new Set<string | symbol>();
+  const denyRelock = (key: string | symbol): never => {
+    throw new TypeError(
+      `Module export '${String(key)}' is write-once and was already assigned`,
+    );
+  };
+  return new Proxy(target, {
+    set(t, key, value) {
+      if (locked.has(key)) denyRelock(key);
+      (t as Record<string | symbol, unknown>)[key] = value;
+      if (value !== undefined) locked.add(key);
+      return true;
+    },
+    defineProperty(t, key, descriptor) {
+      if (locked.has(key)) denyRelock(key);
+      Reflect.defineProperty(t, key, descriptor);
+      const isUndefinedPlaceholder = "value" in descriptor &&
+        descriptor.value === undefined;
+      if (!isUndefinedPlaceholder) locked.add(key);
+      return true;
+    },
+    deleteProperty(_t, key) {
+      throw new TypeError(
+        `Module export '${String(key)}' cannot be deleted (write-once)`,
+      );
+    },
+  });
+}
+
 /** Per-module compiled artifact, cacheable by module hash (Phase 4). */
 export interface CompiledModuleArtifact {
   exports: string[];
@@ -232,19 +272,35 @@ export function compileSourcesToRecords(
           require: (specifier: string) => Record<string, unknown>,
           module: { exports: Record<string, unknown> },
         ) => void;
-        const localExports: Record<string, unknown> = {};
-        const moduleObject = { exports: localExports };
+        // The module body writes its exports into a WRITE-ONCE object rather
+        // than a plain mutable one. The verifier cannot see a write smuggled
+        // into an accepted expression's evaluation (e.g. a comma side effect
+        // inside a `__cf_data(...)` argument: `__cf_data((exports.x = evil, 1))`),
+        // so a body could otherwise overwrite an already-assigned export with an
+        // attacker-controlled value before we snapshot it into the namespace.
+        // Write-once makes any re-assignment / redefinition / deletion of an
+        // already-populated export throw, so the smuggle fails closed. A `void 0`
+        // forward declaration is treated as a placeholder, so the canonical
+        // `exports.x = void 0; … exports.x = real;` compiler shape is allowed.
+        const writeOnceExports = createWriteOnceExports();
+        const moduleObject = { exports: writeOnceExports };
         const requireShim = (specifier: string) =>
           compartment.importNow(resolvedImports[specifier] ?? specifier);
         // A throw here is terminal for this module: SES caches the error and
         // re-throws it on every subsequent importNow (the same contract as a
         // failed AMD factory).
-        factory(localExports, requireShim, moduleObject);
+        factory(writeOnceExports, requireShim, moduleObject);
         const finalExports = moduleObject.exports;
-        // Copy the declared exports onto the SES module namespace object.
-        // NOTE: this snapshots values at init time, so a later reassignment of
-        // an exported `let` is not reflected as a true ESM live binding. This is
-        // acceptable for compiled patterns; revisit with getters if needed.
+        // Copy the declared exports onto the SES module namespace object. SES
+        // already makes the namespace *bindings* immutable (a sibling cannot
+        // reassign or add `ns.x`), and verified plain data is already deep-frozen
+        // by `__cf_data`/`schema` (`freezeVerifiedPlainData`), so exported data
+        // internals are immutable too. We deliberately do NOT freeze the values
+        // here: the engine attaches metadata to exported pattern recipes after
+        // load (`value.program = program` in builder/factory.ts), so exported
+        // builder graphs must stay extensible. Snapshots values at init time, so
+        // a later reassignment of an exported `let` is not reflected as a true
+        // ESM live binding — acceptable for compiled patterns.
         for (const name of exportNames) {
           moduleExports[name] = finalExports[name];
         }
