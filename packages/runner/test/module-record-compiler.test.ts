@@ -292,6 +292,23 @@ describe("compileSourcesToRecords + importModuleGraphNow (end to end)", () => {
     expect(record.exports).not.toContain("default");
   });
 
+  it("computes complete declared exports for an `export *` cycle (>= 3)", () => {
+    // a -> b -> c -> a re-export ring; every module's declared namespace must
+    // include all three names (regression for memo-poisoning on >=3 cycles).
+    const sources = files({
+      "/a.ts": `export * from "./b.ts";\nexport const a = 1;`,
+      "/b.ts": `export * from "./c.ts";\nexport const b = 2;`,
+      "/c.ts": `export * from "./a.ts";\nexport const c = 3;`,
+    });
+    const { records, specifierByPath } = compileSourcesToRecords(sources);
+    for (const name of ["/a.ts", "/b.ts", "/c.ts"]) {
+      const record = records.get(specifierByPath.get(name)!)!;
+      expect(new Set(record.exports)).toEqual(
+        new Set(["a", "b", "c", "__esModule"]),
+      );
+    }
+  });
+
   it("assigns content-addressed specifiers (cf:module/<hash>)", () => {
     const { specifierByPath } = compileSourcesToRecords(
       files({ "/main.ts": `export const x = 1;` }),

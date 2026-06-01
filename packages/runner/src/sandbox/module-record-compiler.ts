@@ -101,29 +101,46 @@ export function compileSourcesToRecords(
     rawExports.set(source.name, collectModuleExports(source));
   }
   const fullExportsMemo = new Map<string, string[]>();
-  const resolveFullExports = (
-    name: string,
-    visiting: Set<string>,
-  ): string[] => {
+  const resolveFullExports = (name: string): string[] => {
     const memo = fullExportsMemo.get(name);
     if (memo) return memo;
-    const raw = rawExports.get(name);
-    if (!raw) return [];
-    if (visiting.has(name)) return raw.names; // break cycles with direct names
-    visiting.add(name);
-    const names = new Set<string>(raw.names);
-    const source = sourceByName.get(name)!;
-    for (const targetSpec of raw.starTargets) {
-      const resolved = resolveImportSpecifier(targetSpec, source);
-      const internal = findInternalTarget(fileNames, resolved);
-      const targetNames = internal !== undefined
-        ? resolveFullExports(internal, visiting)
-        : (runtimeModules[targetSpec] ?? []);
-      for (const n of targetNames) {
-        if (n !== "default") names.add(n); // `export *` excludes default
+    // Walk the transitive closure of `export *` edges first (worklist with a
+    // visited set, so cycles of any length terminate and contribute fully),
+    // then union the reachable modules' direct export names. Computing the full
+    // closure before unioning avoids the memo-poisoning a recursive
+    // partial-result scheme would suffer inside a cycle.
+    const reachableInternal = new Set<string>();
+    const runtimeNames = new Set<string>();
+    const stack = [name];
+    const walked = new Set<string>();
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (walked.has(current)) continue;
+      walked.add(current);
+      const raw = rawExports.get(current);
+      const source = sourceByName.get(current);
+      if (!raw || !source) continue;
+      for (const targetSpec of raw.starTargets) {
+        const resolved = resolveImportSpecifier(targetSpec, source);
+        const internal = findInternalTarget(fileNames, resolved);
+        if (internal !== undefined) {
+          reachableInternal.add(internal);
+          stack.push(internal);
+        } else {
+          for (const n of runtimeModules[targetSpec] ?? []) runtimeNames.add(n);
+        }
       }
     }
-    visiting.delete(name);
+    // Own direct exports (default kept); re-exported names exclude `default`.
+    const names = new Set<string>(rawExports.get(name)?.names ?? []);
+    for (const target of reachableInternal) {
+      for (const n of rawExports.get(target)?.names ?? []) {
+        if (n !== "default") names.add(n);
+      }
+    }
+    for (const n of runtimeNames) {
+      if (n !== "default") names.add(n);
+    }
     const result = [...names];
     fullExportsMemo.set(name, result);
     return result;
@@ -144,13 +161,13 @@ export function compileSourcesToRecords(
       ? options.recordCache?.get(moduleHash)
       : undefined;
     if (precompiled !== undefined) {
-      exportNames = resolveFullExports(source.name, new Set());
+      exportNames = resolveFullExports(source.name);
       compiled = precompiled;
     } else if (cached) {
       exportNames = cached.exports;
       compiled = cached.compiled;
     } else {
-      exportNames = resolveFullExports(source.name, new Set());
+      exportNames = resolveFullExports(source.name);
       compiled = ts.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
