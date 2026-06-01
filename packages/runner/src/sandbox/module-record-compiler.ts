@@ -150,6 +150,14 @@ export function compileSourcesToRecords(
     // rather than wrapping the whole namespace. Authored sources are ESM.
     const namespaceExports = [...exportNames, "__esModule"];
 
+    // Tag the eval with a sourceURL = the (prefixed) source path. NOTE: under
+    // SES `errorTaming` this is currently stripped from stack traces, so it
+    // does NOT yet make `fn.src` resolve — full source-location fidelity under
+    // the ESM loader (stack traces, and thus the scheduler's content-addressed
+    // implementation hash / CFC verified-source check) requires SES-isolate-
+    // level source-map integration and is tracked as the remaining item before
+    // the flag can be enabled by default. The tag is the hook for that work.
+    const sourceUrl = source.name;
     records.set(specifier, {
       imports: importSpecs,
       exports: namespaceExports,
@@ -158,7 +166,7 @@ export function compileSourcesToRecords(
         // Evaluate the compiled CommonJS body inside the SES compartment so it
         // runs under lockdown with confined globals.
         const factory = compartment.evaluate(
-          `(function (exports, require, module) {\n${compiled}\n})`,
+          `(function (exports, require, module) {\n${compiled}\n})\n//# sourceURL=${sourceUrl}`,
         ) as (
           exports: Record<string, unknown>,
           require: (specifier: string) => Record<string, unknown>,

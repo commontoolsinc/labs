@@ -380,6 +380,11 @@ export class Engine extends EventTarget implements Harness {
     try {
       const loadId = `${id}:esm:${this.nextLoadId++}`;
       this.executableRegistry.beginVerifiedLoad(loadId);
+      // Register per-module content hashes for parity with the AMD evaluate
+      // path. This wires the scheduler's content-addressed implementation hash;
+      // it becomes effective once source-location resolution under the ESM
+      // loader is wired (see the sourceURL note in module-record-compiler.ts).
+      this.registerModuleHashes(id, files);
 
       const globals = createModuleCompartmentGlobals({
         console: this.consoleShim,
