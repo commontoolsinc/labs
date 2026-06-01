@@ -113,11 +113,50 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     expect(q.result).toEqual([]);
   });
 
-  // NOTE: builtin-level reactive re-query (`reactOn: db` re-running a query after
-  // a sibling sqliteExecute commits) is NOT yet reliable — the query effect does
-  // not deterministically re-run when the handle changes. Tracked in
-  // IMPLEMENTATION_LOG as needing scheduler investigation. The read and write
-  // paths themselves are proven at the storage and protocol layers.
+  it("re-runs a reactOn:db query after a sibling write (reactive loop)", async () => {
+    // Unique space per test => unique (space, db-id) => fresh cell-db temp file,
+    // so persistent per-id files don't leak rows across runs (the real cause of
+    // the earlier "failure"; see plans/reactivity.md). Assert exact length so
+    // any leak fails loudly.
+    const reactiveSpace =
+      (await Identity.fromPassphrase(`reactive-${crypto.randomUUID()}`)).did();
+    const p = cf.pattern(() => {
+      const db = cf.sqliteDatabase({
+        tables: {
+          notes: cf.table({ id: "integer primary key", body: "text" }),
+        },
+      });
+      const q = cf.sqliteQuery({
+        db,
+        sql: "SELECT body FROM notes ORDER BY id",
+        reactOn: db,
+      });
+      const exec = cf.sqliteExecute({
+        db,
+        sql: "INSERT INTO notes (body) VALUES (?)",
+        params: ["reactive"],
+      });
+      return { q, exec };
+    });
+    const resultCell = runtime.getCell(
+      reactiveSpace,
+      "sqlite-reactive",
+      p.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, p, {}, resultCell);
+    tx.commit();
+
+    const v = await waitUntil<{ q: QueryState }>(
+      runtime,
+      result,
+      (s) =>
+        s.q?.pending === false && Array.isArray(s.q?.result) &&
+        s.q.result.length === 1,
+    );
+    expect(v.q.error).toBeUndefined();
+    expect(v.q.result).toEqual([{ body: "reactive" }]);
+  });
 });
 
 type ExecState = {

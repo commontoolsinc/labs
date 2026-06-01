@@ -231,25 +231,30 @@ Replaced the not-implemented stubs with real work, tested via `StorageManager.em
 - Remaining acknowledged: `_cf_link` decode of result rows, mutex/cancel,
   commit-folded atomic writes, post-commit `reactOn` handle-dirtying.
 
-### Reactivity loop (reactOn: db) — ATTEMPTED, NOT yet reliable (corrected)
+### Reactivity loop (reactOn: db) — WORKING (root cause was test isolation)
 
-I implemented a post-commit handle-`rev` bump (`sqliteExecute` bumps a token in
-the handle cell after a committed write; `sqliteQuery` with `reactOn: db` reads
-the handle whole). It passed once but then **failed deterministically** under
-test: the `reactOn: db` query does **not** reliably re-run when the handle
-changes (the query effect isn't re-scheduled / the re-run doesn't settle), even
-with both effects observed and a generous wait. **Reverted the rev-bump** to keep
-the code honest (it implied working reactivity it didn't deliver) and removed the
-flaky test.
+A focused design session ([plans/reactivity.md](./plans/reactivity.md)) proved,
+empirically, that the reactivity mechanism was **never broken** — my earlier
+"deterministic failure" was a **test-isolation artifact**. The emulated server
+backs each cell-db with a deterministic, persistent temp file keyed by
+`(space, db.id)`; since `db.id` is the handle's *stable* entity id, re-running
+the suite accumulated rows in that file and the query's expected result drifted
+(`[]`→`[hi]`→`[hi,hi]`…), failing the assertion — even though the re-query fired
+correctly every run. The scheduler re-runs a `reactOn`-reading effect through a
+link correctly (verified via probes).
 
-Root-cause is unresolved and needs **scheduler investigation**: why doesn't an
-effect that read `reactOn` (a handle cell) re-run when that cell is written by a
-sibling effect's post-commit `editWithRetry`? Candidates: dependency not
-registered through the read of a linked value; pull-mode not re-scheduling the
-effect; or post-commit-write notification not reaching it. The read and write
-paths themselves are proven (storage + protocol + builtin single-effect tests).
-**This is the next reactivity task**, alongside the server-driven `markSpaceDirty`
-variant (spec Section 05 mechanism 1), which may be the more reliable approach.
+Fix (test-first): reinstated the client post-commit **handle-`rev` bump**
+(`sqliteDatabase` seeds `rev:0`; `sqliteExecute` bumps `inputsCell.key("db")` in
+its success `editWithRetry`; `sqliteQuery` reads the handle via `reactOn` so the
+bump changes the request hash and re-issues), plus an **isolated test** (unique
+space per test → unique cell-db file). Green **5/5 against a dirty `/tmp`**
+(`sqlite-builtins.test.ts` "re-runs a reactOn:db query after a sibling write").
+This closes the user-facing reactive loop. Server-driven `markSpaceDirty`
+remains a documented future-hardening alternative.
+
+**Lesson:** the per-`(space,id)` persistent temp file is a recurring test trap
+(also hit by the LRU/protocol tests) — builtin/runner tests that exercise data
+must use a unique space (or unique db id) per test.
 
 ## Current status & handoff
 
