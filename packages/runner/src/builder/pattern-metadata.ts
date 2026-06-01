@@ -1,5 +1,5 @@
 import type { RuntimeProgram } from "../harness/types.ts";
-import { isPattern, type Pattern } from "./types.ts";
+import { isPattern, type Pattern, unsafe_originalPattern } from "./types.ts";
 
 /**
  * Side-table storage for pattern metadata that is associated *after* a pattern
@@ -78,12 +78,26 @@ export function brandTrustedPattern<T>(value: T): T {
 }
 
 /**
- * True only for a value that is both structurally a pattern AND was produced by
- * the trusted builder (carries the provenance brand). Use this at trust-granting
- * sites; a `__cf_data`-forged pattern-shaped object is `isPattern` but NOT
- * `isTrustedPattern`.
+ * True only for a value that is structurally a pattern AND has trusted builder
+ * provenance — either it carries the brand directly, or it is a derivation /
+ * serialized copy whose `unsafe_originalPattern` chain reaches a branded
+ * original. Use this at trust-granting sites; a `__cf_data`-forged pattern-shaped
+ * object is `isPattern` but NOT `isTrustedPattern` (it carries no brand, and the
+ * `unsafe_originalPattern` symbol is module-private — authored code cannot set
+ * it to point at a real pattern).
  */
 export function isTrustedPattern(value: unknown): value is Pattern {
-  const key = asKey(value);
-  return key !== undefined && trustedPatterns.has(key) && isPattern(value);
+  if (!isPattern(value)) return false;
+  // Walk the original-pattern chain; a branded ancestor confers trust on copies.
+  let current: unknown = value;
+  const seen = new Set<unknown>();
+  while (
+    current && (typeof current === "object" || typeof current === "function")
+  ) {
+    if (trustedPatterns.has(current as object)) return true;
+    if (seen.has(current)) break;
+    seen.add(current);
+    current = (current as Record<symbol, unknown>)[unsafe_originalPattern];
+  }
+  return false;
 }
