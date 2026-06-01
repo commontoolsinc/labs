@@ -10,15 +10,17 @@ piece." This doc covers both, plus the identity caveat that bites first.
 ## The canonical piece
 
 There is one shared instance everyone should iterate on. **These values are a
-deployment pointer, not a stable identifier — current as of 2026-05-27.** A
+deployment pointer, not a stable identifier — current as of 2026-06-01.** A
 piece is tied to one space/server and can be reset or wedged; if it 404s,
 `inspect` fails, or it stops responding to clicks, re-establish it (see
 "Re-establishing" / "Recovering a wedged piece" below) and update this block.
+(The prior `lunch-2026-05-26` piece went stale — `inspect` reported "missing
+pattern ID" — and was superseded by the `lunch-2026-05-29` instance below.)
 
 ```
-space:  lunch-2026-05-26
-piece:  fid1:zGgrBLVmQDTSthOYTv_CHGRbf-Sb6YTGpn2ntAyBZQs
-url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-26/fid1:zGgrBLVmQDTSthOYTv_CHGRbf-Sb6YTGpn2ntAyBZQs
+space:  lunch-2026-05-29
+piece:  fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE
+url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-29/fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE
 ```
 
 Set these once so you don't repeat flags (substitute your own identity key path
@@ -27,8 +29,8 @@ and the current piece/space):
 ```bash
 export CF_API_URL=https://toolshed.saga-castor.ts.net/
 export CF_IDENTITY=/path/to/your-identity.key   # e.g. ~/.config/commonfabric/identity.key
-PIECE=fid1:zGgrBLVmQDTSthOYTv_CHGRbf-Sb6YTGpn2ntAyBZQs   # current as of 2026-05-27
-SPACE=lunch-2026-05-26
+PIECE=fid1:89LeEO1n8boDR1aCFy2zUakZPhyeflsPSg72-H_ZJOE   # current as of 2026-06-01
+SPACE=lunch-2026-05-29
 ```
 
 ## Option A — deploy your version onto the shared state (recommended)
