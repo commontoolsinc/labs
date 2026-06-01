@@ -24,6 +24,12 @@ import {
   type SessionOpenRequest,
   type SessionOpenResult,
   type SessionRevokedMessage,
+  type SqliteDbRef,
+  type SqliteExecuteRequest,
+  type SqliteExecuteResult,
+  type SqliteParamsWire,
+  type SqliteQueryRequest,
+  type SqliteQueryResult,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -34,6 +40,14 @@ import {
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
+import {
+  aliasForDbId,
+  attachDatabase,
+  ensureTables,
+  runQuery,
+  runWrite,
+} from "./sqlite/exec.ts";
+import type { TableSchema } from "./sqlite/schema.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -375,6 +389,22 @@ class Connection {
         }
         this.send(await this.server.graphQuery(parsed));
         return;
+      case "sqlite.query":
+        if (
+          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+        ) {
+          return;
+        }
+        this.send(await this.server.sqliteQuery(parsed));
+        return;
+      case "sqlite.execute":
+        if (
+          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+        ) {
+          return;
+        }
+        this.send(await this.server.sqliteExecute(parsed));
+        return;
       case "session.watch.set":
         if (
           !this.requireSession(
@@ -480,6 +510,9 @@ export class Server {
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
   #store?: URL;
+  // space -> (cell-db id -> attach alias). Cell-derived SQLite dbs are sibling
+  // files attached to the space's engine connection and kept attached.
+  #sqliteAliases = new Map<string, Map<string, string>>();
 
   constructor(
     readonly options: {
@@ -579,6 +612,105 @@ export class Server {
     );
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
+  }
+
+  /**
+   * Ensure a cell-derived SQLite database is attached to the space engine
+   * connection (kept attached) and its declared tables are created (additive).
+   * Returns the engine and the attach alias. Attaches outside any transaction.
+   *
+   * V1 limitation: with multiple distinct cell-dbs attached in one space,
+   * unqualified table names could resolve ambiguously across them. Acceptable
+   * pre-production (same category as the core-table-rename gap, 08-Q8a); the
+   * proper fix is per-op attach with file-backed cell-dbs or alias-rewriting.
+   */
+  async #ensureSqliteDb(
+    space: string,
+    db: SqliteDbRef,
+  ): Promise<{ engine: Engine.Engine; alias: string }> {
+    const engine = await this.openEngine(space);
+    let aliases = this.#sqliteAliases.get(space);
+    if (aliases === undefined) {
+      aliases = new Map();
+      this.#sqliteAliases.set(space, aliases);
+    }
+    let alias = aliases.get(db.id);
+    if (alias === undefined) {
+      alias = aliasForDbId(db.id);
+      attachDatabase(engine.database, alias, this.#cellDbPath(engine, db.id));
+      aliases.set(db.id, alias);
+    }
+    if (db.tables) {
+      ensureTables(
+        engine.database,
+        db.tables as Record<string, TableSchema>,
+        alias,
+      );
+    }
+    return { engine, alias };
+  }
+
+  /** Path for a cell-derived db file. Sibling of the space db for file stores;
+   *  a deterministic temp file for in-memory stores (so it survives the
+   *  connection and isn't lost like an `:memory:` attach would be). */
+  #cellDbPath(engine: Engine.Engine, id: string): string {
+    const safe = id.replace(/[^A-Za-z0-9]/g, "_");
+    if (engine.url.protocol === "file:") {
+      const dir = Path.dirname(Path.fromFileUrl(engine.url));
+      return Path.join(dir, `cell-${safe}.sqlite`);
+    }
+    return Path.join(
+      Deno.env.get("TMPDIR") ?? "/tmp",
+      `cf-cell-${encodeURIComponent(engine.url.pathname)}-${safe}.sqlite`,
+    );
+  }
+
+  async sqliteQuery(
+    message: SqliteQueryRequest,
+  ): Promise<ResponseMessage<SqliteQueryResult>> {
+    if (this.#sessions.get(message.space, message.sessionId) === null) {
+      return respondTypedError<SqliteQueryResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    try {
+      const { engine } = await this.#ensureSqliteDb(message.space, message.db);
+      const rows = runQuery(engine.database, message.sql, message.params);
+      return { type: "response", requestId: message.requestId, ok: { rows } };
+    } catch (error) {
+      return respondTypedError<SqliteQueryResult>(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "SqliteError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async sqliteExecute(
+    message: SqliteExecuteRequest,
+  ): Promise<ResponseMessage<SqliteExecuteResult>> {
+    if (this.#sessions.get(message.space, message.sessionId) === null) {
+      return respondTypedError<SqliteExecuteResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    try {
+      const { engine } = await this.#ensureSqliteDb(message.space, message.db);
+      const result = runWrite(engine.database, message.sql, message.params);
+      return { type: "response", requestId: message.requestId, ok: result };
+    } catch (error) {
+      return respondTypedError<SqliteExecuteResult>(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "SqliteError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
   }
 
   async openSession(
@@ -1713,6 +1845,33 @@ export const parseClientMessage = (
       sessionId: parsed.sessionId,
       query: parsed.query as unknown as GraphQueryRequest["query"],
     };
+  }
+
+  if (
+    (parsed.type === "sqlite.query" || parsed.type === "sqlite.execute") &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.sql === "string" &&
+    isRecord(parsed.db) &&
+    typeof parsed.db.id === "string"
+  ) {
+    const db = {
+      id: parsed.db.id,
+      tables: isRecord(parsed.db.tables) ? parsed.db.tables : undefined,
+    };
+    const params = Array.isArray(parsed.params) || isRecord(parsed.params)
+      ? parsed.params as SqliteParamsWire
+      : undefined;
+    return {
+      type: parsed.type,
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      db,
+      sql: parsed.sql,
+      params,
+    } as SqliteQueryRequest | SqliteExecuteRequest;
   }
 
   if (

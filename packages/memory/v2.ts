@@ -285,6 +285,47 @@ export interface GraphQueryRequest {
   query: GraphQuery;
 }
 
+// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+
+/** Wire form of SQLite bind parameters. */
+export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
+
+/** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
+ *  entity id) plus the declared table schemas (for additive create/migrate). */
+export interface SqliteDbRef {
+  id: string;
+  tables?: Record<string, unknown>;
+}
+
+export interface SqliteQueryRequest {
+  type: "sqlite.query";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  db: SqliteDbRef;
+  sql: string;
+  params?: SqliteParamsWire;
+}
+
+export interface SqliteQueryResult {
+  rows: unknown[];
+}
+
+export interface SqliteExecuteRequest {
+  type: "sqlite.execute";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  db: SqliteDbRef;
+  sql: string;
+  params?: SqliteParamsWire;
+}
+
+export interface SqliteExecuteResult {
+  changes: number;
+  lastInsertRowid: number;
+}
+
 export interface WatchSetRequest {
   type: "session.watch.set";
   requestId: string;
@@ -392,6 +433,8 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | SqliteQueryRequest
+  | SqliteExecuteRequest
   | WatchSetRequest
   | WatchAddRequest
   | SchedulerSnapshotListRequest

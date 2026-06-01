@@ -18,6 +18,10 @@ import {
   type SessionOpenResult,
   type SessionRevokedMessage,
   type SessionSync,
+  type SqliteDbRef,
+  type SqliteExecuteResult,
+  type SqliteParamsWire,
+  type SqliteQueryResult,
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
@@ -453,6 +457,42 @@ export class SpaceSession {
 
     this.noteResult(result.serverSeq);
     return result;
+  }
+
+  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  async sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    this.#assertOpen();
+    return await this.client.request<SqliteQueryResult>({
+      type: "sqlite.query",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      db,
+      sql,
+      params,
+    });
+  }
+
+  /** Run a server-side SQLite write against a cell-derived db. */
+  async sqliteExecute(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteExecuteResult> {
+    this.#assertOpen();
+    return await this.client.request<SqliteExecuteResult>({
+      type: "sqlite.execute",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      db,
+      sql,
+      params,
+    });
   }
 
   async listSchedulerActionSnapshots(

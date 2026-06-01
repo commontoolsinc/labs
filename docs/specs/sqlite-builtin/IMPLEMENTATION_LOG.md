@@ -138,6 +138,39 @@ all confirmed sound). Addressed:
   fetch-data's narrowest-read-scope handling and the Actions need `addCancel` to
   abort transport / clear `pending`. Marked with a TODO at `makeResultCell`.
 
+### Phase 1 server-side — protocol verbs (END-TO-END, tested via loopback)
+
+The user pointed out the in-process harness (`new Server({store: memory://})` +
+`loopback(server)` + `client.mount(space)`), so the protocol is testable without
+a real toolshed. Implemented and tested end-to-end:
+
+- **Protocol** (`v2.ts`): `SqliteDbRef`, `SqliteQueryRequest`/`SqliteQueryResult`,
+  `SqliteExecuteRequest`/`SqliteExecuteResult`, added both verbs to `ClientMessage`.
+- **Server** (`v2/server.ts`): `parseClientMessage` cases, `receiveOrdered`
+  routes, `Server.sqliteQuery`/`sqliteExecute` handlers, and `#ensureSqliteDb`
+  (attach the cell-db sibling file under an alias derived from the handle id,
+  keep attached, `ensureTables` additively). `#cellDbPath`: sibling file for
+  file stores; deterministic temp file for in-memory stores.
+- **Client** (`v2/client.ts`): `SpaceSession.sqliteQuery`/`sqliteExecute`.
+- **Test** (`test/v2-sqlite-protocol-test.ts`): over loopback — write then read
+  back, empty auto-created table, guard enforcement over the wire (write-in-read,
+  core-table ref, DDL-in-write), persistence across requests. Green. Existing
+  `v2-client-test` still passes (only added union variants).
+
+**Decisions:**
+- **Two RPC verbs now (`sqlite.query` + `sqlite.execute`), not yet commit-folded.**
+  The spec wants writes folded into the `transact` commit for atomicity with
+  cells, which needs surgery in `applyCommitTransaction`/`writeOperation` (those
+  assume entity revisions; a `sqlite` op isn't one). A separate execute RPC is a
+  tested stepping stone; **atomicity with cell writes is NOT yet provided** —
+  follow-up. Logged so it isn't mistaken for done.
+- **Cell-db kept attached per (space,id).** V1 limitation: multiple distinct
+  cell-dbs attached in one space could make unqualified table names ambiguous
+  across them (same pre-production category as the core-table-rename gap). Proper
+  fix: per-op attach with file-backed cell-dbs, or alias-rewriting. Logged.
+- In-memory-store cell-dbs use deterministic temp files (an `:memory:` attach
+  would be lost on detach); test uses a unique db id per case to avoid leakage.
+
 ## Current status & handoff
 
 **Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.

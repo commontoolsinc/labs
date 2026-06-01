@@ -10,6 +10,12 @@ import { createTableSQL, type TableSchema } from "./schema.ts";
 // Reserved schema names that may never be used as a pattern-db attach alias.
 const RESERVED_ALIASES = new Set(["main", "temp"]);
 
+/** Derive a safe attach alias from an opaque db id (e.g. an `of:bafy…` entity
+ *  id). The `cf_` prefix guarantees a valid leading identifier char. */
+export function aliasForDbId(id: string): string {
+  return `cf_${id.replace(/[^A-Za-z0-9]/g, "_")}`;
+}
+
 /** Validate an attach alias: a plain SQL identifier, not a reserved schema. */
 export function assertSafeAlias(alias: string): void {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias) || RESERVED_ALIASES.has(alias)) {
