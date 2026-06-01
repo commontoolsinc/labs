@@ -2406,11 +2406,11 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
   const childSystemPrompt = requestBodies[1].messages[0].content;
   assertStringIncludes(
     childSystemPrompt,
-    "Loom Browser Access lease: lease-browser-1",
+    "Browser Access lease: lease-browser-1",
   );
   assertStringIncludes(
     childSystemPrompt,
-    "Loom Browser Access CDP endpoint: http://127.0.0.1:9222",
+    "Browser Access CDP endpoint: http://127.0.0.1:9222",
   );
   assertStringIncludes(
     childSystemPrompt,

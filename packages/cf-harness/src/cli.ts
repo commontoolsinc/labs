@@ -15,6 +15,10 @@ import {
 } from "./image-attachments.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import {
+  HARNESS_BROWSER_ACCESS_LEASE_TYPE,
+  type HarnessBrowserAccessLease,
+} from "./contracts/browser-access.ts";
+import {
   readHarnessRunArtifacts,
   resolveHarnessRunPaths,
 } from "./artifacts.ts";
@@ -64,6 +68,7 @@ import {
   validateStructuredResultValue,
 } from "./structured-result.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
+import { normalizeCdpOrigin } from "./tools/browser-host-command-policy.ts";
 
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -98,6 +103,10 @@ const CLI_STRING_FLAGS = [
   "sandbox-image",
   "max-model-turns",
   "fabric-mount",
+  "browser-access-lease-id",
+  "browser-access-cdp-url",
+  "browser-access-owner",
+  "browser-access-expires-at",
 ] as const;
 const CLI_BOOLEAN_FLAGS = [
   "help",
@@ -142,6 +151,7 @@ export interface CfHarnessCliConfig {
   structuredResult?: CfHarnessStructuredResultConfig;
   runManifestPath?: string;
   cfcEnforcementModeOverride?: CfcEnforcementMode;
+  browserAccess?: HarnessBrowserAccessLease;
   maxModelTurns: number;
   printTranscript: boolean;
   apiKey?: string;
@@ -298,6 +308,10 @@ Options:
   --structured-result-schema <j> JSON Schema for --structured-result-path
   --structured-result-schema-file <p> JSON Schema file for --structured-result-path
   --run-manifest <path>         Optional Loom run manifest JSON path
+  --browser-access-lease-id <id> Browser Access lease id for browser subagents
+  --browser-access-cdp-url <url> Local CDP origin for the Browser Access lease
+  --browser-access-owner <name>  Optional owner label for the Browser Access lease
+  --browser-access-expires-at <t> Optional lease expiry timestamp
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
@@ -477,6 +491,53 @@ const resolveAllowedSubagentProfiles = (
 const nonEmptyEnvValue = (input: string | undefined): string | undefined => {
   const trimmed = input?.trim();
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+};
+
+const optionalStringArg = (
+  args: ReturnType<typeof parseArgs>,
+  name: string,
+): string | undefined => {
+  const raw = args[name];
+  return typeof raw === "string" ? raw.trim() : undefined;
+};
+
+const parseBrowserAccessLease = (
+  args: ReturnType<typeof parseArgs>,
+): HarnessBrowserAccessLease | undefined => {
+  const leaseId = optionalStringArg(args, "browser-access-lease-id");
+  const cdpUrl = optionalStringArg(args, "browser-access-cdp-url");
+  const owner = optionalStringArg(args, "browser-access-owner");
+  const expiresAt = optionalStringArg(args, "browser-access-expires-at");
+  const anyProvided = leaseId !== undefined ||
+    cdpUrl !== undefined ||
+    owner !== undefined ||
+    expiresAt !== undefined;
+  if (!anyProvided) {
+    return undefined;
+  }
+  if (leaseId === undefined || leaseId.length === 0) {
+    throw new Error(
+      "--browser-access-lease-id requires a non-empty value when browser access is configured",
+    );
+  }
+  if (cdpUrl === undefined || cdpUrl.length === 0) {
+    throw new Error(
+      "--browser-access-cdp-url is required when browser access is configured",
+    );
+  }
+  const normalizedCdpUrl = normalizeCdpOrigin(cdpUrl);
+  if (normalizedCdpUrl === undefined) {
+    throw new Error(
+      "--browser-access-cdp-url must be an http:// local origin with an explicit port",
+    );
+  }
+  return {
+    type: HARNESS_BROWSER_ACCESS_LEASE_TYPE,
+    leaseId,
+    cdpUrl: normalizedCdpUrl,
+    ...(owner !== undefined && owner.length > 0 ? { owner } : {}),
+    ...(expiresAt !== undefined && expiresAt.length > 0 ? { expiresAt } : {}),
+  };
 };
 
 const parseSkillNames = (
@@ -722,6 +783,7 @@ export const parseCfHarnessCliArgs = async (
         | undefined,
     ),
   );
+  const browserAccess = parseBrowserAccessLease(args);
   const outputMode = parseCliOutputMode(
     typeof args["output-mode"] === "string" ? args["output-mode"] : undefined,
   );
@@ -886,6 +948,7 @@ export const parseCfHarnessCliArgs = async (
     ...(cfcEnforcementModeOverride !== undefined
       ? { cfcEnforcementModeOverride }
       : {}),
+    ...(browserAccess !== undefined ? { browserAccess } : {}),
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]
@@ -1466,6 +1529,9 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        ...(parsed.browserAccess !== undefined
+          ? { browserAccess: parsed.browserAccess }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
@@ -1494,6 +1560,9 @@ export const runCfHarnessCli = async (
           : {}),
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
+          : {}),
+        ...(parsed.browserAccess !== undefined
+          ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
@@ -1538,6 +1607,9 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        ...(parsed.browserAccess !== undefined
+          ? { browserAccess: parsed.browserAccess }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
@@ -1576,6 +1648,9 @@ export const runCfHarnessCli = async (
           : {}),
         maxModelTurns: parsed.maxModelTurns,
         allowedSubagentProfiles: parsed.allowedSubagentProfiles,
+        ...(parsed.browserAccess !== undefined
+          ? { browserAccess: parsed.browserAccess }
+          : {}),
         ...(parsed.allowedToolIds !== undefined
           ? { allowedToolIds: parsed.allowedToolIds }
           : {}),
