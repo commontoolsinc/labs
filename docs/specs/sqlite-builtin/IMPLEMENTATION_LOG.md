@@ -125,3 +125,36 @@ tests (`v2-sqlite-guard-test.ts` "guard hardening"):
   `createTableSQL`. Fix: validate column names + constrain `sqlType` chars in
   `table()`, and quote identifiers at emit time.
 - **lastInsertRowId** (LOW): documented the single-connection assumption.
+
+## Current status & handoff
+
+**Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.
+- guard, `_cf_link` codec, `table()`/`cfLink()`/DDL, engine `runQuery`/`runWrite`/
+  `ensureTables` (vs real `@db/sqlite`), and the API/builder/registry wiring.
+- Tests green: memory 9 files/28 steps, runner 3 files/9 steps. fmt/lint/check
+  clean; existing builtin tests (generate-text, fetch-data) still pass.
+- Runtime execution is intentionally `not-implemented` (see Phase 0 note).
+
+**CI note:** `.github/workflows/deno.yml` only runs on PRs targeting `main`; the
+impl PR targets the spec branch, so remote CI does not auto-run. Ran the
+CI-equivalent locally (fmt/lint/check + affected tests) instead.
+
+**Next increments (need the live toolshed integration harness; not done here):**
+1. **ATTACH layer + DDL targeting (design detail discovered).** With one file per
+   cell-db (Q6→A) attached to the engine connection, unqualified names resolve to
+   the pattern db only if `main` lacks them. But SQLite has no "default schema"
+   switch, so **DDL must target the attach alias** (`CREATE TABLE cf.<name>`)
+   while reads/writes stay unqualified (resolve to `cf` since `main` lacks them).
+   So `createTableSQL`/`ensureTables` need the attach alias for DDL, even though
+   the statement guard rejects *author* qualified refs. Net: the runtime qualifies
+   DDL with the (internal) alias; the guard still blocks author-supplied
+   qualifiers. This nuance is not in the spec yet — worth adding to Section 04.
+2. `sqlite.query` protocol verb (v2.ts message + server parse/route + client
+   method) → server handler calls `runQuery` on the attached db.
+3. Commit-folded `sqlite` write op in `applyCommitTransaction` + `_cf_commit_watermark`
+   + ops persisted in the commit record (Phase 2/6).
+4. Runner Actions: replace the `not-implemented` stubs with real transport
+   (send `sqlite.query`; append `sqlite` op to the commit), `_cf_link`
+   encode/decode at the boundary, and post-commit handle-cell dirtying for
+   `reactOn`.
+5. `sqliteQuery<Row>` transformer lowering; injected on-disk source via `cf`; CFC.
