@@ -81,3 +81,28 @@ export function decodeCfLinkValue(
   }
   return runtime.getCellFromLink(parsed, schema, tx);
 }
+
+/**
+ * Parse a stored `_cf_link` value to the sigil-link OBJECT (not a Cell), for
+ * storing in a query result under an `asCell` schema so reads rehydrate to live
+ * Cells. `null`/`undefined` → null. Throws like `decodeCfLinkValue` on a
+ * non-string or non-sigil value.
+ */
+export function parseCfLinkToSigil(value: unknown): unknown | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    throw new TypeError(
+      `_cf_link columns hold a sigil-link string or NULL; got ${typeof value}`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new TypeError("_cf_link value is not valid JSON");
+  }
+  if (!isCellLink(parsed)) {
+    throw new TypeError("_cf_link value is not a sigil link");
+  }
+  return parsed;
+}

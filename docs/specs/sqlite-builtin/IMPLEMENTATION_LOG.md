@@ -293,6 +293,20 @@ success (success ⇔ commit success; drop the counts). Decide before implementin
 the current `sqliteExecute` test asserts `changes===1`, so the contract choice
 changes that test.
 
+### `_cf_link` result decode — attempted, blocked by static builder schema
+
+Attempted decoding query result `_cf_link` columns to live Cells (stamp the
+result cell with an `asCell` schema; store parsed sigil objects). The isolated
+mechanism works, but **through a pattern it doesn't**: the pattern reads `q` via
+`p.resultSchema`, derived from `sqliteQuery`'s **static** builder return type,
+which shadows the query cell's dynamic per-query `asCell` schema. Result link
+columns are dynamic; builder return schemas are static — so this needs the
+`sqliteQuery<Row>` transformer (Piece B) to make the call site carry `Row` as the
+node output schema (Piece B is a *prerequisite* for A-through-patterns), or deep
+dynamic-schema propagation. **Reverted** the wiring; kept `parseCfLinkToSigil`.
+Encode + imperative round-trip (`decodeCfLinkValue`) work and are tested. See
+plans/result-decode-and-row-types.md §7.
+
 ## Current status & handoff
 
 **Done, tested, reviewed (this branch):** the foundation + Phase 0 surface.

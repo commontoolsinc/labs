@@ -422,3 +422,31 @@ registry entries (§2.2), the `rowSchema` injection branch keyed on `exportName`
 (§2.3, noting `runtime-call` has no generic injector — a dedicated branch is
 required), the `Cell<T> → asCell` evidence (§2.4), and the runtime read of
 `inputs.rowSchema` (§2.5).
+
+---
+
+## 7. Implementation finding — Piece A blocked through patterns (limitation)
+
+Attempted Piece A (stamp the query result cell with an `asCell` schema for
+`_cf_link` columns; store parsed sigil objects). The isolated mechanism works
+(§0 probe), but **through a pattern it does not**: a pattern reads
+`q.result[i].author_cf_link` via the *pattern's* result schema (`p.resultSchema`),
+which describes `q` using the **static `sqliteQuery` builder return type**
+(`OpaqueRef<{pending,result?,error?}>`) — it has no `asCell` on result items, so
+it **shadows** the query cell's dynamic per-query schema. The decoded sigil is
+read as plain data, not a live Cell.
+
+Root limitation: result link columns are **dynamic per query**, but a builder
+factory's return schema is **static**. Surfacing decoded Cells through normal
+pattern usage needs one of:
+- dynamic result-schema propagation through the node output into the parent
+  pattern's result schema (deep builder/scheduler change), or
+- the `sqliteQuery<Row>` transformer making the *builder call site* carry the
+  `Row` schema as the node's output type (so `p.resultSchema` includes the
+  `asCell` columns) — i.e. Piece B is a **prerequisite** for A-through-patterns,
+  not just an enhancement.
+
+**Reverted** the result-cell schema wiring (kept `parseCfLinkToSigil` for reuse).
+Encode-on-write + the imperative round-trip (`decodeCfLinkValue`) work and are
+tested; auto-decode-to-live-Cell in pattern results is deferred behind Piece B
+(or the dynamic-schema-propagation work).
