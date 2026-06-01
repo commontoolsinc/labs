@@ -1,5 +1,36 @@
 # Plan — `sqliteQuery<Row>` type-argument lowering (Piece B)
 
+> ## STATUS (2026-06-01): transformer half DONE + green
+>
+> GREEN steps 1–2 implemented and merged on `feat/sqlite-builtin-impl`:
+> - **Registry** (§2.2): `sqliteDatabase`/`sqliteQuery`/`sqliteExecute` added as
+>   `runtime-call`/`reactiveOrigin` — this also fixed a pre-existing RED in the
+>   registry guard test (`commonfabric-runtime-registry.test.ts`), since the
+>   factory injects them but they were unregistered.
+> - **Injection branch** (§2.3): added the `exportName === "sqliteQuery"` branch
+>   in `schema-injection.ts` — injects a bare `rowSchema` property; untyped calls
+>   are a no-op.
+> - **Fixtures** (RED-T1): `sqlite-query-row-schema.{input,expected}` (verified
+>   the injected `rowSchema.properties.author` carries `asCell:["cell"]` under the
+>   **alias** `author`, no `_cf_link` suffix) + `sqlite-query-no-type-arg.{…}`
+>   (no injection). Full ts-transformers suite green (295/0); fixture suite 354
+>   steps/0.
+> - Authoring doc updated with `sqliteQuery` as the canonical *nested-result*
+>   reference.
+>
+> **Remaining (dependent runtime half — Piece A, separate, tracked in
+> result-decode-and-row-types.md):** the builtin must read `inputs.rowSchema`,
+> compose `result.items = rowSchema`, and store `*_cf_link` columns as sigil
+> OBJECTS (not strings) so the consumer's asCell schema rehydrates them. NOTE the
+> testability constraint proven in node-output-schema-propagation.md: a runner
+> unit test bypasses the transformer (`p.resultSchema === {}`), so true
+> end-to-end auto-decode is only observable through the full `cf check` pipeline;
+> the runner gate (RED-T2) must feed `rowSchema` into the builtin directly. The
+> `it.skip` at `sqlite-cf-link-decode.test.ts` stays until Piece A lands.
+
+---
+
+
 > Test-first design. **No implementation in this document.** Investigation +
 > design only. Every claim below is anchored to a file:line in the
 > `feat/sqlite-builtin-impl` worktree and was read directly, not inferred.

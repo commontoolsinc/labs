@@ -26,8 +26,8 @@ This doc shows how to give a new builtin the same treatment — e.g. so
      expression from a `ts.TypeNode`.
    - `createSchemaCallWithRegistryTransfer(...)` — same, but transfers the
      resolved `ts.Type` into the `TypeRegistry` so later stages
-     (`schema-generator.ts`) can emit the concrete JSON Schema. Use this when the
-     type must survive into code generation (the usual case).
+     (`schema-generator.ts`) can emit the concrete JSON Schema. Use this when
+     the type must survive into code generation (the usual case).
    - The first type argument is read with the `node.typeArguments?.[0]` pattern
      (see the `getFirstTypeArgument` helper).
 
@@ -38,7 +38,8 @@ This doc shows how to give a new builtin the same treatment — e.g. so
 
 ## Recipe
 
-To lower `myBuiltin<Row>(args)` into `myBuiltin(args, /* injected */ toSchema<Row>())`:
+To lower `myBuiltin<Row>(args)` into
+`myBuiltin(args, /* injected */ toSchema<Row>())`:
 
 1. **Register the export.** In `commonfabric-runtime-registry.ts`, add an entry:
    ```ts
@@ -54,15 +55,21 @@ To lower `myBuiltin<Row>(args)` into `myBuiltin(args, /* injected */ toSchema<Ro
 3. **Build and inject the schema argument:**
    ```ts
    const rowType = node.typeArguments![0];
-   const schemaCall = createSchemaCallWithRegistryTransfer(context, rowType, checker);
+   const schemaCall = createSchemaCallWithRegistryTransfer(
+     context,
+     rowType,
+     checker,
+   );
    // append (or splice) schemaCall into the call's argument list
    return ts.factory.updateCallExpression(
-     node, node.expression, /* typeArguments */ undefined,
+     node,
+     node.expression,
+     /* typeArguments */ undefined,
      [...node.arguments, schemaCall],
    );
    ```
    Drop the `typeArguments` on the emitted call (they've been lowered). Mirror
-   the argument *position* your runtime builtin expects.
+   the argument _position_ your runtime builtin expects.
 
 4. **Read it at runtime.** The builtin's runner-side implementation receives the
    injected schema as a normal argument; use it like any other schema.
@@ -70,23 +77,31 @@ To lower `myBuiltin<Row>(args)` into `myBuiltin(args, /* injected */ toSchema<Ro
 ## Reference implementations
 
 - **`toSchema<T>()`** — the canonical case. Search `toSchema` in
-  `schema-injection.ts` (the `createToSchemaCall` definition and its call sites).
-  The runtime stub that throws when the transformer didn't run is in
+  `schema-injection.ts` (the `createToSchemaCall` definition and its call
+  sites). The runtime stub that throws when the transformer didn't run is in
   [`packages/runner/src/builder/factory.ts`](../../runner/src/builder/factory.ts).
-- **`generateObject` / `generate-object`** — injects a *result* schema from a
+- **`generateObject` / `generate-object`** — injects a _result_ schema from a
   type argument; the closest analog to "result row" lowering. See the
   function-first argument-order handling
   (`[function, inputSchema, resultSchema]`) in `schema-injection.ts`.
 - **`lift` / `lift-applied`** — input + result schema injection from two type
   arguments.
+- **`sqliteQuery<Row>`** — the canonical _nested-result_ case: the branch
+  injects the **bare** `Row` schema as a `rowSchema` property and the **runtime
+  builtin** (not the transformer) composes it into `result.items`. Use this as
+  the model when the type argument describes a value nested inside the builtin's
+  return shape. Keyed on
+  `callKind.kind === "runtime-call" && exportName === "sqliteQuery"` (a
+  `runtime-call` registry entry gets NO schema injection by itself — a dedicated
+  branch is required). Fixtures: `sqlite-query-row-schema.{input,expected}` and
+  `sqlite-query-no-type-arg.{input,expected}` (the untyped-call no-op guard).
 
 ## Tests
 
-Add a fixture pair under
-[`test/fixtures/schema-transform/`](../test/fixtures/) (or
-`ast-transform/` for full-pipeline cases): a `*.input.tsx` calling your builtin
-with a type argument and a `*.expected.jsx` showing the injected `toSchema`/
-schema literal. The fixture-based test runner
+Add a fixture pair under [`test/fixtures/schema-transform/`](../test/fixtures/)
+(or `ast-transform/` for full-pipeline cases): a `*.input.tsx` calling your
+builtin with a type argument and a `*.expected.jsx` showing the injected
+`toSchema`/ schema literal. The fixture-based test runner
 ([`test/fixture-based.test.ts`](../test/fixture-based.test.ts)) picks them up.
 See `lift-explicit-toschema.{input,expected}` and
 `pattern-with-types.{input,expected}` for the shape.

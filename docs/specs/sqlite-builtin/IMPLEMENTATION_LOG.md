@@ -390,3 +390,43 @@ trace are in `plans/node-output-schema-propagation.md` (VERDICT block).
 behavior — a link column reads back as the sigil-link STRING, decodes via
 `decodeCfLinkValue`, and NULL → null — plus an `it.skip` documenting the blocked
 auto-decode target. All speculative src edits reverted (no `src/` diff).
+
+---
+
+## 2026-06-01 — Piece B (transformer): sqliteQuery<Row> lowering DONE + green
+
+Design session (Oracle) → `plans/sqlite-query-row-lowering.md`, then implemented
+the transformer half red-green:
+
+- **Pre-existing RED found & fixed:** the registry guard test
+  (`ts-transformers/test/core/commonfabric-runtime-registry.test.ts`) was already
+  failing on this branch — the runner factory injects
+  `sqliteDatabase`/`sqliteQuery`/`sqliteExecute` but they were absent from
+  `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY`. Registered all three as
+  `runtime-call`/`reactiveOrigin` (commit). Now green.
+- **RED-T1 (fixtures):** added `sqlite-query-row-schema.{input,expected}` and
+  `sqlite-query-no-type-arg.{input,expected}` under
+  `ts-transformers/test/fixtures/schema-injection/`. Generated the golden WITHOUT
+  the branch first (RED: `<Row>` erased, no `rowSchema`).
+- **GREEN:** added a dedicated injection branch in `schema-injection.ts` keyed on
+  `callKind.kind === "runtime-call" && exportName === "sqliteQuery"` (mirrors the
+  generate-object branch; injects a bare `rowSchema` property; untyped calls are
+  a no-op). Regenerated goldens — the injected
+  `rowSchema.properties.author = { $ref:"#/$defs/User", asCell:["cell"] }`, i.e.
+  the **aliased** link column `author` is detected by Row typing with no
+  `_cf_link` suffix (the load-bearing result). `n` → `{type:"number"}`.
+- **Regression:** full ts-transformers suite 295/0; fixture suite 354 steps/0.
+  Additive: untyped sqliteQuery unchanged; the runtime ignores the extra
+  `rowSchema` field (forward-compatible) until Piece A reads it.
+- Authoring doc (`adding-type-arg-schema-lowering.md`) updated: sqliteQuery is now
+  the canonical *nested-result* reference (transformer injects bare schema,
+  runtime wraps into `result.items`).
+
+**Decision / where the spec was incomplete:** the prior plan assumed Piece B was
+purely a transformer change. It is — for the LOWERING. But auto-decode end to end
+ALSO needs the runtime half (Piece A: builtin reads `rowSchema`, composes
+`result.items`, stores sigil OBJECTS) AND is only observable through the full
+`cf check` pipeline (runner unit tests bypass the transformer ⇒
+`p.resultSchema === {}`, proven in node-output-schema-propagation.md). So Piece B
+(this commit) unblocks Piece A but does not by itself flip the skipped runner
+test. Piece A remains the next step.
