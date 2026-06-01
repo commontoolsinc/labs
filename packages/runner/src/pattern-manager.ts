@@ -170,16 +170,12 @@ export class PatternManager {
   private seedVerifiedLoadIds(
     value: unknown,
     verifiedLoadId: string,
-    seen = new Set<unknown>(),
+    seen = new Map<unknown, boolean>(),
     trusted = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
     }
-    if (seen.has(value)) {
-      return;
-    }
-    seen.add(value);
 
     // Trust is rooted at a builder-produced (`isTrustedPattern`) value; nested
     // subpatterns within a trusted pattern's serialized node graph are legit
@@ -188,6 +184,16 @@ export class PatternManager {
     // value at the top level (trusted === false) is never seeded, so it cannot
     // launder a CFC identity into the side-tables.
     const subtreeTrusted = trusted || isTrustedPattern(value);
+
+    // `seen` records the trust level a node was visited at, so a node reached
+    // first via an untrusted path is still re-processed (and seeded) when later
+    // reached via a trusted path — order-independent. A trusted visit is final.
+    const prior = seen.get(value);
+    if (prior === true || (prior === false && !subtreeTrusted)) {
+      return;
+    }
+    seen.set(value, subtreeTrusted);
+
     if (subtreeTrusted && isPattern(value)) {
       const originalPattern = this.findOriginalPattern(value);
       if (!this.patternToVerifiedLoadId.has(originalPattern)) {
