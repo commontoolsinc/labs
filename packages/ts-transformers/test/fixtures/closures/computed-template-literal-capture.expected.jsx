@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // CT-1334: computed() with template literal capturing pattern parameter.
 // The `token` from pattern destructuring must be captured as an explicit
-// input to the derived derive() call, so the callback receives the
+// input to the lift-applied call, so the callback receives the
 // resolved value—not the OpaqueRef proxy.
 export default pattern((__cf_pattern_input: {
     token: string;

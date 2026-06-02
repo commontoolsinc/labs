@@ -21,10 +21,10 @@ interface State {
 }
 // FIXTURE: computed-map-call-arg-logical-and
 // Verifies: callback-local ordinary call roots within a computed-array .map()
-//   callback whole-wrap as callback-local derives rather than lowering only
-//   the nested && argument site.
+//   callback whole-wrap as callback-local lift-applied computations rather than
+//   lowering only the nested && argument site.
 //   const label = identity(row.done && "Done")
-//   → const label = derive(..., ({ row }) => identity(row.done && "Done"))
+//   → const label = lift(({ row }) => identity(row.done && "Done"))(...)
 export default pattern((state) => {
     const rows = __cfHelpers.lift<{
         state: {

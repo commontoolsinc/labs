@@ -144,7 +144,7 @@ const goToCharm = handler({
 // FIXTURE: opaque-ref-cell-map
 // Verifies: a reactive factory result still rewrites JSX ifElse predicates after
 //           the forbidden OpaqueRef cast is removed
-//   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., derive(...), <div>, <ul>)
+//   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., lift(...)(...), <div>, <ul>)
 //   cellRef.map((charm, index) => <li>...) → mapWithPattern(...) even with
 //     `as { cellRef: any[] }`, because the cast does not change the reactive origin
 // Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo

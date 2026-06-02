@@ -21,10 +21,10 @@ interface State {
 }
 // FIXTURE: computed-map-call-arg-conditional
 // Verifies: callback-local ordinary call roots within a computed-array .map()
-//   callback whole-wrap as callback-local derives rather than lowering only
-//   the nested ternary argument site.
+//   callback whole-wrap as callback-local lift-applied computations rather than
+//   lowering only the nested ternary argument site.
 //   const label = identity(row.done ? "Done" : "Pending")
-//   → const label = derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))
+//   → const label = lift(({ row }) => identity(row.done ? "Done" : "Pending"))(...)
 export default pattern((state) => {
     const rows = __cfHelpers.lift<{
         state: {
