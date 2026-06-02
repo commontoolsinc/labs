@@ -3758,17 +3758,25 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const typeArgs = node.typeArguments;
         const args = node.arguments;
 
-        // Only the typed form is injectable. Untyped sqliteQuery(...) must
-        // compile and lower to NO schema (runtime falls back to suffix/table
-        // detection).
+        // Only the typed form is injectable. Untyped sqliteQuery(...) /
+        // db.query(...) must compile and lower to NO schema (runtime falls back
+        // to suffix/table detection).
         if (!typeArgs || typeArgs.length !== 1) {
           return ts.visitEachChild(node, visit, transformation);
         }
 
+        // Two call shapes inject `rowSchema` into the OPTIONS object:
+        //  - free function `sqliteQuery<Row>({ db, sql, ... })` → options is arg 0
+        //  - method `db.query<Row>(sql, { ... })`              → options is arg 1
+        const isMethod = ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === "query";
+        const optIdx = isMethod ? 1 : 0;
+        const optArg = args[optIdx];
+
         // Idempotency: skip if a `rowSchema` property is already present.
         if (
-          args.length > 0 && ts.isObjectLiteralExpression(args[0]!) &&
-          (args[0] as ts.ObjectLiteralExpression).properties.some(
+          optArg && ts.isObjectLiteralExpression(optArg) &&
+          optArg.properties.some(
             (p: ts.ObjectLiteralElementLike) =>
               p.name && ts.isIdentifier(p.name) && p.name.text === "rowSchema",
           )
@@ -3793,18 +3801,18 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
         if (schemaCall) {
           let newOptions: ts.Expression;
-          if (args.length > 0 && ts.isObjectLiteralExpression(args[0]!)) {
+          if (optArg && ts.isObjectLiteralExpression(optArg)) {
             newOptions = factory.createObjectLiteralExpression(
               [
-                ...(args[0] as ts.ObjectLiteralExpression).properties,
+                ...optArg.properties,
                 factory.createPropertyAssignment("rowSchema", schemaCall),
               ],
               true,
             );
-          } else if (args.length > 0) {
+          } else if (optArg) {
             newOptions = factory.createObjectLiteralExpression(
               [
-                factory.createSpreadAssignment(args[0]!),
+                factory.createSpreadAssignment(optArg),
                 factory.createPropertyAssignment("rowSchema", schemaCall),
               ],
               true,
@@ -3819,7 +3827,11 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const updated = factory.createCallExpression(
             node.expression,
             node.typeArguments,
-            [newOptions, ...args.slice(1)],
+            [
+              ...args.slice(0, optIdx),
+              newOptions,
+              ...args.slice(optIdx + 1),
+            ],
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);

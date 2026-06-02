@@ -147,6 +147,7 @@ export type RawCellReadOptions = IReadOptions & {
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
+let sqliteQueryFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
@@ -379,6 +380,7 @@ const cellMethods = new Set<
   | "flatMap"
   | "flatMapWithPattern"
   | "exec"
+  | "query"
 >([
   "get",
   "sample",
@@ -424,6 +426,7 @@ const cellMethods = new Set<
   "setInitialValue",
   "setSelfRef",
   "exec",
+  "query",
 ]);
 
 /** Best-effort parse of the column list from `INSERT INTO t (a, b, c) ...`,
@@ -1779,6 +1782,37 @@ export class CellImpl<T extends FabricValue>
    * Map over an array cell, creating a new derived array.
    * Similar to Array.prototype.map but works with OpaqueRefs.
    */
+  /**
+   * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
+   * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
+   * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
+   * injected by the transformer (method-call lowering), not set here. Only valid
+   * on a `"sqlite"`-kind cell.
+   */
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
+    if (this._kind !== "sqlite") {
+      throw new Error(".query() is only available on a SqliteDb cell");
+    }
+    if (!sqliteQueryFactory) {
+      sqliteQueryFactory = createNodeFactory({
+        type: "ref",
+        implementation: "sqliteQuery",
+      });
+    }
+    return sqliteQueryFactory({
+      db: this,
+      sql,
+      params: options?.params,
+      reactOn: options?.reactOn,
+    }) as OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }>;
+  }
+
   map<S>(
     fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,

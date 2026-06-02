@@ -41,7 +41,10 @@ import {
   COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES,
   COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME,
 } from "../core/commonfabric-runtime-registry.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import {
+  getCellKind,
+  isOpaqueRefType,
+} from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import {
   getTypeAtLocationWithFallback,
@@ -1206,6 +1209,22 @@ function resolveExpressionKind(
       // array-method family, only treat it as such for reactive receivers.
       if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
         const result = { kind: "array-method" } as const;
+        cache.set(expression, result);
+        return result;
+      }
+    }
+    // `db.query<Row>(...)` on a SqliteDb receiver — reuse the `sqliteQuery`
+    // runtime-call kind so the existing schema-injection branch lowers `<Row>`
+    // to `rowSchema`. The receiver-type check (brand `"sqlite"`) is what
+    // distinguishes this from any other `.query` method.
+    if (name === "query") {
+      const receiverType = checker.getTypeAtLocation(target.expression);
+      if (getCellKind(receiverType, checker) === "sqlite") {
+        const result = {
+          kind: "runtime-call",
+          exportName: "sqliteQuery",
+          reactiveOrigin: true,
+        } as const;
         cache.set(expression, result);
         return result;
       }
