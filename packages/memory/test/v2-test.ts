@@ -157,35 +157,23 @@ describe("memory v2 flags", () => {
 describe("parseMemoryProtocolFlags", () => {
   it("accepts the modernCellRep key", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
-      flags: {
-        modernCellRep: true,
-        persistentSchedulerState: false,
-      },
-      wireKey: "modernDataModel",
+      modernCellRep: true,
+      persistentSchedulerState: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
-      flags: {
-        modernCellRep: false,
-        persistentSchedulerState: false,
-      },
-      wireKey: "modernDataModel",
+      modernCellRep: false,
+      persistentSchedulerState: false,
     });
   });
 
   it("accepts the canonical modernDataModel key", () => {
     assertEquals(parseMemoryProtocolFlags({ modernDataModel: true }), {
-      flags: {
-        modernCellRep: false,
-        persistentSchedulerState: false,
-      },
-      wireKey: "modernDataModel",
+      modernCellRep: false,
+      persistentSchedulerState: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernDataModel: false }), {
-      flags: {
-        modernCellRep: false,
-        persistentSchedulerState: false,
-      },
-      wireKey: "modernDataModel",
+      modernCellRep: false,
+      persistentSchedulerState: false,
     });
   });
 
@@ -195,11 +183,8 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: true,
       }),
       {
-        flags: {
-          modernCellRep: false,
-          persistentSchedulerState: true,
-        },
-        wireKey: "modernDataModel",
+        modernCellRep: false,
+        persistentSchedulerState: true,
       },
     );
   });

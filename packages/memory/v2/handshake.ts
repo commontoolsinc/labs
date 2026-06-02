@@ -34,7 +34,7 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
   const parsed = parseMemoryProtocolFlags(message.flags);
   if (
     parsed === null ||
-    !compatibleMemoryProtocolFlags(parsed.flags, expectedFlags)
+    !compatibleMemoryProtocolFlags(parsed, expectedFlags)
   ) {
     return {
       type: "response",
@@ -51,6 +51,6 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
   return {
     type: "hello.ok",
     protocol: MEMORY_PROTOCOL,
-    flags: wireMemoryProtocolFlags(expectedFlags, parsed.wireKey),
+    flags: wireMemoryProtocolFlags(expectedFlags),
   };
 };

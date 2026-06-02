@@ -451,13 +451,11 @@ export const compatibleMemoryProtocolFlags = (
 
 /**
  * Parses and normalizes incoming wire-protocol flags. Returns `null` if the
- * input is not a recognizable flags object. The `wireKey` field is a leftover
- * from early during the modern data model development, when its experiment
- * name changed.
+ * input is not a recognizable flags object.
  */
 export const parseMemoryProtocolFlags = (
   value: unknown,
-): { flags: MemoryProtocolFlags; wireKey: string } | null => {
+): MemoryProtocolFlags | null => {
   if (!isRecord(value) || Array.isArray(value)) {
     return null;
   }
@@ -479,19 +477,13 @@ export const parseMemoryProtocolFlags = (
   }
 
   return {
-    flags: {
-      modernCellRep: modernCellRep === true,
-      persistentSchedulerState: persistentSchedulerState === true,
-    },
-    wireKey: "modernDataModel",
+    modernCellRep: modernCellRep === true,
+    persistentSchedulerState: persistentSchedulerState === true,
   };
 };
 
 /**
- * Builds the wire-format flags object for a `hello`/`hello.ok` message,
- * using the given key. Defaults to the canonical `modernDataModel` key;
- * responders should pass the `wireKey` captured by
- * `parseMemoryProtocolFlags()` to echo back what the peer used.
+ * Builds the wire-format flags object for a `hello`/`hello.ok` message.
  */
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
