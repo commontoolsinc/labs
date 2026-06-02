@@ -1,6 +1,6 @@
 import { Console } from "./console.ts";
 import {
-  type CompiledModuleArtifact,
+  type CacheableModule,
   type CompileResult,
   type EvaluateOptions,
   type EvaluateResult,
@@ -32,10 +32,14 @@ import {
   pretransformProgram,
   pretransformProgramForModules,
 } from "./pretransform.ts";
-import { computeModuleHashes } from "./module-identity.ts";
+import {
+  computeModuleHashes,
+  resolveModuleImports,
+} from "./module-identity.ts";
 import {
   type CompiledModuleGraph,
   compileSourcesToRecords,
+  computeModuleIdentities,
 } from "../sandbox/module-record-compiler.ts";
 import {
   composeBundleSourceMap,
@@ -269,7 +273,8 @@ export class Engine extends EventTarget implements Harness {
       id: string;
       graph: CompiledModuleGraph;
       mainSpecifier: string;
-      compiledArtifacts: Map<string, CompiledModuleArtifact>;
+      entryIdentity: string;
+      modules: CacheableModule[];
     }
   > {
     logger.timeStart("compileToRecordGraph");
@@ -287,13 +292,21 @@ export class Engine extends EventTarget implements Harness {
         !f.name.endsWith(".d.ts")
       );
 
-      // Cache hit: every authored module already has a cached compiled body, so
-      // skip the TypeScript compile entirely and build the record graph from
-      // the cached artifacts. Per-module identities are transitively sensitive,
-      // so a partial set cannot be trusted — fall back to a full recompile.
+      // Prefix-free content identity per resolved module path. Computed here
+      // (cheap, no TS compile) so the cache-hit check and the write-back
+      // descriptors agree with the graph's `cf:module/<hash>` specifiers.
+      const identityByPath = computeModuleIdentities(moduleFiles, {
+        idPrefix: `/${id}`,
+      });
+
+      // Cache hit: every emitted module already has a cached compiled body
+      // (keyed by identity), so skip the TypeScript compile entirely and build
+      // the record graph from the cached bodies. Per-module identities are
+      // transitively sensitive, so a partial set cannot be trusted — fall back
+      // to a full recompile.
       const cached = options.precompiledModules;
       const fullHit = cached !== undefined &&
-        moduleFiles.every((f) => cached.has(f.name));
+        moduleFiles.every((f) => cached.has(identityByPath.get(f.name)!));
 
       const precompiledBodies = new Map<string, string>();
       // Carry per-module source maps so the ESM loader can compose a per-load
@@ -303,7 +316,7 @@ export class Engine extends EventTarget implements Harness {
       if (fullHit) {
         logger.info("compile-cache-hit", () => ["compileToRecordGraph", id]);
         for (const file of moduleFiles) {
-          const artifact = cached!.get(file.name)!;
+          const artifact = cached!.get(identityByPath.get(file.name)!)!;
           precompiledBodies.set(file.name, artifact.js);
           if (artifact.sourceMap !== undefined) {
             precompiledSourceMaps.set(
@@ -393,19 +406,37 @@ export class Engine extends EventTarget implements Harness {
       // verification happens once, at compile time, before any module executes.
       verifyModuleGraph(graph.records, mainSpecifier);
 
-      // Serializable per-module artifacts for write-back to the compiled-set
-      // cache. Keyed by authored path; the caller maps each to its content
-      // identity. On a cache hit these are exactly the artifacts just loaded.
-      const compiledArtifacts = new Map<string, CompiledModuleArtifact>();
-      for (const [name, js] of precompiledBodies) {
-        const sourceMap = precompiledSourceMaps.get(name);
-        compiledArtifacts.set(
-          name,
-          sourceMap === undefined ? { js } : { js, sourceMap },
-        );
-      }
+      // Serializable per-module descriptors for write-back to the cache, in
+      // identity space (the engine's `/<id>` path prefix never leaks out). Each
+      // carries the resolved TS source (for the source set), the compiled JS
+      // (for the compiled set), and the internal import edges as
+      // specifier → dependency-identity links. On a cache hit these mirror the
+      // artifacts just loaded.
+      const importEdges = resolveModuleImports({
+        main: "",
+        files: moduleFiles,
+      });
+      const modules: CacheableModule[] = moduleFiles.map((file) => {
+        const identity = identityByPath.get(file.name)!;
+        const sourceMap = precompiledSourceMaps.get(file.name);
+        const imports = (importEdges.get(file.name)?.internalDeps ?? []).map((
+          dep,
+        ) => ({
+          specifier: dep.specifier,
+          targetIdentity: identityByPath.get(dep.target)!,
+        }));
+        return {
+          identity,
+          filename: stripModuleIdPrefix(file.name, id),
+          source: file.contents,
+          js: precompiledBodies.get(file.name)!,
+          ...(sourceMap === undefined ? {} : { sourceMap }),
+          imports,
+        };
+      });
+      const entryIdentity = identityByPath.get(mappedProgram.main)!;
 
-      return { id, graph, mainSpecifier, compiledArtifacts };
+      return { id, graph, mainSpecifier, entryIdentity, modules };
     } finally {
       logger.timeEnd("compileToRecordGraph");
     }
@@ -954,4 +985,14 @@ function computeId(program: Program): string {
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
   return hashOf(source).toString();
+}
+
+/**
+ * Strip the whole-program `/<id>` prefix from a resolved module path to recover
+ * the normalized authored path (e.g. `/<id>/main.tsx` → `/main.tsx`). Modules
+ * resolved without the prefix (the injected `cfc.ts` helper) are returned as-is.
+ */
+function stripModuleIdPrefix(name: string, id: string): string {
+  const prefix = `/${id}`;
+  return name.startsWith(`${prefix}/`) ? name.slice(prefix.length) : name;
 }

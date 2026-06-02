@@ -27,11 +27,12 @@ export interface TypeScriptHarnessProcessOptions {
   getTransformedProgram?: (program: Program) => void;
   // Show verbose TypeScript error messages instead of simplified hints.
   verboseErrors?: boolean;
-  // Cached per-module compiled bodies keyed by authored (bundle-relative) path.
-  // Used only on the ESM record-graph path: when every authored module is
-  // present, `compileToRecordGraph` skips the TypeScript compile and builds the
-  // record graph from these bodies instead. A partial set is ignored (the
-  // engine recompiles the whole program) because per-module identities are
+  // Cached per-module compiled bodies keyed by content-addressed module
+  // identity (the prefix-free `cf:module/<hash>` minus the scheme). Used only on
+  // the ESM record-graph path: when every emitted module is present,
+  // `compileToRecordGraph` skips the TypeScript compile and builds the record
+  // graph from these bodies instead. A partial set is ignored (the engine
+  // recompiles the whole program) because per-module identities are
   // transitively sensitive — a closure either hits in full or not at all.
   precompiledModules?: Map<string, CompiledModuleArtifact>;
 }
@@ -40,6 +41,26 @@ export interface TypeScriptHarnessProcessOptions {
 export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
+}
+
+/**
+ * Everything the content-addressed compilation cache needs to persist (and
+ * later reload) one module, surfaced by `compileToRecordGraph` in identity
+ * space — callers never see the engine's internal `/<id>` path prefix.
+ */
+export interface CacheableModule {
+  /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
+  identity: string;
+  /** Normalized authored module path (no `/<id>` prefix; e.g. `/main.tsx`). */
+  filename: string;
+  /** Resolved TypeScript source whose bytes are folded into `identity`. */
+  source: string;
+  /** Compiled CommonJS body. */
+  js: string;
+  /** Per-module source map, when available. */
+  sourceMap?: unknown;
+  /** Internal import edges: specifier → the dependency module's identity. */
+  imports: { specifier: string; targetIdentity: string }[];
 }
 
 export type Exports = Record<string, any>;

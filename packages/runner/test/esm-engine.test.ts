@@ -163,42 +163,51 @@ describe("Engine.compileToRecordGraph", () => {
       ],
     };
 
-    it("returns a non-empty compiled artifact for every emitted module", async () => {
-      const { compiledArtifacts, graph } = await engine.compileToRecordGraph(
-        MULTI,
+    // Build an identity-keyed precompiled set from a prior compile's module
+    // descriptors, tagging each body so we can prove it was reused verbatim.
+    const taggedFrom = (modules: { identity: string; js: string }[]) =>
+      new Map(
+        modules.map((
+          m,
+        ) => [m.identity, { js: `${m.js}\n//cached:${m.identity}` }]),
       );
-      // One artifact per authored module body in the graph; both authored
-      // sources (resolved/prefixed) appear among the keys.
-      expect(compiledArtifacts.size).toBeGreaterThanOrEqual(2);
-      const keys = [...compiledArtifacts.keys()];
-      expect(keys.some((k) => k.endsWith("/main.tsx"))).toBe(true);
-      expect(keys.some((k) => k.endsWith("/dep.ts"))).toBe(true);
-      // The artifact set matches the graph's compiled bodies count.
-      expect(compiledArtifacts.size).toBe(graph.compiledBodies.size);
-      for (const a of compiledArtifacts.values()) {
-        expect(typeof a.js).toBe("string");
-        expect(a.js.length).toBeGreaterThan(0);
+
+    it("returns a descriptor per emitted module in identity space", async () => {
+      const { modules, entryIdentity, graph } = await engine
+        .compileToRecordGraph(MULTI);
+      // One descriptor per compiled body in the graph.
+      expect(modules.length).toBe(graph.compiledBodies.size);
+      // Filenames are normalized (no `/<id>` prefix leaks out).
+      const filenames = modules.map((m) => m.filename);
+      expect(filenames).toContain("/main.tsx");
+      expect(filenames).toContain("/dep.ts");
+      for (const f of filenames) {
+        expect(f).not.toMatch(/^\/[A-Za-z0-9_-]{20,}\//);
       }
+      // The entry's identity is among the module identities.
+      expect(modules.some((m) => m.identity === entryIdentity)).toBe(true);
+      // Each descriptor carries non-empty source + js; main links to dep.
+      for (const m of modules) {
+        expect(m.source.length).toBeGreaterThan(0);
+        expect(m.js.length).toBeGreaterThan(0);
+      }
+      const main = modules.find((m) => m.filename === "/main.tsx")!;
+      const dep = modules.find((m) => m.filename === "/dep.ts")!;
+      expect(main.imports.some((i) => i.targetIdentity === dep.identity)).toBe(
+        true,
+      );
     });
 
     it("reuses a full set of precompiled bodies (cache hit) and still evaluates", async () => {
       const first = await engine.compileToRecordGraph(MULTI);
+      const tagged = taggedFrom(first.modules);
 
-      // Feed every artifact back, tagged so we can prove the body was used
-      // verbatim rather than recompiled from source.
-      const tagged = new Map(
-        [...first.compiledArtifacts].map(([name, a]) => [
-          name,
-          { js: `${a.js}\n//cached:${name}`, sourceMap: a.sourceMap },
-        ]),
-      );
       const hit = await engine.compileToRecordGraph(MULTI, {
         precompiledModules: tagged,
       });
-
-      // The returned artifacts are exactly the cached bodies (no recompile).
-      for (const [name, a] of hit.compiledArtifacts) {
-        expect(a.js).toContain(`//cached:${name}`);
+      // Every returned body is exactly the cached body (no recompile).
+      for (const m of hit.modules) {
+        expect(m.js).toContain(`//cached:${m.identity}`);
       }
 
       // And a cache-hit graph still evaluates correctly.
@@ -211,18 +220,13 @@ describe("Engine.compileToRecordGraph", () => {
     it("ignores a partial precompiled set and recompiles the whole program", async () => {
       const first = await engine.compileToRecordGraph(MULTI);
       // Supply all but one module → not a full hit; the engine recompiles.
-      const names = [...first.compiledArtifacts.keys()];
-      const partial = new Map(
-        names.slice(1).map((name) => [name, {
-          js: `${first.compiledArtifacts.get(name)!.js}\n//cached:${name}`,
-        }]),
-      );
+      const partial = taggedFrom(first.modules.slice(1));
       const result = await engine.compileToRecordGraph(MULTI, {
         precompiledModules: partial,
       });
       // Recompiled from source: no body carries the cache tag.
-      for (const a of result.compiledArtifacts.values()) {
-        expect(a.js).not.toContain("//cached");
+      for (const m of result.modules) {
+        expect(m.js).not.toContain("//cached");
       }
     });
   });
