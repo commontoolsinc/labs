@@ -22,6 +22,7 @@ import {
   type SqliteExecuteResult,
   type SqliteParamsWire,
   type SqliteQueryResult,
+  type SqliteRegisterDiskSourceResult,
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
@@ -492,6 +493,26 @@ export class SpaceSession {
       db,
       sql,
       params,
+    });
+  }
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
+   * this, server-side reads for `id` resolve against the on-disk file at `path`
+   * (attached read-only) instead of the cell-derived db; writes are rejected.
+   */
+  async registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    this.#assertOpen();
+    return await this.client.request<SqliteRegisterDiskSourceResult>({
+      type: "sqlite.register-disk-source",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      id,
+      path,
     });
   }
 

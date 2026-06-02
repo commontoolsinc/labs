@@ -31,6 +31,8 @@ import {
   type SqliteParamsWire,
   type SqliteQueryRequest,
   type SqliteQueryResult,
+  type SqliteRegisterDiskSourceRequest,
+  type SqliteRegisterDiskSourceResult,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -48,8 +50,10 @@ import {
   ensureTables,
   runQuery,
   runWrite,
+  setQueryOnly,
 } from "./sqlite/exec.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
+import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -418,6 +422,14 @@ class Connection {
         }
         this.send(await this.server.sqliteExecute(parsed));
         return;
+      case "sqlite.register-disk-source":
+        if (
+          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+        ) {
+          return;
+        }
+        this.send(await this.server.sqliteRegisterDiskSource(parsed));
+        return;
       case "session.watch.set":
         if (
           !this.requireSession(
@@ -523,6 +535,11 @@ export class Server {
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
   #store?: URL;
+  // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
+  // registered id is attached read-only from its descriptor path instead of the
+  // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
+  // docs/specs/sqlite-builtin/plans/on-disk-source.md).
+  #diskSources = new DiskSourceRegistry();
 
   constructor(
     readonly options: {
@@ -647,6 +664,24 @@ export class Server {
   ): Promise<T> {
     const engine = await this.openEngine(space);
     const alias = aliasForDbId(db.id);
+
+    // Phase 7: an injected on-disk source is attached READ-ONLY from its
+    // registered path instead of the cell-derived file, and we do NOT run
+    // ensureTables against it (v1 does not migrate external files). Read-only is
+    // enforced for the synchronous attach→op→detach window via PRAGMA query_only
+    // (the connection is single-threaded; `op` must not await — see below).
+    const disk = this.#diskSources.get(db.id);
+    if (disk) {
+      attachDatabase(engine.database, alias, disk.path, { readOnly: true });
+      setQueryOnly(engine.database, true);
+      try {
+        return op(engine); // synchronous — see doc comment
+      } finally {
+        setQueryOnly(engine.database, false);
+        detachDatabase(engine.database, alias);
+      }
+    }
+
     attachDatabase(
       engine.database,
       alias,
@@ -667,6 +702,15 @@ export class Server {
   }
 
   /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
+   * this, `#onCellDb` attaches `path` (read-only) for `id` instead of the
+   * cell-derived db. The descriptor is server-side state — never the cell value.
+   */
+  registerDiskSource(id: string, path: string): void {
+    this.#diskSources.register(id, { path });
+  }
+
+  /**
    * Attach the cell-db(s) referenced by a commit's `sqlite` ops and create their
    * tables, returning a dbId→alias map for `Engine.applyCommit`. Must run BEFORE
    * applyCommit (ATTACH can't run in a transaction); the caller detaches after.
@@ -683,6 +727,13 @@ export class Server {
     for (const op of operations) {
       if (op.op !== "sqlite") continue;
       const id = op.db.id;
+      // Phase 7: injected on-disk sources are read-only in v1 — a folded write to
+      // one is rejected before it can join the commit (Q13/Q14).
+      if (this.#diskSources.has(id)) {
+        throw new Engine.ProtocolError(
+          "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
+        );
+      }
       if (map.has(id)) continue;
       if (map.size >= 1) {
         throw new Engine.ProtocolError(
@@ -759,6 +810,19 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    // Phase 7: injected on-disk sources are READ-ONLY in v1. Writes (and their
+    // atomicity with the space commit) are gated on co-location (Q13/Q14); reject
+    // up front rather than attach read-only and surface an opaque engine error.
+    if (this.#diskSources.has(message.db.id)) {
+      return respondTypedError<SqliteExecuteResult>(
+        message.requestId,
+        toError(
+          "ReadOnlyError",
+          "injected on-disk SQLite sources are read-only in v1 " +
+            "(db.exec is rejected; see open questions Q13/Q14)",
+        ),
+      );
+    }
     try {
       const result = await this.#onCellDb(
         message.space,
@@ -775,6 +839,29 @@ export class Server {
         ),
       );
     }
+  }
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
+   * link <piece> <field> sqlite:<absPath>` issues this so subsequent reads for the
+   * handle id resolve against the on-disk file (attached read-only) instead of the
+   * cell-derived db. The descriptor is server-side state — never the cell value.
+   */
+  sqliteRegisterDiskSource(
+    message: SqliteRegisterDiskSourceRequest,
+  ): ResponseMessage<SqliteRegisterDiskSourceResult> {
+    if (this.#sessions.get(message.space, message.sessionId) === null) {
+      return respondTypedError<SqliteRegisterDiskSourceResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    this.registerDiskSource(message.id, message.path);
+    return {
+      type: "response",
+      requestId: message.requestId,
+      ok: { registered: true },
+    };
   }
 
   async openSession(
@@ -1959,6 +2046,26 @@ export const parseClientMessage = (
       sql: parsed.sql,
       params,
     } as SqliteQueryRequest | SqliteExecuteRequest;
+  }
+
+  if (
+    parsed.type === "sqlite.register-disk-source" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.id === "string" &&
+    parsed.id.length > 0 && parsed.id.length <= 256 &&
+    typeof parsed.path === "string" &&
+    parsed.path.length > 0 && parsed.path.length <= 4096
+  ) {
+    return {
+      type: "sqlite.register-disk-source",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      id: parsed.id,
+      path: parsed.path,
+    } as SqliteRegisterDiskSourceRequest;
   }
 
   if (

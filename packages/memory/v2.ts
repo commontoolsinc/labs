@@ -343,6 +343,27 @@ export interface SqliteExecuteResult {
   lastInsertRowid: number;
 }
 
+/**
+ * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
+ * link <piece> <field> sqlite:<absPath>` issues this so the server attaches the
+ * given file (read-only) for the handle id instead of the cell-derived path. The
+ * descriptor is server-side state — it is NOT written into the handle cell value.
+ */
+export interface SqliteRegisterDiskSourceRequest {
+  type: "sqlite.register-disk-source";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  /** Handle cell id (content-derived from (serviceSpace, absPath); see cf). */
+  id: string;
+  /** Absolute path to the on-disk SQLite file. */
+  path: string;
+}
+
+export interface SqliteRegisterDiskSourceResult {
+  registered: true;
+}
+
 export interface WatchSetRequest {
   type: "session.watch.set";
   requestId: string;
@@ -452,6 +473,7 @@ export type ClientMessage =
   | GraphQueryRequest
   | SqliteQueryRequest
   | SqliteExecuteRequest
+  | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
   | SchedulerSnapshotListRequest
