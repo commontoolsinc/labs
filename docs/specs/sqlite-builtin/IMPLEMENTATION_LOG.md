@@ -550,3 +550,39 @@ runtime only needs to STORE the link column as a sigil OBJECT (not a string).
   single end-to-end `cf check` integration test would run all three at once and
   is the only remaining nice-to-have; the skip in sqlite-cf-link-decode.test.ts
   pins it.
+
+---
+
+## 2026-06-02 — e2e integration test (un-skip) + fix a real db.query/db.exec regression
+
+Removed the placeholder `it.skip` by writing a real end-to-end integration test
+(`integration/sqlite-db-query-decode.test.{ts,tsx}`, self-contained
+`Deno.serve({port:0})` toolshed server): a pattern creates a db, a handler writes
+via `db.exec` (folded into its commit) + bumps a `version` cell, and a typed
+`db.query<{ author_cf_link: Cell<User> }>` (reactOn:version) returns the row;
+the `_cf_link` column comes back as a decoded sigil object that resolves to the
+author. Proves the full chain through `cf check` + the REAL server.
+
+Writing it caught THREE real bugs the unit tests missed:
+1. **`db.query` dropped the injected `rowSchema`.** The method forwarded
+   `params`/`reactOn` to the factory but not the transformer-injected `rowSchema`
+   (the runner test used the free `sqliteQuery` with rowSchema in params). Fixed:
+   forward `options.rowSchema`.
+2. **`.query`/`.exec` `_kind` guards were wrong for their contexts.** `.query`
+   runs at pattern-BUILD time where `this` is an opaque builder ref (not yet
+   `"sqlite"`-kind) → removed the guard (it's a node constructor like `.map`).
+   `.exec` runs in a handler where the delivered cell isn't reliably stamped
+   `"sqlite"` → validate the handle VALUE (readDbRef) instead of `_kind`
+   (`"sqlite"` is a type-level kind, not a runtime gate).
+3. **`cellMethods` `"query"`/`"exec"` shadowed common data fields.** Adding them
+   to the proxy allow-list made EVERY `.query`/`.exec` access a method — which
+   broke `wish` (reads a `query` data field) and a generateObject patternTool
+   test (full runner suite went 503→500/3). A base-branch worktree check
+   confirmed pattern-scope passed 36/0 pre-impl. Fix: gate `"query"`/`"exec"`
+   method-forwarding in `getAsOpaqueRefProxy` on `cellKind === "sqlite"`; other
+   cells treat `.query`/`.exec` as data navigation. The sqliteDatabase ref IS
+   `"sqlite"`-kind at build time (via the Increment-1 schema-generator lowering),
+   so `db.query` still forwards. Runner back to 503/0; wish-scope 36/0.
+
+Gates: runner 503/0; full `deno task test` green except the pre-existing
+env-dependent toolshed LLM test; `deno task integration` ✅ (incl. the new e2e).

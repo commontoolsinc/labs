@@ -1,23 +1,16 @@
-// `_cf_link` query-result behavior + the boundary of runtime decode-to-Cell.
+// `_cf_link` query-result behavior at the storage/provider level.
 //
-// What a SELECT of a `*_cf_link` column returns today:
-//   1. the stored value comes back as the sigil-link STRING (decodable on demand
-//      via `decodeCfLinkValue`), and NULL comes back as null — both verified;
-//   2. surfacing it AUTOMATICALLY as a live `Cell` (so `row.author_cf_link` is a
-//      Cell with no per-read `asSchema`) is NOT yet wired at runtime — see the
-//      skipped test below.
-//
-// Why automatic decode needs more than the transformer lowering (which now
-// injects a `rowSchema` for `sqliteQuery<Row>` / `db.query<Row>`): the RUNTIME
-// builtin must also read that `rowSchema`, store `*_cf_link` columns as sigil
-// OBJECTS (not strings), and write the result through an asCell schema so the
-// reader rehydrates them (Piece A, plans/result-decode-and-row-types.md +
-// plans/node-output-schema-propagation.md). Encode-on-write round-trips already
-// (sqlite-cf-link-roundtrip.test.ts).
+// An UNTYPED query returns a `*_cf_link` column as the stored sigil-link STRING
+// (decodable on demand via `decodeCfLinkValue`), and NULL as null — both pinned
+// here. The TYPED `db.query<Row>` path that surfaces the column as a live Cell
+// automatically (transformer `rowSchema` injection + runtime decode + consumer
+// asCell read) is covered at the runtime level in
+// sqlite-query-rowschema-decode.test.ts and end to end through `cf check` + the
+// real server in integration/sqlite-db-query-decode.test.ts.
 //
 // Writes here are seeded via the storage provider (the server `sqlite.execute`
 // verb stays); pattern writes are the imperative `SqliteDb.exec` (sqlite-db-exec
-// .test.ts), which is a folded commit, not a declarative builtin.
+// .test.ts), a folded commit, not a declarative builtin.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -26,7 +19,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { table } from "@commonfabric/memory/sqlite/schema";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
-import { isCell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   decodeCfLinkValue,
@@ -119,19 +111,10 @@ describe("sqlite query result _cf_link behavior", () => {
     expect(r.rows.length).toBe(1);
     expect((r.rows[0] as { author_cf_link: unknown }).author_cf_link)
       .toBeNull();
-  });
-
-  // Both halves now exist: the transformer injects `rowSchema` for
-  // `db.query<Row>` (Increment 2) and the runtime decodes asCell columns to sigil
-  // objects (Piece A) — see sqlite-query-rowschema-decode.test.ts (runtime,
-  // executed) + the `db-query-row-schema` / `db-query-consumer-decode`
-  // transformer fixtures (inject rowSchema + consumer asCell read). This stays
-  // skipped only because the FULL typed `db.query<Row>` consumer path can't run
-  // in a runner unit test (no transformer); a single `cf check` integration test
-  // would exercise all three links at once.
-  it.skip("surfaces row.<col>_cf_link as a live Cell automatically (cf check e2e)", () => {
-    //   const q = db.query<{ author_cf_link: Cell<{ name: string }> }>(sql);
-    //   expect(isCell(q.result[0].author_cf_link)).toBe(true);
-    expect(isCell).toBeDefined();
+    // The typed `db.query<Row>` -> live-Cell path (transformer rowSchema
+    // injection + runtime decode + consumer asCell read) is exercised at the
+    // runtime level in sqlite-query-rowschema-decode.test.ts and end to end
+    // through `cf check` + the real server in
+    // integration/sqlite-db-query-decode.test.ts.
   });
 });

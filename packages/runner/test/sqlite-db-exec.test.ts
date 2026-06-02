@@ -150,18 +150,15 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     await tx2.commit();
   });
 
-  it(".query and .exec are only available on a sqlite-kind cell", () => {
+  it(".exec is only available on a sqlite-kind cell", () => {
     const tx = runtime.edit();
     const plain = runtime.getCell<{ x: number }>(space, "plain", undefined, tx);
     plain.set({ x: 1 });
-    // A normal "cell"-kind cell exposes neither method behavior.
+    // .exec is a runtime write that requires a "sqlite"-kind cell (a handler's
+    // db input). (.query is a build-time node constructor like .map, so it has
+    // no _kind guard — `this` is an opaque builder ref at pattern-build time.)
     expect(() =>
       (plain as unknown as SqliteDbCell).exec("INSERT INTO t VALUES (1)")
-    ).toThrow("SqliteDb");
-    expect(() =>
-      (plain as unknown as { query(sql: string): unknown }).query(
-        "SELECT 1",
-      )
     ).toThrow("SqliteDb");
   });
 

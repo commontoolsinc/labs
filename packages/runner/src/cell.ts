@@ -868,9 +868,6 @@ export class CellImpl<T extends FabricValue>
     sql: string,
     params?: ReadonlyArray<unknown> | Record<string, unknown>,
   ): void {
-    if (this._kind !== "sqlite") {
-      throw new Error(".exec() is only available on a SqliteDb cell");
-    }
     if (!this.tx) {
       throw new Error(
         ".exec() must be called within a transaction (e.g. inside a handler)",
@@ -879,11 +876,17 @@ export class CellImpl<T extends FabricValue>
     if (!this.tx.recordSqliteWrite) {
       throw new Error("storage transaction does not support sqlite writes");
     }
+    // `"sqlite"` is a type-level kind (the public `SqliteDb` type restricts who
+    // can call `.exec`); at runtime we validate the actual handle value rather
+    // than `_kind`, since handler-input materialization doesn't always stamp the
+    // kind onto the delivered cell.
     const handle = this.get() as
       | { id?: unknown; tables?: unknown }
       | undefined;
     if (!handle || typeof handle.id !== "string") {
-      throw new TypeError("sqlite: invalid database handle");
+      throw new TypeError(
+        ".exec() is only available on a SqliteDb cell (invalid database handle)",
+      );
     }
     this.tx.recordSqliteWrite(this.space, {
       op: "sqlite",
@@ -1728,6 +1731,10 @@ export class CellImpl<T extends FabricValue>
     boundTarget?: (...args: unknown[]) => unknown,
   ): OpaqueRef<T> {
     const self = this as unknown as Cell<T>;
+    // `query`/`exec` are SqliteDb-only methods whose names are also common data
+    // fields (e.g. wish's `query`). Only forward them as methods on a
+    // `"sqlite"`-kind cell; otherwise treat `.query`/`.exec` as data navigation.
+    const cellKind = this._kind;
     const proxy = new Proxy(boundTarget ?? this, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
@@ -1758,8 +1765,13 @@ export class CellImpl<T extends FabricValue>
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;
 
-          // Check if this is a method on the cell
-          if (cellMethods.has(prop as keyof ICell<T>)) {
+          // Check if this is a method on the cell. `query`/`exec` are gated to
+          // SqliteDb cells so they don't shadow same-named data fields.
+          const isSqliteOnlyMethod = prop === "query" || prop === "exec";
+          if (
+            cellMethods.has(prop as keyof ICell<T>) &&
+            (!isSqliteOnlyMethod || cellKind === "sqlite")
+          ) {
             return nestedCell.getAsOpaqueRefProxy(
               (self as unknown as Record<
                 string,
@@ -1786,8 +1798,12 @@ export class CellImpl<T extends FabricValue>
    * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
    * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
    * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
-   * injected by the transformer (method-call lowering), not set here. Only valid
-   * on a `"sqlite"`-kind cell.
+   * injected by the transformer (method-call lowering), not set here. Like
+   * `.map`, this is a build-time node constructor with no `_kind` guard: at
+   * pattern-build time `this` is an opaque builder ref (the `"sqlite"` kind only
+   * materializes at runtime via the asCell schema), and the public `SqliteDb`
+   * type already restricts who can call it. A wrong handle fails at runtime in
+   * `readDbRef`.
    */
   query<Row = Record<string, unknown>>(
     sql: string,
@@ -1796,9 +1812,6 @@ export class CellImpl<T extends FabricValue>
       reactOn?: unknown;
     },
   ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
-    if (this._kind !== "sqlite") {
-      throw new Error(".query() is only available on a SqliteDb cell");
-    }
     if (!sqliteQueryFactory) {
       sqliteQueryFactory = createNodeFactory({
         type: "ref",
@@ -1810,6 +1823,10 @@ export class CellImpl<T extends FabricValue>
       sql,
       params: options?.params,
       reactOn: options?.reactOn,
+      // Forward the transformer-injected `<Row>` schema (lowered into the
+      // options object) to the node so the builtin can decode `_cf_link`
+      // columns. Read loosely — it is not part of the public options type.
+      rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
     }) as OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }>;
   }
 
