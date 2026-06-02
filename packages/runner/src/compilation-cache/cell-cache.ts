@@ -7,6 +7,7 @@ import type { MemorySpace, Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type Cell, isCell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
+import { readStoredCfcMetadata } from "../cfc/metadata.ts";
 
 /**
  * Content-addressed compilation cache — document model and key scheme.
@@ -288,6 +289,199 @@ export function loadSourceClosure(
     for (const child of childDocs) {
       if (!out.has(child.identity)) queue.push({ doc: child });
     }
+  }
+  return out;
+}
+
+// --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
+
+/**
+ * Compiled artifacts produced by a fresh compile, keyed by authored path.
+ */
+export type CompiledArtifacts = Map<
+  string,
+  { js: string; sourceMap?: unknown }
+>;
+
+/**
+ * The CFC integrity atom stamped on a compiled document. A plain literal string
+ * bound to the compiler's principal DID: structured `represents-principal`
+ * atoms are runtime-resolved and rejected/owner-coupled, so the DID is baked
+ * into the string instead. In the interim the label is client-asserted (a
+ * same-space writer could stamp it); the hard guarantee lands when the server
+ * becomes the sole acceptor of this write integrity. See the threat model in
+ * docs/specs/module-loading.md.
+ */
+export function compiledIntegrityAtom(compilerDid: string): string {
+  return `cf-compiled-by:${compilerDid}`;
+}
+
+const compiledDocProperties = {
+  kind: { type: "string" },
+  identity: { type: "string" },
+  code: { type: "string" },
+  filename: { type: "string" },
+  sourceMap: {},
+  imports: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        specifier: { type: "string" },
+        link: { asCell: ["cell"] },
+      },
+    },
+  },
+} as const;
+
+/** Read schema for a compiled document (`imports[].link` auto-loads). */
+export const COMPILED_DOC_SCHEMA = {
+  type: "object",
+  properties: compiledDocProperties,
+} as const satisfies JSONSchema;
+
+/** Write schema: stamps the compiler integrity atom on the stored value. */
+export function compiledDocWriteSchema(compilerDid: string): JSONSchema {
+  return {
+    type: "object",
+    properties: compiledDocProperties,
+    ifc: { addIntegrity: [compiledIntegrityAtom(compilerDid)] },
+  };
+}
+
+interface StoredCompiledDoc {
+  kind: "compiled";
+  identity: string;
+  code: string;
+  filename: string;
+  sourceMap?: unknown;
+  imports: { specifier: string; link: unknown }[];
+}
+
+/** Whether a cell's persisted CFC label carries `atom` at its root path. */
+function cellCarriesIntegrity(
+  cell: Cell<unknown>,
+  atom: string,
+  tx: IExtendedStorageTransaction,
+): boolean {
+  const link = cell.getAsNormalizedFullLink();
+  const metadata = readStoredCfcMetadata(tx, {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+  });
+  if (metadata === undefined) return false;
+  return metadata.labelMap.entries.some((entry) =>
+    entry.path.length === 0 &&
+    Array.isArray(entry.label.integrity) &&
+    entry.label.integrity.some((a) => a === atom)
+  );
+}
+
+/**
+ * Write every module's compiled artifact as a
+ * `compileCache:<runtimeVersion>/<identity>` cell into `space`, stamped with the
+ * compiler integrity atom, imports linked to dependency compiled cells. The
+ * caller must `prepareCfc()` + commit the tx under an enforcing CFC mode for the
+ * integrity label to persist.
+ */
+export function writeCompiledDocs(
+  runtime: Runtime,
+  space: MemorySpace,
+  program: Program,
+  artifacts: CompiledArtifacts,
+  opts: {
+    runtimeVersion: string;
+    compilerDid: string;
+    runtimeFingerprint?: string;
+  },
+  tx: IExtendedStorageTransaction,
+): void {
+  const ids = moduleIdentities(program, opts.runtimeFingerprint);
+  const edges = resolveModuleImports(program);
+  const schema = compiledDocWriteSchema(opts.compilerDid);
+  for (const file of program.files) {
+    const identity = ids.get(file.name);
+    const artifact = artifacts.get(file.name);
+    if (identity === undefined || artifact === undefined) continue;
+    const cell = runtime.getCell(
+      space,
+      compiledDocKey(opts.runtimeVersion, identity),
+      schema,
+      tx,
+    );
+    cell.set({
+      kind: "compiled",
+      identity,
+      code: artifact.js,
+      filename: file.name,
+      ...(artifact.sourceMap !== undefined
+        ? { sourceMap: artifact.sourceMap }
+        : {}),
+      imports: (edges.get(file.name)?.internalDeps ?? []).map((dep) => ({
+        specifier: dep.specifier,
+        link: runtime.getCell(
+          space,
+          compiledDocKey(opts.runtimeVersion, ids.get(dep.target)!),
+          undefined,
+          tx,
+        ).getAsLink(),
+      })),
+    } as StoredCompiledDoc);
+  }
+}
+
+/**
+ * Load the integrity-valid compiled documents reachable from `entryIdentity` by
+ * following import links. Fail-closed: a document whose persisted CFC label does
+ * not carry the compiler integrity atom is dropped (treated as a cache miss for
+ * that module, so the caller recompiles it). Returns the valid documents keyed
+ * by their stored identity (empty map if the entry itself is missing/unstamped).
+ */
+export function loadCompiledClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  opts: { runtimeVersion: string; compilerDid: string },
+  tx: IExtendedStorageTransaction,
+): Map<string, CompiledDoc> {
+  const atom = compiledIntegrityAtom(opts.compilerDid);
+  const out = new Map<string, CompiledDoc>();
+  const visited = new Set<string>();
+  const queue: string[] = [entryIdentity];
+  while (queue.length > 0) {
+    const identity = queue.shift()!;
+    if (visited.has(identity)) continue;
+    visited.add(identity);
+
+    const cell = runtime.getCell(
+      space,
+      compiledDocKey(opts.runtimeVersion, identity),
+      COMPILED_DOC_SCHEMA,
+      tx,
+    );
+    // Fail-closed: only integrity-stamped documents are trusted.
+    if (!cellCarriesIntegrity(cell, atom, tx)) continue;
+    const doc = cell.get() as StoredCompiledDoc | undefined;
+    if (!doc || typeof doc.identity !== "string") continue;
+
+    const imports: ModuleImportRef[] = [];
+    for (const imp of doc.imports ?? []) {
+      if (!isCell(imp.link)) continue;
+      const child = (imp.link as Cell<unknown>)
+        .asSchema(COMPILED_DOC_SCHEMA)
+        .get() as StoredCompiledDoc | undefined;
+      if (!child || typeof child.identity !== "string") continue;
+      imports.push({ specifier: imp.specifier, identity: child.identity });
+      if (!visited.has(child.identity)) queue.push(child.identity);
+    }
+    out.set(doc.identity, {
+      kind: "compiled",
+      code: doc.code,
+      filename: doc.filename,
+      ...(doc.sourceMap !== undefined ? { sourceMap: doc.sourceMap } : {}),
+      imports,
+    });
   }
   return out;
 }
