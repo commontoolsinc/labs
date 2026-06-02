@@ -460,6 +460,10 @@ describe("PatternManager compilation cache integration (AMD bundle cache)", () =
       apiUrl: new URL(import.meta.url),
       storageManager,
       cachedCompiler,
+      // Pin the AMD bundle-cache path regardless of CF_ESM_MODULE_LOADER: this
+      // suite asserts CachedCompiler behavior. The ESM cell-cache equivalent is
+      // covered in esm-cell-cache-integration.test.ts.
+      experimental: { esmModuleLoader: false },
     });
   });
 
