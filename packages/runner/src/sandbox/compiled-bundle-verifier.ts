@@ -1128,7 +1128,20 @@ function callbackIndexesForBuilder(
     case "computed":
       return args.length >= 1 ? [0] : [];
     case "lift":
-      return args.length >= 3 ? [2] : args.length >= 1 ? [0] : [];
+      // 3-arg `lift(argSchema, resSchema, cb)` → callback at 2.
+      // 2-arg `lift(argSchema, cb)` / `lift(false, cb)` (the no-input form,
+      // PR #3709) → callback at 1. 1-arg `lift(cb)` → callback at 0.
+      // The 2-arg case is newly reachable here as of CT-1644: hoisting a
+      // `lift(false, fn)()` computation to a module-scope const surfaces it to
+      // the authored-factory verifier, where previously it only ever appeared
+      // inline inside a handler/pattern body (not verified at this layer).
+      return args.length >= 3
+        ? [2]
+        : args.length === 2
+        ? [1]
+        : args.length >= 1
+        ? [0]
+        : [];
     case "handler":
       if (
         args.length >= 1 &&

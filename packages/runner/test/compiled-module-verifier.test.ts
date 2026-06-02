@@ -45,6 +45,25 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts the 2-arg no-input lift(false, fn) form at module scope", () => {
+    // CT-1644: Phase 2 hoists a `lift(false, fn)()` computation to a module-
+    // scope const, surfacing the 2-arg no-input form (PR #3709) to the
+    // authored-factory verifier. The callback is the SECOND argument; the
+    // verifier must read it at index 1, not 0 (where `false` sits).
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfLift_1 = (0, commonfabric_1.lift)(false, () => 42);
+    exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts a previously parsed compiled bundle", () => {
     const bundle = `
 ((runtimeDeps = {}) => {
