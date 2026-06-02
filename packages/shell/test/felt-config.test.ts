@@ -43,13 +43,11 @@ describe("shell felt config", () => {
   it("wires modern experimental env vars into build-time defines", async () => {
     const config = await withEnv({
       EXPERIMENTAL_MODERN_CELL_REP: "true",
-      EXPERIMENTAL_MODERN_DATA_MODEL: "true",
       EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
     }, importFreshConfig);
 
     expect(config.esbuild?.define).toMatchObject({
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
-      $EXPERIMENTAL_MODERN_DATA_MODEL: "true",
       $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
     });
   });

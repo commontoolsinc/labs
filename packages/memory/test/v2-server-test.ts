@@ -592,37 +592,6 @@ Deno.test("memory v2 server accepts scheduler-state flag mismatch", async () => 
   }
 });
 
-Deno.test("memory v2 server accepts legacy richStorableValues flag name and echoes it", async () => {
-  const server = createServer("memory://memory-v2-server-handshake-legacy");
-  const messages: ServerMessage[] = [];
-  const connection = server.connect((message) => messages.push(message));
-
-  try {
-    await connection.receive(encodeMemoryBoundary({
-      type: "hello",
-      protocol: MEMORY_PROTOCOL,
-      flags: {
-        // Client used the legacy field name with the matching value.
-        richStorableValues: HELLO_FLAGS.modernDataModel,
-      },
-    }));
-
-    // The server normalizes on input but echoes the same wire-key the
-    // peer used, so older clients still recognize the reply.
-    assertEquals(shiftMessage(messages), {
-      type: "hello.ok",
-      protocol: MEMORY_PROTOCOL,
-      flags: {
-        modernCellRep: HELLO_FLAGS.modernCellRep,
-        richStorableValues: HELLO_FLAGS.modernDataModel,
-        persistentSchedulerState: HELLO_FLAGS.persistentSchedulerState,
-      },
-    });
-  } finally {
-    await server.close();
-  }
-});
-
 Deno.test("memory v2 server rejects unsafe spaces before opening a store", async () => {
   const server = createServer("memory://memory-v2-server-unsafe-space");
   const messages: ServerMessage[] = [];

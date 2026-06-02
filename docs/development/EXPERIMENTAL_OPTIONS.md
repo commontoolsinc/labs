@@ -8,7 +8,6 @@ various major features.
 | Flag | Env Var | Description |
 |------|---------|-------------|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` | Enables new "cell representation" classes |
-| `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | Enables durable scheduler observations, dirty state, and scheduler rehydration through memory-v2. |
 | `schedulerHistoricalMightWrite` | n/a (`RuntimeOptions` only) | Preserves the scheduler's legacy cumulative write history for dependency scheduling instead of the default current-known write set. |
 

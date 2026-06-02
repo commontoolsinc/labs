@@ -225,57 +225,17 @@ describe("parseMemoryProtocolFlags", () => {
     );
   });
 
-  it("accepts the legacy richStorableValues key and normalizes it", () => {
-    assertEquals(parseMemoryProtocolFlags({ richStorableValues: true }), {
-      flags: {
-        modernCellRep: false,
-        modernDataModel: true,
-        persistentSchedulerState: false,
-      },
-      wireKey: "richStorableValues",
-    });
-    assertEquals(parseMemoryProtocolFlags({ richStorableValues: false }), {
-      flags: {
-        modernCellRep: false,
-        modernDataModel: false,
-        persistentSchedulerState: false,
-      },
-      wireKey: "richStorableValues",
-    });
-  });
-
-  it("prefers the canonical key when both are present", () => {
-    assertEquals(
-      parseMemoryProtocolFlags({
-        modernDataModel: true,
-        richStorableValues: false,
-      }),
-      {
-        flags: {
-          modernCellRep: false,
-          modernDataModel: true,
-          persistentSchedulerState: false,
-        },
-        wireKey: "modernDataModel",
-      },
-    );
-  });
-
   it("rejects values that are not a recognizable flags shape", () => {
     assertEquals(parseMemoryProtocolFlags(null), null);
     assertEquals(parseMemoryProtocolFlags(undefined), null);
-    assertEquals(parseMemoryProtocolFlags("modernDataModel"), null);
+    assertEquals(parseMemoryProtocolFlags("modernCellRep"), null);
     assertEquals(parseMemoryProtocolFlags([true]), null);
-    assertEquals(parseMemoryProtocolFlags({ modernDataModel: "true" }), null);
+    assertEquals(parseMemoryProtocolFlags({ modernCellRep: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
-        modernDataModel: true,
+        modernCellRep: true,
         persistentSchedulerState: "true",
       }),
-      null,
-    );
-    assertEquals(
-      parseMemoryProtocolFlags({ richStorableValues: 1 }),
       null,
     );
   });

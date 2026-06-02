@@ -44,9 +44,6 @@ const config: Config = {
       "$EXPERIMENTAL_MODERN_CELL_REP": Deno.env.get(
         "EXPERIMENTAL_MODERN_CELL_REP",
       ),
-      "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
-        "EXPERIMENTAL_MODERN_DATA_MODEL",
-      ),
       "$EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE": Deno.env.get(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),

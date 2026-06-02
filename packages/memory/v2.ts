@@ -159,20 +159,13 @@ export interface MemoryProtocolFlags {
   persistentSchedulerState: boolean;
 }
 
-/** Legacy field name accepted on the wire for backward compatibility. */
-const LEGACY_MODERN_DATA_MODEL_KEY = "richStorableValues";
-
-export type WireFlagsKey = "modernDataModel" | "richStorableValues";
-
 /**
- * Wire-format flags object. May use the canonical `modernDataModel` key or
- * the legacy `richStorableValues` alias. Use `parseMemoryProtocolFlags()` to
- * normalize to a `MemoryProtocolFlags`.
+ * Wire-format flags object.
  */
-export type WireMemoryProtocolFlags =
-  & { [K in WireFlagsKey]?: boolean }
-  & { modernCellRep?: boolean }
-  & { persistentSchedulerState?: boolean };
+export type WireMemoryProtocolFlags = {
+  modernCellRep?: boolean;
+  persistentSchedulerState?: boolean;
+};
 
 export interface HelloMessage {
   type: "hello";
@@ -463,15 +456,14 @@ export const compatibleMemoryProtocolFlags = (
   (left.modernDataModel === right.modernDataModel);
 
 /**
- * Parses and normalizes incoming wire-protocol flags. Accepts either the
- * current `modernDataModel` key or the legacy `richStorableValues` key (which
- * older peers may send). Returns `null` if the input is not a recognizable
- * flags object. The `wireKey` field captures which key the peer used, so
- * responders can echo the same key for backward compatibility.
+ * Parses and normalizes incoming wire-protocol flags. Returns `null` if the
+ * input is not a recognizable flags object. The `wireKey` field is a leftover
+ * from early during the modern data model development, when its experiment
+ * name changed.
  */
 export const parseMemoryProtocolFlags = (
   value: unknown,
-): { flags: MemoryProtocolFlags; wireKey: WireFlagsKey } | null => {
+): { flags: MemoryProtocolFlags; wireKey: string } | null => {
   if (!isRecord(value) || Array.isArray(value)) {
     return null;
   }
@@ -492,44 +484,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  if (typeof value.modernDataModel === "boolean") {
-    return {
-      flags: {
-        modernCellRep: modernCellRep === true,
-        modernDataModel: value.modernDataModel,
-        persistentSchedulerState: persistentSchedulerState === true,
-      },
-      wireKey: "modernDataModel",
-    };
-  }
-
-  const legacy = value[LEGACY_MODERN_DATA_MODEL_KEY];
-  if (typeof legacy === "boolean") {
-    return {
-      flags: {
-        modernCellRep: modernCellRep === true,
-        modernDataModel: legacy,
-        persistentSchedulerState: persistentSchedulerState === true,
-      },
-      wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
-    };
-  }
-
-  if (
-    (value.modernDataModel === undefined) &&
-    (value[LEGACY_MODERN_DATA_MODEL_KEY] === undefined)
-  ) {
-    return {
-      flags: {
-        modernCellRep: modernCellRep === true,
-        modernDataModel: false,
-        persistentSchedulerState: persistentSchedulerState === true,
-      },
-      wireKey: "modernDataModel",
-    };
-  }
-
-  return null;
+  return {
+    flags: {
+      modernCellRep: modernCellRep === true,
+      modernDataModel: false,
+      persistentSchedulerState: persistentSchedulerState === true,
+    },
+    wireKey: "modernDataModel",
+  };
 };
 
 /**
@@ -540,7 +502,7 @@ export const parseMemoryProtocolFlags = (
  */
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
-  wireKey: WireFlagsKey = "modernDataModel",
+  wireKey: string = "modernDataModel",
 ): WireMemoryProtocolFlags => ({
   [wireKey]: flags.modernDataModel,
   modernCellRep: flags.modernCellRep,

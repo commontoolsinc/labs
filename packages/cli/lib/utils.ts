@@ -26,7 +26,6 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
   };
   const opts: ExperimentalOptions = {
     modernCellRep: read("EXPERIMENTAL_MODERN_CELL_REP"),
-    modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
     persistentSchedulerState: read(
       "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
     ),

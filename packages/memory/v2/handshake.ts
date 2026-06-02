@@ -47,8 +47,7 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
       ),
     };
   }
-  // Echo the wire-key the peer used, so older peers that only know the
-  // legacy `richStorableValues` name still parse the reply.
+
   return {
     type: "hello.ok",
     protocol: MEMORY_PROTOCOL,
