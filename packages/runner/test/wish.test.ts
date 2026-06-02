@@ -2549,6 +2549,126 @@ describe("wish built-in", () => {
       expect(result.key("byTag").get()?.result?.kind).toBe("card");
     });
 
+    it("resolves headless #profile to the default profile (ordered first)", async () => {
+      // Both profiles live in one (non-home) space so the home write opens a
+      // single cross-space writer; the real create flow appends one space per
+      // transaction.
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-multi-profile-space",
+      )).did();
+      const p1 = runtime.getCell(profileSpaceDid, "multi-profile-1", undefined, tx);
+      p1.set({
+        name: "Ada",
+        initialNameApplied: "Ada",
+        avatar: "ada.png",
+        elements: [],
+      });
+      const p2 = runtime.getCell(profileSpaceDid, "multi-profile-2", undefined, tx);
+      p2.set({
+        name: "Grace",
+        initialNameApplied: "Grace",
+        avatar: "grace.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-multi-profile-default-link",
+        undefined,
+        tx,
+      );
+      // Two profiles; the default is the *second* one — it must still resolve
+      // first for headless callers.
+      homeDefaultCell.key("profiles").set([p1, p2]);
+      homeDefaultCell.key("defaultProfile").set(p2);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile", headless: true }),
+        profileName: wish({ query: "#profileName" }),
+        profileAvatar: wish({ query: "#profileAvatar" }),
+      }));
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-multi-profile-default-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Grace");
+      expect(result.key("profileName").get()?.result).toBe("Grace");
+      expect(result.key("profileAvatar").get()?.result).toBe("grace.png");
+    });
+
+    it("orders headless #profile by MRU when no default is set", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-mru-profile-space",
+      )).did();
+      const p1 = runtime.getCell(profileSpaceDid, "mru-profile-1", undefined, tx);
+      p1.set({
+        name: "Ada",
+        initialNameApplied: "Ada",
+        avatar: "",
+        elements: [],
+      });
+      const p2 = runtime.getCell(profileSpaceDid, "mru-profile-2", undefined, tx);
+      p2.set({
+        name: "Grace",
+        initialNameApplied: "Grace",
+        avatar: "",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-mru-profile-link",
+        undefined,
+        tx,
+      );
+      // No default set; MRU lists p2 first, so p2 must resolve first.
+      homeDefaultCell.key("profiles").set([p1, p2]);
+      homeDefaultCell.key("mru").set([p2]);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profile: wish({ query: "#profile", headless: true }),
+      }));
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-mru-profile-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+
+      expect(result.key("profile").get()?.result?.name).toBe("Grace");
+    });
+
     it("does not parse profile scope as an arbitrary DID", async () => {
       const wishPattern = pattern(() => ({
         missing: wish({ query: "#missing", scope: ["profile"] }),

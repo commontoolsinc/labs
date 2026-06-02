@@ -41,16 +41,44 @@ describe("home-space profile creation", () => {
       identity,
     });
 
-    // Open the Profile tab, enter a name, and submit through the trusted
-    // create action (mirrors clicking "Create profile").
+    // Open the Profile tab and create a profile through the picker's inline
+    // create surface (the trusted create action). The home Profile tab is the
+    // profile picker.
     await clickCfButton(page, 'cf-tab[value="profile"]');
-    await fillCfInput(page, "#home-profile-name-input", "Ada Lovelace");
+    await fillCfInput(page, "#wish-profile-picker-name-input", "Ada Lovelace");
     await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
     await waitForRuntimeIdle(page);
 
-    // The create surface reactively swaps to the profile view, and the home
-    // summary shows the created name. Before the fix this timed out: the
-    // cross-space write threw, so no profile was created.
+    // The new profile is appended to the home `profiles` list and rendered in
+    // the picker. This exercises the cross-space `inSpace` append as an array
+    // element (the #3812 multi-space-commit path applied to a push, not a set).
     await waitForText(page, "#home-profile-summary", "Ada Lovelace");
+  });
+
+  it("creates a second profile from the picker (multi-profile append)", async () => {
+    const page = shell.page();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { builtin: "home" },
+      identity,
+    });
+
+    await clickCfButton(page, 'cf-tab[value="profile"]');
+
+    // First profile.
+    await fillCfInput(page, "#wish-profile-picker-name-input", "Ada Lovelace");
+    await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
+    await waitForRuntimeIdle(page);
+    await waitForText(page, "#home-profile-summary", "Ada Lovelace");
+
+    // Second profile — must append, not overwrite.
+    await fillCfInput(page, "#wish-profile-picker-name-input", "Alan Turing");
+    await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
+    await waitForRuntimeIdle(page);
+
+    // Both profiles are now listed in the picker.
+    await waitForText(page, "#home-profile-summary", "Ada Lovelace");
+    await waitForText(page, "#home-profile-summary", "Alan Turing");
   });
 });
