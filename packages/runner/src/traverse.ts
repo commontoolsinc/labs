@@ -753,7 +753,6 @@ export abstract class BaseObjectTraverser {
       new StandardObjectCreator(),
   ) {}
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
-  private coverageSelectorCache = new Map<string, SchemaPathSelector>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
@@ -1038,37 +1037,21 @@ export abstract class BaseObjectTraverser {
       ["value", ...(link.path as readonly string[])],
       this.cfc,
     );
+    // `narrowSchema()` returns a fresh, owned selector (fresh `path` array), so
+    // we can normalize and hand it straight to `schemaTrackerCoversSelector()`,
+    // which interns it in place. No separate cache is needed: the tracker is
+    // already keyed on `hashStringOf(selector)`, which returns cached results
+    // for the (now-frozen) interned selector.
     targetSelector.schema = combineOptionalSchema(
       targetSelector.schema,
       link.schema,
-    );
+    ) ?? false;
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
       `${link.space}/${link.scope}/${link.id}`,
-      this.internCoverageSelector(targetSelector),
+      targetSelector,
     );
-  }
-
-  private internCoverageSelector(
-    selector: SchemaPathSelector,
-  ): SchemaPathSelector {
-    const schema = selector.schema ?? false;
-    const schemaKey = typeof schema === "boolean"
-      ? String(schema)
-      : hashSchema(schema);
-    const cacheKey = `${selector.path.join("\0")}\0${schemaKey}`;
-    const cached = this.coverageSelectorCache.get(cacheKey);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const interned = internPathSelector({
-      path: [...selector.path],
-      schema,
-    });
-    this.coverageSelectorCache.set(cacheKey, interned);
-    return interned;
   }
 
   /**
