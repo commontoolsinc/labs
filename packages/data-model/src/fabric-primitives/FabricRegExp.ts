@@ -1,4 +1,4 @@
-import { FabricPrimitive } from "../interface.ts";
+import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";
@@ -23,7 +23,7 @@ const DEFAULT_FLAVOR = "es2025";
  * other regex syntaxes in the future.
  * See Section 1.4.1 of the formal spec.
  */
-export class FabricRegExp extends FabricPrimitive {
+export class FabricRegExp extends BaseFabricPrimitive {
   /** The pattern source text. */
   readonly #source: string;
 
