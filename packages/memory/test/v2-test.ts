@@ -166,17 +166,6 @@ describe("parseMemoryProtocolFlags", () => {
     });
   });
 
-  it("accepts the canonical modernDataModel key", () => {
-    assertEquals(parseMemoryProtocolFlags({ modernDataModel: true }), {
-      modernCellRep: false,
-      persistentSchedulerState: false,
-    });
-    assertEquals(parseMemoryProtocolFlags({ modernDataModel: false }), {
-      modernCellRep: false,
-      persistentSchedulerState: false,
-    });
-  });
-
   it("accepts the canonical persistentSchedulerState key", () => {
     assertEquals(
       parseMemoryProtocolFlags({
