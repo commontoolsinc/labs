@@ -517,15 +517,24 @@ export function* verifiedWalkChildValues(value: object): Generator<unknown> {
  * We must not use `Object.prototype.toString.call(value)` or read
  * `value[Symbol.toStringTag]`: both perform a `[[Get]]` that would invoke a
  * user-defined `@@toStringTag` getter as a side effect on every value walked —
- * exactly the side-effect-free property this traversal is meant to preserve. A
- * real module namespace exposes `@@toStringTag` as a (non-configurable) data
- * property whose value is "Module"; reading its own descriptor never invokes a
- * getter, so an ordinary object that exposes `@@toStringTag` via an accessor is
- * correctly NOT treated as a module namespace and its getters are never run.
+ * exactly the side-effect-free property this traversal is meant to preserve.
+ *
+ * Instead we match the exact `@@toStringTag` shape of a Module Namespace Exotic
+ * Object (ECMAScript 28.3 / 10.4.6): an own, non-writable, non-enumerable,
+ * non-configurable DATA property whose value is "Module" (verified: SES
+ * namespaces expose precisely this). Reading the own descriptor never invokes a
+ * getter, and the strict attribute match keeps the classifier from being
+ * tricked by an ordinary object that merely carries a (writable/enumerable/
+ * configurable) `@@toStringTag` data property or exposes one via an accessor —
+ * so getters on non-namespace objects are never run.
  */
 function isModuleNamespaceObject(value: object): boolean {
   const tag = Object.getOwnPropertyDescriptor(value, Symbol.toStringTag);
-  return tag !== undefined && "value" in tag && tag.value === "Module";
+  return tag !== undefined &&
+    "value" in tag && tag.value === "Module" &&
+    tag.writable === false &&
+    tag.enumerable === false &&
+    tag.configurable === false;
 }
 
 function readVerifiedBindingMetadata(

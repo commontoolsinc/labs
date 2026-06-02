@@ -96,6 +96,30 @@ describe("verifiedWalkChildValues (CT-1623)", () => {
     expect(yielded.length).toBe(0);
   });
 
+  it("does NOT treat an ordinary object with a casual toStringTag 'Module' as a namespace", () => {
+    // A real Module Namespace Exotic Object exposes @@toStringTag as a
+    // non-writable/non-enumerable/non-configurable data property. An ordinary
+    // object that merely assigns `[Symbol.toStringTag] = "Module"` (writable,
+    // enumerable, configurable) must NOT be classified as a namespace, so its
+    // accessor properties' getters are never invoked.
+    let exportInvoked = false;
+    const obj: Record<PropertyKey, unknown> = {
+      [Symbol.toStringTag]: "Module",
+    };
+    Object.defineProperty(obj, "export", {
+      get: () => {
+        exportInvoked = true;
+        return () => {};
+      },
+      enumerable: true,
+    });
+    const yielded = collect(obj);
+    expect(exportInvoked).toBe(false);
+    // Only the data property (the toStringTag string) is yielded, not the
+    // accessor export.
+    expect(yielded).toEqual(["Module"]);
+  });
+
   it("ignores a live binding that throws on read", () => {
     const ns: Record<PropertyKey, unknown> = {};
     Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
