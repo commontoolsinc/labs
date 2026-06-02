@@ -191,8 +191,10 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  *
  * Most native JS object types enter the fabric layer via wrapper classes
  * that extend `FabricInstance`; other special values extend `FabricPrimitive`.
- * Both arrive in `FabricValue` through the common `FabricSpecialObject` arm.
- * Some native types are converted to fabric primitives during conversion.
+ * Both of those reach `FabricValue` through the common `FabricSpecialObject`
+ * arm. The non-object values (`bigint` and the other scalars) are direct
+ * members of the union instead, not routed through that arm. Some native types
+ * are converted to fabric primitives during conversion.
  *
  * `undefined` is preserved when the `modernDataModel` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
