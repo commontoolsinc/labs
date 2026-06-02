@@ -15,7 +15,6 @@ import type { JsonWireValue, TypeHandlerCodec } from "./interface.ts";
 import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
 import { FabricError } from "../fabric-instances/FabricError.ts";
 import { FabricMap } from "../fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../fabric-instances/FabricRegExp.ts";
 import { FabricSet } from "../fabric-instances/FabricSet.ts";
 import { TAGS } from "../fabric-type-tags.ts";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
@@ -126,7 +125,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
     this.registry.set(TAGS.Error, FabricError);
     this.registry.set(TAGS.Map, FabricMap);
     this.registry.set(TAGS.Set, FabricSet);
-    this.registry.set(TAGS.RegExp, FabricRegExp);
   }
 
   //

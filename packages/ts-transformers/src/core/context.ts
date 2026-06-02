@@ -173,30 +173,6 @@ export class TransformationContext {
   }
 
   /**
-   * Record the pre-shrink semantic type that drove a wrapper narrowing.
-   * `applyShrinkAndWrap` (in type-shrinking.ts) calls this on every wrapper
-   * TypeNode it produces so the SchemaInjection inner-lift revisit path can
-   * re-narrow from the original baseType instead of `any` (the checker
-   * widens synthetic wrappers). See `narrowedWrapperTypeRegistry` docs in
-   * core/mod.ts and the underlying smell tracked as CT-1621.
-   *
-   * Promoted from direct `.set` to a method so the registry's contract is
-   * documented and enforced in one place (Berni's review §3.4).
-   */
-  markNarrowedWrapper(wrapperNode: ts.TypeNode, preShrinkType: ts.Type): void {
-    this.options.state?.markNarrowedWrapper(wrapperNode, preShrinkType);
-  }
-
-  /**
-   * Look up the pre-shrink semantic type for a wrapper TypeNode previously
-   * recorded by `markNarrowedWrapper`. Returns undefined when not present;
-   * callers should fall through to their existing recovery path.
-   */
-  lookupNarrowedWrapper(wrapperNode: ts.TypeNode): ts.Type | undefined {
-    return this.options.state?.lookupNarrowedWrapper(wrapperNode);
-  }
-
-  /**
    * Mark a builder call/new node that SchemaInjection has finalized, so a
    * later re-traversal of the transformer's own output skips re-injection.
    * Replaces the arg-count idempotency guards in schema-injection.ts. See

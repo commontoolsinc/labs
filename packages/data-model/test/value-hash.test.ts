@@ -8,7 +8,7 @@ import { FabricValue } from "../src/interface.ts";
 import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.

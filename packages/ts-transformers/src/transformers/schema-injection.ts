@@ -1371,9 +1371,8 @@ function visitInjectedDualSchemaBuilderCall(
   // Mark BEFORE re-descending: the re-descent below re-enters `updated` to
   // reach the callback body (catching pattern calls ClosureTransformer
   // created inside builder callbacks, e.g. from map transformations). Marking
-  // first means that re-entry self-skips the builder/schema logic — including
-  // the re-narrowing of the synthetic schema arg that previously required
-  // narrowedWrapperTypeRegistry (CT-1621) — and only the callback is visited.
+  // first means that re-entry self-skips the builder/schema logic and only the
+  // callback is visited.
   context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
 }
@@ -2884,10 +2883,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       // builder call/new node, do NOT re-process it — only descend into its
       // children (to reach callback bodies). This replaces the per-builder
       // arg-count guards (`args.length >= 5`, etc.) and the implicit
-      // "drop the type args so re-detection fails" tricks, and it plugs the
-      // gap in the lift `isToSchemaCall` branch whose re-narrowing of the
-      // synthetic schema arg was the sole reason narrowedWrapperTypeRegistry
-      // existed (CT-1621). Producers call `context.markSchemaInjected(...)`.
+      // "drop the type args so re-detection fails" tricks. Producers call
+      // `context.markSchemaInjected(...)`. The lift `isToSchemaCall` branch
+      // additionally skips synthetic capability-wrapper re-entries inline
+      // (see CT-1621) for nodes whose mark did not survive reconstruction.
       if (
         (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
         context.isSchemaInjected(node)
@@ -3353,23 +3352,37 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (argumentType && liftCallback) {
-            // Prefer the pre-shrink type from `narrowedWrapperTypeRegistry`
-            // when available — when the first toSchema argument is a synthetic
-            // wrapper TypeNode, `checker.getTypeFromTypeNode` resolves it to
-            // `any`, dropping the inner `type:`. The registry recovers the
-            // pre-shrink type. CT-1621: the only live consumer is `derive`'s
-            // value-as-input lowering (first pass); the redundant self-re-entry
-            // consumer was removed via the schemaInjectedRegistry marker, and
-            // `computed`/user-`lift` never produce this shape. Registry is
-            // derive-bound — see core/mod.ts and type-shrinking.ts
-            // `applyShrinkAndWrap`.
-            const argumentTypeValue =
-              context.lookupNarrowedWrapper(argumentType) ??
-                getTypeFromTypeNodeWithFallback(
-                  argumentType,
-                  checker,
-                  typeRegistry,
-                );
+            // CT-1621: when the toSchema argument is a SYNTHETIC capability
+            // wrapper TypeNode (pos < 0, e.g. `__cfHelpers.ComparableCell<…>`),
+            // it is our OWN already-shrunk output that re-entered this branch —
+            // the input schema is already correct and the callback's capability
+            // summary was already applied upstream. Re-running the recover +
+            // re-shrink here is redundant (it reproduces the same wrapper) and
+            // was the SOLE consumer of narrowedWrapperTypeRegistry: the
+            // synthetic wrapper resolves to `any`, so the re-shrink needed the
+            // pre-shrink type fed back. Skip it — keep the already-injected
+            // input, mark the node, and only descend into the callback body.
+            // Authored `lift(toSchema<T>(), fn)` has a real-source T (pos >= 0)
+            // that the checker resolves, so it falls through to the normal path.
+            //
+            // This is layered with the top-of-visit `schemaInjectedRegistry`
+            // guard (see SchemaInjectionTransformer.transform) as defense-in-
+            // depth: that guard catches re-entries on nodes whose mark survived
+            // reconstruction; this one catches the structural re-entry case
+            // (synthetic Cell-family / Stream wrapper as toSchema arg) for
+            // nodes whose mark did not.
+            if (argumentType.pos < 0 && isCellLikeTypeNode(argumentType)) {
+              context.markSchemaInjected(node);
+              return ts.visitEachChild(node, visit, transformation);
+            }
+            // Authored `lift(toSchema<T>(), fn)`: T is a real-source TypeNode
+            // the checker resolves (the synthetic-wrapper re-entry case is
+            // handled by the skip above).
+            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
+              argumentType,
+              checker,
+              typeRegistry,
+            );
             const {
               argumentTypeNode: narrowedArgumentType,
               argumentTypeValue: narrowedArgumentTypeValue,
@@ -3399,9 +3412,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               [inputSchema, ...node.arguments.slice(1)],
             );
             // Mark so the re-descent below does NOT re-enter this branch and
-            // re-narrow the synthetic `inputSchema` wrapper against `any`.
-            // That re-narrowing was the sole consumer of
-            // narrowedWrapperTypeRegistry (CT-1621).
+            // re-process the synthetic `inputSchema` wrapper.
             context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
