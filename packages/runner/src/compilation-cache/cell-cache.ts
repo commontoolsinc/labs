@@ -510,9 +510,17 @@ export function writeCompiledDocs(
 /**
  * Load the integrity-valid compiled documents reachable from `entryIdentity` by
  * following import links. Each cell is `sync()`d before reading so a closure
- * persisted in a prior session loads from storage. Fail-closed: a document whose
- * persisted CFC label does not carry the compiler integrity atom is dropped
- * (treated as a cache miss for that module, so the caller recompiles it).
+ * persisted in a prior session loads from storage.
+ *
+ * Fail-closed and link-faithful: the BFS walks the *actual linked cells* (never
+ * re-deriving a cell from a stored `identity` field), and a cell is read only
+ * after its own persisted CFC label is confirmed to carry the compiler
+ * integrity atom. So every document in the result — and every import edge — came
+ * from an integrity-stamped cell that the parent's sigil link actually points
+ * at; an unstamped/tampered child is dropped along with the edge to it (treated
+ * as a cache miss, so the caller recompiles). The entry is the one cell looked
+ * up by key, from the caller's trusted `entryIdentity`.
+ *
  * Resolves to the valid documents keyed by their stored identity (empty map if
  * the entry itself is missing/unstamped).
  */
@@ -526,35 +534,45 @@ export async function loadCompiledClosure(
   const atom = compiledIntegrityAtom(opts.compilerDid);
   const out = new Map<string, CompiledDoc>();
   const visited = new Set<string>();
-  const queue: string[] = [entryIdentity];
-  while (queue.length > 0) {
-    const identity = queue.shift()!;
-    if (visited.has(identity)) continue;
-    visited.add(identity);
 
-    const cell = runtime.getCell(
-      space,
-      compiledDocKey(opts.runtimeVersion, identity),
-      COMPILED_DOC_SCHEMA,
-      tx,
-    );
+  // Integrity-check a cell, returning its stored doc only if the cell carries
+  // the compiler atom (fail-closed). The cell is synced first.
+  const readVerified = async (
+    cell: Cell<unknown>,
+  ): Promise<StoredCompiledDoc | undefined> => {
     await cell.sync();
-    // Fail-closed: only integrity-stamped documents are trusted.
-    if (!cellCarriesIntegrity(cell, atom, tx)) continue;
+    if (!cellCarriesIntegrity(cell, atom, tx)) return undefined;
     const doc = cell.get() as StoredCompiledDoc | undefined;
-    if (!doc || typeof doc.identity !== "string") continue;
+    return doc && typeof doc.identity === "string" ? doc : undefined;
+  };
+
+  const entryCell = runtime.getCell(
+    space,
+    compiledDocKey(opts.runtimeVersion, entryIdentity),
+    COMPILED_DOC_SCHEMA,
+    tx,
+  );
+  const entryDoc = await readVerified(entryCell);
+  if (entryDoc === undefined) return out;
+
+  const queue: { doc: StoredCompiledDoc }[] = [{ doc: entryDoc }];
+  while (queue.length > 0) {
+    const { doc } = queue.shift()!;
+    if (visited.has(doc.identity)) continue;
+    visited.add(doc.identity);
 
     const imports: ModuleImportRef[] = [];
     for (const imp of doc.imports ?? []) {
       if (!isCell(imp.link)) continue;
+      // Follow the actual linked cell and integrity-check IT before trusting
+      // either the edge or the child's content (no re-lookup by stored id).
       const childCell = (imp.link as Cell<unknown>).asSchema(
         COMPILED_DOC_SCHEMA,
       );
-      await childCell.sync();
-      const child = childCell.get() as StoredCompiledDoc | undefined;
-      if (!child || typeof child.identity !== "string") continue;
+      const child = await readVerified(childCell);
+      if (child === undefined) continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
-      if (!visited.has(child.identity)) queue.push(child.identity);
+      if (!visited.has(child.identity)) queue.push({ doc: child });
     }
     out.set(doc.identity, {
       kind: "compiled",

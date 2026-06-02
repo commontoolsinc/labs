@@ -201,6 +201,13 @@ export interface CompileSourcesOptions {
    * `fn.src` resolution) keeps the prefixed path untouched.
    */
   idPrefix?: string;
+  /**
+   * Precomputed per-path module identities (from {@link computeModuleIdentities}).
+   * When the caller already derived these (e.g. the Engine, for its cache-hit
+   * check), passing them here avoids recomputing the hashes a second time. Must
+   * be consistent with `idPrefix` / `runtimeFingerprint`.
+   */
+  identityByPath?: Map<string, string>;
 }
 
 export interface CompiledModuleGraph {
@@ -264,12 +271,14 @@ export function compileSourcesToRecords(
   const runtimeModules = options.runtimeModules ?? {};
   // Identities are computed prefix-free (see computeModuleIdentities) so
   // `cf:module/<hash>` is entry-point independent and dedupes across programs.
-  const identityByPath = computeModuleIdentities(sources, {
-    ...(options.idPrefix !== undefined ? { idPrefix: options.idPrefix } : {}),
-    ...(options.runtimeFingerprint !== undefined
-      ? { runtimeFingerprint: options.runtimeFingerprint }
-      : {}),
-  });
+  // Reuse the caller's precomputed map when supplied (avoids a second hash pass).
+  const identityByPath = options.identityByPath ??
+    computeModuleIdentities(sources, {
+      ...(options.idPrefix !== undefined ? { idPrefix: options.idPrefix } : {}),
+      ...(options.runtimeFingerprint !== undefined
+        ? { runtimeFingerprint: options.runtimeFingerprint }
+        : {}),
+    });
   const fileNames = new Set(sources.map((s) => s.name));
   const specifierByPath = new Map<string, string>();
   for (const source of sources) {

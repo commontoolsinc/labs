@@ -379,6 +379,9 @@ export class Engine extends EventTarget implements Harness {
         // `cf:module/<hash>` is entry-point independent and dedupes across
         // programs (the content-addressed cache keys off these identities).
         idPrefix: `/${id}`,
+        // Reuse the identities already computed above (cache-hit check); avoids
+        // a second hashing/import-resolution pass over the module set.
+        identityByPath,
       });
 
       // Register runtime-module records so cf:runtime/* imports resolve.

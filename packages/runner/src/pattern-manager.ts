@@ -546,14 +546,17 @@ export class PatternManager {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
       compilerDid,
     };
-    // Read the cache on a dedicated read-only transaction so cache-cell reads
-    // never enter the caller's transaction (whose commit must not gain
-    // dependencies on, or race, the fire-and-forget write-back).
-    const readTx = this.runtime.readTx();
+    // Read the cache on a dedicated, owned transaction (used read-only — the
+    // load path only reads, and it is aborted below, never committed) so
+    // cache-cell reads never enter the caller's transaction (whose commit must
+    // not gain dependencies on, or race, the fire-and-forget write-back), and
+    // so repeated compiles don't accumulate open transactions.
+    const readTx = this.runtime.edit();
 
     let warmHit = false;
-    const { id, graph, mainSpecifier, entryIdentity, modules } = await harness
-      .compileToRecordGraph!(program, {
+    let compiled;
+    try {
+      compiled = await harness.compileToRecordGraph!(program, {
         precompiledModulesFor: async ({ entryIdentity, identities }) => {
           const closure = await loadCompiledClosure(
             this.runtime,
@@ -581,6 +584,12 @@ export class PatternManager {
           return bodies;
         },
       });
+    } finally {
+      // Release the read-only cache transaction (no commit needed) so repeated
+      // compiles don't accumulate open transactions.
+      readTx.abort?.("compile-cache read complete");
+    }
+    const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
 
     const result = harness.evaluateRecordGraph!(
       id,
