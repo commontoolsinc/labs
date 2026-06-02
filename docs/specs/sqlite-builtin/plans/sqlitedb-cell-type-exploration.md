@@ -603,11 +603,27 @@ Supersedes the free-function `db.exec` framing in `sqlite-execute-commit-fold.md
 the user this session.
 
 ### Shape
-`SqliteDb` is a **branded Cell variant** in the writable/readonly/opaque family —
-a normal branded cell (kind `"cell"`, backed by the single `CellImpl`, value =
-the handle ref `{id, tables}`, carrying `tx`/`space`) exposing a DB-specific
-method surface. NOT a new `asCell` runtime kind. `sqliteDatabase({tables})`
-returns a `SqliteDb`.
+`SqliteDb` is a **new cell kind `"sqlite"`** in the same family as
+`readonly`/`writeonly`/`opaque`/`comparable`: `CellKind` (`api/index.ts:181-187`)
+is already a 6-member union and these are **type-level brands**, not runtime gates
+(only `"stream"` and `"opaque"` are behaviorally gated — cell.ts:708/1602,
+schema.ts:578, traverse.ts:2476/3110). So
+`SqliteDb = BrandedCell<T, "sqlite"> & ISqliteDb<T>`, backed by the single
+`CellImpl`, value = the handle ref `{id, tables}`, carrying `tx`/`space`, with an
+`asCell: ["sqlite"]` marker that **falls through to normal cell read behavior**
+(like `readonly`). Its specialness is the method surface, not read-path gating.
+`sqliteDatabase({tables})` returns a `SqliteDb`.
+
+> **Why `"sqlite"`, not reuse `"cell"`** (overrides the grounding-spike Q1
+> suggestion, per user): `"cell"` denotes a general read/write value container,
+> which a DB handle is not. A distinct kind is the **same implementation cost** (a
+> `CellKind` union member + `cellMethods` entries; no new runtime gate) but is
+> semantically honest and buys type-safety — a `SqliteDb` can't be passed where a
+> writable `Cell<T>` is expected, and the handle can't be `.set()` by accident.
+> Work: add `"sqlite"` to `CellKind`; define `ISqliteDb<T>` (exec/query, no
+> `IWritable`); verify the generic `getAsCellKind` consumers (schema.ts:594/664/1180,
+> cell.ts:1201) treat it as non-stream/non-opaque (they compare `=== "stream"`/
+> `=== "opaque"`, so it falls through — the same path `readonly` takes).
 
 - **`db.exec(sql, params?)` — sync write.** Records a folded `sqlite` op onto the
   cell's own `tx` via the Stage-1 seam (`recordSqliteWrite`), atomic with any
@@ -640,10 +656,17 @@ columns). A separate thread will improve general pending detection; the
 N is undefined — it may be a value that isn't ready yet; pass a resolved value
 (or `null` for SQL NULL), or use the reactive form."
 
+### Regression requirement
+Because this touches foundational `cell.ts` (the shared `CellImpl` + `cellMethods`
+allow-list + the `CellKind` union), every stage must gate on the **full workspace
+suite `deno task test` AND `deno task integration`** — not just the runner
+package. Run both green before committing each stage.
+
 ### Implementation stages
 1. **`SqliteDb` cell variant + `.exec` method (reuses Stage-1 seam).**
-   - Add a branded `SqliteDb` interface (kind `"cell"`) in `packages/api/index.ts`
-     exposing `exec`/`query` (+ a `toCell` recovery, as today).
+   - Add `"sqlite"` to `CellKind` and a branded `SqliteDb = BrandedCell<T,"sqlite"> & ISqliteDb<T>`
+     interface in `packages/api/index.ts` exposing `exec`/`query` (no `IWritable`;
+     + `toCell` recovery, as today).
    - Add `exec`/`query` as real methods on `CellImpl` (`packages/runner/src/cell.ts`)
      and to the `cellMethods` allow-list (`cell.ts:372-423`) so the OpaqueRef
      proxy forwards them (grounding-spike Q2). `exec` recovers `this.tx`/`this.space`,
