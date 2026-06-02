@@ -342,6 +342,28 @@ export type ChangeSet = {
  * @param context - The context of the change.
  * @returns An array of changes that should be written.
  */
+/**
+ * Returns the target space of `value` if it is a reference (cell, link, or
+ * query-result proxy), resolved relative to `link`. Returns `undefined` for
+ * plain values. Used to detect cross-space writes before the reference is
+ * materialized. Reading the link's space does not write to storage.
+ */
+function spaceOfReferenceValue(
+  value: unknown,
+  link: NormalizedFullLink,
+): NormalizedFullLink["space"] | undefined {
+  if (isCellResultForDereferencing(value)) {
+    return getCellOrThrow(value).getAsNormalizedFullLink().space;
+  }
+  if (isCell(value)) {
+    return value.getAsNormalizedFullLink().space;
+  }
+  if (isCellLink(value)) {
+    return parseLink(value, link)?.space;
+  }
+  return undefined;
+}
+
 export function normalizeAndDiff(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
@@ -486,6 +508,24 @@ export function normalizeAndDiff(
     }
     // Fallback: A random id. Below this will create a new entity.
     newValue = { [ID]: crypto.randomUUID(), ...rest };
+  }
+
+  // Writing a reference (cell/link/query-result) that targets a different space
+  // than the cell being written into: opt the transaction into a multi-space
+  // commit, ordering the referenced (child) space before the parent
+  // (`link.space`) so the parent's link is never durable before its target.
+  //
+  // Materializing the reference below can write into the child space as a side
+  // effect — e.g. a handler body running `cell.set(Child.inSpace(s)(...))`,
+  // where instantiating the `inSpace` child during the diff opens a writer for
+  // the child space. Without opting in first, the subsequent parent-space write
+  // trips the single-space write-isolation guard. This mirrors the runner's
+  // post-run `enableCrossSpaceChildCommit` for handler *results*; here it covers
+  // writes performed inside the handler body, which materialize during the
+  // write itself rather than in the post-run pass.
+  const referencedSpace = spaceOfReferenceValue(newValue, link);
+  if (referencedSpace !== undefined && referencedSpace !== link.space) {
+    runtime.runner.enableCrossSpaceChildCommit(tx, referencedSpace, link.space);
   }
 
   // Unwrap proxies and handle special types

@@ -138,22 +138,14 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     profile: profile as any,
     profileName,
   });
-  // Hand the create surface a schema-less view of `profile` (drop the
-  // TrustedProfileLink IFC schema), mirroring how the `#profile` wish builtin
-  // wires this input (a plain link, no schema). With the IFC schema present,
-  // `profile.set(ProfileHome.inSpace(name)(...))` routes through the CFC
-  // write-policy path and materializes the cross-space `inSpace` child during
-  // the handler's own `.set()` — opening a writer for the new profile space
-  // before the home-space link write and tripping the single-space
-  // write-isolation guard ("cross-space writes" error). Without the schema the
-  // child defers to the runner's post-run pass (enableCrossSpaceChildCommit),
-  // which commits the child space first and yields a `.get()`-readable link, so
-  // the display below reactively switches to the profile. Owner-protection of
-  // the profile itself lives on the profile space's fields (ProfileHome's IFC),
-  // not on this home→profile pointer. See docs/specs/shared-profile-space.md.
-  const profileForCreate = (profile as any).asSchema(undefined);
+  // Pass the owner-protected `profile` cell (TrustedProfileLink IFC schema)
+  // through unchanged: `profile.set(ProfileHome.inSpace(name)(...))` materializes
+  // the cross-space `inSpace` child during the handler's own `.set()`, which the
+  // runner now opts into a multi-space commit for (see data-updating.ts /
+  // normalizeAndDiff). Keeping the schema preserves CFC owner-protection on the
+  // home→profile link write. See docs/specs/shared-profile-space.md.
   const profileCreate = ProfileCreate({
-    profile: profileForCreate,
+    profile: profile as any,
     profileName,
     inputId: "home-profile-name-input",
     buttonId: "home-profile-create-button",
