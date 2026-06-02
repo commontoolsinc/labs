@@ -16,7 +16,10 @@ is merged. The module-loading mechanism (Phases 2–4), behind the default-off
 SES virtual-module-record loader, a TS→record adapter that runs the full CF
 transformer pipeline, per-load/per-module source maps with CFC verified-source
 identity (#3785, #3787), per-module SES classification wired into the compile
-path, an in-memory per-module cache, and a structural graph verifier. Security
+path, and a structural graph verifier. (A per-module `ModuleRecordCache` exists
+but is **bypassed on the production ESM path** — precompiled CF-transformed
+bodies are authoritative — so flag-on compiles are not yet cached; see Phase 4.)
+Security
 hardening landed alongside (frozen exported patterns #3777, import-edge
 validation #3778, provenance brand #3779), and the flag is plumbed through to the
 browser client (#3796). The `cfc-group-chat-demo` end-to-end integration test
@@ -24,9 +27,10 @@ passes flag-on (#3797).
 
 Remaining before default-on: the full-corpus verifier **parity oracle** (ESM
 verdicts must match AMD across the whole pattern corpus — the current parity test
-covers crafted fixtures only), a green **full-suite flag-on sweep**, **per-module
-cache persistence** (Phase 4), benchmarks, and the **default-on/AMD-removal
-rollout** (Phase 5). The AMD bundle path remains the default throughout.
+covers crafted fixtures only), a green **full-suite flag-on sweep**, **making the
+production ESM path cacheable and persisting it** as content-addressed cells
+(Phase 4), benchmarks, and the **default-on/AMD-removal rollout** (Phase 5). The
+AMD bundle path remains the default throughout.
 
 ## Last Updated
 

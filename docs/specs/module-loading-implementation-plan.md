@@ -16,7 +16,7 @@ steps with the files each touches, exit criteria, and validation commands.
 | 1 — Decouple identity | Done (merged) | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
 | 2 — ESM emission + SES module loading | Done (behind `CF_ESM_MODULE_LOADER`, default off) | `compileToRecordGraph` + `evaluateRecordGraph` (`engine.ts`) run the full `CommonFabricTransformerPipeline` (not bare `transpileModule`), assemble content-addressed records, register per-load/per-module source maps, and load multi-module programs end-to-end. Engine integration, `export *` re-exports, live module-namespace bindings (#3797), and CFC verified-source location resolution (#3785, #3787) are all wired. The flag is now also plumbed to the browser client (#3796). |
 | 3 — Verifier port | Classification ported + wired; corpus parity oracle pending | The deep SES_SANDBOXING module-item classification (`verifyCompiledModuleBody`, reusing the shared `classifyModuleItems` core) runs **per module** in the ESM compile path (`engine.ts`). `verifyModuleGraph` validates graph shape/wiring. Additional hardening landed beyond the original plan: import-edge target validation (#3778), pattern provenance brand (#3779), frozen exported patterns (#3777). **Remaining (release gate):** the full-corpus differential parity oracle — `esm-verifier-parity.test.ts` currently covers crafted CF-shaped fixtures only, not every pattern-corpus verdict. |
-| 4 — Per-module compilation cache | In-memory done; content-addressed persistence designed (Phase 4 below), not built | `ModuleRecordCache` reuses the compiled artifact in memory. The ESM path in `PatternManager.compilePattern` **bypasses the persistent compilation cache** (the only flag-on test failures are the two `pattern-manager.test.ts` cache cases). **Remaining:** the content-addressed cell cache (source set `pattern:<identity>` + compiled set `compileCache:<runtimeVersion>/<identity>`, per space, with CFC integrity on the compiled set) specified in Phase 4 below. |
+| 4 — Per-module compilation cache | Production ESM path not cached yet; content-addressed cache designed (Phase 4 below), not built | Neither cache is exercised flag-on: the whole-program `CachedCompiler` is AMD-only, and the per-module `ModuleRecordCache` is **bypassed whenever a precompiled CF-transformed body is present** — which `Engine.compileToRecordGraph` always supplies. So flag-on compiles recompile every time (the only flag-on failures are the two `pattern-manager.test.ts` AMD cache cases). **Remaining (two jobs):** make the production ESM path cacheable **and** persist it as the content-addressed cell cache (source set `pattern:<identity>` + compiled set `compileCache:<runtimeVersion>/<identity>`, per space, CFC integrity on the compiled set) — see Phase 4 below. |
 | 5 — Default-on + AMD removal | Not started (intentionally) | Gated on the Phase 3 corpus parity oracle + a green full-suite flag-on sweep + benchmarks. The canary PR (#3782) is the standing CI signal for flag-on. The flag stays **off** by default. |
 
 Phases 0–1 merged earlier. Phases 2–4 mechanism merged behind the default-off
@@ -297,14 +297,20 @@ untrusted execution.
 
 ## Phase 4 — Per-module compilation cache (content-addressed cells)
 
-> **Status: In-memory whole-program cache done; content-addressed persistence
-> designed below, not yet built.** The ESM path in
-> `PatternManager.compilePattern` currently bypasses the persistent compilation
-> cache (the only flag-on test failures are the two
-> `pattern-manager.test.ts` compilation-cache cases, which assume the AMD
-> jsScript/evaluate flow). This phase replaces the in-process whole-program
-> `CachedCompiler` (for the ESM path) with **content-addressed cells**, so the
-> cache is durable, deduplicated per module, and shareable.
+> **Status: production ESM path does no per-module caching yet; content-addressed
+> cache designed below, not built.** Two caches exist but neither is exercised by
+> a flag-on compile: the in-process whole-program `CachedCompiler` (AMD only — the
+> ESM branch of `PatternManager.compilePattern` skips it), and the per-module
+> `ModuleRecordCache`, which `compileSourcesToRecords` deliberately **bypasses
+> whenever a precompiled CF-transformed body is present**
+> (`sandbox/module-record-compiler.ts`) — and `Engine.compileToRecordGraph`
+> always passes `precompiledBodies` and no `recordCache`
+> (`harness/engine.ts`). So the only flag-on test failures today are the two
+> `pattern-manager.test.ts` compilation-cache cases (AMD jsScript/evaluate flow),
+> and the production ESM compile recompiles from scratch every time. This phase
+> therefore has **two** jobs, not one: (a) make the production ESM path
+> cacheable, and (b) persist it as **content-addressed cells** — durable,
+> deduplicated per module, and shareable.
 
 ### 4.0 Design — two content-addressed document sets, per space
 
