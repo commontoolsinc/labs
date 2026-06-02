@@ -15,6 +15,7 @@ import {
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
+import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
 import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
 import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
@@ -48,6 +49,7 @@ const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
 const TAG_CONTENT_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
+const TAG_REGEXP = 0x2b;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
@@ -72,6 +74,7 @@ const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
+const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
 
 //
 // Core: recursive value feeding
@@ -308,6 +311,15 @@ function feedObjectValue(
       hasher.update(getStringRep(typeTag));
       const state = (value as FabricInstance)[DECONSTRUCT]();
       feedValue(hasher, state);
+      return;
+    }
+
+    case NATIVE_TAGS.FabricRegExp: {
+      const fab = value as FabricRegExp;
+      hasher.update(TAG_REGEXP_BYTES);
+      feedValue(hasher, fab.source);
+      feedValue(hasher, fab.flags);
+      feedValue(hasher, fab.flavor);
       return;
     }
 

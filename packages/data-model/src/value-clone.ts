@@ -180,6 +180,7 @@ export function cloneHelper(
     case NATIVE_TAGS.EpochDays:
     case NATIVE_TAGS.ContentHash:
     case NATIVE_TAGS.FabricBytes:
+    case NATIVE_TAGS.FabricRegExp:
       return value;
 
     case NATIVE_TAGS.FabricInstance: {
