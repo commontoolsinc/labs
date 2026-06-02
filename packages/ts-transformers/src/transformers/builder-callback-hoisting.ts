@@ -3,7 +3,7 @@ import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { hoistModuleScopedBuilderCallbacks } from "../closures/module-scope-callback-hoisting.ts";
 
 /**
- * Hoist builder callbacks (derive/handler/lift/pattern/patternTool)
+ * Hoist builder callbacks (handler/lift/pattern/patternTool)
  * whose body closes only over module-level symbols. The hoisted form
  * becomes `const __cfModuleCallback_N = ...` at module scope, replacing
  * the inline callback at the call site with a reference to the new

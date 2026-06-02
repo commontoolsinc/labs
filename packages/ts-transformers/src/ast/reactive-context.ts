@@ -9,7 +9,7 @@ export type ReactiveContextOwner =
   | "render"
   | "array-method"
   | "computed"
-  | "derive"
+  | "lift-applied"
   | "action"
   | "lift"
   | "handler"
@@ -39,11 +39,15 @@ export const RESTRICTED_CONTEXT_BUILDERS = new Set([
 
 /**
  * Builder names that establish compute context.
+ *
+ * NOTE: this set currently has no consumers in the repo (it is exported from
+ * ast/mod.ts but never read). Left in place pending a separate dead-export
+ * audit; the former `"derive"` entry was removed here as part of retiring
+ * `derive` (CT-1643) — derive is no longer a recognized builder name.
  */
 export const SAFE_WRAPPER_BUILDERS = new Set([
   "computed",
   "action",
-  "derive",
   "lift",
   "handler",
 ]);
@@ -88,7 +92,7 @@ function getMarkedSyntheticCallbackContext(
         ) {
           const callKind = detectCallKind(callParent, checker);
           if (callKind?.kind === "lift-applied") {
-            return { kind: "compute", owner: "derive", inJsxExpression };
+            return { kind: "compute", owner: "lift-applied", inJsxExpression };
           }
           if (callKind?.kind === "builder") {
             const builderContext = getBuilderContext(callKind.builderName);
