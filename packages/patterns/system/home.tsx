@@ -139,11 +139,12 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     profileName,
   });
   // Pass the owner-protected `profile` cell (TrustedProfileLink IFC schema)
-  // through unchanged: `profile.set(ProfileHome.inSpace(name)(...))` materializes
-  // the cross-space `inSpace` child during the handler's own `.set()`, which the
-  // runner now opts into a multi-space commit for (see data-updating.ts /
-  // normalizeAndDiff). Keeping the schema preserves CFC owner-protection on the
-  // home→profile link write. See docs/specs/shared-profile-space.md.
+  // through unchanged. Creating a profile into a fresh home works: the runner's
+  // post-run cross-space-child handling commits the new profile space before the
+  // home link. The fix here is purely on the display side (below) — the create
+  // surface is only shown when no profile exists, so a created/existing profile
+  // is never re-submitted (re-creating over an existing link is a separate,
+  // not-yet-handled cross-space case). See docs/specs/shared-profile-space.md.
   const profileCreate = ProfileCreate({
     profile: profile as any,
     profileName,
