@@ -90,4 +90,83 @@ describe("Engine.compileToRecordGraph", () => {
     };
     await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
+
+  // Step 4.3.4: compileToRecordGraph returns serializable per-module artifacts
+  // and accepts a full set of cached bodies to skip the TypeScript compile.
+  describe("precompiled-module seam", () => {
+    const MULTI: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/dep.ts", contents: "export const base = (): number => 20;" },
+        {
+          name: "/main.tsx",
+          contents:
+            `import { base } from "./dep.ts";\nexport const total = () => base() + 22;\nexport default total;`,
+        },
+      ],
+    };
+
+    it("returns a non-empty compiled artifact for every emitted module", async () => {
+      const { compiledArtifacts, graph } = await engine.compileToRecordGraph(
+        MULTI,
+      );
+      // One artifact per authored module body in the graph; both authored
+      // sources (resolved/prefixed) appear among the keys.
+      expect(compiledArtifacts.size).toBeGreaterThanOrEqual(2);
+      const keys = [...compiledArtifacts.keys()];
+      expect(keys.some((k) => k.endsWith("/main.tsx"))).toBe(true);
+      expect(keys.some((k) => k.endsWith("/dep.ts"))).toBe(true);
+      // The artifact set matches the graph's compiled bodies count.
+      expect(compiledArtifacts.size).toBe(graph.compiledBodies.size);
+      for (const a of compiledArtifacts.values()) {
+        expect(typeof a.js).toBe("string");
+        expect(a.js.length).toBeGreaterThan(0);
+      }
+    });
+
+    it("reuses a full set of precompiled bodies (cache hit) and still evaluates", async () => {
+      const first = await engine.compileToRecordGraph(MULTI);
+
+      // Feed every artifact back, tagged so we can prove the body was used
+      // verbatim rather than recompiled from source.
+      const tagged = new Map(
+        [...first.compiledArtifacts].map(([name, a]) => [
+          name,
+          { js: `${a.js}\n//cached:${name}`, sourceMap: a.sourceMap },
+        ]),
+      );
+      const hit = await engine.compileToRecordGraph(MULTI, {
+        precompiledModules: tagged,
+      });
+
+      // The returned artifacts are exactly the cached bodies (no recompile).
+      for (const [name, a] of hit.compiledArtifacts) {
+        expect(a.js).toContain(`//cached:${name}`);
+      }
+
+      // And a cache-hit graph still evaluates correctly.
+      const { main } = await engine.compileAndEvaluateModules(MULTI, {
+        precompiledModules: tagged,
+      });
+      expect((main as { total(): number }).total()).toBe(42);
+    });
+
+    it("ignores a partial precompiled set and recompiles the whole program", async () => {
+      const first = await engine.compileToRecordGraph(MULTI);
+      // Supply all but one module → not a full hit; the engine recompiles.
+      const names = [...first.compiledArtifacts.keys()];
+      const partial = new Map(
+        names.slice(1).map((name) => [name, {
+          js: `${first.compiledArtifacts.get(name)!.js}\n//cached:${name}`,
+        }]),
+      );
+      const result = await engine.compileToRecordGraph(MULTI, {
+        precompiledModules: partial,
+      });
+      // Recompiled from source: no body carries the cache tag.
+      for (const a of result.compiledArtifacts.values()) {
+        expect(a.js).not.toContain("//cached");
+      }
+    });
+  });
 });

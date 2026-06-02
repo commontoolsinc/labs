@@ -1,5 +1,6 @@
 import { Console } from "./console.ts";
 import {
+  type CompiledModuleArtifact,
   type CompileResult,
   type EvaluateOptions,
   type EvaluateResult,
@@ -36,7 +37,10 @@ import {
   type CompiledModuleGraph,
   compileSourcesToRecords,
 } from "../sandbox/module-record-compiler.ts";
-import { composeBundleSourceMap } from "@commonfabric/js-compiler";
+import {
+  composeBundleSourceMap,
+  type SourceMap,
+} from "@commonfabric/js-compiler";
 import {
   loadModuleGraph,
   runtimeModuleRecords,
@@ -261,7 +265,12 @@ export class Engine extends EventTarget implements Harness {
     program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
   ): Promise<
-    { id: string; graph: CompiledModuleGraph; mainSpecifier: string }
+    {
+      id: string;
+      graph: CompiledModuleGraph;
+      mainSpecifier: string;
+      compiledArtifacts: Map<string, CompiledModuleArtifact>;
+    }
   > {
     logger.timeStart("compileToRecordGraph");
     try {
@@ -271,43 +280,66 @@ export class Engine extends EventTarget implements Harness {
         mappedProgram,
         this.ctRuntime.staticCache,
       );
-      const { compiler } = await this.getCompilerInternals();
       const resolvedProgram = await this.resolve(resolver);
 
-      const modules = compiler.compileToModules(resolvedProgram, {
-        noCheck: options.noCheck,
-        runtimeModules: Engine.runtimeModuleNames(),
-        beforeTransformers: (program) => {
-          const pipeline = new CommonFabricTransformerPipeline();
-          return {
-            factories: pipeline.toFactories(program),
-            getDiagnostics: () => pipeline.getDiagnostics(),
-          };
-        },
-      });
-
-      // Every authored (non-.d.ts) source must have an emitted body; a missing
-      // one would otherwise be silently dropped and only fail later at import.
+      // Authored (non-.d.ts) sources are the modules that must have a body.
       const moduleFiles = resolvedProgram.files.filter((f) =>
         !f.name.endsWith(".d.ts")
       );
-      for (const file of moduleFiles) {
-        if (!modules.has(file.name)) {
-          throw new Error(
-            `ESM compile produced no module body for '${file.name}'`,
-          );
-        }
-      }
-      const precompiledBodies = new Map(
-        [...modules].map(([name, out]) => [name, out.js]),
-      );
+
+      // Cache hit: every authored module already has a cached compiled body, so
+      // skip the TypeScript compile entirely and build the record graph from
+      // the cached artifacts. Per-module identities are transitively sensitive,
+      // so a partial set cannot be trusted — fall back to a full recompile.
+      const cached = options.precompiledModules;
+      const fullHit = cached !== undefined &&
+        moduleFiles.every((f) => cached.has(f.name));
+
+      const precompiledBodies = new Map<string, string>();
       // Carry per-module source maps so the ESM loader can compose a per-load
       // bundle map (CFC verified-source / fn.src coordinate resolution).
-      const precompiledSourceMaps = new Map(
-        [...modules].flatMap(([name, out]) =>
-          out.sourceMap ? [[name, out.sourceMap] as const] : []
-        ),
-      );
+      const precompiledSourceMaps = new Map<string, SourceMap>();
+
+      if (fullHit) {
+        logger.info("compile-cache-hit", () => ["compileToRecordGraph", id]);
+        for (const file of moduleFiles) {
+          const artifact = cached!.get(file.name)!;
+          precompiledBodies.set(file.name, artifact.js);
+          if (artifact.sourceMap !== undefined) {
+            precompiledSourceMaps.set(
+              file.name,
+              artifact.sourceMap as SourceMap,
+            );
+          }
+        }
+      } else {
+        const { compiler } = await this.getCompilerInternals();
+        const modules = compiler.compileToModules(resolvedProgram, {
+          noCheck: options.noCheck,
+          runtimeModules: Engine.runtimeModuleNames(),
+          beforeTransformers: (program) => {
+            const pipeline = new CommonFabricTransformerPipeline();
+            return {
+              factories: pipeline.toFactories(program),
+              getDiagnostics: () => pipeline.getDiagnostics(),
+            };
+          },
+        });
+
+        // Every authored source must have an emitted body; a missing one would
+        // otherwise be silently dropped and only fail later at import.
+        for (const file of moduleFiles) {
+          if (!modules.has(file.name)) {
+            throw new Error(
+              `ESM compile produced no module body for '${file.name}'`,
+            );
+          }
+        }
+        for (const [name, out] of modules) {
+          precompiledBodies.set(name, out.js);
+          if (out.sourceMap) precompiledSourceMaps.set(name, out.sourceMap);
+        }
+      }
       const { runtimeExports } = await this.getRuntimeInternals();
       const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
         runtimeExports?.[name]
@@ -357,7 +389,19 @@ export class Engine extends EventTarget implements Harness {
       // verification happens once, at compile time, before any module executes.
       verifyModuleGraph(graph.records, mainSpecifier);
 
-      return { id, graph, mainSpecifier };
+      // Serializable per-module artifacts for write-back to the compiled-set
+      // cache. Keyed by authored path; the caller maps each to its content
+      // identity. On a cache hit these are exactly the artifacts just loaded.
+      const compiledArtifacts = new Map<string, CompiledModuleArtifact>();
+      for (const [name, js] of precompiledBodies) {
+        const sourceMap = precompiledSourceMaps.get(name);
+        compiledArtifacts.set(
+          name,
+          sourceMap === undefined ? { js } : { js, sourceMap },
+        );
+      }
+
+      return { id, graph, mainSpecifier, compiledArtifacts };
     } finally {
       logger.timeEnd("compileToRecordGraph");
     }

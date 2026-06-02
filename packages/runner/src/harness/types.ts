@@ -27,6 +27,19 @@ export interface TypeScriptHarnessProcessOptions {
   getTransformedProgram?: (program: Program) => void;
   // Show verbose TypeScript error messages instead of simplified hints.
   verboseErrors?: boolean;
+  // Cached per-module compiled bodies keyed by authored (bundle-relative) path.
+  // Used only on the ESM record-graph path: when every authored module is
+  // present, `compileToRecordGraph` skips the TypeScript compile and builds the
+  // record graph from these bodies instead. A partial set is ignored (the
+  // engine recompiles the whole program) because per-module identities are
+  // transitively sensitive — a closure either hits in full or not at all.
+  precompiledModules?: Map<string, CompiledModuleArtifact>;
+}
+
+/** A cached/compiled per-module artifact: emitted JS plus optional source map. */
+export interface CompiledModuleArtifact {
+  js: string;
+  sourceMap?: unknown;
 }
 
 export type Exports = Record<string, any>;
