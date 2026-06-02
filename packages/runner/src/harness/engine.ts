@@ -298,13 +298,21 @@ export class Engine extends EventTarget implements Harness {
       const identityByPath = computeModuleIdentities(moduleFiles, {
         idPrefix: `/${id}`,
       });
+      const entryIdentity = identityByPath.get(mappedProgram.main)!;
 
       // Cache hit: every emitted module already has a cached compiled body
       // (keyed by identity), so skip the TypeScript compile entirely and build
       // the record graph from the cached bodies. Per-module identities are
       // transitively sensitive, so a partial set cannot be trusted — fall back
-      // to a full recompile.
-      const cached = options.precompiledModules;
+      // to a full recompile. The cache is queried by identity (directly, or
+      // lazily once identities are known) without leaking the engine's prefix.
+      const cached = options.precompiledModules ??
+        (options.precompiledModulesFor
+          ? await options.precompiledModulesFor({
+            entryIdentity,
+            identities: [...new Set(identityByPath.values())],
+          })
+          : undefined);
       const fullHit = cached !== undefined &&
         moduleFiles.every((f) => cached.has(identityByPath.get(f.name)!));
 
@@ -434,7 +442,6 @@ export class Engine extends EventTarget implements Harness {
           imports,
         };
       });
-      const entryIdentity = identityByPath.get(mappedProgram.main)!;
 
       return { id, graph, mainSpecifier, entryIdentity, modules };
     } finally {
@@ -469,7 +476,11 @@ export class Engine extends EventTarget implements Harness {
    * map. The graph was security-verified at compile time, so verification is
    * not repeated.
    */
-  private evaluateRecordGraph(
+  /**
+   * Evaluate a verified ESM record graph (public so the PatternManager can run
+   * compile → cache write-back → evaluate as discrete steps).
+   */
+  evaluateRecordGraph(
     id: string,
     graph: CompiledModuleGraph,
     mainSpecifier: string,

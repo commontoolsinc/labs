@@ -54,6 +54,16 @@ export interface CompiledDoc extends ModuleDocBase {
   readonly sourceMap?: unknown;
 }
 
+/**
+ * Version tag for the compiled-set axis (`compileCache:<runtimeVersion>/...`).
+ * A compiled document is only reused under a matching tag, so bumping this
+ * invalidates the whole compiled set after any change to the compiler /
+ * transformer pipeline or SES verifier that alters emitted bytes (the source
+ * set, keyed by content identity alone, persists across the bump). There is no
+ * automatic build fingerprint at runtime, so this is bumped by hand.
+ */
+export const COMPILE_CACHE_RUNTIME_VERSION = "cf/esm-compile/v1";
+
 /** Cell key (id) for a source-set document. */
 export function sourceDocKey(identity: string): string {
   return `pattern:${identity}`;
@@ -284,22 +294,24 @@ export function writeSourceDocs(
 
 /**
  * Load the source-document closure reachable from `entryIdentity` in `space` by
- * following import links. Returns the raw documents keyed by their **stored**
- * identity (verify with {@link verifySourceDocs} before trusting). Returns
- * `undefined` if the entry document is absent.
+ * following import links. Each cell is `sync()`d before reading so a closure
+ * persisted in a prior session loads from storage. Returns the raw documents
+ * keyed by their **stored** identity (verify with {@link verifySourceDocs}
+ * before trusting). Resolves to `undefined` if the entry document is absent.
  */
-export function loadSourceClosure(
+export async function loadSourceClosure(
   runtime: Runtime,
   space: MemorySpace,
   entryIdentity: string,
   tx: IExtendedStorageTransaction,
-): Map<string, SourceDoc> | undefined {
+): Promise<Map<string, SourceDoc> | undefined> {
   const entry = runtime.getCell(
     space,
     sourceDocKey(entryIdentity),
     SOURCE_DOC_SCHEMA,
     tx,
   );
+  await entry.sync();
   const root = entry.get() as StoredSourceDoc | undefined;
   if (!root || typeof root.identity !== "string") return undefined;
 
@@ -313,6 +325,8 @@ export function loadSourceClosure(
     for (const imp of doc.imports ?? []) {
       if (!isCell(imp.link)) continue;
       const childCell = (imp.link as Cell<unknown>).asSchema(SOURCE_DOC_SCHEMA);
+      // A linked cell is not synced transitively by the parent — sync each.
+      await childCell.sync();
       const child = childCell.get() as StoredSourceDoc | undefined;
       if (!child || typeof child.identity !== "string") continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
@@ -458,18 +472,20 @@ export function writeCompiledDocs(
 
 /**
  * Load the integrity-valid compiled documents reachable from `entryIdentity` by
- * following import links. Fail-closed: a document whose persisted CFC label does
- * not carry the compiler integrity atom is dropped (treated as a cache miss for
- * that module, so the caller recompiles it). Returns the valid documents keyed
- * by their stored identity (empty map if the entry itself is missing/unstamped).
+ * following import links. Each cell is `sync()`d before reading so a closure
+ * persisted in a prior session loads from storage. Fail-closed: a document whose
+ * persisted CFC label does not carry the compiler integrity atom is dropped
+ * (treated as a cache miss for that module, so the caller recompiles it).
+ * Resolves to the valid documents keyed by their stored identity (empty map if
+ * the entry itself is missing/unstamped).
  */
-export function loadCompiledClosure(
+export async function loadCompiledClosure(
   runtime: Runtime,
   space: MemorySpace,
   entryIdentity: string,
   opts: { runtimeVersion: string; compilerDid: string },
   tx: IExtendedStorageTransaction,
-): Map<string, CompiledDoc> {
+): Promise<Map<string, CompiledDoc>> {
   const atom = compiledIntegrityAtom(opts.compilerDid);
   const out = new Map<string, CompiledDoc>();
   const visited = new Set<string>();
@@ -485,6 +501,7 @@ export function loadCompiledClosure(
       COMPILED_DOC_SCHEMA,
       tx,
     );
+    await cell.sync();
     // Fail-closed: only integrity-stamped documents are trusted.
     if (!cellCarriesIntegrity(cell, atom, tx)) continue;
     const doc = cell.get() as StoredCompiledDoc | undefined;
@@ -493,9 +510,11 @@ export function loadCompiledClosure(
     const imports: ModuleImportRef[] = [];
     for (const imp of doc.imports ?? []) {
       if (!isCell(imp.link)) continue;
-      const child = (imp.link as Cell<unknown>)
-        .asSchema(COMPILED_DOC_SCHEMA)
-        .get() as StoredCompiledDoc | undefined;
+      const childCell = (imp.link as Cell<unknown>).asSchema(
+        COMPILED_DOC_SCHEMA,
+      );
+      await childCell.sync();
+      const child = childCell.get() as StoredCompiledDoc | undefined;
       if (!child || typeof child.identity !== "string") continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
       if (!visited.has(child.identity)) queue.push(child.identity);

@@ -4,6 +4,7 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
+import type { CompiledModuleGraph } from "../sandbox/module-record-compiler.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 
 export type HarnessedFunction = (input: any) => void;
@@ -35,6 +36,15 @@ export interface TypeScriptHarnessProcessOptions {
   // recompiles the whole program) because per-module identities are
   // transitively sensitive — a closure either hits in full or not at all.
   precompiledModules?: Map<string, CompiledModuleArtifact>;
+  // Lazy variant of `precompiledModules`: invoked once, after the engine has
+  // resolved the program and computed per-module identities (so the cache can
+  // be queried by content identity without a separate resolve pass). Returns the
+  // identity-keyed cached bodies, or undefined for a miss. `precompiledModules`
+  // takes precedence when both are set.
+  precompiledModulesFor?: (info: {
+    entryIdentity: string;
+    identities: string[];
+  }) => Promise<Map<string, CompiledModuleArtifact> | undefined>;
 }
 
 /** A cached/compiled per-module artifact: emitted JS plus optional source map. */
@@ -115,6 +125,29 @@ export interface Harness extends EventTarget {
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<EvaluateResult>;
+
+  // Compile a program to a verified ESM record graph, returning the graph plus
+  // the per-module cache descriptors (in content-identity space). Split from
+  // evaluation so a caller can write the descriptors to the content-addressed
+  // cache between compile and evaluate. Optional (ESM-loader harnesses only).
+  compileToRecordGraph?(
+    program: RuntimeProgram,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<{
+    id: string;
+    graph: CompiledModuleGraph;
+    mainSpecifier: string;
+    entryIdentity: string;
+    modules: CacheableModule[];
+  }>;
+
+  // Evaluate a verified ESM record graph produced by `compileToRecordGraph`.
+  evaluateRecordGraph?(
+    id: string,
+    graph: CompiledModuleGraph,
+    mainSpecifier: string,
+    files: Source[],
+  ): EvaluateResult;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's
   // configuration.

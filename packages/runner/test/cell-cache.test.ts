@@ -177,12 +177,17 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     await storageManager?.close();
   });
 
-  it("writes the closure and loads it back via import links", () => {
+  it("writes the closure and loads it back via import links", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const tx = runtime.edit();
     writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
 
-    const loaded = loadSourceClosure(runtime, spaceA, entryIdentity, tx)!;
+    const loaded = (await loadSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    ))!;
 
     // All three modules reached by following links from the entry.
     expect(loaded.size).toBe(3);
@@ -193,9 +198,14 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
   });
 
-  it("is empty for an entry that was never written", () => {
+  it("is empty for an entry that was never written", async () => {
     const tx = runtime.edit();
-    const loaded = loadSourceClosure(runtime, spaceA, "no-such-identity", tx);
+    const loaded = await loadSourceClosure(
+      runtime,
+      spaceA,
+      "no-such-identity",
+      tx,
+    );
     expect(loaded).toBe(undefined);
   });
 });
@@ -234,7 +244,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     await wtx.commit();
 
     const rtx = runtime.edit();
-    const loaded = loadCompiledClosure(
+    const loaded = await loadCompiledClosure(
       runtime,
       spaceA,
       entryIdentity,
@@ -273,7 +283,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     await wtx.commit();
 
     const rtx = runtime.edit();
-    const loaded = loadCompiledClosure(
+    const loaded = await loadCompiledClosure(
       runtime,
       spaceA,
       entryIdentity,
@@ -303,7 +313,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
 
     // Loading util directly as the entry: present but unstamped → dropped.
     const rtx = runtime.edit();
-    const loaded = loadCompiledClosure(
+    const loaded = await loadCompiledClosure(
       runtime,
       spaceA,
       utilIdentity,
@@ -326,7 +336,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       compiledIntegrityAtom(compilerDid),
     );
     const rtx = runtime.edit();
-    const loaded = loadCompiledClosure(
+    const loaded = await loadCompiledClosure(
       runtime,
       spaceA,
       entryIdentity,
