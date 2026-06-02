@@ -10,7 +10,7 @@ import {
 
 /**
  * Type inference utilities for function signatures
- * Used primarily by schema-injection to infer types for lift/derive/handler
+ * Used primarily by schema-injection to infer types for lift/handler
  */
 
 const TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |

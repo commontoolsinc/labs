@@ -9,7 +9,7 @@ import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
 import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {
@@ -423,8 +423,6 @@ describe("value-debug", () => {
     it("renders FabricInstance subclasses with their constructor name", () => {
       expect(toDebugKindString(FabricError.fromNativeError(new Error("x"))))
         .toBe("FabricInstance (FabricError)");
-      expect(toDebugKindString(new FabricRegExp(/abc/g, "es2025")))
-        .toBe("FabricInstance (FabricRegExp)");
       expect(toDebugKindString(new FabricMap(new Map())))
         .toBe("FabricInstance (FabricMap)");
     });
@@ -434,6 +432,8 @@ describe("value-debug", () => {
         .toBe("FabricPrimitive (FabricEpochNsec)");
       expect(toDebugKindString(new FabricBytes(new Uint8Array([1, 2, 3]))))
         .toBe("FabricPrimitive (FabricBytes)");
+      expect(toDebugKindString(new FabricRegExp(/abc/g)))
+        .toBe("FabricPrimitive (FabricRegExp)");
     });
 
     it("renders non-fabric class instances with their constructor name", () => {

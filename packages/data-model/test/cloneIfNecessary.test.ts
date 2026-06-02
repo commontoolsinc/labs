@@ -14,8 +14,8 @@ import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
 import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
 import { FabricSet } from "../src/fabric-instances/FabricSet.ts";
+import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
 import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
 import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "../src/interface.ts";
@@ -525,12 +525,6 @@ describe("cloneIfNecessary", () => {
       factory: () => FabricError.fromNativeError(new Error("test")),
       deepCloneImplemented: true,
     },
-    // `FabricInstance` with `deepClone` stub.
-    {
-      name: "FabricRegExp",
-      factory: () => new FabricRegExp(/abc/g, "es2025"),
-      deepCloneImplemented: false,
-    },
     {
       name: "ProblematicValue",
       factory: () =>
@@ -563,6 +557,11 @@ describe("cloneIfNecessary", () => {
     {
       name: "FabricBytes",
       factory: () => new FabricBytes(new Uint8Array([1, 2, 3])),
+      deepCloneImplemented: false,
+    },
+    {
+      name: "FabricRegExp",
+      factory: () => new FabricRegExp(/abc/g),
       deepCloneImplemented: false,
     },
     {

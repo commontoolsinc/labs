@@ -31,8 +31,8 @@
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
- * - Local computed()/lift() aliases used as plain values in the same callback:
- *   ERROR (use a nested computed()/lift())
+ * - Local computed()/lift() aliases used as plain values in the same
+ *   callback: ERROR (use a nested computed()/lift())
  */
 import ts from "typescript";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
@@ -75,7 +75,7 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
   "pattern-tool",
   "pattern-builder",
   "render-builder",
-  "derive",
+  "lift-applied",
   "computed-builder",
   "action-builder",
   "lift-builder",
@@ -440,7 +440,7 @@ export class PatternContextValidationTransformer
    *
    * This applies to any callback body that still classifies as pattern context
    * at validation time, which intentionally includes pattern-owned array method
-   * callbacks while excluding compute-owned wrappers like computed()/derive().
+   * callbacks while excluding compute-owned wrappers like computed()/lift().
    */
   private validateSupportedPatternStatements(
     func: ts.ArrowFunction | ts.FunctionExpression,
@@ -804,14 +804,16 @@ export class PatternContextValidationTransformer
             return;
           }
 
-          // Check for lift-applied calls.
+          // Check for lift-applied calls (the lowered form of computed() and
+          // other reactive lifted-function computations).
           if (callKind.kind === "lift-applied") {
             context.reportDiagnostic({
               severity: "error",
               type: "standalone-function:reactive-operation",
-              message: `lift() is not allowed inside standalone functions. ` +
+              message:
+                `Reactive computations are not allowed inside standalone functions. ` +
                 `Standalone functions cannot capture reactive closures. ` +
-                `Move the lift() call to module scope, or use patternTool() to enable automatic closure capture.`,
+                `Move the computed() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
               node,
             });
             return;

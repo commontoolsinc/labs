@@ -133,6 +133,7 @@ export interface InitializationData {
   experimental?: {
     modernDataModel?: boolean;
     persistentSchedulerState?: boolean;
+    esmModuleLoader?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:

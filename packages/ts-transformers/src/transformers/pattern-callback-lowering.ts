@@ -256,7 +256,7 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
 
     // ── Module-extracted callback post-pass ────────────────────────────
     // ClosureTransformer hoists reactive callback bodies (from lift-applied
-    // forms — the lowered shape of `computed(...)`, `derive(...)`, etc.)
+    // forms — the lowered shape of `computed(...)`, etc.)
     // into top-level
     // `const __cfModuleCallback_N = (() => { ... })` declarations. The
     // main pass above only walks INSIDE pattern callbacks, so those

@@ -97,11 +97,11 @@ function hasSharedReactiveCollectionProvenance(
  * Check if an array method call should be transformed to its WithPattern variant.
  *
  * Type-based approach with context awareness (CT-1186 fix):
- * 1. derive() calls always return OpaqueRef at runtime -> TRANSFORM
- * 2. Inside safe wrappers (computed/derive/etc), OpaqueRef gets auto-unwrapped
+ * 1. computed()/lift() calls always return OpaqueRef at runtime -> TRANSFORM
+ * 2. Inside safe wrappers (computed/lift/etc), OpaqueRef gets auto-unwrapped
  *    to a plain array, so we should NOT transform OpaqueRef method calls there.
  *    However, Cell and Stream do NOT get auto-unwrapped, so we still transform those.
- * 3. Local aliases created by nested computed()/derive() calls inside the current
+ * 3. Local aliases created by nested computed()/lift() calls inside the current
  *    compute callback become opaque again and should transform.
  * 4. Outside safe wrappers, transform all cell-like types (OpaqueRef, Cell, Stream).
  */

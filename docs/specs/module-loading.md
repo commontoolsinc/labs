@@ -11,17 +11,30 @@ whose action implementation fingerprint is currently unstable across reloads.
 
 Implemented so far (see the implementation plan for the per-phase status):
 identity decoupling (Phase 1, live behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`)
-is merged. The module-loading mechanism (Phases 2–4) — a synchronous SES
-virtual-module-record loader, a TS→record adapter, a per-module compilation
-cache, and a structural graph verifier, all behind a default-off
-`esmModuleLoader` flag — is implemented. Remaining: Engine integration with the
-CF transformer pipeline, the security-critical verifier classification port, and
-the default-on/AMD-removal rollout (Phase 5). The AMD bundle path remains the
-default throughout.
+is merged. The module-loading mechanism (Phases 2–4), behind the default-off
+`CF_ESM_MODULE_LOADER` flag, is implemented and Engine-integrated: a synchronous
+SES virtual-module-record loader, a TS→record adapter that runs the full CF
+transformer pipeline, per-load/per-module source maps with CFC verified-source
+identity (#3785, #3787), per-module SES classification wired into the compile
+path, and a structural graph verifier. (A per-module `ModuleRecordCache` exists
+but is **bypassed on the production ESM path** — precompiled CF-transformed
+bodies are authoritative — so flag-on compiles are not yet cached; see Phase 4.)
+Security
+hardening landed alongside (frozen exported patterns #3777, import-edge
+validation #3778, provenance brand #3779), and the flag is plumbed through to the
+browser client (#3796). The `cfc-group-chat-demo` end-to-end integration test
+passes flag-on (#3797).
+
+Remaining before default-on: the full-corpus verifier **parity oracle** (ESM
+verdicts must match AMD across the whole pattern corpus — the current parity test
+covers crafted fixtures only), a green **full-suite flag-on sweep**, **making the
+production ESM path cacheable and persisting it** as content-addressed cells
+(Phase 4), benchmarks, and the **default-on/AMD-removal rollout** (Phase 5). The
+AMD bundle path remains the default throughout.
 
 ## Last Updated
 
-2026-05-30
+2026-06-02
 
 ## Summary
 
@@ -344,8 +357,37 @@ The cache key moves from whole-program `computeId` to per-module
 - leaves the identities and cache entries of untouched modules stable;
 - yields strictly better hit rates than the current whole-program key.
 
-The existing compiler-version `fingerprint` and `sesValidated` gating on cache
-entries ([compilation-cache/storage.ts][c12]) carry over per module.
+### Storage model: two content-addressed document sets, per space
+
+The persistent cache is **content-addressed cells**, not an in-process map. Each
+module is stored as two regular cells, in the **target space** (per-space — there
+is no global cache), and the storage layer's existing **sigil-link following**
+under a schema loads the whole import closure transitively from a single request
+(cycles handled by per-document dedup, as for any linked data):
+
+1. **Source set — `pattern:<identity>`.** Authored TypeScript, keyed by the
+   per-module Merkle `moduleHash` (`cf:module/<hash>`). It is runtime-version
+   independent (written essentially once ever) and **self-verifying**: a reader
+   checks `hash(content) === <identity>`, so content-addressing *is* the
+   integrity — no separate label needed.
+2. **Compiled set — `compileCache:<runtimeVersion>/<identity>`.** Compiled +
+   verified JS, keyed by `(runtimeVersion, identity)`. A runtime/transformer
+   upgrade rolls `runtimeVersion`, recompiling this set while the source set
+   persists.
+
+Each document holds `{ code, filename, imports: [{ specifier, link }] }`, where
+`link` is a sigil link to the dependency's document in the same set. Because
+`identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
+explicitly), but the parent hash commits to its children's identities, so the
+graph wiring is verifiable on load by recomputing identities and checking each
+against its document key — the content-addressed analog of the structural graph
+verifier. A module shared by N programs is stored once per `(space, identity)`;
+a "program" is just an entry identity over a shared set of module documents.
+
+This replaces the whole-program `PatternMeta` store after the flag flip (the two
+coexist behind the flag until then). The compiler-version `fingerprint` and
+`sesValidated` gating carry over: `runtimeVersion` is the fingerprint, and the
+compiled set is only ever written from verified output (see the threat model).
 
 ## Verifiable Execution Implications
 
@@ -359,6 +401,46 @@ SES_SANDBOXING_SPEC requires than regex-scanning a concatenated bundle. The
 classification rules themselves (direct callbacks to trusted builders, safe
 top-level functions, verified module-safe data) are unchanged; only the parser
 that feeds them changes.
+
+## Threat Model — the persistent compilation cache
+
+Moving the compiled artifact into a **storage cell** changes the trust posture
+versus the in-process cache, because the runtime `eval`s the cell's contents.
+The cache is designed around this:
+
+- **Source set integrity is free.** `pattern:<identity>` is keyed by a hash of
+  its own contents, so a reader self-checks `hash(content) === <identity>`. A
+  tampered source document fails the check; a poisoned-but-different source would
+  not hash to the requested identity. Recompiling a source document also re-runs
+  the SES verifier, so a malformed source is rejected on the compile path.
+- **Compiled set integrity is a CFC label.** `compileCache:<runtimeVersion>/<identity>`
+  is keyed by the *source* identity, which does not bind the *JS* bytes.
+  The compiled document therefore carries a **CFC integrity label**, written with
+  the entry (`addIntegrity`) and **required on read** (`requiredIntegrity`). The
+  label — not the SES verifier — is the security boundary for cache hits.
+- **Fail-closed, not fail-hard.** A compiled document with a missing or invalid
+  integrity label is treated as a **cache miss** and recompiled from the
+  (self-verifying) source set, which re-runs the SES verifier. So the verifier
+  always guards the compile/miss path; only integrity-valid warm hits skip it.
+- **Why skip the SES verifier on a hit.** That verifier's guarantee is that no
+  data flows between components in a way the runtime does not track. An attacker
+  who can write arbitrary storage can already create such untracked flows
+  (writing data a pattern reads), so re-verifying integrity-labeled cache hits
+  adds no protection beyond the label while costing per-load work. Once the label
+  is unforgeable (below), re-verification is redundant.
+- **Per-space containment, then server-only writes.** The cache is per-space, so
+  cross-tenant poisoning is impossible — only a space's own writers can affect
+  its cache. While compilation is still client-side, the integrity label is
+  client-asserted, so within a space it amounts to self-poisoning (acceptable,
+  and contained by the per-space scope). The end state moves **compilation to the
+  server**: the server becomes the sole acceptor of that write integrity (it
+  only stamps the label from its own compilation step), making the label a hard
+  guarantee — with no change to the read path, which already requires it.
+- **CFC verified-source derives from the source set, not the cached JS.** A
+  poisoned-but-SES-safe JS document must not be able to spoof `fn.src` /
+  authorship, so the CFC verified-source identity is anchored to the
+  content-addressed `pattern:<identity>` source, never to the compiled
+  document's source maps.
 
 ## Source Maps and Diagnostics
 
@@ -458,6 +540,21 @@ Sequence identity first to retire the rehydration bug quickly, then the loader.
   entry point rehydrates clean (no rerun) where it previously missed.
 - Compilation-cache test: editing one file invalidates only that module and its
   transitive importers.
+- Content-addressed cache: a cold compile writes the source and compiled
+  document sets into the space; a warm load hits the compiled set with no
+  recompilation and identical exports. Two programs sharing a module produce a
+  single compiled document (per-module dedup).
+- Cross-space (`Pattern.inSpace`): a pattern authored/loaded in space A but
+  instantiated through `PatternFactory.inSpace(B)` writes its source and compiled
+  documents into **space B**, with import links resolving within B and the
+  compiled documents carrying the required CFC integrity; a later load in B is a
+  warm hit.
+- Cache integrity fail-closed: a compiled document with a missing/invalid
+  integrity label is treated as a miss and recompiled from the self-verifying
+  source document; only integrity-valid documents are reused without
+  re-verification.
+- Runtime-version bump misses the compiled set (recompile) while the source set
+  (`pattern:<identity>`) persists.
 
 ## Appendix: Current Pipeline Reference
 

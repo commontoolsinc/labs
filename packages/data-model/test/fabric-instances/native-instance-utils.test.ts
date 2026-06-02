@@ -10,7 +10,6 @@ import {
 } from "../../src/interface.ts";
 import { FabricError } from "../../src/fabric-instances/FabricError.ts";
 import { FabricMap } from "../../src/fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../../src/fabric-instances/FabricRegExp.ts";
 import { FabricSet } from "../../src/fabric-instances/FabricSet.ts";
 import { isConvertibleNativeInstance } from "../../src/native-instance-utils.ts";
 import { nativeFromFabricValueModern } from "../../src/fabric-value-modern.ts";
@@ -501,19 +500,6 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("`FabricRegExp`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      const state = {
-        source: "abc",
-        flags: "g",
-        flavor: "es2025",
-      } as unknown as FabricValue;
-      const frozen = FabricRegExp[RECONSTRUCT](state, frozenCtx);
-      expect(isDeepFrozen(frozen)).toBe(true);
-      expect(Object.isFrozen(frozen.regex)).toBe(true);
-      const mutable = FabricRegExp[RECONSTRUCT](state, mutableCtx);
-      expect(Object.isFrozen(mutable)).toBe(false);
-    });
-
     it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
       const state = {
         type: "Bad@1",
@@ -541,9 +527,6 @@ describe("native-instance-utils", () => {
   // Cycle-capable wired impls: `FabricError` (recurses through `error.cause`
   // + custom enumerable own properties), `ProblematicValue` (recurses through
   // `state`), `UnknownValue` (recurses through `state`).
-  // `FabricRegExp.[DEEP_FREEZE]` ignores its `subFreeze` parameter (only
-  // freezes `this.regex` + `this`) and so is structurally cycle-free by
-  // construction at the protocol level -- omitted intentionally, not a gap.
   //
   // Termination assertion: a cycle without shared-`inProgress` threading
   // would manifest as `RangeError: Maximum call stack size exceeded` (a

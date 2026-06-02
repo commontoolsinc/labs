@@ -13,7 +13,7 @@ import {
 } from "./native-instance-utils.ts";
 import { FabricError } from "./fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "./fabric-instances/FabricNativeWrapper.ts";
-import { FabricRegExp } from "./fabric-instances/FabricRegExp.ts";
+import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
@@ -64,6 +64,7 @@ export function shallowFabricFromNativeValueModern(
     case NATIVE_TAGS.EpochDays:
     case NATIVE_TAGS.ContentHash:
     case NATIVE_TAGS.FabricBytes:
+    case NATIVE_TAGS.FabricRegExp:
       return value as FabricValueLayer;
 
     case NATIVE_TAGS.Error: {
@@ -90,14 +91,9 @@ export function shallowFabricFromNativeValueModern(
     }
 
     case NATIVE_TAGS.RegExp: {
-      // `RegExp` instances are wrapped in `FabricRegExp`. Extra enumerable
-      // properties cause rejection ("death before confusion"). The
-      // `rejectExtraProperties()` check is done inside `FabricRegExp`'s
-      // `[DECONSTRUCT]`, but we also reject eagerly here at conversion time.
-      rejectExtraProperties(value as object, "RegExp");
-      const wrappedRegExp = new FabricRegExp(value as RegExp);
-      if (freeze) Object.freeze(wrappedRegExp);
-      return wrappedRegExp;
+      // `RegExp` instances are converted to `FabricRegExp`, which rejects extra
+      // enumerable properties and self-freezes in its constructor.
+      return new FabricRegExp(value as RegExp);
     }
 
     case NATIVE_TAGS.Uint8Array: {

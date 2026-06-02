@@ -2,7 +2,7 @@
  * Call Kind Detection
  *
  * This module identifies compiler-significant call families. Most are
- * Common Fabric-specific calls (derive, ifElse, pattern, etc.), but array-method
+ * Common Fabric-specific calls (lift, ifElse, pattern, etc.), but array-method
  * families are also classified because they establish callback/container
  * boundaries relevant to analysis and lowering.
  *

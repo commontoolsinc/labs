@@ -1,9 +1,7 @@
-import { FabricPrimitive } from "../interface.ts";
+import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 
 /**
- * Immutable byte sequence in the fabric type system. Extends `FabricPrimitive`
- * -- treated like a primitive (always frozen, passes through conversion
- * unchanged). Direct member of `FabricValue` via the `FabricPrimitive` arm.
+ * Immutable byte sequence in the fabric type system.
  *
  * The underlying bytes are private. Callers access them through:
  * - `length` -- the byte count.
@@ -15,7 +13,7 @@ import { FabricPrimitive } from "../interface.ts";
  * them after construction. (JS cannot freeze `ArrayBuffer` contents, so the
  * copy is the defense.)
  */
-export class FabricBytes extends FabricPrimitive {
+export class FabricBytes extends BaseFabricPrimitive {
   /** Private byte storage. Callers use `slice()` or `copyInto()`. */
   readonly #bytes: Uint8Array;
 

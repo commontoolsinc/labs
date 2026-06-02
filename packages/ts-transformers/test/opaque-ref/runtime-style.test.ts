@@ -25,7 +25,7 @@ export default pattern<{ count: number }>((state) => {
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(
         diagnostics.some((d) =>
-          d.message.includes("OpaqueRef computation should use derive")
+          d.message.includes("OpaqueRef computation should use computed()")
         ),
       ).toBe(true);
     });

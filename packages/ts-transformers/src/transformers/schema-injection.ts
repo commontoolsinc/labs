@@ -31,7 +31,6 @@ import {
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   type CapabilityParamSummary,
-  type CapabilitySummaryRegistry,
   HelpersOnlyTransformer,
   type SchemaHint,
   type SchemaHints,
@@ -64,8 +63,9 @@ const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
 /**
  * Schema Injection Transformer - TypeRegistry Integration
  *
- * This transformer injects JSON schemas for Common Fabric core functions (pattern,
- * handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
+ * This transformer injects JSON schemas for Common Fabric core functions
+ * (pattern, handler, lift) by analyzing TypeScript types and converting them to
+ * runtime schemas.
  *
  * ## TypeRegistry Integration (Unified Approach)
  *
@@ -204,7 +204,7 @@ function getSymbolTypeAtSource(
 function findCapabilitySummaryForParameter(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   index: number,
-  capabilityRegistry?: CapabilitySummaryRegistry,
+  context?: TransformationContext,
   options?: {
     readonly checker?: ts.TypeChecker;
     readonly includeNestedCallbacks?: boolean;
@@ -215,8 +215,8 @@ function findCapabilitySummaryForParameter(
       checker: options.checker,
       includeNestedCallbacks: true,
     })
-    : capabilityRegistry
-    ? (capabilityRegistry.get(fn) ?? analyzeFunctionCapabilities(fn))
+    : context
+    ? (context.lookupCapabilitySummary(fn) ?? analyzeFunctionCapabilities(fn))
     : analyzeFunctionCapabilities(fn, {
       checker: options?.checker,
     });
@@ -236,7 +236,6 @@ function applyCapabilitySummaryToArgument(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   mode: CapabilitySummaryApplicationMode = "full",
   context?: TransformationContext,
   fnNode?: ts.Node,
@@ -246,7 +245,7 @@ function applyCapabilitySummaryToArgument(
   const paramSummary = findCapabilitySummaryForParameter(
     fn,
     0,
-    capabilityRegistry,
+    context,
     (argumentNode.pos < 0 || argumentNode.end < 0) &&
       context?.isSyntheticComputeCallback?.(fnNode ?? fn)
       ? {
@@ -306,7 +305,6 @@ function applyCapabilitySummaryToParameter(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
   fnNode?: ts.Node,
 ): ts.TypeNode | undefined {
@@ -315,7 +313,7 @@ function applyCapabilitySummaryToParameter(
   const paramSummary = findCapabilitySummaryForParameter(
     fn,
     parameterIndex,
-    capabilityRegistry,
+    context,
     {
       checker,
       includeNestedCallbacks: true,
@@ -366,7 +364,6 @@ function collectFunctionSchemaTypeNodes(
   factory: ts.NodeFactory,
   fallbackArgType?: ts.Type,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   argumentCapabilityMode: CapabilitySummaryApplicationMode = "full",
   context?: TransformationContext,
 ): {
@@ -423,7 +420,6 @@ function collectFunctionSchemaTypeNodes(
     checker,
     sourceFile,
     factory,
-    capabilityRegistry,
     argumentCapabilityMode,
     context,
     fn,
@@ -533,7 +529,6 @@ function collectFunctionSchemaTypeNodes(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (synthesizedResult) {
@@ -559,7 +554,6 @@ function collectFunctionSchemaTypeNodes(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (scopedResult) {
@@ -594,7 +588,6 @@ function collectFunctionSchemaTypeNodes(
         sourceFile,
         factory,
         typeRegistry,
-        capabilityRegistry,
         context,
       );
       if (recoveredNode) {
@@ -1142,7 +1135,6 @@ function applyCallbackBuilderArgumentCapabilitySummary(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  capabilityRegistry: CapabilitySummaryRegistry | undefined,
   context: TransformationContext,
 ): {
   argumentTypeNode: ts.TypeNode;
@@ -1159,7 +1151,6 @@ function applyCallbackBuilderArgumentCapabilitySummary(
     checker,
     sourceFile,
     factory,
-    capabilityRegistry,
     "full",
     context,
     callback,
@@ -1183,7 +1174,6 @@ function resolveDualSchemaBuilderTypes(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry: TypeRegistry | undefined,
-  capabilityRegistry: CapabilitySummaryRegistry | undefined,
   context: TransformationContext,
   options?: {
     readonly fallbackArgumentType?: ts.Type;
@@ -1217,7 +1207,6 @@ function resolveDualSchemaBuilderTypes(
       checker,
       sourceFile,
       factory,
-      capabilityRegistry,
       context,
     ));
   }
@@ -1236,7 +1225,6 @@ function resolveDualSchemaBuilderTypes(
       factory,
       options?.fallbackArgumentType,
       typeRegistry,
-      capabilityRegistry,
       options?.capabilityMode ?? "full",
       context,
     );
@@ -1276,7 +1264,6 @@ function resolveDualSchemaBuilderTypes(
         checker,
         sourceFile,
         factory,
-        capabilityRegistry,
         context,
       ));
     } else {
@@ -1307,7 +1294,6 @@ function resolveDualSchemaBuilderTypes(
         checker,
         sourceFile,
         factory,
-        capabilityRegistry,
         context,
       ));
     }
@@ -1370,9 +1356,8 @@ function visitInjectedDualSchemaBuilderCall(
   // Mark BEFORE re-descending: the re-descent below re-enters `updated` to
   // reach the callback body (catching pattern calls ClosureTransformer
   // created inside builder callbacks, e.g. from map transformations). Marking
-  // first means that re-entry self-skips the builder/schema logic — including
-  // the re-narrowing of the synthetic schema arg that previously required
-  // narrowedWrapperTypeRegistry (CT-1621) — and only the callback is visited.
+  // first means that re-entry self-skips the builder/schema logic and only the
+  // callback is visited.
   context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
 }
@@ -1434,7 +1419,6 @@ function inferLiftFactoryResultType(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.Type | undefined {
   const valueInitializer = getVariableInitializer(node, checker);
@@ -1483,7 +1467,6 @@ function inferLiftFactoryResultType(
     factory,
     fallbackArgType,
     typeRegistry,
-    capabilityRegistry,
     "full",
     context,
   );
@@ -1627,7 +1610,6 @@ function inferLiftAppliedResultTypeFromInitializer(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.Type | undefined {
   const initializer = getVariableInitializer(node, checker);
@@ -1660,7 +1642,6 @@ function inferLiftAppliedResultTypeFromInitializer(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (recoveredArgumentType && !isAnyOrUnknownType(recoveredArgumentType)) {
@@ -1675,7 +1656,6 @@ function inferLiftAppliedResultTypeFromInitializer(
     factory,
     argumentType,
     typeRegistry,
-    capabilityRegistry,
     "full",
     context,
   );
@@ -1699,7 +1679,6 @@ function inferExpressionTypeWithInitializerFallback(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.Type | undefined {
   const type = getTypeAtLocationWithFallback(expr, checker, typeRegistry) ??
@@ -1714,7 +1693,6 @@ function inferExpressionTypeWithInitializerFallback(
     sourceFile,
     factory,
     typeRegistry,
-    capabilityRegistry,
     context,
   );
   if (fromLift && !isAnyOrUnknownType(fromLift)) {
@@ -1727,7 +1705,6 @@ function inferExpressionTypeWithInitializerFallback(
     sourceFile,
     factory,
     typeRegistry,
-    capabilityRegistry,
     context,
   );
   if (fromLiftApplied && !isAnyOrUnknownType(fromLiftApplied)) {
@@ -1743,7 +1720,6 @@ function buildObjectLiteralReturnTypeNode(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.TypeNode | undefined {
   const members: ts.TypeElement[] = [];
@@ -1765,7 +1741,6 @@ function buildObjectLiteralReturnTypeNode(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (!valueType || isAnyOrUnknownType(valueType)) {
@@ -2573,7 +2548,6 @@ function handlePatternSchemaInjection(
 ): ts.Node | undefined {
   const { factory, checker, sourceFile, tsContext: transformation } = context;
   const typeArgs = node.typeArguments;
-  const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
@@ -2670,7 +2644,6 @@ function handlePatternSchemaInjection(
       factory,
       undefined,
       typeRegistry,
-      capabilityRegistry,
       argumentCapabilityMode,
       context,
     );
@@ -2712,7 +2685,6 @@ function handlePatternSchemaInjection(
         factory,
         undefined,
         typeRegistry,
-        capabilityRegistry,
         argumentCapabilityMode,
         context,
       );
@@ -2772,7 +2744,6 @@ function handlePatternSchemaInjection(
         factory,
         undefined,
         typeRegistry,
-        capabilityRegistry,
         argumentCapabilityMode,
         context,
       );
@@ -2811,7 +2782,6 @@ function handlePatternSchemaInjection(
     checker,
     sourceFile,
     factory,
-    capabilityRegistry,
     argumentCapabilityMode,
     context,
     builderFunction,
@@ -2876,17 +2846,16 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
     const typeRegistry = context.options.state?.typeRegistry;
-    const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
       // Single idempotency guard: if SchemaInjection already finalized this
       // builder call/new node, do NOT re-process it — only descend into its
       // children (to reach callback bodies). This replaces the per-builder
       // arg-count guards (`args.length >= 5`, etc.) and the implicit
-      // "drop the type args so re-detection fails" tricks, and it plugs the
-      // gap in the lift `isToSchemaCall` branch whose re-narrowing of the
-      // synthetic schema arg was the sole reason narrowedWrapperTypeRegistry
-      // existed (CT-1621). Producers call `context.markSchemaInjected(...)`.
+      // "drop the type args so re-detection fails" tricks. Producers call
+      // `context.markSchemaInjected(...)`. The lift `isToSchemaCall` branch
+      // additionally skips synthetic capability-wrapper re-entries inline
+      // (see CT-1621) for nodes whose mark did not survive reconstruction.
       if (
         (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
         context.isSchemaInjected(node)
@@ -2926,7 +2895,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                   sourceFile,
                   factory,
                   typeRegistry,
-                  capabilityRegistry,
                   context,
                 );
                 return valueType && !isUnresolvedSchemaType(valueType)
@@ -3035,7 +3003,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
               handlerFn,
             ) ?? eventType;
@@ -3048,14 +3015,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
               handlerFn,
             ) ?? stateType;
             const stateSummary = findCapabilitySummaryForParameter(
               handlerFn,
               1,
-              capabilityRegistry,
+              context,
               { checker, includeNestedCallbacks: true },
             );
             applyIdentityArrayItemSchemaHints(
@@ -3104,7 +3070,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               undefined,
               typeRegistry,
-              capabilityRegistry,
               "full",
               context,
             );
@@ -3125,7 +3090,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 checker,
                 sourceFile,
                 factory,
-                capabilityRegistry,
                 undefined,
                 handlerFn,
               ) ?? eventTypeBase;
@@ -3150,14 +3114,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
               handlerFn,
             ) ?? stateTypeBase;
             const stateSummary = findCapabilitySummaryForParameter(
               handlerFn,
               1,
-              capabilityRegistry,
+              context,
               { checker, includeNestedCallbacks: true },
             );
             applyIdentityArrayItemSchemaHints(
@@ -3228,7 +3191,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               explicitArgumentTypeNode: argumentType,
@@ -3290,7 +3252,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 sourceFile,
                 factory,
                 typeRegistry,
-                capabilityRegistry,
                 context,
               );
               if (
@@ -3308,7 +3269,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               fallbackArgumentType: fallbackArgType,
@@ -3352,23 +3312,37 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (argumentType && liftCallback) {
-            // Prefer the pre-shrink type from `narrowedWrapperTypeRegistry`
-            // when available — when the first toSchema argument is a synthetic
-            // wrapper TypeNode, `checker.getTypeFromTypeNode` resolves it to
-            // `any`, dropping the inner `type:`. The registry recovers the
-            // pre-shrink type. CT-1621: the only live consumer is `derive`'s
-            // value-as-input lowering (first pass); the redundant self-re-entry
-            // consumer was removed via the schemaInjectedRegistry marker, and
-            // `computed`/user-`lift` never produce this shape. Registry is
-            // derive-bound — see core/mod.ts and type-shrinking.ts
-            // `applyShrinkAndWrap`.
-            const argumentTypeValue =
-              context.lookupNarrowedWrapper(argumentType) ??
-                getTypeFromTypeNodeWithFallback(
-                  argumentType,
-                  checker,
-                  typeRegistry,
-                );
+            // CT-1621: when the toSchema argument is a SYNTHETIC capability
+            // wrapper TypeNode (pos < 0, e.g. `__cfHelpers.ComparableCell<…>`),
+            // it is our OWN already-shrunk output that re-entered this branch —
+            // the input schema is already correct and the callback's capability
+            // summary was already applied upstream. Re-running the recover +
+            // re-shrink here is redundant (it reproduces the same wrapper) and
+            // was the SOLE consumer of narrowedWrapperTypeRegistry: the
+            // synthetic wrapper resolves to `any`, so the re-shrink needed the
+            // pre-shrink type fed back. Skip it — keep the already-injected
+            // input, mark the node, and only descend into the callback body.
+            // Authored `lift(toSchema<T>(), fn)` has a real-source T (pos >= 0)
+            // that the checker resolves, so it falls through to the normal path.
+            //
+            // This is layered with the top-of-visit `nodeLinks.schemaInjected`
+            // guard (see SchemaInjectionTransformer.transform) as defense-in-
+            // depth: that guard catches re-entries on nodes whose mark survived
+            // reconstruction; this one catches the structural re-entry case
+            // (synthetic Cell-family / Stream wrapper as toSchema arg) for
+            // nodes whose mark did not.
+            if (argumentType.pos < 0 && isCellLikeTypeNode(argumentType)) {
+              context.markSchemaInjected(node);
+              return ts.visitEachChild(node, visit, transformation);
+            }
+            // Authored `lift(toSchema<T>(), fn)`: T is a real-source TypeNode
+            // the checker resolves (the synthetic-wrapper re-entry case is
+            // handled by the skip above).
+            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
+              argumentType,
+              checker,
+              typeRegistry,
+            );
             const {
               argumentTypeNode: narrowedArgumentType,
               argumentTypeValue: narrowedArgumentTypeValue,
@@ -3379,7 +3353,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
             );
             const inputSchema = createSchemaCallWithRegistryTransfer(
@@ -3398,9 +3371,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               [inputSchema, ...node.arguments.slice(1)],
             );
             // Mark so the re-descent below does NOT re-enter this branch and
-            // re-narrow the synthetic `inputSchema` wrapper against `any`.
-            // That re-narrowing was the sole consumer of
-            // narrowedWrapperTypeRegistry (CT-1621).
+            // re-process the synthetic `inputSchema` wrapper.
             context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
@@ -3423,7 +3394,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               explicitArgumentTypeNode: argumentType,
@@ -3471,7 +3441,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               fallbackArgumentType: getTypeFromTypeNodeWithFallback(
@@ -3518,7 +3487,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               fallbackArgumentNode: getParameterSchemaType(
@@ -3573,7 +3541,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 sourceFile,
                 factory,
                 typeRegistry,
-                capabilityRegistry,
                 context,
               );
               return valueType && !isUnresolvedSchemaType(valueType)

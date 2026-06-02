@@ -925,7 +925,7 @@ function rewriteTrackedOpaquePatternBody(
 
 /**
  * Recursively process lift-applied callback bodies (the lowered form of
- * derive()/computed() callbacks) to rewrite property accesses on
+ * computed() callbacks) to rewrite property accesses on
  * locally-declared OpaqueRef variables (e.g., const foo = computed(...);
  * foo.bar → foo.key("bar")).
  *
@@ -935,7 +935,7 @@ function rewriteTrackedOpaquePatternBody(
  * applies the tracked-opaque rewrite to each callback body
  * with empty opaque roots (since lift-applied callbacks receive unwrapped
  * captures).
- * Local variables initialized from derive/computed/lift calls within the callback
+ * Local variables initialized from computed/lift calls within the callback
  * will be detected as opaque roots by the tracked-opaque body's variable
  * tracking.
  */

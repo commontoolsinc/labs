@@ -6,6 +6,7 @@ import { EpochDaysHandler } from "./EpochDaysHandler.ts";
 import { SpecialNumberHandler } from "./SpecialNumberHandler.ts";
 import { SymbolHandler } from "./SymbolHandler.ts";
 import { BytesHandler } from "./BytesHandler.ts";
+import { RegExpHandler } from "./RegExpHandler.ts";
 import { FabricInstanceHandler } from "./FabricInstanceHandler.ts";
 
 /**
@@ -24,6 +25,7 @@ export function createDefaultRegistry(): TypeHandlerRegistry {
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
   registry.register(BytesHandler);
+  registry.register(RegExpHandler);
   // `FabricInstance` (generic -- checked via `instanceof`).
   registry.register(FabricInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).

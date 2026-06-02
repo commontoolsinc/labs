@@ -180,7 +180,7 @@ function rewriteChildExpressions(
 
       const analysis = analyze(child);
       if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
-        // Skip wrapping if inside a safe callback wrapper (computed/derive/action/etc.)
+        // Skip wrapping if inside a safe callback wrapper (computed/lift/action/etc.)
         // This prevents double-wrapping expressions already in a reactive context
         if (isInsideKnownSafeCallbackWrapper(child, context)) {
           return visitEachChildWithJsx(child, visitor, context.tsContext);

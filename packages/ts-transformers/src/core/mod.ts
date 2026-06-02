@@ -1,14 +1,34 @@
 /**
- * Cross-transformer communication registries.
+ * Cross-transformer communication state.
  *
- * The pipeline creates nine shared registries in CommonFabricTransformerPipeline
- * (cf-pipeline.ts). Each is keyed by AST node or symbol identity, which is
- * preserved when transformers are applied in sequence via ts.transform().
+ * `CrossStageState` (cross-stage-state.ts) owns the pipeline's cross-transformer
+ * channels. Each is keyed by AST node or symbol identity, which is preserved
+ * when transformers are applied in sequence via ts.transform(). The channels are
+ * organized into three families:
  *
- * (A former member, syntheticLiftAppliedCallRegistry, was removed in the
- * registry-unification effort — it was verified functionally inert. See
- * docs/scratch/12-registry-unification-design.md. The current ninth member is
- * schemaInjectedRegistry, added in CT-1621 — see its entry below.)
+ *   1. Bare cross-package maps — `typeRegistry`, `schemaHints`. The published
+ *      boundary contract: the separate schema-generator package reads these
+ *      directly as plain WeakMaps and must not depend on `CrossStageState` or
+ *      `NodeTypeLinks`. They deliberately stay their own maps; see the
+ *      "schema-generator boundary" note below.
+ *   2. `nodeLinks` (WeakMap<ts.Node, NodeTypeLinks>) — a NodeLinks-shaped side
+ *      table (mirroring the TS compiler's internal NodeLinks: one struct of
+ *      optional derived facts per node, lazily populated) holding the
+ *      transformer-internal, non-cache-invalidating per-node channels:
+ *      `capabilitySummary` and `schemaInjected`. Reached only through the
+ *      record/lookup/mark/is methods on CrossStageState.
+ *   3. The marker family — node/symbol-keyed WeakSets whose context-level
+ *      mutators are coupled to reactive-analysis cache invalidation
+ *      (mapCallbackRegistry, syntheticComputeCallbackRegistry,
+ *      syntheticComputeOwnedNodeRegistry, syntheticReactiveCollectionRegistry).
+ *
+ * (Former members no longer exist: `syntheticLiftAppliedCallRegistry`, removed
+ * after being verified functionally inert (see
+ * docs/scratch/12-registry-unification-design.md); and `narrowedWrapperTypeRegistry`,
+ * removed in PR #3788 by detecting and short-circuiting the synthetic
+ * capability-wrapper re-entry in schema-injection that was its sole consumer —
+ * see the `nodeLinks.schemaInjected` entry below for the current idempotency
+ * model.)
  *
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
  *   Preserves and recovers synthetic typing across the pipeline. Serves three
@@ -31,9 +51,6 @@
  *   reachable bug, while adding churn the reads can't even exploit (the shared
  *   read helpers — getTypeAtLocationWithFallback, ensureTypeNodeRegistered —
  *   are node-kind-agnostic and would have to consult all three anyway).
- *   The one genuine cross-consumer hazard CT-1615 hit (schema generator pulling
- *   a *pre-shrink* type meant for a different consumer) is already solved by
- *   the separate narrowedWrapperTypeRegistry channel — see its entry below.
  *   Writers: closure strategies, builtins/lift-applied, expression rewrites,
  *            type-building/schema-factory/type-shrinking, schema-injection
  *   Readers: lift-lowering transformer, schema-generator, type-inference,
@@ -71,48 +88,18 @@
  *   Writers: capture analysis in schema-injection
  *   Readers: schema-generator
  *
- * CapabilitySummaryRegistry (WeakMap<ts.Node, FunctionCapabilitySummary>)
+ * nodeLinks.capabilitySummary (NodeTypeLinks field; was CapabilitySummaryRegistry)
  *   Caches per-function capability summaries (read/write paths, capability
- *   classification) computed by PatternCallbackLoweringTransformer.
- *   Writers: pattern-callback lowering (registerCapabilitySummary)
- *   Readers: schema-injection (findCapabilitySummaryForParameter)
+ *   classification) computed by PatternCallbackLoweringTransformer. Internal
+ *   only — never crosses the schema-generator boundary; reached through the
+ *   record/lookup methods, never as a raw map (the bare-map channel was retired
+ *   in step 5 — schema-injection no longer threads a `capabilityRegistry`
+ *   parameter, it reads via context.lookupCapabilitySummary()).
+ *   Writers: context.recordCapabilitySummary() (pattern-callback lowering)
+ *   Readers: context.lookupCapabilitySummary() (schema-injection
+ *            findCapabilitySummaryForParameter)
  *
- * narrowedWrapperTypeRegistry (WeakMap<ts.TypeNode, ts.Type>)
- *   Maps synthetic wrapper TypeNodes produced by applyShrinkAndWrap back to
- *   the *pre-shrink* semantic Type that drove the narrowing. Deliberately
- *   kept separate from typeRegistry because the schema generator consults
- *   typeRegistry for wrapper-inner property recovery — registering pre-shrink
- *   types there would un-shrink carefully-narrowed inner schemas. Added in
- *   CT-1615 to support the lift-applied form's re-narrowing pass.
- *   Writers: context.markNarrowedWrapper() (called by
- *            transformers/type-shrinking.ts applyShrinkAndWrap)
- *   Readers: context.lookupNarrowedWrapper() (called by
- *            transformers/schema-injection.ts lift `isToSchemaCall` branch)
- *
- *   CT-1621 INVARIANT (why this still exists, precisely):
- *   The reader's load-bearing use is the FIRST-pass recovery of the pre-shrink
- *   type for a synthetic wrapper whose lift input is a runtime VALUE that was
- *   capability-shrunk (the checker resolves such a synthetic wrapper TypeNode
- *   to `any`, so without this the inner `type:` is lost and only the `asCell`
- *   capability wrapper survives). That value-as-input shape is produced ONLY by
- *   the `derive`/`computed`→lift-applied lowering's value-input path — and in
- *   practice ONLY by `derive`: `computed(fn)` lowers to the no-input
- *   `lift(false, fn)()` form (no input wrapper at all), and a `computed`
- *   capturing cells reifies those captures into an input OBJECT whose member
- *   nodes carry checker-resolvable types via `typeRegistry` (verified: a
- *   capturing-computed golden made with this registry matches with it neutered).
- *   User-authored `lift` cannot express value-as-input (LiftFunction's leading
- *   args are JSONSchema/fn, never a value), and the user `lift(toSchema<T>(),…)`
- *   form has a real source TypeNode the checker resolves — so neither needs this.
- *   The redundant SELF-RE-ENTRY consumer that CT-1621 originally targeted was
- *   removed (schemaInjectedRegistry now skips re-processing our own output).
- *   What remains is derive-bound. REMOVE THIS REGISTRY when `derive` is
- *   deprecated/removed: drop the writer (applyShrinkAndWrap markNarrowedWrapper),
- *   the reader (schema-injection isToSchemaCall lookup), this map + its methods,
- *   the context shims, and this entry. Until then it is a principled,
- *   single-purpose channel, not an ad-hoc workaround.
- *
- * schemaInjectedRegistry (WeakSet<ts.Node>)
+ * nodeLinks.schemaInjected (NodeTypeLinks field; was schemaInjectedRegistry)
  *   Marks builder call/new nodes that SchemaInjection has already finalized.
  *   The single top-of-visit guard in SchemaInjectionTransformer skips
  *   re-processing a marked node (descending only into its children to reach
@@ -121,15 +108,30 @@
  *   re-detection fails" trick, etc.) with one explicit signal, and plugs the
  *   lift `isToSchemaCall` branch's missing idempotency guard — eliminating the
  *   redundant self-re-entry re-narrowing that CT-1621 targeted. NOTE: this
- *   marks SYNTHETIC nodes we produce; unlike the other marker sets it uses a
- *   plain `.has` (no getOriginalNode fallback) because a marked node's original
- *   is the *pre-injection* user call, which must NOT read as injected.
+ *   marks SYNTHETIC nodes we produce; unlike the marker family it uses a plain
+ *   presence check (no getOriginalNode fallback) because a marked node's
+ *   original is the *pre-injection* user call, which must NOT read as injected.
+ *   That no-fallback semantics is WHY it is a nodeLinks field and not a member
+ *   of the getOriginalNode-fallback marker family.
  *   Some arg-count guards remain DELIBERATELY: the cell-factory/wish `>= 2`
  *   checks also protect USER-supplied schemas (which this marker can't cover),
  *   and the `!== 2`/`!== 3` checks are dispatch (input-shape) guards, not
  *   idempotency.
  *   Writers: context.markSchemaInjected() (SchemaInjection producer sites)
  *   Readers: context.isSchemaInjected() (SchemaInjection top-of-visit guard)
+ *
+ * --- schema-generator boundary ---
+ *
+ * `typeRegistry` and `schemaHints` are the ONLY channels read by the separate
+ * schema-generator package (not a transformer stage). It receives them as bare
+ * `WeakMap<ts.Node, …>` instances and calls only `.get`/`.has` on them; it must
+ * NOT learn about `CrossStageState` or `NodeTypeLinks`. They therefore stay as
+ * their own maps rather than folding into `nodeLinks` — adapter "views" cast
+ * across the package line would re-introduce the very maps they claim to remove,
+ * for zero structural win, and would lie to the typechecker at the boundary.
+ * This mirrors the TS compiler, which keeps its NodeLinks table private and
+ * exposes narrow typed accessors (getTypeAtLocation) instead of the table. The
+ * bare boundary maps are our analogue of that narrow published contract.
  *
  * --- Cache invalidation contract ---
  *
@@ -144,17 +146,11 @@
  * (createDataFlowAnalyzer's `analysisCache`) lives inside its closure and
  * would otherwise return stale pre-mutation verdicts after a registry write.
  *
- * `narrowedWrapperTypeRegistry` is accessed only through
- * `context.markNarrowedWrapper()` / `context.lookupNarrowedWrapper()` (no
- * cache-invalidation needed because no analysis cache depends on it, but
- * routing through the methods centralises the contract — Berni's review
- * §3.4 on CT-1615).
- *
- * schemaHints and capabilitySummaryRegistry are accessed through context
- * record/lookup methods (recordSchemaHint/lookupSchemaHint,
- * recordCapabilitySummary/lookupCapabilitySummary) but, like
- * narrowedWrapperTypeRegistry, do not invalidate caches (no analysis cache
- * depends on them). typeRegistry is still mutated via direct .set() at call
+ * schemaHints and the nodeLinks fields (capabilitySummary, schemaInjected) are
+ * accessed through record/lookup/mark/is methods (recordSchemaHint/
+ * lookupSchemaHint, recordCapabilitySummary/lookupCapabilitySummary,
+ * markSchemaInjected/isSchemaInjected) but do not invalidate caches (no analysis
+ * cache depends on them). typeRegistry is still mutated via direct .set() at call
  * sites; same caveat applies. If you add a cache that depends on any of these,
  * route the mutation through a method that invalidates it (or extend
  * invalidateReactiveAnalysisCaches).
@@ -166,34 +162,47 @@
  * analyzer instance is dropped together, so any state captured in its
  * closure is GC'd.
  *
- * --- Registry unification (in progress, 2026-05) ---
+ * --- Registry unification (complete, 2026-06) ---
  *
- * This registry layer is being consolidated into a single CrossStageState
- * abstraction. The plan and rationale live in
+ * This registry layer was consolidated into the CrossStageState abstraction.
+ * The plan and rationale live in
  * `docs/scratch/12-registry-unification-design.md` (supersedes the earlier
  * audit in `07-registry-audit.md`). Sequence:
  *   1. (done) doc refresh: count fix + mark the inert registry.
  *   2. (done — NO-OP, by investigation) Splitting typeRegistry into three
  *      maps was on the plan, but the split fixes no reachable bug: the three
  *      uses are already isolated by key node-kind (see the TypeRegistry note
- *      above), and the one real CT-1615 cross-consumer hazard is already
- *      handled by narrowedWrapperTypeRegistry. Documented the invariant
- *      instead of splitting.
- *   3. (done) Lifted schemaHints + capabilitySummaryRegistry to context
- *      record/lookup methods. typeRegistry stays on direct .set (its split
- *      was dropped in step 2, so there's no per-use method to route through).
+ *      above). The one real CT-1615 cross-consumer hazard (schema generator vs.
+ *      schema injection needing different types for a synthetic wrapper node)
+ *      was retired in CT-1621: PR #3716 added the `schemaInjectedRegistry`
+ *      marker that catches re-entries on nodes whose mark survived. PR #3788
+ *      then closed the residual case — synthetic capability-wrapper re-entries
+ *      whose mark did not survive — by detecting them structurally
+ *      (`argumentType.pos < 0 && isCellLikeTypeNode(argumentType)`) and
+ *      short-circuiting the re-shrink, which left the channel without a
+ *      consumer and let `narrowedWrapperTypeRegistry` be deleted entirely.
+ *   3. (done) Lifted schemaHints + capabilitySummary to context record/lookup
+ *      methods. typeRegistry stays on direct .set (its split was dropped in
+ *      step 2, so there's no per-use method to route through).
  *   4. (done) Removed syntheticLiftAppliedCallRegistry (verified inert).
- *   5. (pending) Fold the transformer-internal channels into CrossStageState;
- *      keep typeRegistry + schemaHints as loose maps at the schema-generator
- *      package boundary (the only channels that package reads), so no
- *      CrossStageState type crosses into schema-generator.
+ *   5. (done) Folded the transformer-internal, non-cache-invalidating per-node
+ *      channels (capabilitySummary, schemaInjected) into a single NodeLinks-
+ *      shaped `nodeLinks` WeakMap, reached only through methods. As part of this
+ *      the `capabilityRegistry` bare-map parameter that schema-injection threaded
+ *      through ~14 functions was removed — reads now go through
+ *      context.lookupCapabilitySummary(), and the `CapabilitySummaryRegistry`
+ *      type was retired. typeRegistry + schemaHints intentionally stay as bare
+ *      maps at the schema-generator boundary (see the "schema-generator boundary"
+ *      note above), so no CrossStageState/NodeTypeLinks type crosses into
+ *      schema-generator. Research (CT-1621 arc) confirmed this matches how the TS
+ *      compiler itself structures NodeLinks: one private per-node struct, narrow
+ *      public accessors, the table never handed out.
  */
 export { TransformationContext } from "./context.ts";
 export { CrossStageState } from "./cross-stage-state.ts";
 export type {
   CapabilityParamDefault,
   CapabilityParamSummary,
-  CapabilitySummaryRegistry,
   DiagnosticInput,
   DiagnosticSeverity,
   FunctionCapabilitySummary,

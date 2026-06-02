@@ -323,18 +323,28 @@ const pathStartsWith = (
   prefix.length <= path.length &&
   prefix.every((part, index) => path[index] === part);
 
+/**
+ * Determines whether `schemaTracker` already covers `selector` for the given
+ * `key` — either by an exact (hash-equal) match, or by an existing permissive
+ * (`true`-schema) selector whose path is a prefix of this selector's path.
+ *
+ * Most efficient when handed an already-interned selector: the
+ * `internPathSelector()` call below is then a near-no-op that returns the same
+ * reference. An un-interned selector is still handled correctly — it is simply
+ * canonicalized (and deep-frozen) on the way in.
+ *
+ * A schema-less (`undefined`) selector is normalized to `false` ("reject") —
+ * the opposite of the `undefined ≈ true` ("accept") convention used elsewhere
+ * in this file.
+ */
 export const schemaTrackerCoversSelector = (
   schemaTracker: MapSet<string, SchemaPathSelector>,
   key: string,
   selector: SchemaPathSelector,
 ): boolean => {
-  const internedSelector = selector.schema !== undefined &&
-      Object.isFrozen(selector) && Object.isFrozen(selector.path)
-    ? selector
-    : internPathSelector({
-      path: [...selector.path],
-      schema: selector.schema ?? false,
-    });
+  const internedSelector = internPathSelector(
+    selector.schema === undefined ? { ...selector, schema: false } : selector,
+  );
   if (schemaTracker.hasValue(key, internedSelector)) {
     return true;
   }
@@ -1046,6 +1056,24 @@ export abstract class BaseObjectTraverser {
     );
   }
 
+  /**
+   * Returns the interned form of a coverage `selector`, memoized so repeated
+   * structurally-equal checks reuse one frozen instance.
+   *
+   * Safe to call on a frozen or mutable `selector` — it never requires a
+   * mutable one. Interning may deep-freeze the selector and its `path` in place
+   * (a mutable selector's `schema` may also be canonicalized); a frozen input is
+   * left untouched, with a fresh interned selector returned when needed. See
+   * `internPathSelector()`. A schema-less (`undefined`) selector is treated as
+   * `false` ("reject").
+   *
+   * The memo matters: `combineOptionalSchema()` mints a new un-interned schema
+   * on every call, so without it each repeated coverage check would
+   * re-deep-freeze, re-clone, and re-hash that schema — measurably (~2x) slower
+   * on link-heavy refreshes. The cache key joins the path with a single schema
+   * hash rather than hashing the whole selector: hashing the path array (vs a
+   * string join) is pure added cost on the hot cache-hit path.
+   */
   private internCoverageSelector(
     selector: SchemaPathSelector,
   ): SchemaPathSelector {
@@ -1058,11 +1086,11 @@ export abstract class BaseObjectTraverser {
     if (cached !== undefined) {
       return cached;
     }
-
-    const interned = internPathSelector({
-      path: [...selector.path],
-      schema,
-    });
+    // Copy only to substitute the `false` schema for a missing one; otherwise
+    // pass the selector through (`internPathSelector()` handles frozen input).
+    const interned = internPathSelector(
+      selector.schema === undefined ? { ...selector, schema } : selector,
+    );
     this.coverageSelectorCache.set(cacheKey, interned);
     return interned;
   }

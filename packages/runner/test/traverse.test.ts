@@ -24,6 +24,7 @@ import {
   mergeAnyOfMatches,
   PointerCycleTracker,
   SchemaObjectTraverser,
+  schemaTrackerCoversSelector,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
@@ -2947,6 +2948,32 @@ describe("MapSetStringToPathSelectors assumes pre-interned inputs", () => {
     mapSet.add("k", selector);
     mapSet.add("k", selector);
     expect(mapSet.get("k")!.size).toBe(1);
+  });
+});
+
+describe("schemaTrackerCoversSelector", () => {
+  // Content-unique title guarantees no prior interning has seen this schema.
+  const uniqueSchema = (): JSONSchema => ({
+    type: "object",
+    title: `coversSelectorTestAt${Date.now()}-${Math.random()}`,
+  });
+
+  it("canonicalizes a frozen-but-non-interned selector before lookup", () => {
+    // A frozen selector whose schema is frozen yet NOT the canonical interned
+    // instance. The old fast path keyed off `Object.isFrozen()` and treated
+    // this as already-interned, so it skipped canonicalization entirely. The
+    // lookup must instead operate on an interned selector, which means the
+    // schema gets interned as a side effect.
+    const schema = Object.freeze(uniqueSchema()) as JSONSchema;
+    const selector = Object.freeze({
+      path: Object.freeze(["value", "x"]),
+      schema,
+    }) as SchemaPathSelector;
+    const tracker = new MapSetStringToPathSelectors(true);
+
+    expect(isInternedSchema(schema)).toBe(false);
+    schemaTrackerCoversSelector(tracker, "k", selector);
+    expect(isInternedSchema(schema)).toBe(true);
   });
 });
 

@@ -443,8 +443,22 @@ the relevant phase lands.
   node-kind (replacement-Expr / TypeNode / CallExpression never coincide), so
   the split fixed no reachable bug; the invariant is documented instead. (2)
   `syntheticLiftAppliedCallRegistry` was **removed** as verified-inert. The
-  remaining channels (incl. the still load-bearing
-  `narrowedWrapperTypeRegistry`) now live in `CrossStageState`, accessed via
-  record/lookup/mark methods; cache-invalidation stays on the context.
-  `typeRegistry` + `schemaHints` remain plain maps at the schema-generator
-  package boundary.
+  remaining channels (which at the time of #3707 still included
+  `narrowedWrapperTypeRegistry` — see postscript) now live in `CrossStageState`,
+  accessed via record/lookup/mark methods; cache-invalidation stays on the
+  context. `typeRegistry` + `schemaHints` remain plain maps at the
+  schema-generator package boundary.
+
+  _Postscript (post-#3788):_ `narrowedWrapperTypeRegistry` was subsequently
+  retired by CT-1621. PR #3716 added the `schemaInjectedRegistry` marker that
+  catches schema-injection re-entries on nodes whose mark survived. PR #3788
+  then closed the residual case (synthetic capability-wrapper re-entries whose
+  mark didn't survive, e.g. authored `lift(cb)(value)` whose toSchema arg
+  arrives at the `isToSchemaCall` branch as `__cfHelpers.ComparableCell<…>` with
+  `pos < 0`) by detecting it structurally and short-circuiting the redundant
+  re-shrink — which left the channel without a consumer and let it be deleted.
+  The current CrossStageState inventory is the eight registries listed in
+  `core/mod.ts`. Note: the earlier session-prep doc framed the registry as
+  "derive-bound, dies with derive removal"; that was wrong — the consumer was
+  schema-injection's own re-entry on user-authored `lift`, not a derive-specific
+  shape.
