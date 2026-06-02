@@ -64,6 +64,25 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts the 2-arg lift(fn, options) form (callback at index 0)", () => {
+    // `lift` overloads on argument TYPE, not arity: `lift(fn, options)` is a
+    // valid 2-arg form whose callback is the FIRST argument (options second).
+    // The verifier must disambiguate by which position is the function — not
+    // assume a 2-arg lift always has its callback at index 1.
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfLift_1 = (0, commonfabric_1.lift)(() => 42, { materializerWriteInputPaths: [["x"]] });
+    exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts a previously parsed compiled bundle", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

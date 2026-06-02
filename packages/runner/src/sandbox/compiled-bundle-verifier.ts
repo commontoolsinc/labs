@@ -1127,21 +1127,30 @@ function callbackIndexesForBuilder(
     case "action":
     case "computed":
       return args.length >= 1 ? [0] : [];
-    case "lift":
-      // 3-arg `lift(argSchema, resSchema, cb)` → callback at 2.
-      // 2-arg `lift(argSchema, cb)` / `lift(false, cb)` (the no-input form,
-      // PR #3709) → callback at 1. 1-arg `lift(cb)` → callback at 0.
-      // The 2-arg case is newly reachable here as of CT-1644: hoisting a
-      // `lift(false, fn)()` computation to a module-scope const surfaces it to
-      // the authored-factory verifier, where previously it only ever appeared
-      // inline inside a handler/pattern body (not verified at this layer).
-      return args.length >= 3
-        ? [2]
-        : args.length === 2
-        ? [1]
-        : args.length >= 1
-        ? [0]
-        : [];
+    case "lift": {
+      // `lift` is overloaded on the TYPE of its leading arguments, not on
+      // arity (see the runtime dispatch in builder/module.ts): the callback is
+      // whichever of the first few positions is the function.
+      //   lift(fn, options?)                         → callback at 0
+      //   lift(argSchema, fn, options?)              → callback at 1
+      //   lift(argSchema, resSchema, fn, options?)   → callback at 2
+      // So index purely on arity is wrong — `lift(fn, options)` is a valid
+      // 2-arg form with the callback at 0, while `lift(false, fn)` (the
+      // no-input form, PR #3709) is a 2-arg form with the callback at 1.
+      // Mirror the runtime: pick the first position that parses as a direct
+      // callback. (Newly reachable at module scope as of CT-1644, which hoists
+      // `lift(...)()` computations to a module-scope const; previously these
+      // only appeared inline inside a handler/pattern body, unverified here.)
+      for (let i = 0; i < Math.min(args.length, 3); i++) {
+        if (resolveTrustedBuilderCallback(source, args[i]!, env)) {
+          return [i];
+        }
+      }
+      // No direct callback found in the leading positions; fall back to the
+      // canonical schema-prefixed slot so the caller still emits the
+      // "must receive a direct callback" diagnostic against the right argument.
+      return args.length >= 3 ? [2] : args.length >= 1 ? [args.length - 1] : [];
+    }
     case "handler":
       if (
         args.length >= 1 &&
