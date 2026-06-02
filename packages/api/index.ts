@@ -1941,9 +1941,13 @@ export interface LiftFunction {
   ): ModuleFactory<StripCell<T>, StripCell<R>>;
 }
 
-// Helper type to make non-Cell and non-Stream properties readonly in handler state
+// Helper type to make non-Cell and non-Stream properties readonly in handler state.
+// Cell/Stream/SqliteDb are passed through whole (they are handle interfaces with
+// methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
+// to map over).
 export type HandlerState<T> = T extends Cell<any> ? T
   : T extends Stream<any> ? T
+  : T extends SqliteDb<any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
@@ -2080,6 +2084,40 @@ declare const __sqliteDb: unique symbol;
  */
 export type SqliteDatabase = { readonly [__sqliteDb]: true };
 
+/** Imperative write on a SqliteDb handle: records a SQLite write onto the
+ *  current transaction so it commits atomically with surrounding cell writes
+ *  (see docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md). */
+export interface ISqliteExecutable {
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void;
+}
+
+/** Reactive read on a SqliteDb handle: builds a `sqliteQuery` node. `<Row>` is
+ *  lowered by the transformer to an injected result schema. */
+export interface ISqliteQueryable {
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+}
+
+/**
+ * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing the
+ * SQLite method surface (`.exec`/`.query`) instead of the general value-cell
+ * mutators. It reads back the handle ref and carries the `toCell` back-pointer,
+ * but is NOT writable (you can't `.set()` a DB handle).
+ */
+export interface ISqliteDb<T = SqliteDatabase>
+  extends IAnyCell<T>, IReadable<T>, ISqliteExecutable, ISqliteQueryable {}
+
+export interface SqliteDb<T = SqliteDatabase>
+  extends BrandedCell<T, "sqlite">, ISqliteDb<T> {}
+
 /** A map of table name -> one-row JSON Schema (see `table()`). */
 export type SqliteTableSchemas = Record<string, JSONSchema>;
 
@@ -2093,10 +2131,10 @@ export type SqliteDatabaseSource = {
 export type SqliteDatabaseFunction = (
   options?: { tables?: SqliteTableSchemas },
   source?: SqliteDatabaseSource,
-) => OpaqueRef<SqliteDatabase>;
+) => OpaqueRef<SqliteDb>;
 
 export type SqliteQueryParams = {
-  db: Opaque<SqliteDatabase>;
+  db: Opaque<SqliteDatabase | SqliteDb>;
   sql: string;
   params?: ReadonlyArray<unknown> | Record<string, unknown>;
   reactOn?: unknown;
@@ -2106,7 +2144,7 @@ export type SqliteQueryFunction = <Row = Record<string, unknown>>(
 ) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
 
 export type SqliteExecuteParams = {
-  db: Opaque<SqliteDatabase>;
+  db: Opaque<SqliteDatabase | SqliteDb>;
   sql: string;
   params?: ReadonlyArray<unknown> | Record<string, unknown>;
 };
