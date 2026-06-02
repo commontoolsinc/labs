@@ -103,7 +103,7 @@ export class LiftAppliedStrategy implements ClosureTransformationStrategy {
 
 /**
  * Check if a call expression is a lift-applied call (the lowered form of a
- * user-source derive() / computed() call) from commonfabric.
+ * user-source computed() call) from commonfabric.
  */
 export function isLiftAppliedCall(
   node: ts.CallExpression,
@@ -190,7 +190,7 @@ function resolveLiftAppliedCaptureNameCollisions(
  * Example: {value, multiplier} where value is the original input and multiplier is a capture.
  *
  * When hadZeroParameters is true, skip the original input and only include captures.
- * This handles the case where the user wrote derive({}, () => ...) (which lowers to
+ * This handles the case where the user wrote computed(() => ...) (which lowers to
  * lift(() => ...)({})) and we only need captures.
  */
 function buildLiftAppliedInputObject(

@@ -2298,42 +2298,27 @@ function resolveLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // See getLiftAppliedInputAndCallback in src/ast/call-kind.ts for the
-  // two recognized shapes (legacy derive vs lift-applied).
+  // Lift-applied `lift(...)(input)`: callback is the last arg of the inner lift
+  // call; input is the first arg of the outer applied call. The outer call's
+  // callee is always the inner CallExpression — that is the only shape
+  // detectCallKind classifies as lift-applied (see getLiftAppliedInputAndCallback
+  // in src/ast/call-kind.ts).
   const innerCall = getLiftAppliedInnerCall(call);
-  if (innerCall) {
-    // Lift-applied: callback is the last arg of the inner lift call; input
-    // is the first arg of the outer applied call.
-    const callbackIndex = innerCall.arguments.length - 1;
-    const callbackExpression = innerCall.arguments[callbackIndex];
-    const callback = callbackExpression
-      ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
-      : undefined;
-    if (!callback) {
-      return undefined;
-    }
-    const input = call.arguments[0];
-    if (!input) {
-      return undefined;
-    }
-    return { input, callback };
+  if (!innerCall) {
+    return undefined;
   }
-
-  const callbackIndex = call.arguments.length - 1;
-  const callbackExpression = call.arguments[callbackIndex];
+  const callbackIndex = innerCall.arguments.length - 1;
+  const callbackExpression = innerCall.arguments[callbackIndex];
   const callback = callbackExpression
     ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
     : undefined;
   if (!callback) {
     return undefined;
   }
-
-  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
-  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  const input = call.arguments[0];
   if (!input) {
     return undefined;
   }
-
   return { input, callback };
 }
 
@@ -3163,10 +3148,19 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           sourceFile,
         );
 
-        // For lift-applied shape (callee is itself a call), the generic
+        // For the lift-applied shape (callee is itself a call), the generic
         // type arguments live on the *inner* lift call, not on the outer
-        // applied call. The legacy derive shape kept them on the call
-        // itself. Read from whichever holds them.
+        // applied call — the lowering builds the outer call with `undefined`
+        // type args (see lift/transformer.ts). The `?? node.typeArguments`
+        // fallback reads them off the outer call defensively.
+        //
+        // UNCERTAIN whether the fallback is still reachable: dropping it kept
+        // the full fixture suite green (CT-1643), and the main lowering path
+        // never puts type args on the outer call. But this wasn't proven dead
+        // across all three lift-applied construction sites + schema-injection
+        // re-entry, so it's kept as a cheap robustness guard rather than
+        // removed. (It is NOT derive-specific; the prior comment misattributed
+        // it to the removed "legacy derive shape.")
         const innerLiftCall = getLiftAppliedInnerCall(node);
         const sourceTypeArguments = innerLiftCall?.typeArguments ??
           node.typeArguments;

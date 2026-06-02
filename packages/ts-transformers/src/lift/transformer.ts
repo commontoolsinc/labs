@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { detectCallKind, getLiftAppliedInnerCall } from "../ast/call-kind.ts";
+import { detectCallKind } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
 import { registerLiftAppliedCallType } from "../ast/type-inference.ts";
 import { HelpersOnlyTransformer } from "../core/transformers.ts";
@@ -160,13 +160,6 @@ function sourceContainsLowerableCall(
       if (
         callKind?.kind === "builder" &&
         callKind.builderName === "computed"
-      ) {
-        found = true;
-        return;
-      }
-      if (
-        callKind?.kind === "lift-applied" &&
-        !getLiftAppliedInnerCall(node)
       ) {
         found = true;
         return;

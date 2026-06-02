@@ -955,9 +955,10 @@ function rewriteNestedLiftAppliedCallbackBodies(
     if (!liftAppliedArgs) return visited;
     const { callback: callbackArg } = liftAppliedArgs;
 
-    // The callback can live on either the outer call (legacy derive shape:
-    // derive(input, cb)) or the inner call (lift-applied shape:
-    // lift(cb)(input)). Detect which by searching both argument lists.
+    // The callback lives on the inner lift call (lift(cb)(input)). When
+    // getLiftAppliedInputAndCallback succeeds the inner call is always present
+    // — both gate on the outer call's callee being a CallExpression — so
+    // getLiftAppliedInnerCall is non-undefined here.
     const innerCall = getLiftAppliedInnerCall(visited);
     const callbackHostArgs = innerCall
       ? innerCall.arguments
