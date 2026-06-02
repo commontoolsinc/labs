@@ -895,6 +895,27 @@ Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async
     Error,
     "--browser-access-account-access must be one of: available, none",
   );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-expires-at",
+          "not-a-timestamp",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-expires-at must be a valid timestamp",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs supports explicit web_fetch subagent profile authorization", async () => {

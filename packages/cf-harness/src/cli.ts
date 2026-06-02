@@ -19,6 +19,7 @@ import {
   HARNESS_BROWSER_ACCESS_LEASE_TYPE,
   HARNESS_BROWSER_ACCESS_PROFILE_MODES,
   type HarnessBrowserAccessLease,
+  parseBrowserAccessExpiresAt,
 } from "./contracts/browser-access.ts";
 import {
   readHarnessRunArtifacts,
@@ -561,6 +562,14 @@ const parseBrowserAccessLease = (
   if (normalizedCdpUrl === undefined) {
     throw new Error(
       "--browser-access-cdp-url must be an http:// local origin with an explicit port",
+    );
+  }
+  if (
+    expiresAt !== undefined && expiresAt.length > 0 &&
+    parseBrowserAccessExpiresAt(expiresAt) === undefined
+  ) {
+    throw new Error(
+      "--browser-access-expires-at must be a valid timestamp",
     );
   }
   return {

@@ -1329,6 +1329,43 @@ Deno.test("bash-no-sandbox denies host commands outside the browser policy", asy
   assertEquals(context.currentDir, "/workspace/repo/browser");
 });
 
+Deno.test("bash-no-sandbox denies expired Browser Access leases", async () => {
+  const hostRunner = new FakeProcessRunner();
+  const context = createContext(
+    new FakeSandboxRuntime(),
+    "/workspace/repo",
+    hostRunner,
+    "observe",
+    undefined,
+    undefined,
+    [],
+    "/tmp/cf-harness-workspace",
+    undefined,
+    undefined,
+    [],
+    "sandbox",
+    {
+      type: "cf-harness.chat.browser-access-lease",
+      leaseId: "lease-1",
+      cdpUrl: "http://localhost:9362",
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    },
+  );
+
+  const output = await bashNoSandboxTool.invoke(context, {
+    command: "agent-browser --cdp http://localhost:9362 snapshot -i",
+  });
+
+  assertEquals(hostRunner.calls, []);
+  assertEquals(output, {
+    outputId: "run-1:bash-no-sandbox:1",
+    stdout: "",
+    stderr: "bash-no-sandbox command denied: Browser Access lease has expired",
+    exitCode: 126,
+    cwd: "/workspace/repo",
+  });
+});
+
 Deno.test("read_file tool resolves relative paths from the session currentDir", async () => {
   const sandbox = new FakeSandboxRuntime([{
     stdout: "hello",
@@ -2178,6 +2215,7 @@ Deno.test({
           type: "cf-harness.chat.browser-access-lease",
           leaseId: "lease-1",
           cdpUrl: "http://localhost:9362",
+          expiresAt: "2099-01-01T00:00:00.000Z",
         },
       );
       const output = await runSkillScriptTool.invoke(context, {
@@ -2247,6 +2285,43 @@ Deno.test({
       );
       assertEquals(hostRunner.calls.length, 1);
       assertEquals(executions[1].status, "error");
+
+      const expiredContext = createContext(
+        sandbox,
+        "/workspace/subdir",
+        hostRunner,
+        "observe",
+        undefined,
+        registry,
+        [],
+        workspace,
+        activations,
+        [{ skill: "agent-browser", path: "scripts/capture-workflow.sh" }],
+        executions,
+        "host",
+        {
+          type: "cf-harness.chat.browser-access-lease",
+          leaseId: "lease-1",
+          cdpUrl: "http://localhost:9362",
+          expiresAt: "2000-01-01T00:00:00.000Z",
+        },
+      );
+      const expiredOutput = await runSkillScriptTool.invoke(expiredContext, {
+        skill: "agent-browser",
+        path: "scripts/capture-workflow.sh",
+        args: [
+          "--cdp",
+          "http://localhost:9362",
+          "http://localhost:8000/piece",
+        ],
+      });
+      assertEquals(expiredOutput.status, "error");
+      assertEquals(expiredOutput.error?.code, "permission_denied");
+      assertStringIncludes(
+        expiredOutput.error?.message ?? "",
+        "Browser Access lease has expired",
+      );
+      assertEquals(hostRunner.calls.length, 1);
     } finally {
       await Deno.remove(workspace, { recursive: true });
     }

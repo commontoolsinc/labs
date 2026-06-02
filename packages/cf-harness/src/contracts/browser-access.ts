@@ -26,3 +26,28 @@ export interface HarnessBrowserAccessLease {
   profileMode?: HarnessBrowserAccessProfileMode;
   accountAccess?: HarnessBrowserAccessAccountAccess;
 }
+
+export const parseBrowserAccessExpiresAt = (
+  expiresAt: string,
+): Date | undefined => {
+  const timestampMs = Date.parse(expiresAt);
+  return Number.isFinite(timestampMs) ? new Date(timestampMs) : undefined;
+};
+
+export const validateBrowserAccessLeaseFreshness = (
+  expiresAt: string | undefined,
+  options: { now?: Date } = {},
+): string | undefined => {
+  if (expiresAt === undefined || expiresAt.trim() === "") {
+    return undefined;
+  }
+  const expiresAtDate = parseBrowserAccessExpiresAt(expiresAt);
+  if (expiresAtDate === undefined) {
+    return "Browser Access lease expiry is invalid";
+  }
+  const now = options.now ?? new Date();
+  if (expiresAtDate.getTime() <= now.getTime()) {
+    return "Browser Access lease has expired";
+  }
+  return undefined;
+};
