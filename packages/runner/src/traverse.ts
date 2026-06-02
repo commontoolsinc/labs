@@ -4,7 +4,6 @@ import {
   hashSchema,
   internSchema,
   internSchemaAsTaggedHashString,
-  isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type {
@@ -324,25 +323,22 @@ const pathStartsWith = (
   prefix.length <= path.length &&
   prefix.every((part, index) => path[index] === part);
 
+/**
+ * Determines whether `schemaTracker` already covers `selector` for the given
+ * `key` — either by an exact (hash-equal) match, or by an existing permissive
+ * (`true`-schema) selector whose path is a prefix of this selector's path.
+ *
+ * Most efficient when handed an already-interned selector (as all current
+ * callers do): the `internPathSelector()` call below is then a near-no-op that
+ * returns the same reference. An un-interned selector is still handled
+ * correctly — it is simply canonicalized (and deep-frozen) on the way in.
+ */
 export const schemaTrackerCoversSelector = (
   schemaTracker: MapSet<string, SchemaPathSelector>,
   key: string,
   selector: SchemaPathSelector,
 ): boolean => {
-  // Fast path: reuse `selector` as-is only when it is genuinely a proper
-  // interned selector — i.e. its schema is the canonical interned instance (not
-  // merely frozen) and both the object and its path are frozen. `Object.isFrozen`
-  // alone is not enough: a frozen selector can hold a frozen-yet-non-canonical
-  // schema, which would miss the frozen-object hash cache (and break dedup under
-  // reference equality). Otherwise, canonicalize via `internPathSelector`.
-  const internedSelector = selector.schema !== undefined &&
-      isInternedSchema(selector.schema) &&
-      Object.isFrozen(selector) && Object.isFrozen(selector.path)
-    ? selector
-    : internPathSelector({
-      path: [...selector.path],
-      schema: selector.schema ?? false,
-    });
+  const internedSelector = internPathSelector(selector);
   if (schemaTracker.hasValue(key, internedSelector)) {
     return true;
   }
