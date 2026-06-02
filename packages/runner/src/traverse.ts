@@ -1344,8 +1344,17 @@ function followPointer(
   };
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
-    logger.info("traverse", () => [
-      "blocked narrower-scope link follow",
+    // A broader-scoped read context cannot follow a link into a narrower scope
+    // (e.g. a space-scoped .map()/lift row reaching a perSession/perUser cell).
+    // The rule is intentional, but the follow resolves to undefined silently —
+    // a frequent cause of "my PerUser/PerSession value is undefined inside a
+    // map" authoring bugs (CT-1642). Warn (not info) so it actually surfaces:
+    // the traverse logger runs at "warn", which previously swallowed this.
+    logger.warn("traverse", () => [
+      `blocked narrower-scope link follow: a "${schemaScope}"-scoped read ` +
+      `cannot follow a "${link.scope}"-scoped link, so it resolves to ` +
+      `undefined. If this is inside a .map()/lift, resolve the ` +
+      `narrower-scoped value at the top level and pass the value down.`,
       {
         schemaScope,
         linkScope: link.scope,

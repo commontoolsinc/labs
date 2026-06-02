@@ -94,6 +94,71 @@ describe("Schema - Link Resolution", () => {
       });
     });
 
+    it("warns (not silently) when a narrower-scope link follow is blocked (CT-1642)", () => {
+      // Same setup as above: a session-scoped cell read through a user-scoped
+      // schema. The follow is correctly blocked (-> undefined); CT-1642 is that
+      // it used to log only at logger.info, which the traverse logger (level
+      // "warn") swallowed. Assert the drop now surfaces at warn level.
+      const traverseLogger = (globalThis as {
+        commonfabric?: {
+          logger?: Record<string, {
+            counts: { warn: number; info: number };
+          }>;
+        };
+      }).commonfabric?.logger?.["traverse"];
+      expect(traverseLogger).toBeDefined();
+
+      const sessionCell = createCell<string>(
+        runtime,
+        {
+          ...runtime.getCell(
+            space,
+            "ct1642-session-target",
+            { type: "string" },
+            tx,
+          ).getAsNormalizedFullLink(),
+          schema: { type: "string" },
+          scope: "session",
+        },
+        tx,
+      );
+      sessionCell.set("session private");
+
+      const source = runtime.getCell<{ current?: string }>(
+        space,
+        "ct1642-source",
+        {
+          type: "object",
+          properties: { current: { type: "string" } },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      source.set({ current: sessionCell as any });
+
+      const cappedSchema = {
+        type: "object",
+        properties: { current: { type: "string", scope: "user" } },
+      } as const satisfies JSONSchema;
+      const unrestrictedSchema = {
+        type: "object",
+        properties: { current: { type: "string", scope: "any" } },
+      } as const satisfies JSONSchema;
+
+      // Unrestricted read: follow succeeds, no blocked-follow warning.
+      const warnBeforeAllowed = traverseLogger!.counts.warn;
+      expect(source.asSchema(unrestrictedSchema).get()).toEqual({
+        current: "session private",
+      });
+      expect(traverseLogger!.counts.warn).toBe(warnBeforeAllowed);
+
+      // Capped read: follow is blocked -> undefined AND a warning is emitted.
+      const warnBeforeBlocked = traverseLogger!.counts.warn;
+      expect(source.asSchema(cappedSchema).get()).toEqual({
+        current: undefined,
+      });
+      expect(traverseLogger!.counts.warn).toBeGreaterThan(warnBeforeBlocked);
+    });
+
     it("should resolve array element links to the actual nested documents", () => {
       const schema = {
         type: "object",
