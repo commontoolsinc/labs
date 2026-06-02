@@ -2284,7 +2284,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      homeDefaultCell.key("profile").set(profileDefaultCell);
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();
@@ -2347,7 +2347,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      homeDefaultCell.key("profile").set(profileDefaultCell);
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();
@@ -2404,7 +2404,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      homeDefaultCell.key("profile").set(profileDefaultCell);
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();
@@ -2519,7 +2519,7 @@ describe("wish built-in", () => {
         undefined,
         tx,
       );
-      homeDefaultCell.key("profile").set(profileDefaultCell);
+      homeDefaultCell.key("profiles").set([profileDefaultCell]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
 
       await tx.commit();

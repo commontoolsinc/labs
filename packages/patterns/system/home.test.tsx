@@ -9,11 +9,11 @@ export default pattern(() => {
   });
 
   const assert_initial_profile_missing = computed(() =>
-    home.profile === undefined
+    ((home.profiles as unknown[])?.length ?? 0) === 0
   );
 
   const assert_untrusted_stream_does_not_create_profile = computed(() =>
-    home.profile === undefined
+    ((home.profiles as unknown[])?.length ?? 0) === 0
   );
 
   return {

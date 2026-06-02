@@ -395,7 +395,7 @@ describe("profile owner CFC policy", () => {
     }
   });
 
-  it("marks the home profile link as integrity-protected data", async () => {
+  it("marks the home profiles list as integrity-protected data", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const homePattern = await compileHomePattern(runtime);
@@ -403,7 +403,7 @@ describe("profile owner CFC policy", () => {
       const profileSchema = resolveLocalSchemaRef(
         rootSchema,
         (rootSchema as { properties?: Record<string, JSONSchema> }).properties
-          ?.profile ?? {},
+          ?.profiles ?? {},
       ) as { ifc?: { addIntegrity?: unknown[]; writeAuthorizedBy?: unknown } };
       expect(profileSchema.ifc?.addIntegrity).toContain("profile-link");
       expect(profileSchema.ifc?.writeAuthorizedBy).toBeDefined();
@@ -488,7 +488,7 @@ describe("profile owner CFC policy", () => {
     }
   });
 
-  it("rejects direct untrusted writes to the home profile link", async () => {
+  it("rejects direct untrusted writes to the home profiles list", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const homePattern = await compileHomePattern(runtime);
@@ -519,7 +519,7 @@ describe("profile owner CFC policy", () => {
         homePattern.resultSchema,
         writeTx,
       );
-      protectedHomeDefault.key("profile").set(profileDefault);
+      protectedHomeDefault.key("profiles").set([profileDefault]);
       writeTx.prepareCfc();
       const result = await writeTx.commit();
       expect(result.error?.message).toContain("trusted");
