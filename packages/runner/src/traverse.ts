@@ -328,10 +328,10 @@ const pathStartsWith = (
  * `key` — either by an exact (hash-equal) match, or by an existing permissive
  * (`true`-schema) selector whose path is a prefix of this selector's path.
  *
- * Most efficient when handed an already-interned selector (as all current
- * callers do): the `internPathSelector()` call below is then a near-no-op that
- * returns the same reference. An un-interned selector is still handled
- * correctly — it is simply canonicalized (and deep-frozen) on the way in.
+ * Most efficient when handed an already-interned selector: the
+ * `internPathSelector()` call below is then a near-no-op that returns the same
+ * reference. An un-interned selector is still handled correctly — it is simply
+ * canonicalized (and deep-frozen) on the way in.
  *
  * A schema-less (`undefined`) selector is normalized to `false` ("reject"),
  * preserving prior behavior. (Whether `undefined` should instead be left alone
