@@ -333,10 +333,9 @@ const pathStartsWith = (
  * reference. An un-interned selector is still handled correctly — it is simply
  * canonicalized (and deep-frozen) on the way in.
  *
- * A schema-less (`undefined`) selector is normalized to `false` ("reject"),
- * preserving prior behavior. (Whether `undefined` should instead be left alone
- * — consistent with `internPathSelector()` and the `undefined ≈ true`
- * convention used elsewhere — is a semantic question left to a follow-on.)
+ * A schema-less (`undefined`) selector is normalized to `false` ("reject") —
+ * the opposite of the `undefined ≈ true` ("accept") convention used elsewhere
+ * in this file.
  */
 export const schemaTrackerCoversSelector = (
   schemaTracker: MapSet<string, SchemaPathSelector>,
