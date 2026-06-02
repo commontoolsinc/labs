@@ -753,6 +753,7 @@ export abstract class BaseObjectTraverser {
       new StandardObjectCreator(),
   ) {}
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
+  private coverageSelectorCache = new Map<string, SchemaPathSelector>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
@@ -1037,11 +1038,6 @@ export abstract class BaseObjectTraverser {
       ["value", ...(link.path as readonly string[])],
       this.cfc,
     );
-    // `narrowSchema()` returns a fresh, owned selector (fresh `path` array), so
-    // we can normalize and hand it straight to `schemaTrackerCoversSelector()`,
-    // which interns it in place. No separate cache is needed: the tracker is
-    // already keyed on `hashStringOf(selector)`, which returns cached results
-    // for the (now-frozen) interned selector.
     targetSelector.schema = combineOptionalSchema(
       targetSelector.schema,
       link.schema,
@@ -1050,8 +1046,29 @@ export abstract class BaseObjectTraverser {
     return schemaTrackerCoversSelector(
       this.schemaTracker,
       `${link.space}/${link.scope}/${link.id}`,
-      targetSelector,
+      this.internCoverageSelector(targetSelector),
     );
+  }
+
+  /**
+   * Interns the given (freshly-built, owned) coverage selector, memoizing by
+   * `hashStringOf(selector)`. The memo matters: `combineOptionalSchema()` mints
+   * a new un-interned schema on every call, so without it each repeated coverage
+   * check would re-deep-freeze, re-clone, and re-hash that schema — measurably
+   * (~2x) slower on link-heavy refreshes. The selector is owned, so
+   * `internPathSelector()` may freeze it in place.
+   */
+  private internCoverageSelector(
+    selector: SchemaPathSelector,
+  ): SchemaPathSelector {
+    const cacheKey = hashStringOf(selector);
+    const cached = this.coverageSelectorCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const interned = internPathSelector(selector);
+    this.coverageSelectorCache.set(cacheKey, interned);
+    return interned;
   }
 
   /**
