@@ -6,7 +6,7 @@ steps with the files each touches, exit criteria, and validation commands.
 
 ## Last Updated
 
-2026-05-31
+2026-06-01
 
 ## Current status
 
@@ -14,12 +14,17 @@ steps with the files each touches, exit criteria, and validation commands.
 | --- | --- | --- |
 | 0 — Loader shape confirmation | Done | SES `importNow` + virtual (third-party) module records load synchronously, incl. cycles. `ModuleSource`/`StaticModuleRecord` are not exposed by this `ses` build, so the loader uses `{ imports, exports, execute }` records. |
 | 1 — Decouple identity | Done (merged) | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
-| 2 — ESM emission + SES module loading | Mechanism done (this PR, behind `esmModuleLoader`, default off) | `importModuleGraphNow` loader + `compileSourcesToRecords` adapter load real compiled multi-module programs end-to-end. **Remaining:** wire into `Engine.evaluate`, run the CF transformer pipeline (currently bare `ts.transpileModule`), and expand `export *` re-exports. |
-| 3 — Verifier port | Structural seam done (this PR) | `verifyModuleGraph` validates graph shape/wiring before load. **Remaining (security-critical):** port the SES_SANDBOXING module-item classification from the AMD parser. |
-| 4 — Per-module compilation cache | Done (this PR) | `ModuleRecordCache` keyed by module hash; hit reuses the compiled artifact. **Remaining:** persist via the existing compilation-cache backends. |
-| 5 — Default-on + AMD removal | Not started (intentionally) | Gated on Phase 3 classification parity + benchmarks. Flipping the default / removing AMD cannot land while keeping the build green, so it is a deliberate later rollout. The flag stays **off**. |
+| 2 — ESM emission + SES module loading | Done (behind `CF_ESM_MODULE_LOADER`, default off) | `compileToRecordGraph` + `evaluateRecordGraph` (`engine.ts`) run the full `CommonFabricTransformerPipeline` (not bare `transpileModule`), assemble content-addressed records, register per-load/per-module source maps, and load multi-module programs end-to-end. Engine integration, `export *` re-exports, live module-namespace bindings (#3797), and CFC verified-source location resolution (#3785, #3787) are all wired. The flag is now also plumbed to the browser client (#3796). |
+| 3 — Verifier port | Classification ported + wired; corpus parity oracle pending | The deep SES_SANDBOXING module-item classification (`verifyCompiledModuleBody`, reusing the shared `classifyModuleItems` core) runs **per module** in the ESM compile path (`engine.ts`). `verifyModuleGraph` validates graph shape/wiring. Additional hardening landed beyond the original plan: import-edge target validation (#3778), pattern provenance brand (#3779), frozen exported patterns (#3777). **Remaining (release gate):** the full-corpus differential parity oracle — `esm-verifier-parity.test.ts` currently covers crafted CF-shaped fixtures only, not every pattern-corpus verdict. |
+| 4 — Per-module compilation cache | In-memory done; persistence pending | `ModuleRecordCache` keyed by module hash reuses the compiled artifact in memory. The ESM path in `PatternManager.compilePattern` intentionally **bypasses the persistent compilation cache**. **Remaining:** persist ESM records via the existing compilation-cache backends. |
+| 5 — Default-on + AMD removal | Not started (intentionally) | Gated on the Phase 3 corpus parity oracle + a green full-suite flag-on sweep + benchmarks. The canary PR (#3782) is the standing CI signal for flag-on. The flag stays **off** by default. |
 
-Phase 1 merged separately; this PR adds the Phases 2–4 mechanism behind the default-off flag.
+Phases 0–1 merged earlier. Phases 2–4 mechanism merged behind the default-off
+flag (#3763), then substantially completed by follow-up work: ESM source-location
+/ CFC verified-source identity (#3785, #3787), security hardening (#3777–#3779),
+module-namespace live bindings (#3797), and client flag plumbing (#3796). The
+`cfc-group-chat-demo` integration test — the original end-to-end blocker — passes
+flag-on as of #3797.
 
 ## Guiding constraints
 
@@ -198,6 +203,14 @@ green with the scheduler flag on and off.
 
 ## Phase 2 — ESM emission + SES module loading (behind flag, dev/trusted only)
 
+> **Status: Done** (behind `CF_ESM_MODULE_LOADER`, default off). Implemented as
+> `Engine.compileToRecordGraph` + `Engine.evaluateRecordGraph` rather than a
+> branch inside the old `Engine.evaluate`. The sub-steps below are kept as the
+> design record; deviations: the CF transformer pipeline runs (not bare
+> `transpileModule`), source maps are composed per-load and per-module for CFC
+> verified-source identity (#3785, #3787), and the flag is plumbed to the
+> browser client (#3796).
+
 ### 2.1 ESM compiler mode
 
 - Add an ESM emit path to the compiler: `ModuleKind.ES2022`, no `outFile`. Keep
@@ -254,6 +267,13 @@ path); behavior parity with AMD.
 
 ## Phase 3 — Verifier port (gates default-on for untrusted code)
 
+> **Status: Classification ported and wired; corpus parity oracle pending.**
+> `verifyCompiledModuleBody` (reusing the shared `classifyModuleItems` core) runs
+> per module in the ESM compile path (`engine.ts`), and `verifyModuleGraph`
+> checks graph shape/wiring. The remaining release gate is the full-corpus
+> differential parity oracle — `packages/runner/test/esm-verifier-parity.test.ts`
+> exists but covers crafted CF-shaped fixtures, not every pattern-corpus verdict.
+
 The bundle verifier currently parses AMD `define()` calls and must verify
 `ModuleSource` records before ESM can run untrusted patterns by default.
 
@@ -277,6 +297,11 @@ untrusted execution.
 
 ## Phase 4 — Per-module compilation cache
 
+> **Status: In-memory done; persistence pending.** The in-memory per-module
+> record cache exists; the ESM path in `PatternManager.compilePattern`
+> intentionally bypasses the persistent compilation cache. Remaining: persist
+> ESM records via the existing compilation-cache backends.
+
 - Re-key the compilation cache and the `ModuleSource` cache by `moduleHash(M)`
   instead of whole-program `computeId`
   (`packages/runner/src/compilation-cache/`).
@@ -293,6 +318,11 @@ regression.
 ---
 
 ## Phase 5 — Default-on and cleanup
+
+> **Status: Not started.** Gated on the Phase 3 corpus parity oracle, a green
+> full-suite flag-on sweep (`CF_ESM_MODULE_LOADER=1 deno task test` +
+> `deno task integration` from the repo root), and benchmarks. The canary
+> PR (#3782) is the standing flag-on CI signal.
 
 - Flip `EXPERIMENTAL_ESM_MODULE_LOADER` default on after Phases 2–4 are green and
   benchmarks acceptable.

@@ -11,17 +11,26 @@ whose action implementation fingerprint is currently unstable across reloads.
 
 Implemented so far (see the implementation plan for the per-phase status):
 identity decoupling (Phase 1, live behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`)
-is merged. The module-loading mechanism (Phases 2–4) — a synchronous SES
-virtual-module-record loader, a TS→record adapter, a per-module compilation
-cache, and a structural graph verifier, all behind a default-off
-`esmModuleLoader` flag — is implemented. Remaining: Engine integration with the
-CF transformer pipeline, the security-critical verifier classification port, and
-the default-on/AMD-removal rollout (Phase 5). The AMD bundle path remains the
-default throughout.
+is merged. The module-loading mechanism (Phases 2–4), behind the default-off
+`CF_ESM_MODULE_LOADER` flag, is implemented and Engine-integrated: a synchronous
+SES virtual-module-record loader, a TS→record adapter that runs the full CF
+transformer pipeline, per-load/per-module source maps with CFC verified-source
+identity (#3785, #3787), per-module SES classification wired into the compile
+path, an in-memory per-module cache, and a structural graph verifier. Security
+hardening landed alongside (frozen exported patterns #3777, import-edge
+validation #3778, provenance brand #3779), and the flag is plumbed through to the
+browser client (#3796). The `cfc-group-chat-demo` end-to-end integration test
+passes flag-on (#3797).
+
+Remaining before default-on: the full-corpus verifier **parity oracle** (ESM
+verdicts must match AMD across the whole pattern corpus — the current parity test
+covers crafted fixtures only), a green **full-suite flag-on sweep**, **per-module
+cache persistence** (Phase 4), benchmarks, and the **default-on/AMD-removal
+rollout** (Phase 5). The AMD bundle path remains the default throughout.
 
 ## Last Updated
 
-2026-05-30
+2026-06-01
 
 ## Summary
 
