@@ -487,7 +487,6 @@ export const parseMemoryProtocolFlags = (
  */
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
-  _wireKey: string = "modernDataModel",
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
