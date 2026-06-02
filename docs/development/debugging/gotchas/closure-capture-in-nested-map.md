@@ -23,7 +23,7 @@
 fails fast) with one of these strings:
 
 > Reactive reference from outer scope cannot be accessed via closure. Wrap the
-> access in a derive that passes the variable through, or use computed() which
+> access in a computed() that passes the variable through, which
 > handles this automatically.
 
 > Cannot access cell via closure - reactive dependencies must be explicit
