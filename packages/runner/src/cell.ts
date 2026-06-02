@@ -15,6 +15,8 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { SqliteParamsWire } from "@commonfabric/memory/v2";
+import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -376,6 +378,7 @@ const cellMethods = new Set<
   | "filterWithPattern"
   | "flatMap"
   | "flatMapWithPattern"
+  | "exec"
 >([
   "get",
   "sample",
@@ -420,7 +423,17 @@ const cellMethods = new Set<
   "getAsOpaqueRefProxy",
   "setInitialValue",
   "setSelfRef",
+  "exec",
 ]);
+
+/** Best-effort parse of the column list from `INSERT INTO t (a, b, c) ...`,
+ *  used to map positional `_cf_link` params (mirrors sqlite-builtins.ts;
+ *  consolidate when the reactive sqliteExecute node is removed). */
+function parseSqliteInsertColumns(sql: string): string[] | undefined {
+  const m = sql.match(/insert\s+into\s+[^(]+\(([^)]*)\)/i);
+  if (!m) return undefined;
+  return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
+}
 
 export function createCell<T>(
   runtime: Runtime,
@@ -837,6 +850,90 @@ export class CellImpl<T extends FabricValue>
         resolve(result);
       });
     });
+  }
+
+  /**
+   * SqliteDb write (`db.exec`): records a SQLite write op onto THIS cell's
+   * transaction so it commits ATOMICALLY with surrounding cell writes (one
+   * commit = cell ops + a `sqlite` op). On SQL failure the whole commit aborts.
+   * Only valid on a `"sqlite"`-kind cell and inside a transaction (e.g. a
+   * handler). Throws on an `undefined` param (it may be a value that isn't ready
+   * yet — pass a resolved value, or `null` for SQL NULL). See
+   * docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+   */
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void {
+    if (this._kind !== "sqlite") {
+      throw new Error(".exec() is only available on a SqliteDb cell");
+    }
+    if (!this.tx) {
+      throw new Error(
+        ".exec() must be called within a transaction (e.g. inside a handler)",
+      );
+    }
+    if (!this.tx.recordSqliteWrite) {
+      throw new Error("storage transaction does not support sqlite writes");
+    }
+    const handle = this.get() as
+      | { id?: unknown; tables?: unknown }
+      | undefined;
+    if (!handle || typeof handle.id !== "string") {
+      throw new TypeError("sqlite: invalid database handle");
+    }
+    this.tx.recordSqliteWrite(this.space, {
+      op: "sqlite",
+      db: {
+        id: handle.id,
+        tables: handle.tables as Record<string, unknown> | undefined,
+      },
+      sql,
+      params: this.#encodeSqliteParams(sql, params),
+    });
+  }
+
+  /**
+   * Encode `db.exec` params for the wire: a cell bound to a `_cf_link` column is
+   * encoded to a sigil-link string; a cell bound elsewhere throws; an
+   * `undefined` value throws (the interim pending guard — `null` is allowed for
+   * SQL NULL). Mirrors `encodeParams` in sqlite-builtins.ts.
+   */
+  #encodeSqliteParams(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): SqliteParamsWire | undefined {
+    if (params === undefined) return undefined;
+    const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+      if (value === undefined) {
+        throw new TypeError(
+          "sqlite: param is undefined (it may be a value that isn't ready " +
+            "yet); pass a resolved value, or null for SQL NULL",
+        );
+      }
+      if (isCell(value)) {
+        if (!isLinkCol) {
+          throw new TypeError("cells may only be bound to _cf_link columns");
+        }
+        return JSON.stringify(
+          createSigilLinkFromParsedLink(value.getAsNormalizedFullLink(), {
+            includeSchema: false,
+          }),
+        );
+      }
+      return value;
+    };
+    if (Array.isArray(params)) {
+      const cols = parseSqliteInsertColumns(sql);
+      return params.map((v, i) =>
+        encodeOne(v, cols ? isCfLinkColumn(cols[i] ?? "") : isCell(v))
+      ) as SqliteParamsWire;
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(params)) {
+      out[k] = encodeOne(v, isCfLinkColumn(k));
+    }
+    return out as SqliteParamsWire;
   }
 
   set(

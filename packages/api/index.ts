@@ -184,7 +184,8 @@ export type CellKind =
   | "stream"
   | "comparable"
   | "readonly"
-  | "writeonly";
+  | "writeonly"
+  | "sqlite";
 
 export type CellScope = "space" | "user" | "session";
 export type SchemaScope = CellScope | "any";
