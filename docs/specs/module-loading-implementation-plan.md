@@ -6,7 +6,7 @@ steps with the files each touches, exit criteria, and validation commands.
 
 ## Last Updated
 
-2026-06-01
+2026-06-02
 
 ## Current status
 
@@ -16,7 +16,7 @@ steps with the files each touches, exit criteria, and validation commands.
 | 1 — Decouple identity | Done (merged) | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
 | 2 — ESM emission + SES module loading | Done (behind `CF_ESM_MODULE_LOADER`, default off) | `compileToRecordGraph` + `evaluateRecordGraph` (`engine.ts`) run the full `CommonFabricTransformerPipeline` (not bare `transpileModule`), assemble content-addressed records, register per-load/per-module source maps, and load multi-module programs end-to-end. Engine integration, `export *` re-exports, live module-namespace bindings (#3797), and CFC verified-source location resolution (#3785, #3787) are all wired. The flag is now also plumbed to the browser client (#3796). |
 | 3 — Verifier port | Classification ported + wired; corpus parity oracle pending | The deep SES_SANDBOXING module-item classification (`verifyCompiledModuleBody`, reusing the shared `classifyModuleItems` core) runs **per module** in the ESM compile path (`engine.ts`). `verifyModuleGraph` validates graph shape/wiring. Additional hardening landed beyond the original plan: import-edge target validation (#3778), pattern provenance brand (#3779), frozen exported patterns (#3777). **Remaining (release gate):** the full-corpus differential parity oracle — `esm-verifier-parity.test.ts` currently covers crafted CF-shaped fixtures only, not every pattern-corpus verdict. |
-| 4 — Per-module compilation cache | In-memory done; persistence pending | `ModuleRecordCache` keyed by module hash reuses the compiled artifact in memory. The ESM path in `PatternManager.compilePattern` intentionally **bypasses the persistent compilation cache**. **Remaining:** persist ESM records via the existing compilation-cache backends. |
+| 4 — Per-module compilation cache | In-memory done; content-addressed persistence designed (Phase 4 below), not built | `ModuleRecordCache` reuses the compiled artifact in memory. The ESM path in `PatternManager.compilePattern` **bypasses the persistent compilation cache** (the only flag-on test failures are the two `pattern-manager.test.ts` cache cases). **Remaining:** the content-addressed cell cache (source set `pattern:<identity>` + compiled set `compileCache:<runtimeVersion>/<identity>`, per space, with CFC integrity on the compiled set) specified in Phase 4 below. |
 | 5 — Default-on + AMD removal | Not started (intentionally) | Gated on the Phase 3 corpus parity oracle + a green full-suite flag-on sweep + benchmarks. The canary PR (#3782) is the standing CI signal for flag-on. The flag stays **off** by default. |
 
 Phases 0–1 merged earlier. Phases 2–4 mechanism merged behind the default-off
@@ -295,25 +295,181 @@ untrusted execution.
 
 ---
 
-## Phase 4 — Per-module compilation cache
+## Phase 4 — Per-module compilation cache (content-addressed cells)
 
-> **Status: In-memory done; persistence pending.** The in-memory per-module
-> record cache exists; the ESM path in `PatternManager.compilePattern`
-> intentionally bypasses the persistent compilation cache. Remaining: persist
-> ESM records via the existing compilation-cache backends.
+> **Status: In-memory whole-program cache done; content-addressed persistence
+> designed below, not yet built.** The ESM path in
+> `PatternManager.compilePattern` currently bypasses the persistent compilation
+> cache (the only flag-on test failures are the two
+> `pattern-manager.test.ts` compilation-cache cases, which assume the AMD
+> jsScript/evaluate flow). This phase replaces the in-process whole-program
+> `CachedCompiler` (for the ESM path) with **content-addressed cells**, so the
+> cache is durable, deduplicated per module, and shareable.
 
-- Re-key the compilation cache and the `ModuleSource` cache by `moduleHash(M)`
-  instead of whole-program `computeId`
-  (`packages/runner/src/compilation-cache/`).
-- Editing one file invalidates only that module and its transitive importers;
-  untouched modules keep their cache entries and identities.
-- Carry over the compiler-version `fingerprint` and `sesValidated` gating per
-  module (`compilation-cache/storage.ts`).
+### 4.0 Design — two content-addressed document sets, per space
 
-**Validation:** cache test asserting single-file edits invalidate exactly the
-changed module + transitive importers; cold/warm compile benchmarks.
-**Exit:** measured cache-hit improvement on multi-file patterns; no correctness
-regression.
+Both sets are stored as **regular cells** in the **target space** (per-space;
+no global cache). Loading relies on the existing storage behavior that follows
+**sigil links** under a schema and transitively loads the closure — the same way
+ordinary linked data loads — so requesting the entry document pulls in its whole
+import graph. Cycles are handled by the loader's per-document dedup, as for any
+linked data.
+
+Each document, in either set, stores:
+
+```
+{
+  code: string,                                   // TS (set 1) or compiled JS (set 2)
+  filename: string,                               // authored module path
+  imports: Array<{ specifier: string; link: <sigil link to the dep's doc> }>,
+}
+```
+
+1. **Source documents — `pattern:<identity>`.** Authored TypeScript, keyed by the
+   module's content-addressed **identity** (the Phase 1 per-module Merkle hash,
+   already surfaced as `cf:module/<moduleHash>`; `computeModuleHashes` in
+   `harness/module-identity.ts`). `imports[].link` points at the dependency's
+   `pattern:<dep-identity>` doc. Runtime-version independent — written
+   essentially once ever.
+   - **Self-verifying:** a reader checks `hash(content) === <identity>`, so the
+     source set needs no separate integrity label — content-addressing is the
+     integrity.
+
+2. **Compiled documents — `compileCache:<runtimeVersion>/<identity>`.**
+   Compiled + verified JS, keyed by `(runtimeVersion, identity)`.
+   `imports[].link` points at the dependency's
+   `compileCache:<runtimeVersion>/<dep-identity>` doc. A runtime/transformer
+   upgrade changes `runtimeVersion`, so the compiled set is recompiled while the
+   source set persists.
+   - **Integrity, not content-addressing:** the key's `identity` is the *TS*
+     hash, which does **not** bind the JS bytes. The compiled doc therefore
+     carries a **CFC integrity label** (`addIntegrity` on write,
+     `requiredIntegrity` on read), which is the binding/provenance — see the
+     threat model in `module-loading.md`.
+
+`identity` is a one-way Merkle hash, so the `imports` links are **load-bearing,
+not derivable** — they are stored explicitly. But the parent hash *commits to*
+its children's identities, so on load the graph wiring is verifiable by
+recomputing identities from the loaded source set and checking each equals its
+document key (the content-addressed analog of `verifyModuleGraph`).
+
+### 4.1 Load flow (warm-full / partial / cold)
+
+1. Compute per-module identities for the program (`computeModuleHashes`).
+2. Request `compileCache:<runtimeVersion>/<entry-identity>` with a
+   link-following schema; the storage layer loads the reachable compiled closure.
+3. **Warm full hit** — every reachable compiled doc present and integrity-valid:
+   assemble the record graph from the cached bodies and `evaluateRecordGraph`
+   directly. **No TS compile and no SES re-verification.**
+4. **Partial / cold** — any module missing or integrity-invalid: fall back to the
+   source set (`pattern:<identity>`, or the program input on a total miss),
+   compile through the CF transformer pipeline, **SES-verify** the freshly
+   compiled bodies, reuse cached compiled bodies for unchanged-identity modules
+   during record assembly, then write back (4.2) the modules that were compiled.
+5. Evaluate via `evaluateRecordGraph` (unchanged).
+
+Fail-closed: a missing or invalid integrity label on a compiled doc is treated
+as a **cache miss → recompile from source**, never as a hard error. The SES
+verifier thus runs on the compile/miss path only; warm hits trust the integrity
+label. (Mirrors AMD's "skip evaluate-time validation for SES-validated hits".)
+
+### 4.2 Write flow (on compile)
+
+On any compile (cold or partial), write into the **target space**:
+
+- the source doc `pattern:<identity>` for each compiled module (idempotent;
+  content-addressed, so a re-write is a no-op);
+- the compiled doc `compileCache:<runtimeVersion>/<identity>` with the CFC
+  integrity label, for each compiled module.
+
+Dedup: a module shared by N programs (same identity) is written once per
+`(space, identity)` — programs are just different entry identities over a shared
+set of module docs.
+
+### 4.3 Ordered steps
+
+- **4.3.1 Cache-doc schemas + keys.** Define the source-doc and compiled-doc cell
+  schemas (`code`, `filename`, `imports: [{ specifier, link }]`), the
+  `pattern:<identity>` / `compileCache:<runtimeVersion>/<identity>` key scheme,
+  and the integrity-label constant. The import-link entries use sigil links and a
+  link-following schema. **Files:** new
+  `packages/runner/src/compilation-cache/cell-cache.ts` (schemas + read/write
+  helpers); `runtimeVersion` derives from the existing compiler/runtime
+  fingerprint (`compilation-cache/`).
+- **4.3.2 Source-set store.** Write/read `pattern:<identity>` cells; verify
+  `hash(content) === key` on read; expose a link-following schema so a request
+  loads the closure. **Files:** `cell-cache.ts`, `PatternManager`.
+- **4.3.3 Compiled-set store.** Write/read
+  `compileCache:<runtimeVersion>/<identity>` with `addIntegrity` on write and
+  `requiredIntegrity` on read (fail-closed → treat as miss). **Files:**
+  `cell-cache.ts`, `cfc/` integrity wiring.
+- **4.3.4 Engine seam.** Teach `Engine.compileToRecordGraph` to accept
+  `precompiledModules?: Map<path, { js; sourceMap? }>` (cached compiled bodies)
+  so it skips the TS compile for hit modules, and to return the serializable
+  per-module artifacts for write-back. **Files:**
+  `packages/runner/src/harness/engine.ts`.
+- **4.3.5 PatternManager ESM load.** Replace the direct
+  `compileAndEvaluateModules` call in the ESM branch of
+  `PatternManager.compilePattern` with: identity computation → compiled-set fetch
+  (link-following) → partial fallback (4.1) → assemble → `evaluateRecordGraph` →
+  write-back on miss (4.2). **Files:**
+  `packages/runner/src/pattern-manager.ts`.
+- **4.3.6 Graph-wiring verification.** On load, recompute module identities from
+  the loaded source set and assert each equals its doc key (content-addressed
+  `verifyModuleGraph` analog); keep `verifyCompiledModuleBody` on the compile
+  path. **Files:** `cell-cache.ts`, `sandbox/module-record-verifier.ts`.
+- **4.3.7 Replace whole-program pattern storage (gated).** The
+  `pattern:<patternId>` `PatternMeta` store (`PatternManager.savePattern` /
+  `loadPattern`, keyed by `createRef(pattern)`) is superseded by the
+  content-addressed source set after the flag flip. Behind the flag the two
+  coexist; Phase 5 removes the old store. (No migration: per the rollout, cache
+  and pattern data are cleared at the flip.)
+
+### 4.4 Tests
+
+- **Cold → warm.** First compile writes both doc sets into the space; second
+  load hits the compiled set with **no recompile** (assert via a compile spy /
+  the absence of TS-compile work), producing identical exports.
+- **Partial invalidation.** Editing one module in a multi-file program changes
+  only that module's identity (+ its transitive importers); untouched modules
+  keep their `pattern:`/`compileCache:` docs and are reused. Assert exactly the
+  changed module + importers are recompiled/rewritten.
+- **Per-module dedup.** Two programs importing the same util produce a single
+  `compileCache:<rtver>/<util-identity>` doc in the space.
+- **`Pattern.inSpace(...)` — A → B (required).** A pattern authored/loaded in
+  space A but instantiated through `PatternFactory.inSpace(B)` writes its source
+  and compiled docs into **space B**, with `imports` links resolving within B;
+  a subsequent load in B is a warm hit. Assert the docs land in B (not A), the
+  link closure resolves in B, and the compiled docs carry the required integrity.
+  Build on `packages/runner/test/pattern-scope.test.ts`, which already exercises
+  `inSpace`.
+- **Integrity fail-closed.** A compiled doc with a missing/invalid integrity
+  label is treated as a miss and recompiled from the (self-verifying) source doc;
+  only integrity-valid docs are reused without re-verification.
+- **Runtime-version bump.** Changing `runtimeVersion` misses the compiled set
+  (recompile) while the source set (`pattern:<identity>`) persists.
+- **Replace the AMD-shaped cache tests for ESM.** Make the two
+  `pattern-manager.test.ts` "compilation cache integration" cases loader-aware:
+  the AMD path keeps the `jsScript`/`harness.evaluate(skipBundleValidation)`
+  assertions; the ESM path asserts the content-addressed-cell behavior above.
+
+**Validation:**
+
+```
+deno test -A packages/runner/test/pattern-manager.test.ts
+deno test -A packages/runner/test/pattern-scope.test.ts
+CF_ESM_MODULE_LOADER=1 deno task test
+CF_ESM_MODULE_LOADER=1 deno task integration patterns
+```
+
+**Exit:** warm loads skip compilation; single-file edits invalidate exactly the
+changed module + transitive importers; the A→B `inSpace` test passes; the two
+compilation-cache tests pass under both loaders; no correctness regression.
+
+> **Future optimization (not gated on this phase):** truly isolated per-module
+> recompilation (compile only changed modules rather than re-running the TS
+> program pass and reusing cached bodies at assembly). The warm-full-hit path
+> already avoids all compilation; this only sharpens the partial-miss cost.
 
 ---
 
