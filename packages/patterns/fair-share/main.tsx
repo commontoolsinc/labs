@@ -124,6 +124,12 @@ export default pattern<State>(({ people, expenses, myName }) => {
   const paidByDraft = Writable.perSession.of<string>(""); // Person.name
   const splitWith = Writable.perSession.of<string[]>([]); // Person.name[]
 
+  // Locally retype without Default<>: the transformer only infers `comparable`
+  // array items (required for equals()) when the array type has no Default<>
+  // union member. The cells are the same; this just sharpens the static type.
+  const peopleList: Writable<Person[]> = people;
+  const expensesList: Writable<Expense[]> = expenses;
+
   // --- Identity (resolve per-user name once at top level) ---
   const me = (myName ?? "").trim();
 
@@ -234,41 +240,43 @@ export default pattern<State>(({ people, expenses, myName }) => {
           <cf-vstack gap="3">
             <cf-heading level={4}>People</cf-heading>
 
+            {
+              /* Bare .map() — wrapping it in computed() breaks the transformer's
+                equals() schema inference (array items lose `comparable`), which
+                silently breaks removal. Empty state is a separate sibling. */
+            }
+            <cf-hstack gap="2" wrap>
+              {peopleList.map((person) => (
+                <cf-chip
+                  label={person.name}
+                  removable
+                  oncf-remove={() => {
+                    const cur = peopleList.get();
+                    const idx = cur.findIndex((p) => equals(person, p));
+                    if (idx < 0) return;
+                    const name = { ...cur[idx] }.name;
+                    peopleList.set(cur.toSpliced(idx, 1));
+                    // Cascade-clean so balances stay zero-sum: drop expenses
+                    // they paid (money has no creditor now) and remove them
+                    // from every other split.
+                    const cleaned = expenses.get()
+                      .filter((e) => e.paidBy !== name)
+                      .map((e) => {
+                        const sharedBy = e.sharedBy.filter((s) => s !== name);
+                        return sharedBy.length === e.sharedBy.length
+                          ? e
+                          : { ...e, sharedBy };
+                      })
+                      .filter((e) => e.sharedBy.length > 0);
+                    expenses.set(cleaned);
+                  }}
+                />
+              ))}
+            </cf-hstack>
             {computed(() =>
               people.get().length === 0
                 ? <cf-text tone="muted">Add people to get started.</cf-text>
-                : (
-                  <cf-hstack gap="2" wrap>
-                    {people.map((person) => (
-                      <cf-chip
-                        label={person.name}
-                        removable
-                        oncf-remove={() => {
-                          const cur = people.get();
-                          const idx = cur.findIndex((p) => equals(person, p));
-                          if (idx < 0) return;
-                          const name = { ...cur[idx] }.name;
-                          people.set(cur.toSpliced(idx, 1));
-                          // Cascade-clean so balances stay zero-sum: drop
-                          // expenses they paid (money has no creditor now) and
-                          // remove them from every other split.
-                          const cleaned = expenses.get()
-                            .filter((e) => e.paidBy !== name)
-                            .map((e) => {
-                              const sharedBy = e.sharedBy.filter((s) =>
-                                s !== name
-                              );
-                              return sharedBy.length === e.sharedBy.length
-                                ? e
-                                : { ...e, sharedBy };
-                            })
-                            .filter((e) => e.sharedBy.length > 0);
-                          expenses.set(cleaned);
-                        }}
-                      />
-                    ))}
-                  </cf-hstack>
-                )
+                : null
             )}
 
             <cf-hstack gap="2" align="center">
@@ -393,48 +401,50 @@ export default pattern<State>(({ people, expenses, myName }) => {
               </cf-text>
             </cf-hstack>
 
+            {/* Bare .map() — see People note above. */}
+            {expensesList.map((expense) => (
+              <cf-hstack
+                gap="3"
+                align="center"
+                style={{
+                  justifyContent: "space-between",
+                  borderBottom: "1px solid #eee",
+                  paddingBottom: "0.5rem",
+                }}
+              >
+                <cf-vstack gap="0" style={{ flex: 1 }}>
+                  <span style={{ fontWeight: "600" }}>
+                    {expense.description}
+                  </span>
+                  <cf-text variant="caption" tone="muted">
+                    {computed(() => {
+                      const n = expense.sharedBy?.length || 0;
+                      return `${expense.paidBy} paid · split ${n} way${
+                        n === 1 ? "" : "s"
+                      } · ${expense.date}`;
+                    })}
+                  </cf-text>
+                </cf-vstack>
+                <span style={{ fontWeight: "600" }}>
+                  {computed(() => money(expense.amount))}
+                </span>
+                <cf-button
+                  variant="ghost"
+                  color="danger"
+                  onClick={() => {
+                    const cur = expensesList.get();
+                    const idx = cur.findIndex((el) => equals(expense, el));
+                    if (idx >= 0) expensesList.set(cur.toSpliced(idx, 1));
+                  }}
+                >
+                  ×
+                </cf-button>
+              </cf-hstack>
+            ))}
             {computed(() =>
               expenses.get().length === 0
                 ? <cf-text tone="muted">No expenses yet.</cf-text>
-                : expenses.map((expense) => (
-                  <cf-hstack
-                    gap="3"
-                    align="center"
-                    style={{
-                      justifyContent: "space-between",
-                      borderBottom: "1px solid #eee",
-                      paddingBottom: "0.5rem",
-                    }}
-                  >
-                    <cf-vstack gap="0" style={{ flex: 1 }}>
-                      <span style={{ fontWeight: "600" }}>
-                        {expense.description}
-                      </span>
-                      <cf-text variant="caption" tone="muted">
-                        {computed(() => {
-                          const n = expense.sharedBy?.length || 0;
-                          return `${expense.paidBy} paid · split ${n} way${
-                            n === 1 ? "" : "s"
-                          } · ${expense.date}`;
-                        })}
-                      </cf-text>
-                    </cf-vstack>
-                    <span style={{ fontWeight: "600" }}>
-                      {computed(() => money(expense.amount))}
-                    </span>
-                    <cf-button
-                      variant="ghost"
-                      color="danger"
-                      onClick={() => {
-                        const cur = expenses.get();
-                        const idx = cur.findIndex((el) => equals(expense, el));
-                        if (idx >= 0) expenses.set(cur.toSpliced(idx, 1));
-                      }}
-                    >
-                      ×
-                    </cf-button>
-                  </cf-hstack>
-                ))
+                : null
             )}
           </cf-vstack>
         </cf-card>
