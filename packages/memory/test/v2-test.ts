@@ -266,7 +266,6 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags(undefined), null);
     assertEquals(parseMemoryProtocolFlags("modernDataModel"), null);
     assertEquals(parseMemoryProtocolFlags([true]), null);
-    assertEquals(parseMemoryProtocolFlags({}), null);
     assertEquals(parseMemoryProtocolFlags({ modernDataModel: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({

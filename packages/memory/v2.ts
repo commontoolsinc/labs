@@ -515,6 +515,20 @@ export const parseMemoryProtocolFlags = (
     };
   }
 
+  if (
+    (value.modernDataModel === undefined) &&
+    (value[LEGACY_MODERN_DATA_MODEL_KEY] === undefined)
+  ) {
+    return {
+      flags: {
+        modernCellRep: modernCellRep === true,
+        modernDataModel: false,
+        persistentSchedulerState: persistentSchedulerState === true,
+      },
+      wireKey: "modernDataModel",
+    };
+  }
+
   return null;
 };
 
