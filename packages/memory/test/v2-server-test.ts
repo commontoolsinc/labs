@@ -546,6 +546,7 @@ Deno.test("memory v2 server rejects handshakes when data-model flags disagree", 
       type: "hello",
       protocol: MEMORY_PROTOCOL,
       flags: {
+        modernCellRep: !HELLO_FLAGS.modernCellRep,
         modernDataModel: !HELLO_FLAGS.modernDataModel,
       },
     }));
@@ -557,6 +558,7 @@ Deno.test("memory v2 server rejects handshakes when data-model flags disagree", 
         name: "ProtocolError",
         message: `memory flag mismatch: client=${
           JSON.stringify({
+            modernCellRep: !HELLO_FLAGS.modernCellRep,
             modernDataModel: !HELLO_FLAGS.modernDataModel,
           })
         } server=${JSON.stringify(HELLO_FLAGS)}`,
@@ -611,6 +613,7 @@ Deno.test("memory v2 server accepts legacy richStorableValues flag name and echo
       type: "hello.ok",
       protocol: MEMORY_PROTOCOL,
       flags: {
+        modernCellRep: !HELLO_FLAGS.modernCellRep,
         richStorableValues: HELLO_FLAGS.modernDataModel,
         persistentSchedulerState: HELLO_FLAGS.persistentSchedulerState,
       },

@@ -20,6 +20,11 @@ import {
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import {
+  getModernCellRepConfig,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
+import {
   getPersistentSchedulerStateConfig,
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
@@ -175,6 +180,8 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
  */
 export interface ExperimentalOptions {
+  /** Enable the modern "cell representation" classes. */
+  modernCellRep?: boolean | undefined;
   /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   modernDataModel?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
@@ -329,6 +336,7 @@ export class Runtime {
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
+      modernCellRep: undefined,
       modernDataModel: undefined,
       persistentSchedulerState: undefined,
       schedulerHistoricalMightWrite: undefined,
@@ -352,6 +360,8 @@ export class Runtime {
     // explicit value — without this, consumers like `createQueryResultProxy`
     // see `undefined` and treat the runtime as legacy even when the global
     // default is modern).
+    setModernCellRepConfig(this.experimental.modernCellRep);
+    this.experimental.modernCellRep = getModernCellRepConfig();
     setDataModelConfig(this.experimental.modernDataModel);
     this.experimental.modernDataModel = getDataModelConfig();
     setPersistentSchedulerStateConfig(
@@ -538,6 +548,7 @@ export class Runtime {
     this.harness.dispose();
 
     // Reset experimental config to defaults.
+    resetModernCellRepConfig();
     resetDataModelConfig();
     resetPersistentSchedulerStateConfig();
     resetEsmModuleLoaderConfig();

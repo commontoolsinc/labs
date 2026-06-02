@@ -1622,6 +1622,7 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
           type: "hello.ok",
           protocol: MEMORY_PROTOCOL,
           flags: {
+            modernCellRep: !getMemoryProtocolFlags().modernCellRep,
             modernDataModel: !getMemoryProtocolFlags().modernDataModel,
           },
         }));
