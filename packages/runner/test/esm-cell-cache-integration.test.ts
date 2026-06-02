@@ -4,8 +4,14 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  COMPILE_CACHE_RUNTIME_VERSION,
+  loadCompiledClosure,
+  loadVerifiedSourceClosure,
+} from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -129,6 +135,142 @@ describe("ESM compile via content-addressed cell cache", () => {
     } finally {
       await dtx.commit();
       await disabled.dispose();
+    }
+  });
+});
+
+// Step 4.4 (required): a pattern compiled bound to space B writes its source +
+// compiled docs into B (not the ambient space A), the link closure resolves in
+// B, and the compiled docs carry the required integrity. This is exactly the
+// per-space routing `PatternFactory.inSpace(B)` relies on: instantiating a child
+// in space B loads it via `loadPattern(id, rootCell.space === B)`, whose core is
+// `compilePattern(source, { space: B })`.
+describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  const spaceA = signer.did();
+
+  const PROGRAM: RuntimeProgram = {
+    main: "/main.tsx",
+    files: [
+      { name: "/util.ts", contents: "export const triple = (x:number)=>x*3;" },
+      {
+        name: "/main.tsx",
+        contents: [
+          "import { pattern, lift } from 'commonfabric';",
+          "import { triple } from './util.ts';",
+          "const t = lift((x:number)=>triple(x));",
+          "export default pattern<{ value: number }>(({ value }) => {",
+          "  return { result: t(value) };",
+          "});",
+        ].join("\n"),
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+  });
+  afterEach(async () => {
+    await storageManager?.close();
+  });
+
+  it("writes source + compiled docs into the target space B, not A", async () => {
+    const spaceB = (await Identity.fromPassphrase("inSpace target B")).did();
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: { esmModuleLoader: true },
+    });
+    const tx = runtime.edit();
+    const compilerDid = runtime.userIdentityDID;
+    const cacheOpts = {
+      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      compilerDid,
+    };
+    try {
+      // The entry identity is loader-internal; recover it via a no-cache compile.
+      const { entryIdentity } = await (runtime.harness as Engine)
+        .compileToRecordGraph(PROGRAM);
+
+      const pm = runtime.patternManager;
+      await pm.compilePattern(PROGRAM, { space: spaceB, tx });
+      await pm.flushCompileCacheWrites();
+
+      const readTx = runtime.edit();
+      // Compiled docs landed in B: full, integrity-valid closure.
+      const inB = await loadCompiledClosure(
+        runtime,
+        spaceB,
+        entryIdentity,
+        cacheOpts,
+        readTx,
+      );
+      expect(inB.size).toBeGreaterThanOrEqual(2);
+      expect(inB.has(entryIdentity)).toBe(true);
+
+      // Source closure resolves + graph-wiring-verifies in B.
+      const srcB = await loadVerifiedSourceClosure(
+        runtime,
+        spaceB,
+        entryIdentity,
+        readTx,
+      );
+      expect(srcB?.has(entryIdentity)).toBe(true);
+
+      // Nothing leaked into the ambient space A.
+      const inA = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        cacheOpts,
+        readTx,
+      );
+      expect(inA.size).toBe(0);
+      readTx.abort?.();
+    } finally {
+      await tx.commit();
+      await runtime.dispose();
+    }
+  });
+
+  it("a fresh runtime warm-hits from space B (cross-session, per space)", async () => {
+    const spaceB = (await Identity.fromPassphrase("inSpace target B2")).did();
+    // Session 1: compile bound to B, write back, flush to storage.
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: { esmModuleLoader: true },
+    });
+    const tx1 = rt1.edit();
+    let rt2: Runtime | undefined;
+    try {
+      await rt1.patternManager.compilePattern(PROGRAM, {
+        space: spaceB,
+        tx: tx1,
+      });
+      await rt1.patternManager.flushCompileCacheWrites();
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2: fresh runtime, same storage → warm hit when loading into B.
+      rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { esmModuleLoader: true },
+      });
+      const tx2 = rt2.edit();
+      await rt2.patternManager.compilePattern(PROGRAM, {
+        space: spaceB,
+        tx: tx2,
+      });
+      expect(rt2.patternManager.getCompileCacheStats()).toEqual({
+        hits: 1,
+        misses: 0,
+      });
+      await tx2.commit();
+    } finally {
+      await rt2?.dispose();
+      await rt1.dispose();
     }
   });
 });
