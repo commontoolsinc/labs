@@ -1048,7 +1048,7 @@ export abstract class BaseObjectTraverser {
     targetSelector.schema = combineOptionalSchema(
       targetSelector.schema,
       link.schema,
-    ) ?? false;
+    );
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
@@ -1058,17 +1058,26 @@ export abstract class BaseObjectTraverser {
   }
 
   /**
-   * Interns the given (freshly-built, owned) coverage selector, memoizing by
-   * `hashStringOf(selector)`. The memo matters: `combineOptionalSchema()` mints
-   * a new un-interned schema on every call, so without it each repeated coverage
-   * check would re-deep-freeze, re-clone, and re-hash that schema — measurably
-   * (~2x) slower on link-heavy refreshes. The selector is owned, so
-   * `internPathSelector()` may freeze it in place.
+   * Interns the given (freshly-built, owned) coverage selector, memoizing the
+   * result. The memo matters: `combineOptionalSchema()` mints a new un-interned
+   * schema on every call, so without it each repeated coverage check would
+   * re-deep-freeze, re-clone, and re-hash that schema — measurably (~2x) slower
+   * on link-heavy refreshes.
+   *
+   * The cache key joins the path with a single schema hash rather than hashing
+   * the whole selector: hashing the path array (vs a string join) is pure added
+   * cost on the hot cache-hit path. The selector is owned, so
+   * `internPathSelector()` may freeze it in place (no copy needed).
    */
   private internCoverageSelector(
     selector: SchemaPathSelector,
   ): SchemaPathSelector {
-    const cacheKey = hashStringOf(selector);
+    // A schema-less selector is normalized to `false` in place (it is owned).
+    const schema = selector.schema ??= false;
+    const schemaKey = typeof schema === "boolean"
+      ? String(schema)
+      : hashSchema(schema);
+    const cacheKey = `${selector.path.join("\0")}\0${schemaKey}`;
     const cached = this.coverageSelectorCache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
