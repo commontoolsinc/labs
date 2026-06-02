@@ -113,17 +113,15 @@ The receiver is now an OpaqueRef again; the transformer rewrites the inner
 `packages/patterns/factory-outputs/lot-watch/main.tsx:1443-1447`
 (definition) consumed at `:2110-2118`.
 
-### C — Explicit `derive({deps}, …)` inside the row callback
+### C — Local `computed()` bridge inside the row callback
 
-Only when neither A nor B is structurally possible. Pass the cells you need as
-explicit deps so the transformer doesn't have to infer reactivity from the
-closure:
+Only when neither A nor B is structurally possible. Put the reactive read inside
+an explicit computation boundary so the transformer can make the dependency
+explicit instead of relying on the nested closure:
 
 ```tsx
 {rows.map((row) => {
-  const chips = derive({ people }, ({ people }) =>
-    people.map((p) => p.name)
-  );
+  const chips = computed(() => people.map((p) => p.name));
   return <div>{chips.map((n) => <button>{n}</button>)}</div>;
 })}
 ```

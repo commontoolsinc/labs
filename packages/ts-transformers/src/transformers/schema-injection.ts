@@ -89,7 +89,6 @@ const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
  * ## Pattern-Specific Behavior
  *
  * - **Handler**: Checks TypeRegistry for type arguments, uses `unknown` fallback
- * - **Derive**: Checks TypeRegistry for type arguments, preserves shorthand property types
  * - **Pattern**: Checks TypeRegistry before inferring, registers inferred types
  * - **Pattern**: Checks TypeRegistry for type arguments
  * - **Lift**: Checks TypeRegistry for type arguments and inferred types

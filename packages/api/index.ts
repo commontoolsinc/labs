@@ -1974,12 +1974,13 @@ export interface HandlerFunction {
 /**
  * ActionFunction creates a handler that doesn't use the state parameter.
  *
- * This is to handler as computed is to lift/derive:
+ * This is to handler as computed is to lift:
  * - User writes: action((e) => count.set(e.data))
  * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
- * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ * computed(() => expr) becomes a lift-applied computation with closure
+ * extraction.
  */
 export type ActionFunction = {
   // Overload 1: Zero-parameter callback returns Stream<void>

@@ -80,14 +80,14 @@ It does not list pure schema-generation/type-emission code unless that code exis
 
 These are not new policy decisions by themselves, but they preserve type information so later behavior-affecting checks still work on synthetic/transformed nodes.
 
-- `src/closures/strategies/derive-strategy.ts`
+- `src/closures/strategies/lift-applied-strategy.ts`
   - `preRegisterCaptureTypes(...)`
   - `rewriteCaptureReferences(...)`
-  Unwrap opaque captures to `T` inside derive callbacks, while preserving `Cell<T>` / `Stream<T>` as wrapped.
+  Unwrap opaque captures to `T` inside lift-applied callbacks, while preserving `Cell<T>` / `Stream<T>` as wrapped.
 
-- `src/transformers/builtins/derive.ts`
+- `src/transformers/builtins/lift-applied.ts`
   - `replaceOpaqueRefsWithParams(...)`
-  Registers synthetic derive parameters with unwrapped types for the same reason.
+  Registers synthetic lift-applied parameters with unwrapped types for the same reason.
 
 - `src/transformers/pattern-body-reactive-root-lowering.ts`
   - `registerReplacementType(...)`

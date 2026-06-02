@@ -47,7 +47,7 @@ export default pattern<{
   const selectedTaskId = new Writable<string | undefined>();
   // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
   const hoveredSectionId = new Writable<string | undefined>();
-  // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
+  // [TRANSFORM] computed() -> lift(): captures state.sections (asCell — Writable<Section[]>)
   const hasSections = computed(() => state.sections.get().length > 0);
 
   return {
