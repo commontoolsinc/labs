@@ -897,6 +897,16 @@ export class CellImpl<T extends FabricValue>
       sql,
       params: this.#encodeSqliteParams(sql, params),
     });
+    // Bump a write counter on the DB handle cell in THIS SAME commit. Two
+    // effects, both intended:
+    //  - `reactOn: db` queries re-run after a write (the handle value changed).
+    //  - it serializes concurrent writers: each does a read-modify-write of
+    //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
+    //    revision (optimistic-concurrency mutex) and one retries.
+    const rev = ((handle as { rev?: unknown }).rev as number | undefined) ?? 0;
+    this.withTx(this.tx).set(
+      { ...(handle as Record<string, unknown>), rev: rev + 1 } as unknown as T,
+    );
   }
 
   /**
