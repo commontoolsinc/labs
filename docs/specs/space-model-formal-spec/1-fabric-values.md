@@ -1741,6 +1741,7 @@ The built-in type handlers are:
 | `EpochNsecHandler` | `EpochNsec@1` | `FabricEpochNsec` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `EpochDaysHandler` | `EpochDays@1` | `FabricEpochDays` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `BytesHandler` | `Bytes@1` | `FabricBytes` | `FabricPrimitive` subclass; matched by `instanceof`. |
+| `RegExpHandler` | `RegExp@1` | `FabricRegExp` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `FabricInstanceHandler` | _(empty)_ | `FabricInstance` | Generic handler for all `FabricInstance` values. Uses `[DECONSTRUCT]` and the codec's tag methods. No tag for deserialization — individual instance types are deserialized via the class registry. |
 | `BigIntHandler` | `BigInt@1` | `bigint` | Encodes as unpadded base64url of minimal two's complement big-endian bytes. |
 | `UndefinedHandler` | `Undefined@1` | `undefined` | Stateless; state is `null`. |
