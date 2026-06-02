@@ -2539,7 +2539,10 @@ export class Runner {
    * parent (orderedCommitSpaces appends unlisted written spaces), which would
    * make the parent's link to `child1` durable before `child1`'s target.
    */
-  private enableCrossSpaceChildCommit(
+  // Public so the diff path (data-updating.ts) can opt a transaction into a
+  // multi-space commit when it writes a cross-space link (e.g. appending to the
+  // home `profiles` list, whose elements live in their own spaces).
+  enableCrossSpaceChildCommit(
     tx: IExtendedStorageTransaction,
     childSpace: MemorySpace,
     parentSpace: MemorySpace,

@@ -48,7 +48,6 @@ export const submitProfileCreation = handler<
         initialName: name,
       }) as ProfileHomeOutput,
     );
-    draftName?.set("");
   }
 });
 
