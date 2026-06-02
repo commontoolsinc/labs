@@ -1,4 +1,4 @@
-import { type Cell, derive, pattern, sqliteDatabase } from "commonfabric";
+import { type Cell, lift, pattern, sqliteDatabase } from "commonfabric";
 
 interface User {
   name: string;
@@ -7,14 +7,19 @@ interface User {
 // FIXTURE: db-query-consumer-decode
 // Verifies the CONSUMER half of `_cf_link` auto-decode: reading
 // `q.result[0].author_cf_link` off a typed `db.query<{ author_cf_link: Cell<User> }>`
-// lowers (via the <Row> return type) to a derive input schema where
+// lowers (via the <Row> return type) to a consumer input schema where
 // `result.items.author_cf_link` carries `asCell: ["cell"]`. Combined with the
 // runtime storing a sigil OBJECT (Piece A), that asCell read rehydrates the
 // column to a live Cell.
+const readAuthor = lift(
+  (qv: { result?: Array<{ author_cf_link: Cell<User> }> }) =>
+    qv.result?.[0]?.author_cf_link,
+);
+
 export default pattern(() => {
   const db = sqliteDatabase();
   const q = db.query<{ author_cf_link: Cell<User> }>(
     "SELECT author_cf_link FROM people",
   );
-  return { author: derive(q, (qv) => qv.result?.[0]?.author_cf_link) };
+  return { author: readAuthor(q) };
 });
