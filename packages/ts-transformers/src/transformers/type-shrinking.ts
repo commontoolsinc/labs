@@ -3213,35 +3213,5 @@ export function applyShrinkAndWrap(
     factory,
     preserveStreamWrapper,
   );
-  // Register the produced wrapper TypeNode against the pre-shrink semantic
-  // baseType in `narrowedWrapperTypeRegistry`. This is consumed by
-  // SchemaInjection (see schema-injection.ts at the `kind === "builder" &&
-  // builderName === "lift"` branch with `isToSchemaCall(firstArgument)`): when
-  // a synthetic wrapper TypeNode reaches that branch, the checker resolves it
-  // to `any`, so capability narrowing needs the original baseType fed back —
-  // without it the inner `type:` is lost and only the `asCell` wrapper
-  // survives.
-  //
-  // CT-1621: the redundant SELF-RE-ENTRY consumer (re-narrowing our own
-  // already-injected output on `ts.visitEachChild`) was eliminated — the
-  // schemaInjectedRegistry marker now makes that re-entry skip re-processing.
-  // The remaining live consumer is the FIRST-pass recovery for `derive`'s
-  // value-as-input lowering (the only shape that puts a runtime value through
-  // the shrink → synthetic wrapper); `computed` and user `lift` don't produce
-  // it. So this write — and the whole registry — is derive-bound and should be
-  // removed when `derive` is deprecated. See narrowedWrapperTypeRegistry's
-  // entry in core/mod.ts for the full invariant.
-  //
-  // We deliberately do NOT write to the main `typeRegistry` here. The schema
-  // generator's wrapper-recovery path (`formatWrapperTypeFromNode`) reads from
-  // `typeRegistry` to recover inner properties — if the pre-shrink type lived
-  // there, the generator would un-shrink the carefully-narrowed inner
-  // schemas (e.g., turn an equals-only-shrunk `Comparable<unknown>` back into
-  // `Comparable<number>`). The two consumers have opposite needs for the
-  // same wrapper node; keeping them in separate registries is the cleanest
-  // way to satisfy both.
-  if (baseType && !isAnyOrUnknownType(baseType) && context) {
-    context.markNarrowedWrapper(wrapped, baseType);
-  }
   return wrapped;
 }
