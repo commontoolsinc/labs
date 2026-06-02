@@ -35,11 +35,11 @@ and when **running the server** (for server-side flags):
 
 ```bash
 # Enable a single flag (build + run)
-EXPERIMENTAL_SOME_FLAG=true deno task dev
+EXPERIMENTAL_EXAMPLE_NAME=true deno task dev
 
 # Enable multiple flags
-EXPERIMENTAL_SOME_FLAG=true \
-EXPERIMENTAL_SOME_OTHER_FLAG=true \
+EXPERIMENTAL_EXAMPLE_NAME_1=true \
+EXPERIMENTAL_EXAMPLE_NAME_2=true \
 deno task dev
 ```
 
