@@ -16,10 +16,11 @@ function readEnvDefault(): boolean {
     const value = (globalThis as {
       Deno?: { env?: { get(name: string): string | undefined } };
     }).Deno?.env?.get?.("CF_ESM_MODULE_LOADER");
-    return value === "1" || value === "true";
+    // VERIFY BRANCH (DO NOT MERGE): ESM loader default ON to run the whole
+    // suite through the ESM path with the CT-1623 fix applied.
+    return value !== "0" && value !== "false";
   } catch {
-    // Env access may be denied (no --allow-env); treat as unset / off.
-    return false;
+    return true;
   }
 }
 
