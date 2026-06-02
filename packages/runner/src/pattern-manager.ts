@@ -558,7 +558,9 @@ export class PatternManager {
     try {
       compiled = await harness.compileToRecordGraph!(program, {
         precompiledModulesFor: async ({ entryIdentity, identities }) => {
-          logger.timeStart("compile-cache", "read");
+          // Concurrency-safe timing: explicit start (no shared timer key, which
+          // parallel compiles would clobber). Same for the others below.
+          const readStart = performance.now();
           const closure = await loadCompiledClosure(
             this.runtime,
             space,
@@ -566,7 +568,7 @@ export class PatternManager {
             cacheOpts,
             readTx,
           );
-          logger.timeEnd("compile-cache", "read");
+          logger.time(readStart, "compile-cache", "read");
           // Full hit only: every emitted module must be present (and
           // integrity-valid). A partial set cannot be trusted (transitively
           // sensitive identities), so fall back to a full recompile.
@@ -593,14 +595,14 @@ export class PatternManager {
     }
     const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
 
-    logger.timeStart("compile-cache", "evaluate");
+    const evalStart = performance.now();
     const result = harness.evaluateRecordGraph!(
       id,
       graph,
       mainSpecifier,
       program.files,
     );
-    logger.timeEnd("compile-cache", "evaluate");
+    logger.time(evalStart, "compile-cache", "evaluate");
 
     if (warmHit) {
       this.esmCacheStats.hits++;
@@ -636,12 +638,12 @@ export class PatternManager {
     entryIdentity: string,
     opts: { runtimeVersion: string; compilerDid: string },
   ): Promise<void> {
-    logger.timeStart("compile-cache", "writeback");
+    const writebackStart = performance.now();
     const { error } = await this.runtime.editWithRetry((tx) => {
       writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
       writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
     });
-    logger.timeEnd("compile-cache", "writeback");
+    logger.time(writebackStart, "compile-cache", "writeback");
     if (error) {
       logger.error("compile-cache-writeback-failed", () => [
         `entry=${entryIdentity}`,

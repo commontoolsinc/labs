@@ -335,7 +335,9 @@ export class Engine extends EventTarget implements Harness {
         }
       } else {
         const { compiler } = await this.getCompilerInternals();
-        logger.timeStart("compileToRecordGraph", "ts-compile");
+        // Concurrency-safe timing: explicit start (a shared timer key would be
+        // clobbered by parallel compiles). Same for `records`/`verify` below.
+        const tsCompileStart = performance.now();
         const modules = compiler.compileToModules(resolvedProgram, {
           noCheck: options.noCheck,
           runtimeModules: Engine.runtimeModuleNames(),
@@ -347,7 +349,7 @@ export class Engine extends EventTarget implements Harness {
             };
           },
         });
-        logger.timeEnd("compileToRecordGraph", "ts-compile");
+        logger.time(tsCompileStart, "compileToRecordGraph", "ts-compile");
 
         // Every authored source must have an emitted body; a missing one would
         // otherwise be silently dropped and only fail later at import.
@@ -373,7 +375,7 @@ export class Engine extends EventTarget implements Harness {
           Object.keys(runtimeExports?.[name] ?? {}),
         ]),
       );
-      logger.timeStart("compileToRecordGraph", "records");
+      const recordsStart = performance.now();
       const graph = compileSourcesToRecords(moduleFiles, {
         precompiledBodies,
         precompiledSourceMaps,
@@ -386,7 +388,7 @@ export class Engine extends EventTarget implements Harness {
         // a second hashing/import-resolution pass over the module set.
         identityByPath,
       });
-      logger.timeEnd("compileToRecordGraph", "records");
+      logger.time(recordsStart, "compileToRecordGraph", "records");
 
       // Register runtime-module records so cf:runtime/* imports resolve.
       const runtimeRecordExports: Record<string, Record<string, unknown>> = {};
@@ -405,14 +407,13 @@ export class Engine extends EventTarget implements Harness {
       // Security-verify every authored module body before it can execute.
       // (Runs even on a warm cache hit — the integrity label is still only
       // client-asserted, so we do not yet trust cached bytes unverified.)
-      logger.timeStart("compileToRecordGraph", "verify");
+      const verifyStart = performance.now();
       for (const [specifier, body] of graph.compiledBodies) {
         verifyCompiledModuleBody(body, specifier);
       }
 
       const mainSpecifier = graph.specifierByPath.get(mappedProgram.main);
       if (mainSpecifier === undefined) {
-        logger.timeEnd("compileToRecordGraph", "verify");
         throw new Error(
           "ESM compile produced no record for the program entry",
         );
@@ -424,7 +425,7 @@ export class Engine extends EventTarget implements Harness {
       // invoked with `verify: false` in evaluateRecordGraph — graph
       // verification happens once, at compile time, before any module executes.
       verifyModuleGraph(graph.records, mainSpecifier);
-      logger.timeEnd("compileToRecordGraph", "verify");
+      logger.time(verifyStart, "compileToRecordGraph", "verify");
 
       // Serializable per-module descriptors for write-back to the cache, in
       // identity space (the engine's `/<id>` path prefix never leaks out). Each
