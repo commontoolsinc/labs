@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: computed-pattern-typed
 // Verifies: computed() inside a typed pattern with destructured params is closure-extracted
-//   computed(() => value.get() * multiplier) → derive(..., { value, multiplier }, ({ value, multiplier }) => value.get() * multiplier)
+//   computed(() => value.get() * multiplier) → lift(({ value, multiplier }) => value.get() * multiplier)({ value, multiplier })
 // Context: The pattern uses generic type params <{ multiplier: number }, number>.
 //   Destructured `multiplier` is captured with asOpaque: true (it is an OpaqueRef
 //   from the pattern input), while `value` is captured with asCell: true.

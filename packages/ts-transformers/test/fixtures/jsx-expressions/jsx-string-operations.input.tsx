@@ -9,10 +9,10 @@ interface State {
 }
 
 // FIXTURE: jsx-string-operations
-// Verifies: string concatenation, template literals, and string methods in JSX are wrapped in derive()
-//   state.title + ": " + state.firstName → derive({title, firstName}, ...)
-//   `Welcome, ${state.firstName}!`       → derive({firstName}, ...)
-//   state.firstName.toUpperCase()        → derive({firstName}, ...)
+// Verifies: string concatenation, template literals, and string methods in JSX are wrapped in a lift-applied computation
+//   state.title + ": " + state.firstName → lift(...)({ title, firstName })
+//   `Welcome, ${state.firstName}!`       → lift(...)({ firstName })
+//   state.firstName.toUpperCase()        → lift(...)({ firstName })
 export default pattern<State>((state) => {
   return {
     [UI]: (

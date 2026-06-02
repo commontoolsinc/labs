@@ -13,7 +13,7 @@ import { __cfHelpers } from "commonfabric";
  * Variation where an inline arrow function handler is wrapped inside an
  * explicit computed() in JSX. The transformer will convert the arrow function
  * to a handler, and the Cell reference (state.isEditing) must be properly
- * captured in the derive wrapper created for the computed.
+ * captured in the lift-applied computation created for the computed.
  */
 import { Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
@@ -28,9 +28,9 @@ interface State {
     isEditing: Cell<boolean>;
 }
 // FIXTURE: inline-action-in-ternary-branch
-// Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in derive
-//   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → derive({ state: { isEditing: asCell } }, ..., handler(...)(...))
-// Context: Regression -- inline handler inside computed() must have its Cell ref captured in the derive wrapper
+// Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in a lift-applied computation
+//   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → lift(..., handler(...)(...))({ state: { isEditing: asCell } })
+// Context: Regression -- inline handler inside computed() must have its Cell ref captured in the lift-applied computation
 export default pattern((state) => {
     return {
         [UI]: (<cf-card>
@@ -55,7 +55,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, state.key("isEditing"), <div>Editing</div>, <div>
             <span>{state.key("card", "title")}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
-            {/* The Cell ref in the handler must be captured in the derive */}
+            {/* The Cell ref in the handler must be captured in the lift-applied computation */}
             {__cfHelpers.lift<{
                 state: {
                     isEditing: __cfHelpers.ReadonlyCell<boolean>;

@@ -23,14 +23,14 @@ interface State {
 }
 // FIXTURE: computed-map-call-root-containers
 // Verifies: inside a computed-array .map() callback, callback-local ordinary
-//   call roots whole-wrap as callback-local derives across object-property,
-//   array-element, and direct return-expression sites.
+//   call roots whole-wrap as callback-local lift-applied computations across
+//   object-property, array-element, and direct return-expression sites.
 //   ({ value: identity(row.done ? "Done" : "Pending") })
-//   → ({ value: derive(..., ({ row }) => identity(row.done ? "Done" : "Pending")) })
+//   → ({ value: lift(({ row }) => identity(row.done ? "Done" : "Pending"))(...) })
 //   [identity(row.done ? "Done" : "Pending")]
-//   → [derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))]
+//   → [lift(({ row }) => identity(row.done ? "Done" : "Pending"))(...)]
 //   row => identity(row.done ? "Done" : "Pending")
-//   → row => derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))
+//   → row => lift(({ row }) => identity(row.done ? "Done" : "Pending"))(...)
 export default pattern((state) => {
     const rows = __cfHelpers.lift<{
         state: {

@@ -18,7 +18,7 @@ const __cfAmdHooks = undefined;
 //   `pattern-context:get-call`; that restriction was legacy (the rewriter already
 //   lowers the computation). A bare *terminal* `cell.get()` (no enclosing
 //   computation) is still rejected elsewhere, since it has no lowerable site.
-// Context: enables `derive(cell, v => f(v))` migrations to drop the wrapper and
+// Context: enabled migrating `cell.get()`-wrapped reads to drop the wrapper and
 //   write a plain expression even when the input is a Writable/Cell.
 export default pattern((__cf_pattern_input) => {
     const layout = __cf_pattern_input.key("layout");

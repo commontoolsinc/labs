@@ -72,7 +72,7 @@ const passthrough = lift({
 //   const foo = wish<Default<T[], []>>(...).result!; map  -> foo.mapWithPattern(...)
 //   const filtered = foo.filter(fn); filtered.map(fn)     -> filterWithPattern(...).mapWithPattern(...)
 //   const filtered = foo.filter(fn); filtered.map(item => item.toUpperCase())
-//                                                   -> receiver-method body still lowers via derive(...)
+//                                                   -> receiver-method body still lowers to a lift-applied computation
 // Context: contrasts with the existing plain-array compute fixtures where the
 // callback receiver really is compute-owned plain JS data.
 export default pattern((state) => {

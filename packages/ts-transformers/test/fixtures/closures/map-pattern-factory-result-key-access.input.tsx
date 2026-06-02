@@ -31,7 +31,7 @@ const EntryRow = pattern<RowInput, RowOutput>((input) => ({
 // FIXTURE: map-pattern-factory-result-key-access (CT-1586)
 // Verifies: `row[K]` where K is a well-known CF computed key (UI or NAME)
 // and row is a pattern-factory result inside a JSX-context map callback
-// lowers to `row.key(__cfHelpers.K)` — not a derive wrapper.
+// lowers to `row.key(__cfHelpers.K)` — not a lift-applied wrapper.
 // Context: `EntryRow(...)` is recognized as an opaque-origin call via
 // structural pattern-factory detection, so `row` is tracked as a local
 // opaque binding. The reordered visitor in pattern-body-reactive-root-

@@ -4,7 +4,7 @@
  * Wrappers around the element identifier (parens, non-null assertion, `as`
  * type assertion) should not block the analyzer or the capture-tree parser
  * from recognizing `entry.name` as a fine-grained reactive dependency. The
- * derive's inputs should use the nested partial-key shape
+ * lift-applied computation's inputs should use the nested partial-key shape
  *   { entry: { name: entry.key("name") } }
  * not a flat fallback like `_entry__name: entry.key("name")` (which is
  * what the parser produced before `parseCaptureExpression` started

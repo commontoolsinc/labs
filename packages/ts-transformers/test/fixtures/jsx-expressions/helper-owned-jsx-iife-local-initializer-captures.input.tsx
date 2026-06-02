@@ -4,7 +4,7 @@
  * The wrapper around this authored IIFE should capture the reactive roots that
  * feed local aliases declared inside the IIFE body. Capturing the inner locals
  * themselves (`tree`, `p`, `unsorted`, `items`) is wrong because they are not
- * in scope at the synthetic derive call site.
+ * in scope at the synthetic lift-applied call site.
  */
 import {
   action,

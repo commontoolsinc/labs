@@ -35,7 +35,7 @@ interface State {
 // FIXTURE: map-parking-style-join
 // Verifies: nested plain-array joins inside a reactive map callback stay plain in complex branches
 //   state.people.map(fn)                    -> state.key("people").mapWithPattern(pattern(...), ...)
-//   state.spots.filter(...).map(... )       -> derive(...).filter(...).map(...) stays plain inside computed()
+//   state.spots.filter(...).map(... )       -> lift(...)(...).filter(...).map(...) stays plain inside computed()
 //   spotPreferences.map((n) => "#" + n)     -> nested plain-array callback stays plain and does not capture n
 // Context: Realistic callback body mixing computed aliases, destructuring, conditional JSX, and joined plain-array labels
 export default pattern((state) => {
