@@ -158,15 +158,19 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     inputId: "home-profile-name-input",
     buttonId: "home-profile-create-button",
   });
-  // Gate the display on `profileName` rather than `profile.get()`. The profile
-  // link points cross-space (into the name-derived profile space); a synchronous
-  // `profile.get()` from the home space returns `undefined` until that space is
-  // loaded and does not itself drive the cross-space load, so it never flips.
-  // `profileName` lives in the home space, is written alongside the profile on
-  // creation, and reads reliably — so it is a sound "profile exists" signal. The
-  // `cf-render` below then resolves and loads the cross-space profile for
+  // Existence is keyed off the durable profile *link* (`profile`), which is the
+  // source of truth; `profileName` is only a creation-latency fallback. The link
+  // points cross-space (into the name-derived profile space), so on the first
+  // render right after creation `profile.get()` is still `undefined` until that
+  // space loads — but the home-space `profileName` mirror, written alongside the
+  // link, reads immediately and covers that window. Keying primarily off the
+  // link means a home whose link is populated but whose `profileName` mirror is
+  // empty (e.g. a migrated/partially-populated home) still reports a profile and
+  // does not re-show the create form (which would let it overwrite a valid
+  // link). The `cf-render` below resolves and loads the cross-space profile for
   // display.
   const hasProfile = computed(() =>
+    profile.get() !== undefined ||
     (profileName.get() ?? "").trim().length > 0
   );
 
