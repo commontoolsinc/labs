@@ -68,12 +68,15 @@ directly to `new Runtime({ experimental: { ... } })`.
 ```
 Server Process (Deno)
   |
-  +-- ENV: EXPERIMENTAL_MODERN_DATA_MODEL=true
+  +-- ENV: EXPERIMENTAL_EXAMPLE_NAME_1=<value>
+  |        EXPERIMENTAL_EXAMPLE_NAME_2=<value>
+  |        ...
   |
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
-                                    +-- setDataModelConfig(...)
-                                    +-- setPersistentSchedulerStateConfig(...)
+                                    +-- setExperimentName1Config(...)
+                                    +-- setExperimentName2Config(...)
+                                    ...
 ```
 
 ### Browser-side (build-time injection)
@@ -84,10 +87,12 @@ via the IPC protocol:
 ```
 Build Time (shell)
   |
-  +-- ENV: EXPERIMENTAL_MODERN_DATA_MODEL=true
+  +-- ENV: EXPERIMENTAL_EXAMPLE_NAME_1=<value>
+  |        EXPERIMENTAL_EXAMPLE_NAME_2=<value>
+  |        ...
   |
-  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_MODERN_DATA_MODEL
-  +-- src/lib/env.ts           --> EXPERIMENTAL.modernDataModel = true
+  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_*
+  +-- src/lib/env.ts          --> EXPERIMENTAL.exampleName* = true
   |
 Browser (Main Thread)
   |
@@ -96,17 +101,16 @@ Browser (Main Thread)
   +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
         |
         | postMessage (IPC)
-        | InitializationData { ..., experimental: { modernDataModel: true } }
+        | InitializationData { ..., experimental: { exampleName*: true } }
         |
         v
 Browser Web Worker
   |
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
-              +-- setDataModelConfig(true)
-              +-- setPersistentSchedulerStateConfig(...)
-              |    +-- modernDataModelEnabled = true
-              |         +-- fabricFromNativeValue() checks modernDataModelEnabled
+              +-- setExperimentName1Config(...)
+              +-- setExperimentName2Config(...)
+              ...
 ```
 
 Key points:
