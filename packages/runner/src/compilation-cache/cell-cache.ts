@@ -1,3 +1,4 @@
+import { getLogger } from "@commonfabric/utils/logger";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
@@ -5,6 +6,8 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type Cell, isCell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
+
+const logger = getLogger("cell-cache");
 
 /**
  * Content-addressed compilation cache — document model and key scheme.
@@ -343,6 +346,40 @@ export async function loadSourceClosure(
     }
   }
   return out;
+}
+
+/**
+ * Load the source closure (see {@link loadSourceClosure}) and **graph-wiring
+ * verify** it (step 4.3.6): recompute every module's Merkle identity from the
+ * loaded source + import graph and require it to equal its document key. This is
+ * the content-addressed analog of `verifyModuleGraph` — the source set is
+ * self-verifying (content-addressing IS the integrity), so a tampered source, a
+ * rewired link, or an incomplete closure is rejected here. Resolves to the
+ * verified closure, or `undefined` if the entry is absent or verification fails.
+ */
+export async function loadVerifiedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Promise<Map<string, SourceDoc> | undefined> {
+  const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
+  if (closure === undefined) return undefined;
+  const verification = verifySourceDocs(
+    entryIdentity,
+    closure,
+    runtimeFingerprint,
+  );
+  if (!verification.ok) {
+    logger.warn("source-closure-verify-failed", () => [
+      `entry=${entryIdentity}`,
+      `mismatches=${verification.mismatches.length}`,
+      `missing=${verification.missing.length}`,
+    ]);
+    return undefined;
+  }
+  return closure;
 }
 
 // --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------

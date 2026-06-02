@@ -15,6 +15,7 @@ import {
   compiledIntegrityAtom,
   loadCompiledClosure,
   loadSourceClosure,
+  loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
   sourceDocKey,
   verifySourceDocs,
@@ -207,6 +208,38 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
       tx,
     );
     expect(loaded).toBe(undefined);
+  });
+
+  it("loadVerifiedSourceClosure returns a faithful closure but rejects a tampered one", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
+
+    // Happy path: the written closure graph-wiring-verifies.
+    const ok = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    );
+    expect(ok?.size).toBe(3);
+
+    // Tamper util's stored source (keep its key) → recomputed identity diverges.
+    const utilIdentity = identityOf(PROGRAM, "/util.ts");
+    runtime.getCell(spaceA, sourceDocKey(utilIdentity), undefined, tx).set({
+      kind: "source",
+      identity: utilIdentity,
+      code: "export const helper = (n) => n + 999;",
+      filename: "/util.ts",
+      imports: [],
+    });
+    const tampered = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      tx,
+    );
+    expect(tampered).toBe(undefined);
   });
 });
 
