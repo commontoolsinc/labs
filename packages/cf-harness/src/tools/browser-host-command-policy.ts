@@ -1,3 +1,5 @@
+import { validateBrowserAccessLeaseFreshness } from "../contracts/browser-access.ts";
+
 export interface BrowserHostCommandPolicyResult {
   allowed: boolean;
   reason?: string;
@@ -11,6 +13,7 @@ export interface BrowserHostCommandPlan {
 
 export interface BrowserHostCommandPolicyOptions {
   browserAccessCdpUrl?: string;
+  browserAccessExpiresAt?: string;
 }
 
 export const BROWSER_HOST_COMMAND_DENIED_EXIT_CODE = 126;
@@ -74,6 +77,12 @@ const validateAgentBrowserCommand = (
   args: readonly string[],
   options: BrowserHostCommandPolicyOptions,
 ): BrowserHostCommandPolicyResult => {
+  const expiryError = validateBrowserAccessLeaseFreshness(
+    options.browserAccessExpiresAt,
+  );
+  if (expiryError !== undefined) {
+    return deny(expiryError);
+  }
   const expectedCdpOrigin = normalizeCdpOrigin(options.browserAccessCdpUrl);
   if (
     options.browserAccessCdpUrl !== undefined && expectedCdpOrigin === undefined
