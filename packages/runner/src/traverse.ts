@@ -1061,8 +1061,12 @@ export abstract class BaseObjectTraverser {
    * Returns the interned form of a coverage `selector`, memoized so repeated
    * structurally-equal checks reuse one frozen instance.
    *
-   * Accepts a frozen or mutable `selector` and never mutates it. A schema-less
-   * (`undefined`) selector is treated as `false` ("reject").
+   * Safe to call on a frozen or mutable `selector` — it never requires a
+   * mutable one. Interning may deep-freeze the selector and its `path` in place
+   * (a mutable selector's `schema` may also be canonicalized); a frozen input is
+   * left untouched, with a fresh interned selector returned when needed. See
+   * `internPathSelector()`. A schema-less (`undefined`) selector is treated as
+   * `false` ("reject").
    *
    * The memo matters: `combineOptionalSchema()` mints a new un-interned schema
    * on every call, so without it each repeated coverage check would
