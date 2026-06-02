@@ -1,14 +1,14 @@
 {
   "name": "@commonfabric/leb128",
   "exports": {
-    ".": "./mod.ts"
+    ".": "./src/index.ts"
   },
   "tasks": {
     "test": "deno test"
   },
   "test": {
     "include": [
-      "test/*-test.ts"
+      "test/*.test.ts"
     ]
   }
 }
