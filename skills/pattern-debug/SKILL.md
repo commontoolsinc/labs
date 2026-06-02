@@ -101,7 +101,7 @@ a function:**
 
 - Inside `computed()` body, ternaries are plain JS (Writable objects always
   truthy)
-- Cell bindings (`$value`, `$checked`) inside `derive()` may get positionally
+- Cell bindings (`$value`, `$checked`) inside `computed()` may get positionally
   mis-resolved
 - Fix: use bare JSX ternaries, hoist `computed()` for data only
 - See `docs/common/concepts/computed/computed.md`

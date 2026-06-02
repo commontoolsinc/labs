@@ -32,7 +32,7 @@ An **action** is a function `(tx: Transaction) => any` that the scheduler manage
 |-------------------|---------------------|-------------|
 | `sink(cell, callback)` | Effect | Runs callback when cell changes |
 | `lift(fn, ...inputs)` | Computation | Transforms inputs, writes to output cell |
-| `derive(input, fn)` | Computation | Derives new value from input |
+| `computed(() => ...)` | Computation | Derives a new reactive value |
 | Event handlers | Queued event action | Responds to user events |
 
 The scheduler doesn't know about patterns - it only sees actions with read/write dependencies.
@@ -98,7 +98,7 @@ writable-input targets are represented as `materializerWriteEnvelopes`, a
 separate pull-mode index.
 
 Materializer membership normally comes from explicit module/action metadata.
-For generated `computed()`/`derive()` callbacks, the transformer emits
+For generated `computed()` callbacks, the transformer emits
 `materializerWriteInputPaths` only when capability analysis observes actual
 writes through captured cell inputs. A Writable input in an output-producing
 generated action schema is not enough evidence: pure computations commonly

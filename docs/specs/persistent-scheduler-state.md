@@ -726,7 +726,7 @@ all possible downstream readers when an input changes, because that recreates
 the broad fanout that pull mode is trying to avoid.
 
 Materializer identity is explicit scheduler metadata. For generated
-`computed()`/`derive()` callbacks, the transformer emits
+`computed()` callbacks, the transformer emits
 `materializerWriteInputPaths` only when capability analysis observes actual
 writes through captured cell inputs; the runner resolves those input paths to
 `materializerWriteEnvelopes` for the concrete action instance. A generated

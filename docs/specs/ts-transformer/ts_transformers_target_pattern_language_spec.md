@@ -407,7 +407,7 @@ construct is only supportable by compatibility behavior such as:
 
 1. leaving the foreign container authored as plain JS
 2. or, in older/rarer cases, wrapping the whole foreign container as one
-   compute/derive island
+   compute island
 
 that is strong evidence it should be rejected from the target language rather
 than elevated into the core language.

@@ -56,7 +56,7 @@ execution) via `CompiledBundleValidator.verify()`. It has two distinct layers:
    - top-level `const` only — `let`/`var` rejected (no mutable module state);
    - each `const` initializer must be one of: a **direct function**
      (function/arrow with brace body), a **trusted-builder call**
-     (`pattern`/`lift`/`handler`/`action`/`computed`/`derive`) whose callback
+     (`pattern`/`lift`/`handler`/`action`/`computed`) whose callback
      argument is a *direct* callback at the builder-specific arg index
      (`callbackIndexesForBuilder`), a **trusted data-helper call**
      (`__cf_data`/`schema`/`safeDateNow`/`nonPrivateRandom` with exact arity), or

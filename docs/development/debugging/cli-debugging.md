@@ -46,7 +46,7 @@ This is the fastest way to inspect how `ts-transformers` rewrote:
 
 - JSX expressions
 - reactive array-method chains like `.map()` / `.filter()`
-- `computed()` / `derive()` wrapping
+- `computed()` wrapping
 - downstream schema/capability lowering effects
 
 It also works on fixture inputs while debugging the compiler itself:

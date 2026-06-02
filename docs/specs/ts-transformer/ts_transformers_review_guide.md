@@ -41,7 +41,7 @@ for this PR is:
 - **Supported**
   - local reactive value expressions in JSX
   - authored helper control flow (`ifElse`, `when`, `unless`)
-  - explicit computation callbacks (`computed`, `derive`, `action`, `lift`,
+  - explicit computation callbacks (`computed`, `action`, `lift`,
     `handler`)
   - supported reactive collection callbacks (`map` / `filter` / `flatMap`)
   - top-level pattern-body lowerable value-expression sites such as returned
