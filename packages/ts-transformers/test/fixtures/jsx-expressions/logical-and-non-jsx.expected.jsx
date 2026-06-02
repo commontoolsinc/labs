@@ -13,8 +13,8 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: logical-and-non-jsx
 // Verifies: && with non-JSX right side still lowers through when(), with predicate/value derived separately
-//   user.get().name.length > 0 && `Hello...` → when(derive(predicate), derive(template))
-//   user.get().age > 18 && user.get().age    → when(derive(predicate), derive(number))
+//   user.get().name.length > 0 && `Hello...` → when(lift(...)(predicate), lift(...)(template))
+//   user.get().age > 18 && user.get().age    → when(lift(...)(predicate), lift(...)(number))
 // Context: JSX-local control flow still uses when(); non-JSX right-hand values become derived branch values
 export default pattern((_state) => {
     const user = cell<{

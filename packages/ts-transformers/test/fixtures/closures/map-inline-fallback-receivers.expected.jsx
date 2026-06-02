@@ -24,8 +24,8 @@ interface Input {
 }
 // FIXTURE: map-inline-fallback-receivers
 // Verifies: inline fallback array-method receivers are transformed structurally
-//   (msg.reactions ?? []).map(fn) → derive(...).mapWithPattern(pattern(...), { msg: { id: ... } })
-//   (msg.reactions || []).map(fn) → derive(...).mapWithPattern(pattern(...), { msg: { id: ... } })
+//   (msg.reactions ?? []).map(fn) → lift(...)(...).mapWithPattern(pattern(...), { msg: { id: ... } })
+//   (msg.reactions || []).map(fn) → lift(...)(...).mapWithPattern(pattern(...), { msg: { id: ... } })
 // Context: Nested map — outer maps messages, inner fallback receivers capture msg.id and message-local reaction data
 export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");

@@ -13,10 +13,10 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: pattern-object-binary-add
 // Verifies: top-level non-JSX arithmetic in an object property is lowered after
-//   closure normalization into a direct derive wrapper rather than left as raw
-//   arithmetic over opaque values.
+//   closure normalization into a direct lift-applied computation rather than left
+//   as raw arithmetic over opaque values.
 //   return { next: state.count + 1 }
-//   → return { next: derive(state.count + 1) }
+//   → return { next: lift(({ state }) => state.count + 1)({ state }) }
 export default pattern((state) => ({
     next: __cfHelpers.lift<{
         state: {

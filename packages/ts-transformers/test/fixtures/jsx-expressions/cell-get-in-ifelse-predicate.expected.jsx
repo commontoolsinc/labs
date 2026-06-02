@@ -12,12 +12,12 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // Reproduction of bug: .get() called on Cell inside ifElse predicate
-// The transformer wraps predicates in derive(), which unwraps Cells,
+// The transformer wraps predicates in a lift-applied computation, which unwraps Cells,
 // but fails to remove the .get() calls
 // FIXTURE: cell-get-in-ifelse-predicate
-// Verifies: .get() calls on Cell refs inside ifElse predicates are preserved within derive()
-//   showHistory && messageCount !== dismissedIndex.get() → derive(..., ({...}) => showHistory && messageCount !== dismissedIndex.get())
-// Context: Bug repro -- predicate wrapped in derive() which unwraps Cells, but .get() must remain
+// Verifies: .get() calls on Cell refs inside ifElse predicates are preserved within the lift-applied computation
+//   showHistory && messageCount !== dismissedIndex.get() → lift(({...}) => showHistory && messageCount !== dismissedIndex.get())(...)
+// Context: Bug repro -- predicate wrapped in a lift-applied computation which unwraps Cells, but .get() must remain
 export default pattern((__cf_pattern_input) => {
     const showHistory = __cf_pattern_input.key("showHistory");
     const messageCount = __cf_pattern_input.key("messageCount");

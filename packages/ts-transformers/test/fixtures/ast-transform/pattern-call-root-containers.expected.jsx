@@ -20,11 +20,11 @@ const identity = __cfHardenFn(<T,>(value: T) => value);
 //   non-JSX container kinds instead of lowering only their nested conditional
 //   arguments.
 //   { value: identity(state.done ? "Done" : "Pending") }
-//   → { value: derive(..., ({ state }) => identity(state.done ? "Done" : "Pending")) }
+//   → { value: lift(({ state }) => identity(state.done ? "Done" : "Pending"))({ state }) }
 //   [identity(state.done ? "Done" : "Pending")]
-//   → [derive(..., ({ state }) => identity(state.done ? "Done" : "Pending"))]
+//   → [lift(({ state }) => identity(state.done ? "Done" : "Pending"))({ state })]
 //   return identity(state.done ? "Done" : "Pending")
-//   → return derive(..., ({ state }) => identity(state.done ? "Done" : "Pending"))
+//   → return lift(({ state }) => identity(state.done ? "Done" : "Pending"))({ state })
 export const objectAndArray = pattern((state) => {
     const view = {
         value: __cfHelpers.lift<{

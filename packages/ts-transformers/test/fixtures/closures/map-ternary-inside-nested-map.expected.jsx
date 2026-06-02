@@ -15,7 +15,7 @@ import { __cfHelpers } from "commonfabric";
  * back in "pattern mode" where ternaries need transformation.
  *
  * This structure mirrors pattern-nested-jsx-map: outer ternary wraps items.map,
- * causing ifElse → derive, then inner ternary is inside nested .map callback.
+ * causing ifElse → lift-applied, then inner ternary is inside nested .map callback.
  */
 import { Cell, computed, Default, pattern, UI } from "commonfabric";
 const define = undefined;

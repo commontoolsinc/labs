@@ -16,8 +16,8 @@ const __cfAmdHooks = undefined;
 // The transformer must handle this correctly - the undefined is a VALUE, not a missing argument
 // FIXTURE: ifelse-undefined-value
 // Verifies: ifElse with explicit undefined as ifTrue or ifFalse branch is handled correctly
-//   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, derive(...), undefined, {result})
-//   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, derive(...), {data}, undefined)
+//   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, lift(...)(...), undefined, {result})
+//   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern(() => {
     const __cf_destructure_1 = fetchData({

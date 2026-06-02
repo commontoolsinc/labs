@@ -12,10 +12,10 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: pattern-with-cells
-// Verifies: pattern input property access is transformed to .key() and arithmetic to derive()
+// Verifies: pattern input property access is transformed to .key() and arithmetic to a lift-applied computation
 //   cell.value       → cell.key("value")
-//   cell.value + 1   → derive({value: asOpaque}, ({cell}) => cell.value + 1)
-//   cell.value * 2   → derive({value: asOpaque}, ({cell}) => cell.value * 2)
+//   cell.value + 1   → lift(({cell}) => cell.value + 1)({ value: asOpaque })
+//   cell.value * 2   → lift(({cell}) => cell.value * 2)({ value: asOpaque })
 export default pattern((cell) => {
     return {
         [UI]: (<div>

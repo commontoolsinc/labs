@@ -25,11 +25,11 @@ const shippingCost = 5.99;
 // FIXTURE: map-multiple-captures
 // Verifies: .map() on reactive array captures multiple outer variables (state + local)
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {discount, taxRate}, multiplier})
-//   expression → derive() combining item + state reactively with `multiplier`
+//   expression → lift(...)(...) combining item + state reactively with `multiplier`
 //     wired in as an explicit input (not via lexical closure)
-// Context: state.discount and state.taxRate are explicit derive inputs;
+// Context: state.discount and state.taxRate are explicit lift-applied inputs;
 //   `multiplier` (a plain-JS value declared in the enclosing pattern callback)
-//   is also wired in as an explicit derive input so the callback stays
+//   is also wired in as an explicit lift-applied input so the callback stays
 //   self-contained; module-level `shippingCost` is left lexical (module-scope
 //   bindings are stable across hoist boundaries).
 export default pattern((state) => {
