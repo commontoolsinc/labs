@@ -138,13 +138,34 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     profile: profile as any,
     profileName,
   });
+  // Pass the owner-protected `profile` cell (TrustedProfileLink IFC schema)
+  // through unchanged. Creating a profile into a fresh home works: the runner's
+  // post-run cross-space-child handling commits the new profile space before the
+  // home link. The fix here is purely on the display side (below) — the create
+  // surface is only shown when no profile exists, so a created/existing profile
+  // is never re-submitted (re-creating over an existing link is a separate,
+  // not-yet-handled cross-space case). See docs/specs/shared-profile-space.md.
   const profileCreate = ProfileCreate({
     profile: profile as any,
     profileName,
     inputId: "home-profile-name-input",
     buttonId: "home-profile-create-button",
   });
-  const hasProfile = computed(() => profile.get() !== undefined);
+  // Existence is keyed off the durable profile *link* (`profile`), which is the
+  // source of truth; `profileName` is only a creation-latency fallback. The link
+  // points cross-space (into the name-derived profile space), so on the first
+  // render right after creation `profile.get()` is still `undefined` until that
+  // space loads — but the home-space `profileName` mirror, written alongside the
+  // link, reads immediately and covers that window. Keying primarily off the
+  // link means a home whose link is populated but whose `profileName` mirror is
+  // empty (e.g. a migrated/partially-populated home) still reports a profile and
+  // does not re-show the create form (which would let it overwrite a valid
+  // link). The `cf-render` below resolves and loads the cross-space profile for
+  // display.
+  const hasProfile = computed(() =>
+    profile.get() !== undefined ||
+    (profileName.get() ?? "").trim().length > 0
+  );
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -174,10 +195,15 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                 (
                   <cf-vstack gap="2">
                     <cf-hstack id="home-profile-summary" gap="2" align="center">
-                      <strong>{profile.key("name")}</strong>
-                      <span style={{ color: "#888" }}>
-                        {profile.key("avatar")}
-                      </span>
+                      {
+                        /*
+                        Show the home-space `profileName` mirror here rather than
+                        `profile.key("name")`: the latter reads cross-space (into
+                        the profile space) and renders empty inline. The live,
+                        editable name is shown by the `cf-render` below.
+                      */
+                      }
+                      <strong>{profileName}</strong>
                     </cf-hstack>
                     <cf-render $cell={profile as any} />
                   </cf-vstack>
