@@ -25,6 +25,7 @@
   },
   "exports": {
     "./BaseReconstructionContext": "./src/BaseReconstructionContext.ts",
+    "./cell-rep": "./src/cell-rep.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
     "./EmptyReconstructionContext": "./src/EmptyReconstructionContext.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
