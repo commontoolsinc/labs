@@ -274,12 +274,8 @@ export class ExecutableRegistry {
       }
     }
 
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
-      this.recordVerifiedFunctions(loadId, descriptor.value, seen);
+    for (const child of verifiedWalkChildValues(value as object)) {
+      this.recordVerifiedFunctions(loadId, child, seen);
     }
   }
 
@@ -325,13 +321,9 @@ export class ExecutableRegistry {
       setVerifiedLoadId(value, loadId);
     }
 
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
+    for (const child of verifiedWalkChildValues(value as object)) {
       this.annotateVerifiedPatterns(
-        descriptor.value,
+        child,
         loadId,
         seen,
         subtreeTrusted,
@@ -385,13 +377,9 @@ export class ExecutableRegistry {
       registry.set(associated.implementationRef, associated.implementation);
     }
 
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
+    for (const child of verifiedWalkChildValues(value as object)) {
       this.collectAssociatedFunctions(
-        descriptor.value,
+        child,
         registry,
         seen,
         fallbackLookup,
@@ -479,6 +467,47 @@ export class ExecutableRegistry {
     }
     hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
     return implementationRef;
+  }
+}
+
+/**
+ * Yield the child values to recurse into when walking a verified value graph
+ * (used by {@link ExecutableRegistry.recordVerifiedFunctions},
+ * `annotateVerifiedPatterns`, and `collectAssociatedFunctions`).
+ *
+ * Data properties — the AMD/CommonJS bundle shape (`exports.x = …`) — expose
+ * their value directly. SES module-namespace exports — the ESM module-record
+ * loader shape — are live-binding ACCESSOR properties (`get`/`set`, no `value`).
+ * Reading only `descriptor.value` therefore never descends into an ESM module's
+ * exports, so verified functions, their binding metadata
+ * (`__cfVerifiedBindingIdentity`), and exported patterns defined by ESM-loaded
+ * modules were never registered/annotated. That left the writer's verified
+ * binding identity (`sourceFile`/`bindingPath`) unresolved, so CFC
+ * `writeAuthorizedBy` rejected trusted-action writes under the ESM loader
+ * (CT-1623).
+ *
+ * Reading via [[Get]] is scoped to genuine module namespaces (`[object
+ * Module]`), whose getters are spec-defined live bindings with no
+ * user-controlled side effects. Getters on ordinary objects are deliberately
+ * NOT invoked, preserving the side-effect-free walk over data values.
+ */
+export function* verifiedWalkChildValues(value: object): Generator<unknown> {
+  const isModuleNamespace =
+    Object.prototype.toString.call(value) === "[object Module]";
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) {
+      continue;
+    }
+    if ("value" in descriptor) {
+      yield descriptor.value;
+    } else if (isModuleNamespace && typeof descriptor.get === "function") {
+      try {
+        yield (value as Record<PropertyKey, unknown>)[key];
+      } catch {
+        // A live binding that throws on read carries nothing to register.
+      }
+    }
   }
 }
 
