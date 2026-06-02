@@ -138,13 +138,37 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     profile: profile as any,
     profileName,
   });
+  // Hand the create surface a schema-less view of `profile` (drop the
+  // TrustedProfileLink IFC schema), mirroring how the `#profile` wish builtin
+  // wires this input (a plain link, no schema). With the IFC schema present,
+  // `profile.set(ProfileHome.inSpace(name)(...))` routes through the CFC
+  // write-policy path and materializes the cross-space `inSpace` child during
+  // the handler's own `.set()` — opening a writer for the new profile space
+  // before the home-space link write and tripping the single-space
+  // write-isolation guard ("cross-space writes" error). Without the schema the
+  // child defers to the runner's post-run pass (enableCrossSpaceChildCommit),
+  // which commits the child space first and yields a `.get()`-readable link, so
+  // the display below reactively switches to the profile. Owner-protection of
+  // the profile itself lives on the profile space's fields (ProfileHome's IFC),
+  // not on this home→profile pointer. See docs/specs/shared-profile-space.md.
+  const profileForCreate = (profile as any).asSchema(undefined);
   const profileCreate = ProfileCreate({
-    profile: profile as any,
+    profile: profileForCreate,
     profileName,
     inputId: "home-profile-name-input",
     buttonId: "home-profile-create-button",
   });
-  const hasProfile = computed(() => profile.get() !== undefined);
+  // Gate the display on `profileName` rather than `profile.get()`. The profile
+  // link points cross-space (into the name-derived profile space); a synchronous
+  // `profile.get()` from the home space returns `undefined` until that space is
+  // loaded and does not itself drive the cross-space load, so it never flips.
+  // `profileName` lives in the home space, is written alongside the profile on
+  // creation, and reads reliably — so it is a sound "profile exists" signal. The
+  // `cf-render` below then resolves and loads the cross-space profile for
+  // display.
+  const hasProfile = computed(() =>
+    (profileName.get() ?? "").trim().length > 0
+  );
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -174,10 +198,15 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                 (
                   <cf-vstack gap="2">
                     <cf-hstack id="home-profile-summary" gap="2" align="center">
-                      <strong>{profile.key("name")}</strong>
-                      <span style={{ color: "#888" }}>
-                        {profile.key("avatar")}
-                      </span>
+                      {
+                        /*
+                        Show the home-space `profileName` mirror here rather than
+                        `profile.key("name")`: the latter reads cross-space (into
+                        the profile space) and renders empty inline. The live,
+                        editable name is shown by the `cf-render` below.
+                      */
+                      }
+                      <strong>{profileName}</strong>
                     </cf-hstack>
                     <cf-render $cell={profile as any} />
                   </cf-vstack>
