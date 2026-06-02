@@ -24,6 +24,7 @@
     ]
   },
   "exports": {
+    "./BaseFabricSpecialValue": "./src/BaseFabricSpecialValue.ts",
     "./BaseReconstructionContext": "./src/BaseReconstructionContext.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
     "./EmptyReconstructionContext": "./src/EmptyReconstructionContext.ts",
