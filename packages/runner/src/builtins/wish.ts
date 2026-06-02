@@ -35,6 +35,8 @@ const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
 const PROFILE_CREATE_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/profile-create.tsx";
+const PROFILE_PICKER_TSX_PATH = getPatternEnvironment().apiUrl +
+  "api/patterns/system/profile-picker.tsx";
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
   level: "warn",
@@ -1105,6 +1107,8 @@ let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let suggestionPattern: Pattern | undefined;
 let profileCreatePatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let profileCreatePattern: Pattern | undefined;
+let profilePickerPatternFetchPromise: Promise<Pattern | undefined> | undefined;
+let profilePickerPattern: Pattern | undefined;
 
 async function fetchSuggestionPattern(
   runtime: Runtime,
@@ -1154,6 +1158,28 @@ async function fetchProfileCreatePattern(
     return pattern;
   } catch (e) {
     console.error("Can't load profile-create.tsx", e);
+    return undefined;
+  }
+}
+
+async function fetchProfilePickerPattern(
+  runtime: Runtime,
+): Promise<Pattern | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(PROFILE_PICKER_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load profile-picker.tsx");
+    }
+    const pattern = await runtime.patternManager.compilePattern(program);
+
+    if (!pattern) throw new WishError("Can't compile profile-picker.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("Can't load profile-picker.tsx", e);
     return undefined;
   }
 }
@@ -1338,6 +1364,14 @@ export function wish(
     | undefined;
   let profileCreatePatternResultCell: Cell<any> | undefined;
   let profileCreatePatternReadyCell: Cell<boolean> | undefined;
+  let profilePickerPatternInput:
+    | {
+      profiles: unknown;
+      defaultProfile: unknown;
+      mru: unknown;
+    }
+    | undefined;
+  let profilePickerPatternResultCell: Cell<any> | undefined;
 
   addCancel(() => {
     cancelled = true;
@@ -1347,6 +1381,9 @@ export function wish(
     }
     if (profileCreatePatternResultCell) {
       runtime.runner.stop(profileCreatePatternResultCell);
+    }
+    if (profilePickerPatternResultCell) {
+      runtime.runner.stop(profilePickerPatternResultCell);
     }
   });
 
@@ -1595,6 +1632,108 @@ export function wish(
     });
   }
 
+  // Launch the profile picker for #profile wishes with multiple profiles. Feeds
+  // the home `profiles`/`defaultProfile`/`mru` cells (as sigil links) so the
+  // picker can render natively, select (stamp MRU), set the default, and create
+  // another — all as trusted picker-surface writes. Mirrors
+  // launchProfileCreatePattern's deferred-fetch/run handling.
+  function launchProfilePickerPattern(
+    ctx: WishContext,
+    providedTx?: IExtendedStorageTransaction,
+  ): Cell<any> {
+    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
+      .resolveAsCell();
+    profilePickerPatternInput = {
+      profiles: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
+      ),
+      defaultProfile: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("defaultProfile").getAsNormalizedFullLink(),
+      ),
+      mru: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("mru").getAsNormalizedFullLink(),
+      ),
+    };
+    const tx = providedTx || runtime.edit();
+
+    if (!profilePickerPatternResultCell) {
+      profilePickerPatternResultCell = runtime.getCell(
+        parentCell.space,
+        {
+          wish: {
+            profilePickerPattern: cause,
+            user: runtime.userIdentityDID,
+          },
+        },
+        undefined,
+        tx,
+      );
+    }
+
+    const pickerInputForTx = (tx: IExtendedStorageTransaction) => {
+      const bindInputCell = (cell: unknown) =>
+        cell && typeof (cell as { withTx?: unknown }).withTx === "function"
+          ? (cell as Cell<unknown>).withTx(tx)
+          : cell;
+      return profilePickerPatternInput && {
+        profiles: bindInputCell(profilePickerPatternInput.profiles),
+        defaultProfile: bindInputCell(profilePickerPatternInput.defaultProfile),
+        mru: bindInputCell(profilePickerPatternInput.mru),
+      };
+    };
+
+    if (!profilePickerPattern) {
+      if (!profilePickerPatternFetchPromise) {
+        profilePickerPatternFetchPromise = fetchProfilePickerPattern(runtime)
+          .then((pattern) => {
+            profilePickerPattern = pattern;
+            if (!pattern) {
+              profilePickerPatternFetchPromise = undefined;
+            }
+            return pattern;
+          });
+      }
+      void profilePickerPatternFetchPromise.then((pattern) => {
+        if (!cancelled && pattern && profilePickerPatternResultCell) {
+          const resultCell = profilePickerPatternResultCell;
+          try {
+            const runTx = runtime.edit();
+            runtime.run(
+              runTx,
+              pattern,
+              pickerInputForTx(runTx),
+              resultCell.withTx(runTx),
+            );
+            runtime.prepareTxForCommit(runTx);
+            runTx.commit().then(({ error }) => {
+              if (error) {
+                commitPatternErrorUI(resultCell, toCompactDebugString(error));
+              }
+            }).catch((error) => {
+              commitPatternErrorUI(resultCell, errorMessage(error));
+            });
+          } catch (error) {
+            commitPatternErrorUI(resultCell, errorMessage(error));
+          }
+        }
+      });
+    } else if (!cancelled && profilePickerPatternResultCell) {
+      runtime.run(
+        tx,
+        profilePickerPattern,
+        pickerInputForTx(tx),
+        profilePickerPatternResultCell.withTx(tx),
+      );
+    }
+
+    if (!providedTx) {
+      runtime.prepareTxForCommit(tx);
+      tx.commit();
+    }
+
+    return profilePickerPatternResultCell;
+  }
+
   // Wish action, reactive to changes in inputsCell and any cell we read during
   // initial resolution. Synchronous: reads cell.get() which triggers sync and
   // returns undefined if data isn't loaded yet. The reactive system re-triggers
@@ -1755,6 +1894,27 @@ export function wish(
               "resolve",
               queryKey,
             );
+
+            // #profile with multiple profiles → launch the dedicated profile
+            // picker (native name/avatar/link rows, inline create, MRU/default
+            // writes). Headless / single-profile callers fall through to the
+            // fast path below and get the default profile directly.
+            if (
+              isProfilePersonaTarget(activeParsed) &&
+              !headless &&
+              uniqueResultCells.length > 1
+            ) {
+              measureWishPhase(
+                "send-profile-picker",
+                queryKey,
+                () =>
+                  sendResult(
+                    tx,
+                    launchProfilePickerPattern(ctx, tx),
+                  ),
+              );
+              return;
+            }
 
             // Unified shape: always return { result, candidates, [UI] }
             // For single result, use fast path (no picker needed)
