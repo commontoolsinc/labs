@@ -486,14 +486,14 @@ export class ExecutableRegistry {
  * `writeAuthorizedBy` rejected trusted-action writes under the ESM loader
  * (CT-1623).
  *
- * Reading via [[Get]] is scoped to genuine module namespaces (`[object
- * Module]`), whose getters are spec-defined live bindings with no
- * user-controlled side effects. Getters on ordinary objects are deliberately
- * NOT invoked, preserving the side-effect-free walk over data values.
+ * Reading via [[Get]] is scoped to genuine module namespaces (see
+ * {@link isModuleNamespaceObject}), whose getters are spec-defined live bindings
+ * with no user-controlled side effects. Getters on ordinary objects are
+ * deliberately NOT invoked, preserving the side-effect-free walk over data
+ * values.
  */
 export function* verifiedWalkChildValues(value: object): Generator<unknown> {
-  const isModuleNamespace =
-    Object.prototype.toString.call(value) === "[object Module]";
+  const isModuleNamespace = isModuleNamespaceObject(value);
   for (const key of Reflect.ownKeys(value)) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor) {
@@ -509,6 +509,23 @@ export function* verifiedWalkChildValues(value: object): Generator<unknown> {
       }
     }
   }
+}
+
+/**
+ * Detect a module-namespace object WITHOUT invoking user code.
+ *
+ * We must not use `Object.prototype.toString.call(value)` or read
+ * `value[Symbol.toStringTag]`: both perform a `[[Get]]` that would invoke a
+ * user-defined `@@toStringTag` getter as a side effect on every value walked —
+ * exactly the side-effect-free property this traversal is meant to preserve. A
+ * real module namespace exposes `@@toStringTag` as a (non-configurable) data
+ * property whose value is "Module"; reading its own descriptor never invokes a
+ * getter, so an ordinary object that exposes `@@toStringTag` via an accessor is
+ * correctly NOT treated as a module namespace and its getters are never run.
+ */
+function isModuleNamespaceObject(value: object): boolean {
+  const tag = Object.getOwnPropertyDescriptor(value, Symbol.toStringTag);
+  return tag !== undefined && "value" in tag && tag.value === "Module";
 }
 
 function readVerifiedBindingMetadata(

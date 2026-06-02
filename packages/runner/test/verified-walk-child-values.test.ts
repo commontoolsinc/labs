@@ -66,6 +66,36 @@ describe("verifiedWalkChildValues (CT-1623)", () => {
     expect(yielded.length).toBe(0);
   });
 
+  it("does NOT invoke a Symbol.toStringTag getter while detecting module namespaces", () => {
+    // Regression for the review note: detecting a module namespace must not
+    // perform a [[Get]] on @@toStringTag, or it would run user getters as a
+    // side effect on every walked value.
+    let tagInvoked = false;
+    let exportInvoked = false;
+    const obj = {};
+    Object.defineProperty(obj, Symbol.toStringTag, {
+      get: () => {
+        tagInvoked = true;
+        return "Module"; // a real namespace uses a data property, not a getter
+      },
+      enumerable: false,
+    });
+    Object.defineProperty(obj, "export", {
+      get: () => {
+        exportInvoked = true;
+        return () => {};
+      },
+      enumerable: true,
+    });
+
+    const yielded = collect(obj);
+    // The toStringTag getter must never run; the object is not a real module
+    // namespace, so its accessor export must not be followed either.
+    expect(tagInvoked).toBe(false);
+    expect(exportInvoked).toBe(false);
+    expect(yielded.length).toBe(0);
+  });
+
   it("ignores a live binding that throws on read", () => {
     const ns: Record<PropertyKey, unknown> = {};
     Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
