@@ -5,13 +5,17 @@
  * shared it, and see net balances plus a minimal "settle up" plan of who should
  * pay whom. Inspired by group expense-splitting apps.
  *
- * Scope (cozy-poll idiom):
- * - `people` and `expenses` are a per-space shared ledger anyone in the space
- *   sees and edits.
+ * Scope:
+ * - `people` and `expenses` are the shared ledger. Cells default to per-space
+ *   scope, so anyone in the space sees and edits the same ledger.
  * - `myName` is per-user: each viewer picks which person they are, which powers
- *   a personal "you are owed / you owe" summary and row highlight.
- * - Form drafts are per-session local cells, so concurrent viewers don't share
- *   each other's half-typed input or chip toggles.
+ *   a personal "you are owed / you owe" summary and a row highlight.
+ * - Form drafts are per-session cells, so concurrent viewers don't share each
+ *   other's half-typed input or chip toggles.
+ *
+ * Identity: items are matched with `equals()` (the pattern idiom) — never via
+ * synthetic id fields, which read as Cells inside `.map()` and break `===`.
+ * People are referenced from expenses by their (unique) name, the natural key.
  *
  * Money is computed in integer cents with largest-remainder allocation, so
  * displayed shares always sum back to the total and balances tie out exactly.
@@ -19,11 +23,9 @@
 import {
   computed,
   Default,
-  handler,
+  equals,
   NAME,
-  nonPrivateRandom,
   pattern,
-  type PerSpace,
   type PerUser,
   safeDateNow,
   UI,
@@ -33,21 +35,18 @@ import {
 // ============ TYPES ============
 
 interface Person {
-  id: string;
   name: string;
 }
 
 interface Expense {
-  id: string;
   description: string;
   amount: number;
-  paidBy: string; // Person.id
-  sharedBy: string[]; // Person.id[]; empty => split among everyone
+  paidBy: string; // Person.name
+  sharedBy: string[]; // Person.name[]; empty => split among everyone
   date: string; // YYYY-MM-DD
 }
 
 interface Balance {
-  id: string;
   name: string;
   paid: number;
   share: number;
@@ -55,38 +54,18 @@ interface Balance {
 }
 
 interface Settlement {
-  fromId: string;
   from: string; // debtor name
-  toId: string;
   to: string; // creditor name
   amount: number;
 }
 
-// Per-space shared ledger + per-user identity. Writes go through the
-// module-scope handlers below (which re-type these as Writable cells).
 interface State {
-  people: PerSpace<Person[] | Default<[]>>;
-  expenses: PerSpace<Expense[] | Default<[]>>;
+  people: Writable<Person[] | Default<[]>>;
+  expenses: Writable<Expense[] | Default<[]>>;
   myName: PerUser<string | Default<"">>;
 }
 
-// Cell aliases for handler contexts (cozy-poll idiom).
-type PeopleCell = Writable<Person[] | Default<[]>>;
-type ExpensesCell = Writable<Expense[] | Default<[]>>;
-type TextCell = Writable<string>;
-type IdsCell = Writable<string[]>;
-
-type EmptyEvent = Record<string, never>;
-interface IdEvent {
-  id: string;
-}
-
 // ============ HELPERS ============
-
-const newId = (prefix: string): string =>
-  `${prefix}_${safeDateNow().toString(36)}_${
-    Math.floor(nonPrivateRandom() * 1e6).toString(36)
-  }`;
 
 const getTodayDate = (): string =>
   new Date(safeDateNow()).toISOString().split("T")[0];
@@ -95,25 +74,25 @@ const toCents = (n: number): number => Math.round((n || 0) * 100);
 
 const money = (n: number): string => `$${(n || 0).toFixed(2)}`;
 
-// Allocate `cents` across `ids` so the parts sum back to `cents` exactly.
-// Largest-remainder: the first `remainder` ids get one extra cent.
-const splitCents = (cents: number, ids: string[]): Map<string, number> => {
+// Allocate `cents` across `names` so the parts sum back to `cents` exactly.
+// Largest-remainder: the first `remainder` recipients get one extra cent.
+const splitCents = (cents: number, names: string[]): Map<string, number> => {
   const out = new Map<string, number>();
-  const n = ids.length;
+  const n = names.length;
   if (n === 0) return out;
   const base = Math.floor(cents / n);
   const remainder = cents - base * n;
-  ids.forEach((id, i) => out.set(id, base + (i < remainder ? 1 : 0)));
+  names.forEach((name, i) => out.set(name, base + (i < remainder ? 1 : 0)));
   return out;
 };
 
 const computeSettlements = (balances: Balance[]): Settlement[] => {
   const creditors = balances
-    .map((b) => ({ id: b.id, name: b.name, rem: Math.round(b.net * 100) }))
+    .map((b) => ({ name: b.name, rem: Math.round(b.net * 100) }))
     .filter((b) => b.rem > 0)
     .sort((a, b) => b.rem - a.rem);
   const debtors = balances
-    .map((b) => ({ id: b.id, name: b.name, rem: -Math.round(b.net * 100) }))
+    .map((b) => ({ name: b.name, rem: -Math.round(b.net * 100) }))
     .filter((b) => b.rem > 0)
     .sort((a, b) => b.rem - a.rem);
 
@@ -125,13 +104,7 @@ const computeSettlements = (balances: Balance[]): Settlement[] => {
     const c = creditors[j];
     const cents = Math.min(d.rem, c.rem);
     if (cents > 0) {
-      result.push({
-        fromId: d.id,
-        from: d.name,
-        toId: c.id,
-        to: c.name,
-        amount: cents / 100,
-      });
+      result.push({ from: d.name, to: c.name, amount: cents / 100 });
     }
     d.rem -= cents;
     c.rem -= cents;
@@ -141,103 +114,6 @@ const computeSettlements = (balances: Balance[]): Settlement[] => {
   return result;
 };
 
-// ============ HANDLERS (module scope; write per-space state) ============
-
-const addPerson = handler<EmptyEvent, { people: PeopleCell; draft: TextCell }>(
-  (_event, { people, draft }) => {
-    const name = draft.get().trim();
-    if (!name) return;
-    if (people.get().some((p) => p.name === name)) return;
-    people.push({ id: newId("p"), name });
-    draft.set("");
-  },
-);
-
-// Removing a person cascade-cleans the ledger so balances stay zero-sum:
-// expenses they *paid* are dropped (the money has no creditor anymore), and
-// they are removed from every other expense's `sharedBy` (dropping any expense
-// left with no sharers).
-const removePerson = handler<
-  IdEvent,
-  { people: PeopleCell; expenses: ExpensesCell }
->(({ id }, { people, expenses }) => {
-  const ppl = people.get();
-  const idx = ppl.findIndex((p) => p.id === id);
-  if (idx < 0) return;
-  people.set(ppl.toSpliced(idx, 1));
-
-  const cleaned = expenses.get()
-    .filter((e) => e.paidBy !== id)
-    .map((e) => {
-      const sharedBy = e.sharedBy.filter((s) => s !== id);
-      return sharedBy.length === e.sharedBy.length ? e : { ...e, sharedBy };
-    })
-    .filter((e) => e.sharedBy.length > 0);
-  expenses.set(cleaned);
-});
-
-const addExpense = handler<EmptyEvent, {
-  people: PeopleCell;
-  expenses: ExpensesCell;
-  descDraft: TextCell;
-  amountDraft: TextCell;
-  paidByDraft: TextCell;
-  splitWith: IdsCell;
-}>(
-  (
-    _event,
-    { people, expenses, descDraft, amountDraft, paidByDraft, splitWith },
-  ) => {
-    const description = descDraft.get().trim();
-    const amount = toCents(parseFloat(amountDraft.get())) / 100; // snap to cents
-    const paidBy = paidByDraft.get();
-    const ppl = people.get();
-    if (!description || isNaN(amount) || amount <= 0) return;
-    if (!ppl.some((p) => p.id === paidBy)) return; // payer must exist
-
-    const everyone = ppl.map((p) => p.id);
-    const selected = splitWith.get().filter((sid) =>
-      ppl.some((p) => p.id === sid)
-    );
-    const sharedBy = selected.length === 0 ? everyone : selected;
-    if (sharedBy.length === 0) return;
-
-    expenses.push({
-      id: newId("e"),
-      description,
-      amount,
-      paidBy,
-      sharedBy,
-      date: getTodayDate(),
-    });
-    descDraft.set("");
-    amountDraft.set("");
-    splitWith.set([]);
-  },
-);
-
-const removeExpense = handler<IdEvent, { expenses: ExpensesCell }>(
-  ({ id }, { expenses }) => {
-    const cur = expenses.get();
-    const idx = cur.findIndex((e) => e.id === id);
-    if (idx >= 0) expenses.set(cur.toSpliced(idx, 1));
-  },
-);
-
-const toggleSplit = handler<
-  IdEvent,
-  { people: PeopleCell; splitWith: IdsCell }
->(
-  ({ id }, { people, splitWith }) => {
-    const cur = splitWith.get();
-    // First explicit toggle starts from "everyone selected".
-    const base = cur.length === 0 ? people.get().map((p) => p.id) : cur;
-    splitWith.set(
-      base.includes(id) ? base.filter((x) => x !== id) : [...base, id],
-    );
-  },
-);
-
 // ============ PATTERN ============
 
 export default pattern<State>(({ people, expenses, myName }) => {
@@ -245,73 +121,51 @@ export default pattern<State>(({ people, expenses, myName }) => {
   const personDraft = Writable.perSession.of<string>("");
   const descDraft = Writable.perSession.of<string>("");
   const amountDraft = Writable.perSession.of<string>("");
-  const paidByDraft = Writable.perSession.of<string>("");
-  const splitWith = Writable.perSession.of<string[]>([]);
-
-  // --- Bound handlers ---
-  const boundAddPerson = addPerson({ people, draft: personDraft });
-  const boundRemovePerson = removePerson({ people, expenses });
-  const boundAddExpense = addExpense({
-    people,
-    expenses,
-    descDraft,
-    amountDraft,
-    paidByDraft,
-    splitWith,
-  });
-  const boundRemoveExpense = removeExpense({ expenses });
-  const boundToggleSplit = toggleSplit({ people, splitWith });
+  const paidByDraft = Writable.perSession.of<string>(""); // Person.name
+  const splitWith = Writable.perSession.of<string[]>([]); // Person.name[]
 
   // --- Identity (resolve per-user name once at top level) ---
   const me = (myName ?? "").trim();
 
   // --- Derived data ---
-  const payerOptions = computed(() =>
-    people.map((p) => ({ label: p.name, value: p.id }))
-  );
-  const identityOptions = computed(() =>
-    people.map((p) => ({ label: p.name, value: p.name }))
+  const peopleOptions = computed(() =>
+    people.get().map((p) => ({ label: p.name, value: p.name }))
   );
 
   const total = computed(() => {
     let cents = 0;
-    for (const e of expenses) cents += toCents(e.amount);
+    for (const e of expenses.get()) cents += toCents(e.amount);
     return cents / 100;
   });
 
-  const nameById = computed(() => {
-    const map: Record<string, string> = {};
-    for (const p of people) map[p.id] = p.name;
-    return map;
-  });
-
   const balances = computed<Balance[]>(() => {
+    const ppl = people.get();
     const paidCents = new Map<string, number>();
     const shareCents = new Map<string, number>();
-    for (const p of people) {
-      paidCents.set(p.id, 0);
-      shareCents.set(p.id, 0);
+    for (const p of ppl) {
+      paidCents.set(p.name, 0);
+      shareCents.set(p.name, 0);
     }
 
-    for (const e of expenses) {
+    for (const e of expenses.get()) {
       const cents = toCents(e.amount);
       if (paidCents.has(e.paidBy)) {
         paidCents.set(e.paidBy, paidCents.get(e.paidBy)! + cents);
       }
-      const everyone = people.map((p) => p.id);
-      const ids = (e.sharedBy && e.sharedBy.length ? e.sharedBy : everyone)
-        .filter((id) => shareCents.has(id));
-      if (ids.length === 0) continue;
-      const alloc = splitCents(cents, ids);
-      for (const id of ids) {
-        shareCents.set(id, shareCents.get(id)! + (alloc.get(id) ?? 0));
+      const everyone = ppl.map((p) => p.name);
+      const names = (e.sharedBy && e.sharedBy.length ? e.sharedBy : everyone)
+        .filter((name) => shareCents.has(name));
+      if (names.length === 0) continue;
+      const alloc = splitCents(cents, names);
+      for (const name of names) {
+        shareCents.set(name, shareCents.get(name)! + (alloc.get(name) ?? 0));
       }
     }
 
-    return people.map((p) => {
-      const paid = (paidCents.get(p.id) ?? 0) / 100;
-      const share = (shareCents.get(p.id) ?? 0) / 100;
-      return { id: p.id, name: p.name, paid, share, net: paid - share };
+    return ppl.map((p) => {
+      const paid = (paidCents.get(p.name) ?? 0) / 100;
+      const share = (shareCents.get(p.name) ?? 0) / 100;
+      return { name: p.name, paid, share, net: paid - share };
     });
   });
 
@@ -325,10 +179,10 @@ export default pattern<State>(({ people, expenses, myName }) => {
 
   // Display helper for the "split with" chips in the form.
   const splitChips = computed(() =>
-    people.map((p) => ({
-      id: p.id,
+    people.get().map((p) => ({
       name: p.name,
-      included: splitWith.get().length === 0 || splitWith.get().includes(p.id),
+      included: splitWith.get().length === 0 ||
+        splitWith.get().includes(p.name),
     }))
   );
 
@@ -348,7 +202,7 @@ export default pattern<State>(({ people, expenses, myName }) => {
             <cf-label>You are</cf-label>
             <cf-select
               $value={myName}
-              items={identityOptions}
+              items={peopleOptions}
               style={{ minWidth: "160px" }}
             />
             {computed(() => {
@@ -381,7 +235,7 @@ export default pattern<State>(({ people, expenses, myName }) => {
             <cf-heading level={4}>People</cf-heading>
 
             {computed(() =>
-              people.length === 0
+              people.get().length === 0
                 ? <cf-text tone="muted">Add people to get started.</cf-text>
                 : (
                   <cf-hstack gap="2" wrap>
@@ -389,8 +243,28 @@ export default pattern<State>(({ people, expenses, myName }) => {
                       <cf-chip
                         label={person.name}
                         removable
-                        oncf-remove={() =>
-                          boundRemovePerson.send({ id: person.id })}
+                        oncf-remove={() => {
+                          const cur = people.get();
+                          const idx = cur.findIndex((p) => equals(person, p));
+                          if (idx < 0) return;
+                          const name = { ...cur[idx] }.name;
+                          people.set(cur.toSpliced(idx, 1));
+                          // Cascade-clean so balances stay zero-sum: drop
+                          // expenses they paid (money has no creditor now) and
+                          // remove them from every other split.
+                          const cleaned = expenses.get()
+                            .filter((e) => e.paidBy !== name)
+                            .map((e) => {
+                              const sharedBy = e.sharedBy.filter((s) =>
+                                s !== name
+                              );
+                              return sharedBy.length === e.sharedBy.length
+                                ? e
+                                : { ...e, sharedBy };
+                            })
+                            .filter((e) => e.sharedBy.length > 0);
+                          expenses.set(cleaned);
+                        }}
                       />
                     ))}
                   </cf-hstack>
@@ -406,7 +280,13 @@ export default pattern<State>(({ people, expenses, myName }) => {
               <cf-button
                 color="primary"
                 variant="solid"
-                onClick={boundAddPerson}
+                onClick={() => {
+                  const name = personDraft.get().trim();
+                  if (!name) return;
+                  if (people.get().some((p) => p.name === name)) return;
+                  people.push({ name });
+                  personDraft.set("");
+                }}
               >
                 Add
               </cf-button>
@@ -431,7 +311,7 @@ export default pattern<State>(({ people, expenses, myName }) => {
               </cf-vstack>
               <cf-vstack gap="1" style={{ flex: 1 }}>
                 <cf-label>Paid by</cf-label>
-                <cf-select $value={paidByDraft} items={payerOptions} />
+                <cf-select $value={paidByDraft} items={peopleOptions} />
               </cf-vstack>
             </cf-hstack>
 
@@ -443,7 +323,18 @@ export default pattern<State>(({ people, expenses, myName }) => {
                     <cf-chip
                       label={c.name}
                       interactive
-                      onClick={() => boundToggleSplit.send({ id: c.id })}
+                      onClick={() => {
+                        const cur = splitWith.get();
+                        // First explicit toggle starts from "everyone".
+                        const base = cur.length === 0
+                          ? people.get().map((p) => p.name)
+                          : cur;
+                        splitWith.set(
+                          base.includes(c.name)
+                            ? base.filter((x) => x !== c.name)
+                            : [...base, c.name],
+                        );
+                      }}
                       style={{ opacity: c.included ? "1" : "0.4" }}
                     />
                   ))
@@ -457,7 +348,32 @@ export default pattern<State>(({ people, expenses, myName }) => {
             <cf-button
               color="primary"
               variant="solid"
-              onClick={boundAddExpense}
+              onClick={() => {
+                const description = descDraft.get().trim();
+                const amount = toCents(parseFloat(amountDraft.get())) / 100;
+                const paidBy = paidByDraft.get();
+                const ppl = people.get();
+                if (!description || isNaN(amount) || amount <= 0) return;
+                if (!ppl.some((p) => p.name === paidBy)) return;
+
+                const everyone = ppl.map((p) => p.name);
+                const selected = splitWith.get().filter((nm) =>
+                  ppl.some((p) => p.name === nm)
+                );
+                const sharedBy = selected.length === 0 ? everyone : selected;
+                if (sharedBy.length === 0) return;
+
+                expenses.push({
+                  description,
+                  amount,
+                  paidBy,
+                  sharedBy,
+                  date: getTodayDate(),
+                });
+                descDraft.set("");
+                amountDraft.set("");
+                splitWith.set([]);
+              }}
             >
               Add expense
             </cf-button>
@@ -478,7 +394,7 @@ export default pattern<State>(({ people, expenses, myName }) => {
             </cf-hstack>
 
             {computed(() =>
-              expenses.length === 0
+              expenses.get().length === 0
                 ? <cf-text tone="muted">No expenses yet.</cf-text>
                 : expenses.map((expense) => (
                   <cf-hstack
@@ -496,10 +412,8 @@ export default pattern<State>(({ people, expenses, myName }) => {
                       </span>
                       <cf-text variant="caption" tone="muted">
                         {computed(() => {
-                          const names = nameById;
-                          const payer = names[expense.paidBy] ?? "?";
                           const n = expense.sharedBy?.length || 0;
-                          return `${payer} paid · split ${n} way${
+                          return `${expense.paidBy} paid · split ${n} way${
                             n === 1 ? "" : "s"
                           } · ${expense.date}`;
                         })}
@@ -511,8 +425,11 @@ export default pattern<State>(({ people, expenses, myName }) => {
                     <cf-button
                       variant="ghost"
                       color="danger"
-                      onClick={() =>
-                        boundRemoveExpense.send({ id: expense.id })}
+                      onClick={() => {
+                        const cur = expenses.get();
+                        const idx = cur.findIndex((el) => equals(expense, el));
+                        if (idx >= 0) expenses.set(cur.toSpliced(idx, 1));
+                      }}
                     >
                       ×
                     </cf-button>
@@ -584,18 +501,12 @@ export default pattern<State>(({ people, expenses, myName }) => {
       </cf-vstack>
     ),
 
-    // Per-space ledger + per-user identity (re-exported for cross-piece reads).
+    // Shared ledger + per-user identity (re-exported for cross-piece reads).
     people,
     expenses,
     myName,
     balances,
     settlements,
     total,
-
-    // Mutations exposed as streams for composition.
-    addPerson: boundAddPerson,
-    removePerson: boundRemovePerson,
-    addExpense: boundAddExpense,
-    removeExpense: boundRemoveExpense,
   };
 });
