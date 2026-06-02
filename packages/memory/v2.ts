@@ -431,13 +431,6 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
 });
 
-export const sameMemoryProtocolFlags = (
-  left: MemoryProtocolFlags,
-  right: MemoryProtocolFlags,
-): boolean =>
-  left.modernCellRep === right.modernCellRep &&
-  left.persistentSchedulerState === right.persistentSchedulerState;
-
 /**
  * Scheduler-state persistence is an optional capability, not a data-model wire
  * contract. Peers with different scheduler flags can still share memory data;

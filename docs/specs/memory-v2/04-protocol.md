@@ -48,7 +48,6 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory/v2",
   "flags": {
     "modernCellRep": true,
-    "modernDataModel": true,
     "persistentSchedulerState": true
   }
 }
@@ -62,7 +61,6 @@ If the server accepts the protocol, it returns:
   "protocol": "memory/v2",
   "flags": {
     "modernCellRep": true,
-    "modernDataModel": true,
     "persistentSchedulerState": true
   }
 }
