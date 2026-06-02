@@ -53,6 +53,9 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "mapWithPattern",
   "filterWithPattern",
   "flatMapWithPattern",
+  // SqliteDb.query(sql, ...) — a reactive read method on a SqliteDb handle,
+  // lowered like .map (the node factory builds the sqliteQuery node).
+  "query",
 ]);
 
 function isSelfPathSegment(

@@ -24,7 +24,7 @@ import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
-import { encodeCfLinkValue } from "./sqlite/cf-link.ts";
+import { encodeCfLinkValue, parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 
 type SqliteDbRef = {
@@ -108,6 +108,52 @@ function readDbRef(value: unknown): SqliteDbRef {
   throw new TypeError("sqlite: invalid database handle");
 }
 
+/**
+ * Result columns to decode from a sigil-link STRING to a sigil-link OBJECT: the
+ * keys the transformer-injected `rowSchema` marks `asCell`. A consumer reading
+ * `q.result[i].<col>` under its own `<Row>` schema (Cell<T> -> asCell) then
+ * rehydrates the object to a live Cell (link-resolution only recognizes link
+ * OBJECTS, not JSON strings). Untyped queries inject no rowSchema -> no decode
+ * (the column reads back as the raw sigil string; see sqlite-cf-link-decode.test).
+ */
+function asCellColumnsFromRowSchema(rowSchema: unknown): string[] {
+  if (!rowSchema || typeof rowSchema !== "object") return [];
+  const props = (rowSchema as { properties?: Record<string, unknown> })
+    .properties;
+  if (!props || typeof props !== "object") return [];
+  return Object.entries(props)
+    .filter(([, v]) =>
+      !!v && typeof v === "object" &&
+      Array.isArray((v as { asCell?: unknown }).asCell)
+    )
+    .map(([k]) => k);
+}
+
+/** Replace each asCell column's stored sigil-link STRING with the parsed sigil
+ *  OBJECT. A value that is not a decodable link is left as-is (the asCell read
+ *  then yields undefined rather than crashing the whole query). */
+function decodeRowLinkColumns(
+  rows: readonly unknown[],
+  cols: readonly string[],
+): unknown[] {
+  if (cols.length === 0) return rows as unknown[];
+  return rows.map((row) => {
+    if (!row || typeof row !== "object") return row;
+    const out: Record<string, unknown> = {
+      ...(row as Record<string, unknown>),
+    };
+    for (const c of cols) {
+      if (!(c in out)) continue;
+      try {
+        out[c] = parseCfLinkToSigil(out[c]);
+      } catch {
+        // Leave a non-link value untouched.
+      }
+    }
+    return out;
+  });
+}
+
 /** sqliteDatabase: yields an opaque handle cell whose value is the SqliteDbRef. */
 export function sqliteDatabase(
   inputsCell: Cell<any>,
@@ -178,10 +224,14 @@ export function sqliteQuery(
       sql?: string;
       params?: WireParams;
       reactOn?: unknown;
+      // Transformer-injected from `db.query<Row>` / `sqliteQuery<Row>`; absent
+      // for untyped queries.
+      rowSchema?: unknown;
     } | undefined;
     if (!inputs?.db || typeof inputs.sql !== "string") return;
 
     const db = readDbRef(inputs.db);
+    const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
     let params: WireParams;
     try {
       params = encodeParams(inputs.sql, inputs.params);
@@ -210,10 +260,14 @@ export function sqliteQuery(
         const provider = runtime.storageManager.open(space);
         try {
           const res = await provider.sqliteQuery!(db, sql, params);
+          // Decode asCell-marked `_cf_link` columns from sigil STRINGS to sigil
+          // OBJECTS so a typed consumer's asCell schema rehydrates them to live
+          // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
+          const rows = decodeRowLinkColumns(res.rows, linkCols);
           await runtime.editWithRetry((wtx) => {
             result.withTx(wtx).set({
               pending: false,
-              result: res.rows,
+              result: rows,
               requestHash: hash,
             });
           });

@@ -520,3 +520,33 @@ the sqliteQuery builtin reading the injected `rowSchema`, storing sigil OBJECTS,
 and writing through an asCell schema so a typed `db.query<Row>` row surfaces a
 live Cell. The transformer half (rowSchema injection) is done; the skip in
 sqlite-cf-link-decode.test.ts pins the target.
+
+---
+
+## 2026-06-02 — Piece A: runtime _cf_link auto-decode (rowSchema-driven)
+
+The decode that the earlier node-output-schema dead-end couldn't do at the runner
+layer is now unblocked by the transformer lowering: the CONSUMER's read of
+`q.result[i].<col>` carries `asCell` (from the `<Row>` return type), so the
+runtime only needs to STORE the link column as a sigil OBJECT (not a string).
+
+- **Runtime (sqlite-builtins.ts):** `sqliteQuery` reads the transformer-injected
+  `inputs.rowSchema`, computes the asCell columns, and at flush converts those
+  columns from sigil STRING → sigil OBJECT (`parseCfLinkToSigil`). Untyped queries
+  (no rowSchema) keep raw strings (unchanged). A non-link value is left as-is.
+- **Found + fixed a real Increment-2 gap:** `db.query(...)` in a real PATTERN BODY
+  was rejected by `pattern-body-reactive-root-lowering.ts` ("Method calls on
+  opaque pattern values are not lowerable") — the Increment-2 fixture used a
+  standalone function and missed it. Fix: add `"query"` to
+  `KNOWN_PATH_TERMINAL_METHODS` so `db.query` lowers like `.map` (node factory
+  builds the sqliteQuery node).
+- **Proof (composed):** (a) runner test `sqlite-query-rowschema-decode.test.ts`
+  executes rowSchema → stored sigil object → asCell read → live Cell; (b)
+  transformer fixture `db-query-row-schema` (Increment 2) injects the rowSchema;
+  (c) NEW fixture `db-query-consumer-decode` proves a `derive(q, q =>
+  q.result[0].author_cf_link)` consumer read lowers to an input schema with
+  `result.items.author_cf_link: { asCell: ["cell"] }`. Together these cover the
+  full chain (inject rowSchema → store object → consumer asCell read → Cell). A
+  single end-to-end `cf check` integration test would run all three at once and
+  is the only remaining nice-to-have; the skip in sqlite-cf-link-decode.test.ts
+  pins it.

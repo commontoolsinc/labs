@@ -121,12 +121,15 @@ describe("sqlite query result _cf_link behavior", () => {
       .toBeNull();
   });
 
-  // BLOCKED: requires the Piece-A runtime wiring (builtin reads the injected
-  // rowSchema, stores sigil objects, writes through an asCell schema) so a
-  // typed `db.query<{ author_cf_link: Cell<...> }>` row surfaces a live Cell.
-  // The transformer half (rowSchema injection) is done; the runtime half is not.
-  it.skip("surfaces row.<col>_cf_link as a live Cell automatically", () => {
-    // Target (unreachable until Piece A lands):
+  // Both halves now exist: the transformer injects `rowSchema` for
+  // `db.query<Row>` (Increment 2) and the runtime decodes asCell columns to sigil
+  // objects (Piece A) — see sqlite-query-rowschema-decode.test.ts (runtime,
+  // executed) + the `db-query-row-schema` / `db-query-consumer-decode`
+  // transformer fixtures (inject rowSchema + consumer asCell read). This stays
+  // skipped only because the FULL typed `db.query<Row>` consumer path can't run
+  // in a runner unit test (no transformer); a single `cf check` integration test
+  // would exercise all three links at once.
+  it.skip("surfaces row.<col>_cf_link as a live Cell automatically (cf check e2e)", () => {
     //   const q = db.query<{ author_cf_link: Cell<{ name: string }> }>(sql);
     //   expect(isCell(q.result[0].author_cf_link)).toBe(true);
     expect(isCell).toBeDefined();
