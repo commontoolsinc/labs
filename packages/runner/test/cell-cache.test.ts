@@ -3,15 +3,19 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import {
+  computeModuleHashes,
+  resolveModuleImports,
+} from "../src/harness/module-identity.ts";
+import type { CacheableModule } from "../src/harness/types.ts";
 
 import {
   buildSourceDocs,
-  type CompiledArtifacts,
   compiledDocKey,
   compiledIntegrityAtom,
   loadCompiledClosure,
   loadSourceClosure,
-  moduleIdentities,
+  ROOT_LINK_SPECIFIER,
   sourceDocKey,
   verifySourceDocs,
   writeCompiledDocs,
@@ -20,9 +24,10 @@ import {
 
 const signer = await Identity.fromPassphrase("cell-cache test");
 
-// Step 4.3.1 — content-addressed cache document model: key scheme, per-module
-// identity, source-document construction, and the Merkle self-verification of a
-// loaded source closure.
+// Step 4.3.1–4.3.3 — content-addressed cache document model. The cache operates
+// in identity space on the engine's `CacheableModule[]`; these tests synthesize
+// an equivalent module set from a small program (computing the same per-module
+// identities + import edges the engine would).
 
 const PROGRAM = {
   main: "/main.tsx",
@@ -43,8 +48,27 @@ const PROGRAM = {
   ],
 };
 
+/** Synthesize the engine's `CacheableModule[]` from an authored program. */
+function toModules(
+  program: typeof PROGRAM,
+): { modules: CacheableModule[]; entryIdentity: string } {
+  const ids = computeModuleHashes(program);
+  const edges = resolveModuleImports(program);
+  const modules = program.files.map((f) => ({
+    identity: ids.get(f.name)!,
+    filename: f.name,
+    source: f.contents,
+    js: `/* compiled */ ${f.name}`,
+    imports: (edges.get(f.name)?.internalDeps ?? []).map((d) => ({
+      specifier: d.specifier,
+      targetIdentity: ids.get(d.target)!,
+    })),
+  }));
+  return { modules, entryIdentity: ids.get(program.main)! };
+}
+
 const identityOf = (program: typeof PROGRAM, path: string) =>
-  moduleIdentities(program).get(path)!;
+  computeModuleHashes(program).get(path)!;
 
 describe("cell-cache: keys", () => {
   it("formats source and compiled document keys", () => {
@@ -55,14 +79,11 @@ describe("cell-cache: keys", () => {
 
 describe("cell-cache: buildSourceDocs", () => {
   it("keys each module by its identity and records resolved import links", () => {
-    const ids = moduleIdentities(PROGRAM);
-    const docs = buildSourceDocs(PROGRAM);
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const docs = buildSourceDocs(modules, entryIdentity);
 
-    // One document per program file, keyed by identity.
+    // One document per module, keyed by identity.
     expect(docs.size).toBe(3);
-    for (const [identity, doc] of docs) {
-      expect(ids.get(doc.filename)).toBe(identity);
-    }
 
     const entry = docs.get(identityOf(PROGRAM, "/main.tsx"))!;
     expect(entry.kind).toBe("source");
@@ -76,12 +97,33 @@ describe("cell-cache: buildSourceDocs", () => {
       `./util.ts->${identityOf(PROGRAM, "/util.ts")}`,
     ]);
   });
+
+  it("links otherwise-unreachable modules from the entry document", () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    // Append an isolated module (like the injected cfc.ts helper): part of the
+    // emitted set, but with no incoming import edge.
+    const isolated: CacheableModule = {
+      identity: "iso-identity",
+      filename: "cfc.ts",
+      source: "export {};",
+      js: "/* iso */",
+      imports: [],
+    };
+    const docs = buildSourceDocs([...modules, isolated], entryIdentity);
+    const entry = docs.get(entryIdentity)!;
+    // The entry now carries a synthetic root link to the isolated module.
+    const rootLink = entry.imports.find((i) =>
+      i.specifier === `${ROOT_LINK_SPECIFIER}iso-identity`
+    );
+    expect(rootLink?.identity).toBe("iso-identity");
+  });
 });
 
 describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
   it("accepts a faithfully-built closure", () => {
-    const docs = buildSourceDocs(PROGRAM);
-    const v = verifySourceDocs(identityOf(PROGRAM, "/main.tsx"), docs);
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const docs = buildSourceDocs(modules, entryIdentity);
+    const v = verifySourceDocs(entryIdentity, docs);
     expect(v.ok).toBe(true);
     expect(v.entryFilename).toBe("/main.tsx");
     expect(v.mismatches).toEqual([]);
@@ -89,7 +131,8 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
   });
 
   it("rejects a tampered document (recomputed identity != key)", () => {
-    const docs = new Map(buildSourceDocs(PROGRAM));
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const docs = new Map(buildSourceDocs(modules, entryIdentity));
     const utilIdentity = identityOf(PROGRAM, "/util.ts");
     const util = docs.get(utilIdentity)!;
     // Keep the key, change the body — content no longer hashes to its key.
@@ -98,24 +141,24 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
       code: `export const helper = (n) => n + 999;`,
     });
 
-    const v = verifySourceDocs(identityOf(PROGRAM, "/main.tsx"), docs);
+    const v = verifySourceDocs(entryIdentity, docs);
     expect(v.ok).toBe(false);
     expect(v.mismatches).toContain(utilIdentity);
   });
 
   it("flags a missing import-link target", () => {
-    const docs = new Map(buildSourceDocs(PROGRAM));
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const docs = new Map(buildSourceDocs(modules, entryIdentity));
     docs.delete(identityOf(PROGRAM, "/util.ts"));
-    const v = verifySourceDocs(identityOf(PROGRAM, "/main.tsx"), docs);
+    const v = verifySourceDocs(entryIdentity, docs);
     expect(v.ok).toBe(false);
     expect(v.missing).toContain(identityOf(PROGRAM, "/util.ts"));
   });
 
   it("is entry-point independent (util identity is stable across entries)", () => {
     const viaMain = identityOf(PROGRAM, "/util.ts");
-    // Compile the same files with util as the entry point.
     const utilEntry = { ...PROGRAM, main: "/util.ts" };
-    const viaUtil = moduleIdentities(utilEntry).get("/util.ts")!;
+    const viaUtil = computeModuleHashes(utilEntry).get("/util.ts")!;
     expect(viaUtil).toBe(viaMain);
   });
 });
@@ -135,10 +178,10 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
   });
 
   it("writes the closure and loads it back via import links", () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
     const tx = runtime.edit();
-    writeSourceDocs(runtime, spaceA, PROGRAM, tx);
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, tx);
 
-    const entryIdentity = identityOf(PROGRAM, "/main.tsx");
     const loaded = loadSourceClosure(runtime, spaceA, entryIdentity, tx)!;
 
     // All three modules reached by following links from the entry.
@@ -164,14 +207,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   const compilerDid = signer.did();
   const RTVER = "rt-test-1";
 
-  const artifactsFor = (program: typeof PROGRAM): CompiledArtifacts => {
-    const m = new Map();
-    for (const f of program.files) {
-      m.set(f.name, { js: `/* compiled */ ${f.name}` });
-    }
-    return m;
-  };
-
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -192,12 +227,45 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   const opts = () => ({ runtimeVersion: RTVER, compilerDid });
 
   it("writes compiled docs with integrity and loads them back (warm hit)", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const rtx = runtime.edit();
+    const loaded = loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      rtx,
+    );
+    rtx.abort?.();
+
+    expect(loaded.size).toBe(3);
+    const main = loaded.get(entryIdentity)!;
+    expect(main.code).toBe("/* compiled */ /main.tsx");
+    expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
+      new Set(["/main.tsx", "/util.ts", "/types.ts"]),
+    );
+  });
+
+  it("reaches an otherwise-unreachable module via the entry root link", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const isolated: CacheableModule = {
+      identity: "iso-compiled-identity",
+      filename: "cfc.ts",
+      source: "export {};",
+      js: "/* iso compiled */",
+      imports: [],
+    };
     const wtx = runtime.edit();
     writeCompiledDocs(
       runtime,
       spaceA,
-      PROGRAM,
-      artifactsFor(PROGRAM),
+      [...modules, isolated],
+      entryIdentity,
       opts(),
       wtx,
     );
@@ -208,18 +276,14 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const loaded = loadCompiledClosure(
       runtime,
       spaceA,
-      identityOf(PROGRAM, "/main.tsx"),
+      entryIdentity,
       opts(),
       rtx,
     );
     rtx.abort?.();
-
-    expect(loaded.size).toBe(3);
-    const main = loaded.get(identityOf(PROGRAM, "/main.tsx"))!;
-    expect(main.code).toBe("/* compiled */ /main.tsx");
-    expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
-      new Set(["/main.tsx", "/util.ts", "/types.ts"]),
-    );
+    // The isolated module is reached only because the entry links it.
+    expect(loaded.has("iso-compiled-identity")).toBe(true);
+    expect(loaded.size).toBe(4);
   });
 
   it("fail-closed: an unstamped compiled cell is not accepted", async () => {
@@ -251,19 +315,12 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   });
 
   it("fail-closed: a different compiler principal is not accepted", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
     const wtx = runtime.edit();
-    writeCompiledDocs(
-      runtime,
-      spaceA,
-      PROGRAM,
-      artifactsFor(PROGRAM),
-      opts(),
-      wtx,
-    );
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
     wtx.prepareCfc();
     await wtx.commit();
 
-    // A loader expecting a different compiler DID requires a different atom.
     const otherDid = "did:key:someone-else";
     expect(compiledIntegrityAtom(otherDid)).not.toBe(
       compiledIntegrityAtom(compilerDid),
@@ -272,7 +329,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const loaded = loadCompiledClosure(
       runtime,
       spaceA,
-      identityOf(PROGRAM, "/main.tsx"),
+      entryIdentity,
       { runtimeVersion: RTVER, compilerDid: otherDid },
       rtx,
     );

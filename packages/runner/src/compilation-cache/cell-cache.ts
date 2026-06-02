@@ -1,8 +1,5 @@
-import type { Program } from "@commonfabric/js-compiler";
-import {
-  computeModuleHashes,
-  resolveModuleImports,
-} from "../harness/module-identity.ts";
+import { computeModuleHashes } from "../harness/module-identity.ts";
+import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type Cell, isCell } from "../cell.ts";
@@ -71,40 +68,80 @@ export function compiledDocKey(
 }
 
 /**
- * Per-module identities for a program: `path → identity`. Wraps
- * `computeModuleHashes` so the cache and the loader agree on identity.
+ * Synthetic import specifier prefix for a link the cache adds from the entry
+ * document to a module that is part of the emitted program but not reachable
+ * from the entry through the natural import graph (e.g. the injected `cfc.ts`
+ * helper, pulled in via a `.d.ts` re-export with no runtime import edge).
+ * Without it the link-following loader would never fetch such a module, so a
+ * warm closure would always be incomplete. These links carry no authored
+ * specifier, so they are ignored by the Merkle identity recompute (which
+ * resolves a module's edges from its own source, not its stored links).
  */
-export function moduleIdentities(
-  program: Program,
-  runtimeFingerprint = "",
-): Map<string, string> {
-  return computeModuleHashes(program, { runtimeFingerprint });
+export const ROOT_LINK_SPECIFIER = "cf:cache-root/";
+
+/** Identities of emitted modules not reachable from the entry via imports. */
+function unreachedRoots(
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
+): string[] {
+  const byId = new Map(modules.map((m) => [m.identity, m]));
+  const seen = new Set<string>();
+  const queue: string[] = [entryIdentity];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const imp of byId.get(id)?.imports ?? []) {
+      queue.push(imp.targetIdentity);
+    }
+  }
+  return modules.filter((m) => !seen.has(m.identity)).map((m) => m.identity);
 }
 
 /**
- * Build the source-set documents for a program, keyed by module identity. Each
- * document's `imports` resolve internal edges to the imported module's identity
- * (so a reader can follow links to the dependency documents).
+ * The resolved internal-import edges to store on a module's document, augmented
+ * (for the entry module only) with synthetic root links to any otherwise-
+ * unreachable emitted module so the link-following loader fetches the whole set.
+ */
+function storedImportRefs(
+  module: CacheableModule,
+  entryIdentity: string,
+  extraRoots: readonly string[],
+): ModuleImportRef[] {
+  const refs: ModuleImportRef[] = module.imports.map((imp) => ({
+    specifier: imp.specifier,
+    identity: imp.targetIdentity,
+  }));
+  if (module.identity === entryIdentity) {
+    for (const rootIdentity of extraRoots) {
+      refs.push({
+        specifier: `${ROOT_LINK_SPECIFIER}${rootIdentity}`,
+        identity: rootIdentity,
+      });
+    }
+  }
+  return refs;
+}
+
+/**
+ * Build the source-set documents for an emitted module set, keyed by module
+ * identity. Each document's `imports` resolve internal edges to the imported
+ * module's identity (so a reader can follow links to the dependency documents);
+ * the entry document additionally links any module unreachable through the
+ * natural import graph (see {@link ROOT_LINK_SPECIFIER}).
  */
 export function buildSourceDocs(
-  program: Program,
-  runtimeFingerprint = "",
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
 ): Map<string, SourceDoc> {
-  const ids = moduleIdentities(program, runtimeFingerprint);
-  const edges = resolveModuleImports(program);
+  const extraRoots = unreachedRoots(modules, entryIdentity);
   const out = new Map<string, SourceDoc>();
-  for (const file of program.files) {
-    const identity = ids.get(file.name);
-    if (identity === undefined) continue;
-    const imports = (edges.get(file.name)?.internalDeps ?? []).map((dep) => ({
-      specifier: dep.specifier,
-      identity: ids.get(dep.target)!,
-    }));
-    out.set(identity, {
+  for (const module of modules) {
+    out.set(module.identity, {
       kind: "source",
-      code: file.contents,
-      filename: file.name,
-      imports,
+      code: module.source,
+      filename: module.filename,
+      imports: storedImportRefs(module, entryIdentity, extraRoots),
     });
   }
   return out;
@@ -148,9 +185,9 @@ export function verifySourceDocs(
     name: doc.filename,
     contents: doc.code,
   }));
-  const recomputed = moduleIdentities(
+  const recomputed = computeModuleHashes(
     { main: entry.filename, files },
-    runtimeFingerprint,
+    { runtimeFingerprint },
   );
 
   const mismatches: string[] = [];
@@ -211,18 +248,19 @@ export const SOURCE_DOC_SCHEMA = {
 } as const satisfies JSONSchema;
 
 /**
- * Write every module of `program` as a `pattern:<identity>` cell into `space`,
- * each import a sigil link to its dependency cell. Idempotent (content-addressed
- * keys). The caller owns the transaction's commit.
+ * Write every emitted module as a `pattern:<identity>` cell into `space`, each
+ * import a sigil link to its dependency cell (the entry additionally linking any
+ * otherwise-unreachable module). Idempotent (content-addressed keys). The caller
+ * owns the transaction's commit.
  */
 export function writeSourceDocs(
   runtime: Runtime,
   space: MemorySpace,
-  program: Program,
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
   tx: IExtendedStorageTransaction,
-  runtimeFingerprint = "",
 ): void {
-  const docs = buildSourceDocs(program, runtimeFingerprint);
+  const docs = buildSourceDocs(modules, entryIdentity);
   for (const [identity, doc] of docs) {
     const cell = runtime.getCell(
       space,
@@ -294,14 +332,6 @@ export function loadSourceClosure(
 }
 
 // --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
-
-/**
- * Compiled artifacts produced by a fresh compile, keyed by authored path.
- */
-export type CompiledArtifacts = Map<
-  string,
-  { js: string; sourceMap?: unknown }
->;
 
 /**
  * The CFC integrity atom stamped on a compiled document. A plain literal string
@@ -379,54 +409,49 @@ function cellCarriesIntegrity(
 }
 
 /**
- * Write every module's compiled artifact as a
+ * Write every emitted module's compiled body as a
  * `compileCache:<runtimeVersion>/<identity>` cell into `space`, stamped with the
- * compiler integrity atom, imports linked to dependency compiled cells. The
- * caller must `prepareCfc()` + commit the tx under an enforcing CFC mode for the
- * integrity label to persist.
+ * compiler integrity atom, imports linked to dependency compiled cells (the
+ * entry additionally linking any otherwise-unreachable module). The caller must
+ * `prepareCfc()` + commit the tx under an enforcing CFC mode for the integrity
+ * label to persist.
  */
 export function writeCompiledDocs(
   runtime: Runtime,
   space: MemorySpace,
-  program: Program,
-  artifacts: CompiledArtifacts,
-  opts: {
-    runtimeVersion: string;
-    compilerDid: string;
-    runtimeFingerprint?: string;
-  },
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
+  opts: { runtimeVersion: string; compilerDid: string },
   tx: IExtendedStorageTransaction,
 ): void {
-  const ids = moduleIdentities(program, opts.runtimeFingerprint);
-  const edges = resolveModuleImports(program);
+  const extraRoots = unreachedRoots(modules, entryIdentity);
   const schema = compiledDocWriteSchema(opts.compilerDid);
-  for (const file of program.files) {
-    const identity = ids.get(file.name);
-    const artifact = artifacts.get(file.name);
-    if (identity === undefined || artifact === undefined) continue;
+  for (const module of modules) {
     const cell = runtime.getCell(
       space,
-      compiledDocKey(opts.runtimeVersion, identity),
+      compiledDocKey(opts.runtimeVersion, module.identity),
       schema,
       tx,
     );
     cell.set({
       kind: "compiled",
-      identity,
-      code: artifact.js,
-      filename: file.name,
-      ...(artifact.sourceMap !== undefined
-        ? { sourceMap: artifact.sourceMap }
+      identity: module.identity,
+      code: module.js,
+      filename: module.filename,
+      ...(module.sourceMap !== undefined
+        ? { sourceMap: module.sourceMap }
         : {}),
-      imports: (edges.get(file.name)?.internalDeps ?? []).map((dep) => ({
-        specifier: dep.specifier,
-        link: runtime.getCell(
-          space,
-          compiledDocKey(opts.runtimeVersion, ids.get(dep.target)!),
-          undefined,
-          tx,
-        ).getAsLink(),
-      })),
+      imports: storedImportRefs(module, entryIdentity, extraRoots).map(
+        (ref) => ({
+          specifier: ref.specifier,
+          link: runtime.getCell(
+            space,
+            compiledDocKey(opts.runtimeVersion, ref.identity),
+            undefined,
+            tx,
+          ).getAsLink(),
+        }),
+      ),
     } as StoredCompiledDoc);
   }
 }
