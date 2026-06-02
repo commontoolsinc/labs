@@ -19,9 +19,8 @@ import { makeProblematic } from "./makeProblematic.ts";
 /**
  * Handler for `FabricEpochDays`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochDays@1": "<base64>" }`. `FabricEpochDays` is a direct
- * member of `FabricValue` (not a `FabricInstance`), so this handler uses
- * `instanceof` directly. Same flat encoding approach as `EpochNsecHandler`.
+ * Wire format: `{ "/EpochDays@1": "<base64>" }`. Matches by `instanceof`.
+ * Same flat encoding approach as `EpochNsecHandler`.
  * See Section 5.3 of the formal spec.
  */
 export const EpochDaysHandler: TypeHandler = {
