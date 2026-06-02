@@ -696,3 +696,424 @@ package. Run both green before committing each stage.
   method calls).
 - **Discarded:** the reactive `sqliteExecute` node + its result cell/RPC/`rev`
   bump; `reactOn:db` read-after-write re-run (dropped this session).
+
+---
+
+## Increments 1–3 (implementation spec)
+
+> Status: implementation spec. Every file:line below was opened and read in the
+> `feat/sqlite-builtin-impl` worktree on 2026-06-02. Where line numbers differ
+> from earlier sections it is because `cell.ts` grew when `.exec` was added (the
+> exploration sections above predate that landing). This section anchors to the
+> CURRENT lines.
+>
+> **Already on the branch (do not redo):** `"sqlite"` is in `CellKind`
+> (`api/index.ts:181-188`, mirrored in
+> `packages/static/assets/types/commonfabric.d.ts:181-188`).
+> `CellImpl.exec(sql, params?)` exists, kind-guarded to `"sqlite"`, folding onto
+> `this.tx` via `recordSqliteWrite`, throwing on `undefined` params, encoding
+> `_cf_link` cell params inline (`cell.ts:864-937`). `"exec"` is in the
+> `cellMethods` allow-list (`cell.ts:381,426` — listed twice; harmless `Set`
+> dedup, worth collapsing). `exec` is covered by `test/sqlite-db-exec.test.ts`
+> (mints a `"sqlite"`-kind cell directly via `createCell(..., "sqlite")`,
+> `:54-61`). The Stage-1 commit-fold seam is green. The free-function
+> `sqliteQuery<Row>` transformer lowering injects `rowSchema`
+> (`schema-injection.ts:3787-3867`).
+
+### THE LOUD BLOCKER (read first) — schema-generator does NOT recognize a `"sqlite"` brand
+
+Increment 1's entire premise is "a `SqliteDb`-typed field lowers to
+`{asCell:["sqlite"]}`". **Today it does not, and will not, without a
+schema-generator edit.** The wrapper detector is brand-driven but gated by a
+hardcoded brand-to-kind switch that has no `"sqlite"` case:
+
+- The detector entry point is `getCellWrapperInfo`
+  (`packages/schema-generator/src/typescript/cell-brand.ts:190-204`). It calls
+  `getCellBrand` (`cell-brand.ts:83-100`), which finds the `CELL_BRAND`
+  computed-property symbol (`cell-brand.ts:34-55`) and returns the brand's
+  string-literal value — so for `BrandedCell<T,"sqlite">` it returns the literal
+  string `"sqlite"` (the function casts to `CellBrand` but does not validate
+  against the union, `cell-brand.ts:95-96`).
+- It then calls `brandToWrapperKind(brand)` (`cell-brand.ts:125-142`). This
+  switch has cases for opaque/stream/cell/comparable/readonly/writeonly and a
+  **`default: return undefined`**. `"sqlite"` hits the default, so `kind` is
+  `undefined`, so `getCellWrapperInfo` returns `undefined`
+  (`cell-brand.ts:197-198`).
+- Every `asCell` emission in the object/common-fabric formatters routes through
+  `getCellWrapperInfo`
+  (`common-fabric-formatter.ts:144,263,357,607,657,776,2051,2121`;
+  `object-formatter.ts:51-73` `getWrapperSchemaFromCallable`). With it returning
+  `undefined`, a `SqliteDb` field is treated as a plain object and its inner
+  `{id, tables}` shape is formatted with NO `asCell` — so the handler input
+  schema never carries `["sqlite"]`, runner's `.key()` kind-derivation
+  (`cell.ts:1291-1303`) never sets `_kind="sqlite"`, and `db.exec` throws
+  ".exec() is only available on a SqliteDb cell" (`cell.ts:868-870`).
+- A second, independent gate: `isOpaqueRefType` (`opaque-ref.ts:30-38`) has its
+  OWN hardcoded allow-list
+  `["opaque","cell","stream","comparable","readonly","writeonly"]` and returns
+  `false` for `"sqlite"`. This function gates reactive-receiver detection and
+  dataflow classification across the transformer (`call-kind.ts:850,959`;
+  `dataflow.ts:767,875`; `type-inference.ts:273,304,325,789`;
+  `reactive-variable-for.ts:768`; `structural-reactive-factory.ts:43`;
+  `rewrite-policy.ts:20`). If a `SqliteDb` receiver is not "opaque-ref-like",
+  `db.query(...)` may not be treated as a reactive call site at all.
+
+**Smallest viable fix (mechanical, additive):** in
+`packages/schema-generator/src/typescript/cell-brand.ts`, add `"sqlite"` to the
+`CellBrand` union (`:4-10`) and `CellWrapperKind` union (`:12-19`), add a
+`case "sqlite": return "SqliteDb"` to `brandToWrapperKind` (`:125-142`), and a
+`case "SqliteDb": return "sqlite"` to `wrapperKindToBrand` (`:144-164`). Then in
+`packages/schema-generator/src/formatters/object-formatter.ts:51-73`, add a
+`wrapperInfo?.kind === "SqliteDb"` branch returning `{ asCell: ["sqlite"] }`
+(and the same inside the OpaqueRef-inner block `:60-73`). Then add `"sqlite"` to
+the `isOpaqueRefType` allow-list (`opaque-ref.ts:34`). The
+`applyWrapperSemantics` path (`common-fabric-formatter.ts:1955-1969`) already
+emits `{asCell:[brand]}` generically once `wrapperKindToBrand` yields a value, so
+no further formatter edits are needed for the field-lowering case. **This is the
+single highest-risk edit in the whole effort** because `cell-brand.ts` is
+consumed by every schema the generator produces.
+
+---
+
+### Increment 1 — ergonomic wiring: `sqliteDatabase` returns a `SqliteDb`; a handler's `db` is a `"sqlite"`-kind cell
+
+**(a) Files + seam/edit**
+
+1. `packages/schema-generator/src/typescript/cell-brand.ts` and
+   `.../formatters/object-formatter.ts` and
+   `packages/ts-transformers/src/transformers/opaque-ref/opaque-ref.ts:34` — the
+   brand-recognition edits described in THE LOUD BLOCKER above. This is what makes
+   a `SqliteDb`-typed field emit `{asCell:["sqlite"]}`. `BrandedCell<T,"sqlite">`
+   does NOT flow through generically today — `brandToWrapperKind`'s closed switch
+   is the gate.
+2. `packages/api/index.ts` — define the variant interface. Mirror the
+   `ReadonlyCell`/`WriteonlyCell` shape (`api/index.ts:1128-1160`), which composes
+   `BrandedCell<T,Kind>` + a capability subset, with NO `IWritable`:
+   ```ts
+   // near the SQLite block, api/index.ts:2146+
+   export interface ISqliteExecutable {
+     exec(sql: string,
+          params?: ReadonlyArray<unknown> | Record<string, unknown>): void;
+   }
+   export interface ISqliteQueryable {
+     query<Row = Record<string, unknown>>(
+       sql: string,
+       options?: { params?: ReadonlyArray<unknown> | Record<string, unknown>;
+                   reactOn?: unknown },
+     ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+   }
+   export interface ISqliteDb<T = SqliteDatabase>
+     extends IAnyCell<T>, IResolvable<T, AnyBrandedCell<T>>,
+             ISqliteExecutable, ISqliteQueryable {}
+   export interface SqliteDb<T = SqliteDatabase>
+     extends BrandedCell<T, "sqlite">, ISqliteDb<T> {}
+   ```
+   `IAnyCell`+`IResolvable` give `toCell` recovery (the back-pointer the
+   query-result proxy returns, `query-result-proxy.ts:227-229`) and `.get()` for
+   `exec`'s `readDbRef(this.get())` step; NO `IWritable` (a DB handle must not be
+   `.set()`). Reuse the existing `"cell"`-family `ICell` decomposition
+   (`api/index.ts:1059-1070`) as the menu of capability interfaces.
+3. `packages/api/index.ts:2166-2192` — change the function param/return types,
+   keeping back-compat where possible:
+   - `SqliteDatabaseFunction` (`:2166-2169`): return `OpaqueRef<SqliteDb>` instead
+     of `OpaqueRef<SqliteDatabase>`. (`SqliteDatabase` stays as the brand payload
+     type `T`.)
+   - `SqliteQueryParams.db` (`:2172`) and `SqliteExecuteParams.db` (`:2182`):
+     widen to `Opaque<SqliteDatabase | SqliteDb>` so the free functions still
+     accept a handle whether it arrives as the bare brand or the variant
+     (back-compat for the existing free-function call sites in tests).
+   - `packages/static/assets/types/commonfabric.d.ts` — **MANUAL MIRROR
+     REQUIRED.** This file is a hand-maintained copy of `api/index.ts` (it already
+     carries `"sqlite"` in `CellKind` at `:181-188`; no diff vs `api/index.ts`
+     for the SQLite block today). It is included into the CLI binary
+     (`tasks/build-binaries.ts:298`) and is the `commonfabric.d.ts` the
+     transformer fixture harness type-checks against
+     (`fixture-based.test.ts:103,205,264`; `utils.ts:167-169`). There is NO
+     generator task that rebuilds it — so every `api/index.ts` type added here
+     (`ISqliteDb`, `SqliteDb`, the signature changes) MUST be copied into the
+     static `.d.ts`, or the Increment-2 fixture (and `cf check`) will not see
+     `SqliteDb`.
+4. `packages/runner/src/builtins/sqlite-builtins.ts:116-145` — `sqliteDatabase`
+   needs no runtime change to surface kind `"sqlite"`. The handle is a plain
+   result cell (`makeResultCell` calls `createCell(..., tx)` with default kind
+   `"cell"`, `:50-62`). The kind is derived at the CONSUMER from the schema, not
+   stamped on the producer: when a handler input field `db` has schema
+   `{asCell:["sqlite"]}`, runner materializes the handler argument, and the
+   navigated child cell gets `kind="sqlite"` via `CellImpl.key()` reading
+   `getAsCellValues`/`getAsCellKind` (`cell.ts:1291-1303`; `cfc.ts:509-520` —
+   `getAsCellKind` returns the raw string `"sqlite"` generically, no enum gate).
+   The `{asCell:["sqlite"]}` schema itself originates from lowering the
+   `SqliteDatabaseFunction` return type / the handler-state field type through the
+   schema-generator (edit #1).
+   - Confirm the handler-input path: a handler state typed `{db: SqliteDb}` →
+     schema-generator lowers `db` to `{asCell:["sqlite"]}` (edit #1) → runner
+     delivers a `"sqlite"`-kind cell. Note `findAllWriteRedirectCells` only fires
+     for `"cell"`/`"writeonly"` (`runner.ts:2096-2105`), so a `"sqlite"` field is
+     NOT treated as a write-redirect input; it flows through `getAsQueryResult`
+     materialization (`runner.ts:2352`), and the query-result proxy's `toCell`
+     mints the cell whose `_kind` is then set by `.key()` from the schema. Same
+     mechanism `Stream`/`Cell` inputs use; nothing SQLite-specific in `runner.ts`.
+
+**(b) New/changed types & signatures** — `ISqliteExecutable`, `ISqliteQueryable`,
+`ISqliteDb<T>`, `SqliteDb<T>` (new, api/index.ts); `SqliteDatabaseFunction` return
+becomes `OpaqueRef<SqliteDb>`; `SqliteQueryParams.db`/`SqliteExecuteParams.db`
+widened to `SqliteDatabase | SqliteDb`. `CellBrand`/`CellWrapperKind` unions plus
+`brandToWrapperKind`/`wrapperKindToBrand` gain a `"sqlite"`/`"SqliteDb"` arm
+(cell-brand.ts). No new runtime class — backed by the single `CellImpl`
+(`cell.ts:477-478`); `createCell(..., "sqlite")` already works
+(`cell.ts:438-455`, exercised at `test/sqlite-db-exec.test.ts:54-61`).
+
+**(c) RED tests**
+
+- **Transformer field-lowering fixture (proves edit #1):** add
+  `packages/ts-transformers/test/fixtures/schema-injection/sqlite-db-field-ascell.input.tsx`
+  + `.expected.jsx`. Input: a handler/pattern whose state declares `db: SqliteDb`
+  (imported from `commonfabric`); assert the emitted argument schema contains
+  `{ asCell: ["sqlite"] }` on the `db` property. The harness auto-discovers any
+  `schema-injection/*.input.tsx` (`fixture-based.test.ts:73` registers the
+  `schema-injection` directory; sibling examples
+  `sqlite-query-row-schema.input.tsx`/`.expected.jsx`). Requires the static
+  `commonfabric.d.ts` mirror (edit #3) so `SqliteDb` resolves in the fixture
+  program. Key assertion: `properties.db.asCell` deep-equals `["sqlite"]`.
+- **End-to-end integration (pattern creates db in a handler, calls `db.exec`):**
+  add `packages/runner/integration/sqlite-db-exec.test.ts` (+ `.tsx` pattern
+  fixture) mirroring the existing `integration/*.test.ts` shape (e.g.
+  `integration/array_push.test.ts` + `array_push.test.tsx`). The `.tsx` pattern:
+  `sqliteDatabase({tables})` into state, a handler typed `{db: SqliteDb}` calling
+  `db.exec("INSERT …", […])`; the `.test.ts` runs it through `cf check` (the
+  transformer + runtime), commits, then reads back via the storage provider
+  `sqliteQuery` (`storage/v2.ts:1048-1054`). Key assertion: the row is present AND
+  a sibling cell write in the same handler committed atomically. This is the test
+  that proves the `SqliteDb`-field → `asCell:["sqlite"]` → `"sqlite"`-kind-cell →
+  `db.exec` chain end to end (the unit test at `test/sqlite-db-exec.test.ts`
+  cannot, because it mints the kind directly).
+
+**(d) Gate** — `deno task test` AND `deno task integration`, both green
+(Regression requirement, this doc `:659-663`). The schema-generator edit is
+workspace-foundational; the full suite is mandatory, not just the runner package.
+
+---
+
+### Increment 2 — `db.query<Row>` method + transformer METHOD-CALL lowering
+
+**(a) Files + seam/edit**
+
+1. `packages/runner/src/cell.ts` — add a `query` method on `CellImpl` as a sibling
+   of `map` (`cell.ts:1785-1811`). It is sugar over the existing `sqliteQuery`
+   `createNodeFactory` (the free factory is `built-in.ts:179-182`), threading the
+   receiver as the `db` input exactly as `map` threads `this` as `list`:
+   ```ts
+   // mirror cell.ts:1785-1811; memoize a module-scope factory like mapFactory (cell.ts:147)
+   query<Row>(sql: string,
+              options?: { params?: ...; reactOn?: unknown }): OpaqueRef<...> {
+     if (this._kind !== "sqlite") throw new Error(".query() is only available on a SqliteDb cell");
+     if (!sqliteQueryFactory) sqliteQueryFactory = createNodeFactory({ type: "ref", implementation: "sqliteQuery" });
+     return sqliteQueryFactory({ db: this, sql, params: options?.params, reactOn: options?.reactOn });
+   }
+   ```
+   `createNodeFactory` is already imported (`cell.ts:21`). Kind-guard to
+   `"sqlite"` mirrors `exec` (`cell.ts:868-870`). The `<Row>` result schema is NOT
+   set here — it is injected by the transformer (edit #4), exactly as the free
+   function relies on transformer injection rather than a runtime `setSchema`.
+2. `packages/runner/src/cell.ts:374-427` — add the string `"query"` to the
+   `cellMethods` allow-list. Without this the OpaqueRef proxy get-trap treats
+   `.query` as a data-key navigation, not a bound method (`cell.ts:1757-1772`:
+   only names in `cellMethods` are returned bound via
+   `getAsOpaqueRefProxy(self[prop].bind(self))`). This is the grounding-spike Q2
+   finding — the proxy is allow-list-gated, not generic. (`exec` is already in the
+   set, `:381,426`; add `query` the same way.)
+3. `packages/ts-transformers/src/ast/call-kind.ts` — teach `detectCallKind` to
+   classify `db.query<Row>(...)`. Today `resolveExpressionKind`
+   (`call-kind.ts:1114-1223`) resolves a PropertyAccessExpression callee by symbol
+   (`:1175-1176` `getSymbolAtLocation(target.name)` then `resolveSymbolKind`); the
+   `.query` method symbol resolves to the `ISqliteDb.query` declaration in
+   `api/index.ts`, which is NOT in the runtime-call registry
+   (`commonfabric-runtime-registry.ts:184-201` keys on free export names), so it
+   yields `undefined`. The array-method precedent shows the pattern: a property
+   name plus a reactive-receiver check (`call-kind.ts:1196-1207`,
+   `isReactiveArrayMethodReceiverExpression` then `hasReactiveCollectionProvenance`,
+   `:1398-1403`). Add a SIBLING branch in `resolveExpressionKind` after the
+   array-method block (`:1196-1207`): when `target.name.text === "query"` and the
+   receiver type is a `SqliteDb` (brand `"sqlite"`), return a CallKind. The
+   **receiver-type check is the new bit vs the free-function form** — use the
+   transformer's existing `getCellKind(receiverType, checker)` helper
+   (`opaque-ref.ts:46-51`, delegating to `cell-brand.ts:118-123`), which returns
+   the raw brand string `"sqlite"` for a `SqliteDb` receiver (it does NOT go
+   through `brandToWrapperKind`, so it works even before the Increment-1
+   schema-generator edit — but `isOpaqueRefType`'s allow-list, opaque-ref.ts:34,
+   must include `"sqlite"` for sibling reactive-classification paths). Suggested
+   CallKind: reuse `{ kind: "runtime-call", exportName: "sqliteQuery",
+   reactiveOrigin: true }` (`call-kind.ts:170-175`) so the EXISTING injection
+   branch (next edit) matches with no new discriminant.
+4. `packages/ts-transformers/src/transformers/schema-injection.ts:3787-3867` — the
+   existing branch keys on `callKind.kind` being `"runtime-call"` with
+   `callKind.exportName === "sqliteQuery"` (`:3793-3796`) and reads
+   `node.typeArguments` (`:3798`). For a method call `db.query<Row>(sql)` the AST
+   call node is still a `CallExpression` with `typeArguments`, and its `expression`
+   is the `PropertyAccessExpression`. If edit #3 returns
+   `exportName:"sqliteQuery"` for the method, **this branch already fires
+   unchanged for the injection itself** — BUT it currently appends `rowSchema`
+   into `args[0]` assuming an OPTIONS-OBJECT first arg (`:3836-3857`). The method
+   shape is `query(sql: string, options?)` — `args[0]` is the SQL string, not an
+   object. So this branch needs a method-vs-free fork: when the callee is a
+   PropertyAccessExpression whose name is `query`, inject `rowSchema` into
+   `args[1]` (the options object), creating it if absent — reusing
+   `resolveInjectableSchemaType` (`:3819`) and
+   `createRegisteredSchemaCallFromResolvedType` (`:3827`) exactly as today.
+   Cleanest impl: detect the method form via a PropertyAccessExpression callee
+   whose name text is `query`, then branch the arg-rewrite target index.
+
+**(b) New/changed types & signatures** — `ISqliteQueryable.query<Row>` (added in
+Increment 1); a module-scope `let sqliteQueryFactory` memo in `cell.ts` (mirror
+`mapFactory`, `cell.ts:147`); a new receiver-type branch in
+`resolveExpressionKind` (call-kind.ts); a method-arg fork in the schema-injection
+`sqliteQuery` branch (schema-injection.ts). No registry change (reuse the
+`sqliteQuery` runtime-call entry).
+
+**(c) RED tests**
+
+- **Transformer fixture** `db-query-row-schema.{input,expected}` under
+  `packages/ts-transformers/test/fixtures/schema-injection/` (model on the
+  existing `sqlite-query-row-schema.input.tsx:13-19` and its
+  `.expected.jsx:24-54`). Input:
+  `db.query<{ author: Cell<User>; n: number }>("SELECT …")` on a `db: SqliteDb`
+  receiver. Key assertion: the emitted options object carries
+  `rowSchema.properties.author.asCell === ["cell"]` and
+  `rowSchema.properties.n.type === "number"` — byte-for-byte the same injected
+  `rowSchema` the free-function fixture produces, but appended to the method
+  call's options arg. Requires the static `commonfabric.d.ts` mirror so `SqliteDb`
+  and its `query` method resolve.
+- **Runner unit test** for node-building: extend `test/sqlite-db-exec.test.ts` (or
+  a new `test/sqlite-db-query.test.ts`) — mint a `"sqlite"`-kind cell, call
+  `db.query("SELECT …")`, assert it returns an `OpaqueRef` wired to a
+  `sqliteQuery`-implementation graph node (assert via the builder graph, the same
+  way map/filter node-building is tested). Kind-guard: calling `.query` on a
+  non-sqlite cell throws.
+
+**(d) Gate** — `deno task test` AND `deno task integration`. The `call-kind.ts`
+edit is shared by all transformer dispatch; the array-method classifier is the
+template but the receiver-type check is new — run the full transformer suite
+(`fixture-based.test.ts`, `call-kind.test.ts`) and the integration suite.
+
+---
+
+### Increment 3 — drop the reactive `sqliteExecute` node
+
+Per `sqlite-execute-commit-fold.md` §6 removal list, reconciled with the
+cell-variant design. `db.exec` (Increment 1) plus `tx.recordSqliteWrite`
+(Stage-1 seam) fully replace the reactive write node; **keep `sqliteQuery` and
+the storage provider `sqliteQuery` method**.
+
+**(a) Files + the exact symbols to change/remove**
+
+1. `packages/runner/src/builtins/sqlite-builtins.ts` — remove the entire
+   `sqliteExecute` builtin action (`:246-336`), its `ExecuteState` type
+   (`:239-244`), and the `rev` bump machinery (`:298-322`: `dbCell`,
+   `enqueuePostCommitEffect` kind `"sqlite-execute"`, `provider.sqliteExecute!`,
+   `editWithRetry`, the `dbCell.set({...rev})`). Also remove the now-dead
+   `rev?: number` field on `SqliteDbRef` (`:34-36`) and the `rev: 0` initializer
+   in `sqliteDatabase` (`:139`) — the `reactOn:db` read-after-write re-run is
+   dropped (this doc `:698`). `encodeParams`/`parseInsertColumns`/`readDbRef`
+   (`:71-113`) STAY (used by `sqliteQuery`; also duplicated into `cell.ts` for
+   `exec` — `cell.ts:429-436,902-937`; consider hoisting to a shared leaf module
+   to kill the duplication, but not required for green).
+2. `packages/runner/src/builder/built-in.ts:184-187` — remove the
+   `export const sqliteExecute = createNodeFactory(...)` factory.
+3. `packages/runner/src/builtins/index.ts:15-16,56-59` — remove the
+   `sqliteExecute` import (`:16`) and its
+   `moduleRegistry.addModuleByRef("sqliteExecute", raw(sqliteExecute, { isEffect: true }))`
+   registration (`:56-59`). Update the comment at `:49-51` (drops the
+   "sqliteExecute is effectful" clause).
+4. `packages/api/index.ts:2181-2192` — remove `SqliteExecuteParams` and
+   `SqliteExecuteFunction` (and mirror the removal in
+   `packages/static/assets/types/commonfabric.d.ts` at the same SQLite block).
+5. `packages/ts-transformers/src/core/commonfabric-runtime-registry.ts:196-201` —
+   remove the `sqliteExecute` registry entry (it is only `reactiveOrigin:true` to
+   recognize the free-function call site; with the function gone it is dead). Do
+   NOT flip to `reactiveOrigin:false` — fully remove, since the export is gone.
+   `sqliteQuery` (`:190-195`) and `sqliteDatabase` (`:184-189`) STAY.
+6. Wherever `cf.sqliteExecute` is exposed on the builder object (the value
+   surfaced to patterns) — remove it alongside the factory removal in
+   `built-in.ts`. (`storage/v2.ts:872-877,1057-1063` provider `sqliteExecute`
+   stays for now: it is the server verb still used by tests migrated to
+   `recordSqliteWrite`/`db.exec`'s commit path; or remove if no caller remains —
+   verify with a workspace grep before deleting.)
+
+**(b) Test/call-site migrations (declarative `cf.sqliteExecute(...)` becomes
+handler `db.exec` or `tx.recordSqliteWrite`)**
+
+- `packages/runner/test/sqlite-builtins.test.ts` — the "executes a write through
+  the builtin…" test (`:52-72`, uses `cf.sqliteExecute({db, sql, params})`) and
+  the "re-runs a reactOn:db query after a sibling write" test (`:116-148`, uses
+  both `cf.sqliteExecute` and `reactOn:db`). Migrate the write to either a handler
+  `db.exec` (mint a `"sqlite"`-kind cell as `test/sqlite-db-exec.test.ts:46-61`
+  does) or a direct `tx.recordSqliteWrite(space, {op:"sqlite", …})` (as
+  `test/sqlite-commit-fold.test.ts:48-58,81,112` already does). The `reactOn:db`
+  re-run assertion (`:116-148`) is DROPPED behavior — convert it to a plain
+  "write, then query sees the row" assertion (no auto-re-run), matching this doc
+  `:698`.
+- `packages/runner/test/sqlite-cf-link-decode.test.ts` — the two `cf.sqliteExecute`
+  write+query tests (`:100-139` returns-the-stored-sigil-link; `:165-195`
+  NULL-link-column). Migrate the write to `db.exec`/`recordSqliteWrite`; keep the
+  `cf.sqliteQuery` read unchanged.
+- `test/sqlite-db-exec.test.ts` already covers the `db.exec` happy path,
+  undefined-throw, `_cf_link` encode, and SQL-failure rollback (`:63-185`) — the
+  migrated cases above should reuse those harness patterns.
+
+**(c) RED tests** — the migrated tests above ARE the regression net. Add one
+explicit "the `sqliteExecute` builtin is no longer registered" guard if desired
+(assert `moduleRegistry` has no `"sqliteExecute"` ref after `index.ts` setup) to
+lock the removal.
+
+**(d) Gate** — `deno task test` AND `deno task integration`. Removing a registered
+builtin plus an api export ripples to anything importing them; a workspace grep
+for `sqliteExecute` (currently: built-in.ts, builtins/index.ts,
+sqlite-builtins.ts, api/index.ts, the registry, the static d.ts, storage/v2.ts,
+and the three test files above) is the change checklist.
+
+---
+
+### Sequencing & risk
+
+**Order: 1, then 2, then 3.** Increment 1 makes the variant real (and is the
+prerequisite for the Increment-2 fixture to type-check via the static `.d.ts`).
+Increment 2 adds the reactive method plus transformer method-call lowering.
+Increment 3 is pure removal once `db.exec` is the live write path — do it LAST so
+the migrated tests have `db.exec` to land on.
+
+**Riskiest increment: Increment 1, specifically the schema-generator brand edit
+(`cell-brand.ts:125-164`, `object-formatter.ts:51-73`, `opaque-ref.ts:34`).**
+`getCellWrapperInfo` is the single chokepoint for `asCell` emission across EVERY
+schema the generator produces (10+ call sites in `common-fabric-formatter.ts`
+alone). A mistake in `brandToWrapperKind` (e.g. mapping `"sqlite"` to a kind that
+collides with an existing wrapper-semantics branch) could mis-lower unrelated
+`Cell`/`Stream`/`OpaqueRef` fields workspace-wide. Mitigation: the edit is purely
+ADDITIVE (a new switch arm plus a new allow-list member); the existing arms are
+untouched; gate on the full `deno task test` (schema-generator + ts-transformers +
+runner) before proceeding.
+
+**Second risk: the `isOpaqueRefType` allow-list (`opaque-ref.ts:30-38`).** It is
+consumed by ~10 transformer modules for reactive-receiver/dataflow decisions.
+Adding `"sqlite"` is necessary for `db.query` to classify as reactive, but it also
+makes a `SqliteDb` "opaque-ref-like" everywhere — verify no transformer path then
+tries to treat a `SqliteDb` as a generic readable cell (e.g. emitting a `.get()`
+lowering). The kind-guard on `query`/`exec` (`cell.ts:868`) is the runtime
+backstop, but a mis-lowering would surface as a transformer error, not a runtime
+one — so the ts-transformers fixture suite is the gate.
+
+**Third risk: the static `commonfabric.d.ts` mirror drift.** It is hand-maintained
+(no generator task; last edited by a rename commit, not a build step) and is what
+`cf check` and the fixture harness type-check against. If `api/index.ts` and the
+static `.d.ts` diverge, Increment-2's `db.query<Row>` fixture (and real `cf check`
+of patterns) will fail to resolve `SqliteDb`/`.query` with confusing "property
+does not exist" errors rather than a clear signal. Keep the two in lockstep in the
+SAME commit.
+
+**Lowest risk: Increment 3.** Pure deletion plus test migration; the replacement
+(`db.exec`) is already green. The only subtlety is dropping `reactOn:db` re-run
+semantics — a behavior change, not a mechanism risk, already decided (this doc
+`:698`).
+
+**Not a blocker, but call it out:** `exec` is listed twice in the `cellMethods`
+Set (`cell.ts:381,426`); collapse to one entry when adding `query` to avoid
+confusion.
