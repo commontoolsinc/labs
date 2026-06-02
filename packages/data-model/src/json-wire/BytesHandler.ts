@@ -15,9 +15,7 @@ import { makeProblematic } from "./makeProblematic.ts";
 /**
  * Handler for `FabricBytes`. Serializes to a flat base64url string
  * encoding the raw bytes. Wire format: `{ "/Bytes@1": "<base64>" }`.
- * `FabricBytes` is a direct member of `FabricValue` (via
- * `FabricPrimitive`), so this handler uses `instanceof` directly.
- * Same flat encoding approach as the epoch handlers.
+ * Matches by `instanceof`. Same flat encoding approach as the epoch handlers.
  */
 export const BytesHandler: TypeHandler = {
   tag: TAGS.Bytes,

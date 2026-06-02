@@ -190,10 +190,9 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  *   JavaScript "wild west" (`unknown`) <-> `FabricValue` <-> Serialized (`Uint8Array`)
  *
  * Most native JS object types enter the fabric layer via wrapper classes
- * that implement `FabricInstance`. However, `FabricPrimitive` subclasses
- * and `bigint` are direct members of `FabricValue` without implementing
- * `FabricInstance`. Some native types are converted to fabric primitives
- * during conversion.
+ * that extend `FabricInstance`; other special values extend `FabricPrimitive`.
+ * Both arrive in `FabricValue` through the common `FabricSpecialObject` arm.
+ * Some native types are converted to fabric primitives during conversion.
  *
  * `undefined` is preserved when the `modernDataModel` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
