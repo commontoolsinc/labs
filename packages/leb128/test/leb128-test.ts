@@ -4,7 +4,7 @@ import {
   decodeULEB128,
   encodeSLEB128,
   encodeULEB128,
-} from "../mod.ts";
+} from "../src/index.ts";
 
 Deno.test("encodeULEB128", async (t) => {
   await t.step("encodes 0", () => {
