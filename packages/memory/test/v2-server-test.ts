@@ -613,7 +613,7 @@ Deno.test("memory v2 server accepts legacy richStorableValues flag name and echo
       type: "hello.ok",
       protocol: MEMORY_PROTOCOL,
       flags: {
-        modernCellRep: !HELLO_FLAGS.modernCellRep,
+        modernCellRep: HELLO_FLAGS.modernCellRep,
         richStorableValues: HELLO_FLAGS.modernDataModel,
         persistentSchedulerState: HELLO_FLAGS.persistentSchedulerState,
       },
