@@ -2,7 +2,6 @@ import {
   computed,
   equals,
   handler,
-  ifElse,
   NAME,
   pattern,
   Stream,
@@ -10,16 +9,14 @@ import {
   Writable,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
-import ProfileCreate, {
+import {
   type CreateProfileEvent,
-  setDefaultProfile,
   submitProfileCreation,
-  TRUSTED_PROFILE_PICKER_SURFACE,
-  TRUSTED_PROFILE_SET_DEFAULT_ACTION,
   type TrustedDefaultProfile,
   type TrustedProfileList,
   type TrustedProfileMru,
 } from "./profile-create.tsx";
+import ProfilePicker from "./profile-picker.tsx";
 import type { ProfileHomeOutput } from "./profile-home.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
@@ -150,15 +147,19 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   const defaultProfile = new Writable<ProfileHomeOutput | undefined>(undefined)
     .for("defaultProfile");
   const mru = new Writable<ProfileHomeOutput[]>([]).for("mru");
+  // Untrusted-write regression surface: this stream is exported so tests can
+  // verify that sending it from outside the trusted create surface does NOT
+  // create a profile. The actual create UI lives in the profile picker below.
   const createProfileStream = submitProfileCreation({
     profiles: profiles as any,
   });
-  const profileCreate = ProfileCreate({
+  // The home Profile tab IS the profile picker: it lists profiles natively,
+  // sets the default, stamps MRU on selection, and creates more inline.
+  const profilePicker = ProfilePicker({
     profiles: profiles as any,
-    inputId: "home-profile-name-input",
-    buttonId: "home-profile-create-button",
+    defaultProfile: defaultProfile as any,
+    mru: mru as any,
   });
-  const hasProfiles = computed(() => (profiles.get() ?? []).length > 0);
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -183,45 +184,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>
 
-              <cf-vstack
-                id="home-profile-summary"
-                gap="2"
-                data-ui-pattern={TRUSTED_PROFILE_PICKER_SURFACE}
-                data-ui-event-integrity={TRUSTED_PROFILE_PICKER_SURFACE}
-              >
-                {profiles.map((p) => (
-                  <cf-hstack gap="2" align="center">
-                    <div style={{ flex: "1" }}>
-                      <cf-cell-link $cell={p as any} />
-                    </div>
-                    {ifElse(
-                      computed(() => equals(defaultProfile.get(), p)),
-                      <span style={{ color: "#0a7", fontSize: "12px" }}>
-                        default
-                      </span>,
-                      <cf-button
-                        size="sm"
-                        variant="ghost"
-                        data-ui-action={TRUSTED_PROFILE_SET_DEFAULT_ACTION}
-                        onClick={setDefaultProfile({
-                          defaultProfile: defaultProfile as any,
-                          profile: p,
-                        })}
-                      >
-                        Set default
-                      </cf-button>,
-                    )}
-                  </cf-hstack>
-                ))}
-                {ifElse(
-                  hasProfiles,
-                  null,
-                  <p style={{ color: "#888", fontStyle: "italic" }}>
-                    No profiles yet. Create one below.
-                  </p>,
-                )}
-                {profileCreate}
-              </cf-vstack>
+              <div id="home-profile-summary">{profilePicker}</div>
 
               {
                 /*
