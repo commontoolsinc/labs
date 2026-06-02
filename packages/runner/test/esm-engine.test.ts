@@ -91,6 +91,63 @@ describe("Engine.compileToRecordGraph", () => {
     await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
 
+  // Step 5 (option C): per-module identities (`cf:module/<hash>`) are
+  // entry-point independent — the whole-program `/<id>` prefix is stripped for
+  // identity computation, so a byte-identical module shared by two different
+  // programs gets the SAME identity (content-addressed cross-program dedup).
+  describe("entry-point-independent module identities", () => {
+    const depContents = "export const base = (): number => 20;";
+
+    const specifierFor = async (
+      program: RuntimeProgram,
+      path: string,
+    ): Promise<string> => {
+      const { graph } = await engine.compileToRecordGraph(program);
+      // specifierByPath is keyed by the resolved/prefixed path; find the entry
+      // whose path ends with the authored path.
+      for (const [p, spec] of graph.specifierByPath) {
+        if (p.endsWith(path)) return spec;
+      }
+      throw new Error(`no specifier for ${path}`);
+    };
+
+    it("gives a shared module the same identity across different programs", async () => {
+      const progA: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          { name: "/dep.ts", contents: depContents },
+          {
+            name: "/main.tsx",
+            contents:
+              `import { base } from "./dep.ts";\nexport default () => base() + 1;`,
+          },
+        ],
+      };
+      const progB: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          { name: "/dep.ts", contents: depContents },
+          {
+            name: "/main.tsx",
+            // Different entry → different whole-program id, same dep.ts bytes.
+            contents:
+              `import { base } from "./dep.ts";\nexport default () => base() * 99;`,
+          },
+        ],
+      };
+      const depA = await specifierFor(progA, "/dep.ts");
+      const depB = await specifierFor(progB, "/dep.ts");
+      expect(depA).toBe(depB);
+      // The prefix is gone from the identity: no whole-program hash leaks in.
+      expect(depA.startsWith("cf:module/")).toBe(true);
+
+      // The entry modules differ (different content), so their identities differ.
+      const mainA = await specifierFor(progA, "/main.tsx");
+      const mainB = await specifierFor(progB, "/main.tsx");
+      expect(mainA).not.toBe(mainB);
+    });
+  });
+
   // Step 4.3.4: compileToRecordGraph returns serializable per-module artifacts
   // and accepts a full set of cached bodies to skip the TypeScript compile.
   describe("precompiled-module seam", () => {

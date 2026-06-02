@@ -188,6 +188,19 @@ export interface CompileSourcesOptions {
    * loader (the AMD path registers the bundle map via the isolate).
    */
   precompiledSourceMaps?: Map<string, SourceMap>;
+  /**
+   * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
+   * module's path *for content-addressed identity only*. The ESM compile path
+   * resolves a program whose files are prefixed with `/<computeId>/...` (a
+   * whole-program hash) so source locations match the AMD bundle. Folding that
+   * prefix into the per-module identity would make `cf:module/<hash>`
+   * whole-program-dependent — defeating cross-program dedup and diverging from
+   * the entry-point-independent identity the spec mandates
+   * (docs/specs/module-loading.md). Stripping it here yields stable, dedupable
+   * identities while every other artifact (record sourceUrls, source-map keys,
+   * `fn.src` resolution) keeps the prefixed path untouched.
+   */
+  idPrefix?: string;
 }
 
 export interface CompiledModuleGraph {
@@ -205,8 +218,19 @@ export function compileSourcesToRecords(
   options: CompileSourcesOptions = {},
 ): CompiledModuleGraph {
   const runtimeModules = options.runtimeModules ?? {};
+  // Strip the whole-program `/<id>` prefix for identity computation only, so
+  // `cf:module/<hash>` is entry-point independent and dedupes across programs.
+  // Relative-import resolution inside `computeModuleHashes` stays consistent
+  // because every path is normalized the same way; unprefixed modules (e.g.
+  // the injected `cfc.ts` helper) are left untouched.
+  const prefix = options.idPrefix;
+  const identityName = (name: string): string =>
+    prefix && name.startsWith(`${prefix}/`) ? name.slice(prefix.length) : name;
   const hashes = computeModuleHashes(
-    { main: "", files: sources },
+    {
+      main: "",
+      files: sources.map((s) => ({ ...s, name: identityName(s.name) })),
+    },
     options.runtimeFingerprint !== undefined
       ? { runtimeFingerprint: options.runtimeFingerprint }
       : {},
@@ -214,7 +238,10 @@ export function compileSourcesToRecords(
   const fileNames = new Set(sources.map((s) => s.name));
   const specifierByPath = new Map<string, string>();
   for (const source of sources) {
-    specifierByPath.set(source.name, `cf:module/${hashes.get(source.name)}`);
+    specifierByPath.set(
+      source.name,
+      `cf:module/${hashes.get(identityName(source.name))}`,
+    );
   }
   const sourceByName = new Map(sources.map((s) => [s.name, s]));
 
@@ -277,7 +304,7 @@ export function compileSourcesToRecords(
   const moduleSourceMaps = new Map<string, SourceMap>();
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
-    const moduleHash = hashes.get(source.name)!;
+    const moduleHash = hashes.get(identityName(source.name))!;
     const sourceMap = options.precompiledSourceMaps?.get(source.name);
     if (sourceMap) moduleSourceMaps.set(specifier, sourceMap);
     const precompiled = options.precompiledBodies?.get(source.name);

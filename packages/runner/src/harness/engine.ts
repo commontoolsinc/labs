@@ -354,6 +354,10 @@ export class Engine extends EventTarget implements Harness {
         precompiledBodies,
         precompiledSourceMaps,
         runtimeModules: runtimeModulesOption,
+        // Strip the whole-program `/<id>` prefix from per-module identities so
+        // `cf:module/<hash>` is entry-point independent and dedupes across
+        // programs (the content-addressed cache keys off these identities).
+        idPrefix: `/${id}`,
       });
 
       // Register runtime-module records so cf:runtime/* imports resolve.
