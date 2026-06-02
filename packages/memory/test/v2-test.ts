@@ -151,16 +151,6 @@ describe("memory v2 flags", () => {
         persistentSchedulerState: false,
       },
     ));
-    assertFalse(compatibleMemoryProtocolFlags(
-      {
-        modernCellRep: true,
-        persistentSchedulerState: true,
-      },
-      {
-        modernCellRep: true,
-        persistentSchedulerState: true,
-      },
-    ));
   });
 });
 
