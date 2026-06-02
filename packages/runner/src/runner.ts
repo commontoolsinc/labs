@@ -2414,13 +2414,8 @@ export class Runner {
    * replace the order with `[child2, parent]`, dropping `child1` to after the
    * parent (orderedCommitSpaces appends unlisted written spaces), which would
    * make the parent's link to `child1` durable before `child1`'s target.
-   *
-   * Public so the write path (`diffAndUpdate`) can opt in when a handler body
-   * materializes an `inSpace` child straight into a cell, which writes the child
-   * during the `.set()` itself — before the post-run handler-result path below
-   * gets a chance to enable it.
    */
-  enableCrossSpaceChildCommit(
+  private enableCrossSpaceChildCommit(
     tx: IExtendedStorageTransaction,
     childSpace: MemorySpace,
     parentSpace: MemorySpace,
