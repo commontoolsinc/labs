@@ -220,6 +220,7 @@ Currently defined:
 
 | Flag | Env var |
 |---|---|
+| `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` |
 | `schedulerHistoricalMightWrite` | _(runtime-only; pass via `new Runtime({ experimental: { ... } })`)_ |
 
@@ -236,6 +237,7 @@ Most shell config is **build-time**: esbuild injects defines in
 | `PRODUCTION` | `$ENVIRONMENT` (`"production"` if set, else `"development"`) | _(unset = dev)_ | Triggers minified bundle and disables sourcemaps. |
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging. |
+| `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_MODERN_DATA_MODEL` | `EXPERIMENTAL.modernDataModel` | _(unset)_ | See experimental flags. |
 | `COMPILATION_CACHE_CLIENT` | `$COMPILATION_CACHE_CLIENT` | `"true"` | See compilation cache. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
@@ -293,6 +295,7 @@ Passed before the CLI args; rarely needed:
 | `OPERATOR_PASS` | `"implicit trust"` | Passphrase for implicit identity. Must match toolshed's identity in dev. |
 | `IDENTITY` | _(unset)_ | Path to keyfile; takes precedence over `OPERATOR_PASS`. |
 | `API_URL` | `http://localhost:8000` | Toolshed URL the service calls. |
+| `EXPERIMENTAL_MODERN_CELL_REP` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_MODERN_DATA_MODEL` | _(unset)_ | See experimental flags. |
 
 ---

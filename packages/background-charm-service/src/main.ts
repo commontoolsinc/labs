@@ -32,6 +32,7 @@ const runtime = new Runtime({
     address: new URL("/api/storage/memory", env.API_URL),
   }),
   experimental: {
+    modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
     modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
     persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
   },

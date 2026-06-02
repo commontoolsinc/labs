@@ -1,4 +1,5 @@
 import { getDataModelConfig } from "@commonfabric/data-model/fabric-value";
+import { getModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
 import {
   jsonFromValue,
   valueFromJson,
@@ -153,6 +154,7 @@ export interface SessionOpenResult {
 }
 
 export interface MemoryProtocolFlags {
+  modernCellRep: boolean;
   modernDataModel: boolean;
   persistentSchedulerState: boolean;
 }
@@ -169,6 +171,7 @@ export type WireFlagsKey = "modernDataModel" | "richStorableValues";
  */
 export type WireMemoryProtocolFlags =
   & { [K in WireFlagsKey]?: boolean }
+  & { modernCellRep?: boolean }
   & { persistentSchedulerState?: boolean };
 
 export interface HelloMessage {
@@ -433,6 +436,7 @@ export function resetPersistentSchedulerStateConfig(): void {
 }
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
+  modernCellRep: getModernCellRepConfig(),
   modernDataModel: getDataModelConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
 });
@@ -441,6 +445,7 @@ export const sameMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
 ): boolean =>
+  left.modernCellRep === right.modernCellRep &&
   left.modernDataModel === right.modernDataModel &&
   left.persistentSchedulerState === right.persistentSchedulerState;
 
@@ -453,7 +458,9 @@ export const sameMemoryProtocolFlags = (
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean => left.modernDataModel === right.modernDataModel;
+): boolean =>
+  (left.modernCellRep === right.modernCellRep) &&
+  (left.modernDataModel === right.modernDataModel);
 
 /**
  * Parses and normalizes incoming wire-protocol flags. Accepts either the
@@ -477,9 +484,18 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const modernCellRep = value.modernCellRep;
+  if (
+    modernCellRep !== undefined &&
+    typeof modernCellRep !== "boolean"
+  ) {
+    return null;
+  }
+
   if (typeof value.modernDataModel === "boolean") {
     return {
       flags: {
+        modernCellRep: modernCellRep === true,
         modernDataModel: value.modernDataModel,
         persistentSchedulerState: persistentSchedulerState === true,
       },
@@ -491,10 +507,25 @@ export const parseMemoryProtocolFlags = (
   if (typeof legacy === "boolean") {
     return {
       flags: {
+        modernCellRep: modernCellRep === true,
         modernDataModel: legacy,
         persistentSchedulerState: persistentSchedulerState === true,
       },
       wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
+    };
+  }
+
+  if (
+    (value.modernDataModel === undefined) &&
+    (value[LEGACY_MODERN_DATA_MODEL_KEY] === undefined)
+  ) {
+    return {
+      flags: {
+        modernCellRep: modernCellRep === true,
+        modernDataModel: false,
+        persistentSchedulerState: persistentSchedulerState === true,
+      },
+      wireKey: "modernDataModel",
     };
   }
 
@@ -512,6 +543,7 @@ export const wireMemoryProtocolFlags = (
   wireKey: WireFlagsKey = "modernDataModel",
 ): WireMemoryProtocolFlags => ({
   [wireKey]: flags.modernDataModel,
+  modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
 });
 
