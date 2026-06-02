@@ -644,7 +644,6 @@ const HELPER_BOUNDARY_KINDS = new Set<ExpressionSiteHelperBoundaryKind>([
   "when",
   "unless",
   "builder",
-  "derive",
   "pattern-tool",
 ]);
 

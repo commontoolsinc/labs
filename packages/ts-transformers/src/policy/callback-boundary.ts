@@ -18,7 +18,7 @@ export type SupportedCallbackBoundaryKind =
   | "plain-array-value"
   | "pattern-builder"
   | "render-builder"
-  | "derive"
+  | "lift-applied"
   | "pattern-tool"
   | "computed-builder"
   | "action-builder"
@@ -39,7 +39,7 @@ type CallbackBoundaryBodyContext =
       | "render"
       | "array-method"
       | "computed"
-      | "derive"
+      | "lift-applied"
       | "action"
       | "lift"
       | "handler"
@@ -129,11 +129,11 @@ export function classifyCallbackBoundary(
   if (callKind?.kind === "lift-applied") {
     return {
       kind: "supported",
-      boundaryKind: "derive",
+      boundaryKind: "lift-applied",
       bodyContext: {
         strategy: "explicit",
         kind: "compute",
-        owner: "derive",
+        owner: "lift-applied",
       },
     };
   }
@@ -327,7 +327,7 @@ export function getCallbackBoundarySemantics(
       supportedKind !== "event-handler" &&
       supportedKind !== "pattern-builder" &&
       supportedKind !== "render-builder",
-    establishesLocalReactiveAliasScope: supportedKind === "derive" ||
+    establishesLocalReactiveAliasScope: supportedKind === "lift-applied" ||
       supportedKind === "computed-builder",
   };
 }
