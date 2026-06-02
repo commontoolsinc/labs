@@ -239,25 +239,36 @@ interface StoredSourceDoc {
   imports: { specifier: string; link: unknown }[];
 }
 
-/** Schema for a source-set document; `imports[].link` auto-loads as a cell. */
+/**
+ * Schema for a source-set document. **Recursive**: each `imports[].link` is an
+ * `asCell` reference back to a source document (`$ref: "#/$defs/sourceDoc"`), so
+ * syncing the entry cell under this schema transitively loads the *entire*
+ * import closure in one round-trip — the storage layer follows the sigil links
+ * and pulls every reachable document. No per-cell `sync()` is needed on load.
+ */
 export const SOURCE_DOC_SCHEMA = {
-  type: "object",
-  properties: {
-    kind: { type: "string" },
-    identity: { type: "string" },
-    code: { type: "string" },
-    filename: { type: "string" },
-    imports: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          specifier: { type: "string" },
-          link: { asCell: ["cell"] },
+  $defs: {
+    sourceDoc: {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        identity: { type: "string" },
+        code: { type: "string" },
+        filename: { type: "string" },
+        imports: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              specifier: { type: "string" },
+              link: { $ref: "#/$defs/sourceDoc", asCell: ["cell"] },
+            },
+          },
         },
       },
     },
   },
+  $ref: "#/$defs/sourceDoc",
 } as const satisfies JSONSchema;
 
 /**
@@ -275,10 +286,12 @@ export function writeSourceDocs(
 ): void {
   const docs = buildSourceDocs(modules, entryIdentity);
   for (const [identity, doc] of docs) {
-    const cell = runtime.getCell(
+    // Write with an untyped cell (the recursive read schema would over-constrain
+    // `set`); reads address the same entity via SOURCE_DOC_SCHEMA.
+    const cell = runtime.getCell<StoredSourceDoc>(
       space,
       sourceDocKey(identity),
-      SOURCE_DOC_SCHEMA,
+      undefined,
       tx,
     );
     cell.set({
@@ -297,10 +310,13 @@ export function writeSourceDocs(
 
 /**
  * Load the source-document closure reachable from `entryIdentity` in `space` by
- * following import links. Each cell is `sync()`d before reading so a closure
- * persisted in a prior session loads from storage. Returns the raw documents
- * keyed by their **stored** identity (verify with {@link verifySourceDocs}
- * before trusting). Resolves to `undefined` if the entry document is absent.
+ * following import links. A **single** `sync()` on the entry cell under the
+ * recursive {@link SOURCE_DOC_SCHEMA} transitively loads the whole closure (the
+ * storage layer follows the `asCell` sigil links), so the walk below reads the
+ * already-loaded linked cells synchronously — no per-cell `sync()`. Returns the
+ * raw documents keyed by their **stored** identity (verify with
+ * {@link verifySourceDocs} before trusting). Resolves to `undefined` if the
+ * entry document is absent.
  */
 export async function loadSourceClosure(
   runtime: Runtime,
@@ -314,23 +330,25 @@ export async function loadSourceClosure(
     SOURCE_DOC_SCHEMA,
     tx,
   );
+  // One sync pulls the entire link closure (recursive schema). No further syncs.
   await entry.sync();
   const root = entry.get() as StoredSourceDoc | undefined;
   if (!root || typeof root.identity !== "string") return undefined;
 
   const out = new Map<string, SourceDoc>();
-  const queue: { doc: StoredSourceDoc }[] = [{ doc: root }];
+  const queue: StoredSourceDoc[] = [root];
   while (queue.length > 0) {
-    const { doc } = queue.shift()!;
+    const doc = queue.shift()!;
     if (out.has(doc.identity)) continue;
     const imports: ModuleImportRef[] = [];
     const childDocs: StoredSourceDoc[] = [];
     for (const imp of doc.imports ?? []) {
+      // `link` is already a loaded Cell (the entry sync pulled it). View it
+      // under the recursive schema so its own links resolve as cells too.
       if (!isCell(imp.link)) continue;
-      const childCell = (imp.link as Cell<unknown>).asSchema(SOURCE_DOC_SCHEMA);
-      // A linked cell is not synced transitively by the parent — sync each.
-      await childCell.sync();
-      const child = childCell.get() as StoredSourceDoc | undefined;
+      const child = (imp.link as Cell<unknown>)
+        .asSchema(SOURCE_DOC_SCHEMA)
+        .get() as StoredSourceDoc | undefined;
       if (!child || typeof child.identity !== "string") continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
       childDocs.push(child);
@@ -342,7 +360,7 @@ export async function loadSourceClosure(
       imports,
     });
     for (const child of childDocs) {
-      if (!out.has(child.identity)) queue.push({ doc: child });
+      if (!out.has(child.identity)) queue.push(child);
     }
   }
   return out;
@@ -415,13 +433,42 @@ const compiledDocProperties = {
   },
 } as const;
 
-/** Read schema for a compiled document (`imports[].link` auto-loads). */
+/**
+ * Read schema for a compiled document. **Recursive**: each `imports[].link` is
+ * an `asCell` reference back to a compiled document, so a single `sync()` on the
+ * entry cell transitively loads the entire compiled closure (one round-trip),
+ * and the loader reads the linked cells synchronously — no per-cell `sync()`.
+ */
 export const COMPILED_DOC_SCHEMA = {
-  type: "object",
-  properties: compiledDocProperties,
+  $defs: {
+    compiledDoc: {
+      type: "object",
+      properties: {
+        kind: { type: "string" },
+        identity: { type: "string" },
+        code: { type: "string" },
+        filename: { type: "string" },
+        sourceMap: {},
+        imports: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              specifier: { type: "string" },
+              link: { $ref: "#/$defs/compiledDoc", asCell: ["cell"] },
+            },
+          },
+        },
+      },
+    },
+  },
+  $ref: "#/$defs/compiledDoc",
 } as const satisfies JSONSchema;
 
-/** Write schema: stamps the compiler integrity atom on the stored value. */
+/**
+ * Write schema: stamps the compiler integrity atom on the stored value. Flat
+ * (no recursive `$ref`) — writing a single document does not transitively load.
+ */
 export function compiledDocWriteSchema(compilerDid: string): JSONSchema {
   return {
     type: "object",
@@ -509,17 +556,19 @@ export function writeCompiledDocs(
 
 /**
  * Load the integrity-valid compiled documents reachable from `entryIdentity` by
- * following import links. Each cell is `sync()`d before reading so a closure
- * persisted in a prior session loads from storage.
+ * following import links. A **single** `sync()` on the entry cell under the
+ * recursive {@link COMPILED_DOC_SCHEMA} transitively loads the whole closure
+ * (the storage layer follows the `asCell` sigil links), so the walk reads the
+ * already-loaded linked cells synchronously — no per-cell `sync()`.
  *
- * Fail-closed and link-faithful: the BFS walks the *actual linked cells* (never
- * re-deriving a cell from a stored `identity` field), and a cell is read only
- * after its own persisted CFC label is confirmed to carry the compiler
- * integrity atom. So every document in the result — and every import edge — came
- * from an integrity-stamped cell that the parent's sigil link actually points
- * at; an unstamped/tampered child is dropped along with the edge to it (treated
- * as a cache miss, so the caller recompiles). The entry is the one cell looked
- * up by key, from the caller's trusted `entryIdentity`.
+ * Fail-closed and link-faithful: the walk follows the *actual linked cells*
+ * (never re-deriving a cell from a stored `identity` field), and a cell's stored
+ * doc is used only after its own persisted CFC label is confirmed to carry the
+ * compiler integrity atom. So every document in the result — and every import
+ * edge — came from an integrity-stamped cell that the parent's sigil link
+ * actually points at; an unstamped/tampered child is dropped along with the edge
+ * to it (treated as a cache miss, so the caller recompiles). The entry is the
+ * one cell looked up by key, from the caller's trusted `entryIdentity`.
  *
  * Resolves to the valid documents keyed by their stored identity (empty map if
  * the entry itself is missing/unstamped).
@@ -535,12 +584,12 @@ export async function loadCompiledClosure(
   const out = new Map<string, CompiledDoc>();
   const visited = new Set<string>();
 
-  // Integrity-check a cell, returning its stored doc only if the cell carries
-  // the compiler atom (fail-closed). The cell is synced first.
-  const readVerified = async (
+  // Integrity-gated read (fail-closed): the cell's stored doc only if its
+  // persisted CFC label carries the compiler atom. No sync here — the entry's
+  // single sync (below) has already transitively loaded the whole closure.
+  const verifiedDoc = (
     cell: Cell<unknown>,
-  ): Promise<StoredCompiledDoc | undefined> => {
-    await cell.sync();
+  ): StoredCompiledDoc | undefined => {
     if (!cellCarriesIntegrity(cell, atom, tx)) return undefined;
     const doc = cell.get() as StoredCompiledDoc | undefined;
     return doc && typeof doc.identity === "string" ? doc : undefined;
@@ -552,7 +601,9 @@ export async function loadCompiledClosure(
     COMPILED_DOC_SCHEMA,
     tx,
   );
-  const entryDoc = await readVerified(entryCell);
+  // One sync pulls the entire link closure (recursive schema). No further syncs.
+  await entryCell.sync();
+  const entryDoc = verifiedDoc(entryCell);
   if (entryDoc === undefined) return out;
 
   const queue: { doc: StoredCompiledDoc }[] = [{ doc: entryDoc }];
@@ -564,12 +615,12 @@ export async function loadCompiledClosure(
     const imports: ModuleImportRef[] = [];
     for (const imp of doc.imports ?? []) {
       if (!isCell(imp.link)) continue;
-      // Follow the actual linked cell and integrity-check IT before trusting
-      // either the edge or the child's content (no re-lookup by stored id).
-      const childCell = (imp.link as Cell<unknown>).asSchema(
-        COMPILED_DOC_SCHEMA,
+      // `link` is an already-loaded Cell (the entry sync pulled it). View it
+      // under the recursive schema so its own links resolve as cells too, then
+      // integrity-check + read synchronously — no re-lookup by id, no sync.
+      const child = verifiedDoc(
+        (imp.link as Cell<unknown>).asSchema(COMPILED_DOC_SCHEMA),
       );
-      const child = await readVerified(childCell);
       if (child === undefined) continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
       if (!visited.has(child.identity)) queue.push({ doc: child });

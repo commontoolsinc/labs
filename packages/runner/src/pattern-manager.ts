@@ -558,6 +558,7 @@ export class PatternManager {
     try {
       compiled = await harness.compileToRecordGraph!(program, {
         precompiledModulesFor: async ({ entryIdentity, identities }) => {
+          logger.timeStart("compile-cache", "read");
           const closure = await loadCompiledClosure(
             this.runtime,
             space,
@@ -565,6 +566,7 @@ export class PatternManager {
             cacheOpts,
             readTx,
           );
+          logger.timeEnd("compile-cache", "read");
           // Full hit only: every emitted module must be present (and
           // integrity-valid). A partial set cannot be trusted (transitively
           // sensitive identities), so fall back to a full recompile.
@@ -591,27 +593,28 @@ export class PatternManager {
     }
     const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
 
+    logger.timeStart("compile-cache", "evaluate");
     const result = harness.evaluateRecordGraph!(
       id,
       graph,
       mainSpecifier,
       program.files,
     );
+    logger.timeEnd("compile-cache", "evaluate");
 
     if (warmHit) {
       this.esmCacheStats.hits++;
     } else {
       this.esmCacheStats.misses++;
-      // Cold/partial: persist the freshly compiled module set for next time,
-      // fire-and-forget on its own transaction (tracked for flush/shutdown).
+      // Cold/partial: persist the freshly compiled module set for next time.
+      // Fire-and-forget — the pattern is already returned below, so cache
+      // persistence never blocks the load. Tracked for flush/shutdown.
       const writeBack = this.writeBackCompileCache(
         space,
         modules,
         entryIdentity,
         cacheOpts,
-      ).catch((error) => {
-        logger.warn("compile-cache-writeback-failed", () => [String(error)]);
-      });
+      );
       this.compileCacheWrites.add(writeBack);
       writeBack.finally(() => this.compileCacheWrites.delete(writeBack));
     }
@@ -621,8 +624,11 @@ export class PatternManager {
 
   /**
    * Write the source + compiled document sets for an emitted module set into
-   * `space` on a fresh transaction and commit it (CFC-prepared so the compiled
-   * docs' integrity label persists). Independent of the caller's transaction.
+   * `space`, on its own transaction, independent of the caller's. Uses
+   * `editWithRetry` so a commit conflict (e.g. the cache write racing the
+   * pattern's own space writes) retries rather than silently dropping the
+   * entry; a final failure is logged (not thrown) since the cache is an
+   * optimization, never on the correctness path.
    */
   private async writeBackCompileCache(
     space: MemorySpace,
@@ -630,11 +636,18 @@ export class PatternManager {
     entryIdentity: string,
     opts: { runtimeVersion: string; compilerDid: string },
   ): Promise<void> {
-    const tx = this.runtime.edit();
-    writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
-    writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
-    this.runtime.prepareTxForCommit(tx);
-    await tx.commit();
+    logger.timeStart("compile-cache", "writeback");
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
+      writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
+    });
+    logger.timeEnd("compile-cache", "writeback");
+    if (error) {
+      logger.error("compile-cache-writeback-failed", () => [
+        `entry=${entryIdentity}`,
+        error.message,
+      ]);
+    }
   }
 
   private async evaluateToPattern(
