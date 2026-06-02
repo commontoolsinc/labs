@@ -89,6 +89,7 @@ describe("ExperimentalOptions", () => {
         },
       });
       expect(runtime.experimental).toEqual({
+        modernCellRep: false,
         modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
