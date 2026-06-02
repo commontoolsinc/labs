@@ -136,11 +136,11 @@ profile**.
    consent decision lives.
 6. [U] Taps **Save**.
 7. [F] My Car(s) writes the car as a **profile element** in the employee's
-   profile space, tagged for discovery (e.g. `#myCar`, with the structured
+   profile space, tagged for discovery (e.g. `#car`, with the structured
    `Vehicle` shape from `vehicles.ts`). Owner integrity (`represents-principal`,
    per the profile auth model) brands it so only the employee can mutate it.
 8. [F] **Across spaces, with no further user action:** the parking-coordinator
-   in the org space has a standing `wish({ query: "#myCar", scope: ["profile"]
+   in the org space has a standing `wish({ query: "#car", scope: ["profile"]
    })` (resolved per-viewer / per-employee — see §6). That wish now resolves to
    this car. The coordinator folds the plate into its **"ours"** set; lot-watch's
    classification consumes the same set. The employee's plate is now `ours`
@@ -350,7 +350,7 @@ Honest about friction. Privacy items are explicitly **FUTURE WORK** — we note
   car shows "✅ registered" on the profile but stays `unknown` in lot-watch.
   *This is the most likely silent failure of the whole composition.* Mitigation:
   a coordinator-side "registered employees with no matched plate" diagnostic, and
-  a single canonical tag (`#myCar`) shared in code between producer and consumer.
+  a single canonical tag (`#car`) shared in code between producer and consumer.
 - **EF4 — Employee owns multiple cars.** My Car(s) is plural by design
   (`vehicles: Vehicle[]`). All of an employee's plates join "ours." A sighting
   matches whichever plate hits. Edge: shared/household car registered by two
@@ -388,7 +388,7 @@ What the data model & wishes must support. This feeds the design doc.
   profile's `addElement`, tagged for hashtag discovery).
 - Owner integrity on the element (`{ kind: "represents-principal", subject:
   ownerDid }`) — only the employee can mutate (J-A step 7, PV4).
-- A canonical discovery tag, **`#myCar`**, shared in code with consumers (EF3).
+- A canonical discovery tag, **`#car`**, shared in code with consumers (EF3).
 - **Capture capability:** rear-camera image input + LLM extraction
   (image → `{ description, plateId, plateState, confidence }`), mirroring
   lot-watch's `cf-image-input` + `generateObject` (J-A steps 2–3). Editable
@@ -398,7 +398,7 @@ What the data model & wishes must support. This feeds the design doc.
 - Plural: supports add / replace / remove car (S6, EF4, PV4).
 
 ### Parking-coordinator + lot-watch (org-space consumers)
-- A standing **`wish({ query: "#myCar", scope: ["profile"] })`** that resolves
+- A standing **`wish({ query: "#car", scope: ["profile"] })`** that resolves
   employee car broadcasts into the **"ours"** set. Must resolve **per employee**
   across the org's known profiles — i.e. the consumer needs to fan the wish over
   the set of org employees (or the profile substrate must expose
@@ -431,7 +431,7 @@ What the data model & wishes must support. This feeds the design doc.
 1. **Wish fan-out (the big one).** `scope: ["profile"]` resolves the *current
    viewer's* profile. The coordinator needs *all employees'* cars. Options:
    (a) coordinator iterates a known org-employee list and resolves each profile's
-   `#myCar`; (b) profile substrate grows an org/collaborator-scoped wish so an
+   `#car`; (b) profile substrate grows an org/collaborator-scoped wish so an
    org-space pattern can discover member profile elements directly. Pick one;
    everything in §3–§4 depends on it. *(Ref: `shared-profile-space.md` open
    question "profile readable by all collaborators by default?")*
@@ -441,7 +441,7 @@ What the data model & wishes must support. This feeds the design doc.
    +description / +plate) are the right rungs, and that "description only" has a
    coherent consumer behavior (PV2). *Policy engine is out of scope; the rungs'
    names and the card placement are in scope to specify.*
-4. **Canonical tag + shape contract.** Lock `#myCar` and the `Vehicle` shape as
+4. **Canonical tag + shape contract.** Lock `#car` and the `Vehicle` shape as
    the producer↔consumer contract to avoid EF3.
 
 ---

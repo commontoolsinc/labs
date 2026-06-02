@@ -1,6 +1,6 @@
 # Card-web synthesis: prior thinking for the "my cars × parking-coordinator" worked example
 
-**Source:** SQLite store at `/Users/alex/Code/loom-files/.scripts/shared/card_web/cache/card_web.db` — 9,885 live cards (collection `everything/bits-and-bobs`, tags `common-tools` 5,017 / `internal` 514). DB was readable; FTS5 (`cards_fts`) and `body_text` queried directly. The `cache/images/` dir is empty and there is no separate rendered-notes folder — card bodies live only in SQLite, as the README/SKILL state. Card titles are auto-generated word-salad; real content is in `body_text`. Public URL form: `https://cards.komoroske.com/bits-and-bobs/<card-id>`.
+**Source:** SQLite store at `~/Code/loom-files/.scripts/shared/card_web/cache/card_web.db` — 9,885 live cards (collection `everything/bits-and-bobs`, tags `common-tools` 5,017 / `internal` 514). DB was readable; FTS5 (`cards_fts`) and `body_text` queried directly. The `cache/images/` dir is empty and there is no separate rendered-notes folder — card bodies live only in SQLite, as the README/SKILL state. Card titles are auto-generated word-salad; real content is in `body_text`. Public URL form: `https://cards.komoroske.com/bits-and-bobs/<card-id>`.
 
 Below, each card is `card_id` (= db `card_id`, and the URL slug). Quotes are verbatim from `body_text`.
 
