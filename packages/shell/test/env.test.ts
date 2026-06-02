@@ -39,7 +39,6 @@ Deno.test({
 
     expect(mod.EXPERIMENTAL).toEqual({
       modernCellRep: true,
-      modernDataModel: true,
       persistentSchedulerState: true,
     });
   },
