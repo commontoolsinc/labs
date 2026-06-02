@@ -47,10 +47,12 @@ export const RegExpHandler: TypeHandler = {
         `RegExp: expected object state, got ${typeof decoded}`,
       );
     }
+    const s = decoded as Record<string, unknown>;
+    const flavor = (s.flavor as string) ?? "es2025";
+    const source = (s.source as string) ?? "";
+    const flags = (s.flags as string) ?? "";
     try {
-      return FabricRegExp.fromState(
-        decoded as Record<string, unknown>,
-      ) as unknown as FabricValue;
+      return new FabricRegExp(flavor, source, flags) as unknown as FabricValue;
     } catch (e) {
       return makeProblematic(
         TAGS.RegExp,

@@ -110,20 +110,6 @@ export class FabricRegExp extends FabricPrimitive {
     }
     return new RegExp(this.#value);
   }
-
-  /**
-   * Reconstructs a `FabricRegExp` from its essential state
-   * (`{ source, flags, flavor }`).
-   *
-   * @param state - The essential state, with optional `source`, `flags`, and
-   *   `flavor` string fields.
-   */
-  static fromState(state: Record<string, unknown>): FabricRegExp {
-    const source = (state.source as string) ?? "";
-    const flags = (state.flags as string) ?? "";
-    const flavor = (state.flavor as string) ?? DEFAULT_FLAVOR;
-    return new FabricRegExp(flavor, source, flags);
-  }
 }
 
 /**
