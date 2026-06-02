@@ -3,6 +3,10 @@ import {
   computeModuleHashes,
   resolveModuleImports,
 } from "../harness/module-identity.ts";
+import type { MemorySpace, Runtime } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { type Cell, isCell } from "../cell.ts";
+import type { JSONSchema } from "../builder/types.ts";
 
 /**
  * Content-addressed compilation cache — document model and key scheme.
@@ -165,4 +169,125 @@ export function verifySourceDocs(
     mismatches,
     missing,
   };
+}
+
+// --- Source-set store (4.3.2): write/read `pattern:<identity>` cells ---------
+
+/**
+ * Stored shape of a source-set cell. Mirrors {@link SourceDoc} but each import
+ * carries a sigil **link** to the dependency's cell (so the storage layer
+ * follows it and loads the closure), plus the module's own `identity` for
+ * read-side keying. The stored identity is not trusted — {@link verifySourceDocs}
+ * recomputes it.
+ */
+interface StoredSourceDoc {
+  kind: "source";
+  identity: string;
+  code: string;
+  filename: string;
+  imports: { specifier: string; link: unknown }[];
+}
+
+/** Schema for a source-set document; `imports[].link` auto-loads as a cell. */
+export const SOURCE_DOC_SCHEMA = {
+  type: "object",
+  properties: {
+    kind: { type: "string" },
+    identity: { type: "string" },
+    code: { type: "string" },
+    filename: { type: "string" },
+    imports: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          specifier: { type: "string" },
+          link: { asCell: ["cell"] },
+        },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+/**
+ * Write every module of `program` as a `pattern:<identity>` cell into `space`,
+ * each import a sigil link to its dependency cell. Idempotent (content-addressed
+ * keys). The caller owns the transaction's commit.
+ */
+export function writeSourceDocs(
+  runtime: Runtime,
+  space: MemorySpace,
+  program: Program,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): void {
+  const docs = buildSourceDocs(program, runtimeFingerprint);
+  for (const [identity, doc] of docs) {
+    const cell = runtime.getCell(
+      space,
+      sourceDocKey(identity),
+      SOURCE_DOC_SCHEMA,
+      tx,
+    );
+    cell.set({
+      kind: "source",
+      identity,
+      code: doc.code,
+      filename: doc.filename,
+      imports: doc.imports.map((imp) => ({
+        specifier: imp.specifier,
+        link: runtime.getCell(space, sourceDocKey(imp.identity), undefined, tx)
+          .getAsLink(),
+      })),
+    } as StoredSourceDoc);
+  }
+}
+
+/**
+ * Load the source-document closure reachable from `entryIdentity` in `space` by
+ * following import links. Returns the raw documents keyed by their **stored**
+ * identity (verify with {@link verifySourceDocs} before trusting). Returns
+ * `undefined` if the entry document is absent.
+ */
+export function loadSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+): Map<string, SourceDoc> | undefined {
+  const entry = runtime.getCell(
+    space,
+    sourceDocKey(entryIdentity),
+    SOURCE_DOC_SCHEMA,
+    tx,
+  );
+  const root = entry.get() as StoredSourceDoc | undefined;
+  if (!root || typeof root.identity !== "string") return undefined;
+
+  const out = new Map<string, SourceDoc>();
+  const queue: { doc: StoredSourceDoc }[] = [{ doc: root }];
+  while (queue.length > 0) {
+    const { doc } = queue.shift()!;
+    if (out.has(doc.identity)) continue;
+    const imports: ModuleImportRef[] = [];
+    const childDocs: StoredSourceDoc[] = [];
+    for (const imp of doc.imports ?? []) {
+      if (!isCell(imp.link)) continue;
+      const childCell = (imp.link as Cell<unknown>).asSchema(SOURCE_DOC_SCHEMA);
+      const child = childCell.get() as StoredSourceDoc | undefined;
+      if (!child || typeof child.identity !== "string") continue;
+      imports.push({ specifier: imp.specifier, identity: child.identity });
+      childDocs.push(child);
+    }
+    out.set(doc.identity, {
+      kind: "source",
+      code: doc.code,
+      filename: doc.filename,
+      imports,
+    });
+    for (const child of childDocs) {
+      if (!out.has(child.identity)) queue.push({ doc: child });
+    }
+  }
+  return out;
 }

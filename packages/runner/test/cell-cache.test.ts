@@ -1,13 +1,20 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
 
 import {
   buildSourceDocs,
   compiledDocKey,
+  loadSourceClosure,
   moduleIdentities,
   sourceDocKey,
   verifySourceDocs,
+  writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
+
+const signer = await Identity.fromPassphrase("cell-cache test");
 
 // Step 4.3.1 — content-addressed cache document model: key scheme, per-module
 // identity, source-document construction, and the Merkle self-verification of a
@@ -106,5 +113,42 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     const utilEntry = { ...PROGRAM, main: "/util.ts" };
     const viaUtil = moduleIdentities(utilEntry).get("/util.ts")!;
     expect(viaUtil).toBe(viaMain);
+  });
+});
+
+describe("cell-cache: source-set store (per space, link-following)", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  const spaceA = signer.did();
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+  });
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("writes the closure and loads it back via import links", () => {
+    const tx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, PROGRAM, tx);
+
+    const entryIdentity = identityOf(PROGRAM, "/main.tsx");
+    const loaded = loadSourceClosure(runtime, spaceA, entryIdentity, tx)!;
+
+    // All three modules reached by following links from the entry.
+    expect(loaded.size).toBe(3);
+    expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
+      new Set(["/main.tsx", "/util.ts", "/types.ts"]),
+    );
+    // Loaded closure self-verifies (recomputed identities match the keys).
+    expect(verifySourceDocs(entryIdentity, loaded).ok).toBe(true);
+  });
+
+  it("is empty for an entry that was never written", () => {
+    const tx = runtime.edit();
+    const loaded = loadSourceClosure(runtime, spaceA, "no-such-identity", tx);
+    expect(loaded).toBe(undefined);
   });
 });
