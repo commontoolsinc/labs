@@ -21,7 +21,7 @@ import { buildCallbackWithTopLevelCaptures } from "../utils/pattern-builder.ts";
  * const content = cell("Hello");
  * const grepTool = patternTool(
  *   ({ query }: { query: string }) => {
- *     return derive({ query }, ({ query }) => {
+ *     return computed(() => {
  *       return content.split("\n").filter((c) => c.includes(query));
  *     });
  *   }
@@ -33,7 +33,7 @@ import { buildCallbackWithTopLevelCaptures } from "../utils/pattern-builder.ts";
  * const content = cell("Hello");
  * const grepTool = patternTool(
  *   ({ query, content }: { query: string; content: string }) => {
- *     return derive({ query }, ({ query }) => {
+ *     return computed(() => {
  *       return content.split("\n").filter((c) => c.includes(query));
  *     });
  *   },
