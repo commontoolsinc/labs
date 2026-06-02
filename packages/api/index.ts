@@ -2143,18 +2143,9 @@ export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: Opaque<SqliteQueryParams>,
 ) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
 
-export type SqliteExecuteParams = {
-  db: Opaque<SqliteDatabase | SqliteDb>;
-  sql: string;
-  params?: ReadonlyArray<unknown> | Record<string, unknown>;
-};
-export type SqliteExecuteFunction = (
-  params: Opaque<SqliteExecuteParams>,
-) => OpaqueRef<{
-  pending: boolean;
-  result?: { lastInsertRowid?: number; changes: number };
-  error?: any;
-}>;
+// Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
+// folds a `sqlite` op into the caller's commit (atomic with cell writes). There
+// is no standalone reactive sqliteExecute builder.
 
 /** Column spec for `table()`: a shorthand SQL type string or a column schema. */
 export type SqliteColumnSpec = string | JSONSchema;
@@ -2415,7 +2406,6 @@ export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
 export declare const sqliteDatabase: SqliteDatabaseFunction;
 export declare const sqliteQuery: SqliteQueryFunction;
-export declare const sqliteExecute: SqliteExecuteFunction;
 export declare const table: SqliteTableFunction;
 export declare const cfLink: SqliteCfLinkFunction;
 export declare const navigateTo: NavigateToFunction;

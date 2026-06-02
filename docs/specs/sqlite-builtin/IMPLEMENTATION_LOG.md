@@ -468,3 +468,55 @@ deliberately — sprawling cross-layer rewrite with a builder↔builtins import-
 hazard; a half-done version breaks the compile. tx access is confirmed
 (`db.tx` via the handler's tx-bound cell). Full notes in the plan's STATUS block.
 Stage 1 is independent and shippable.
+
+---
+
+## 2026-06-02 — SqliteDb cell variant: increments 1–3 (db.exec + db.query<Row>)
+
+Implemented the decided "SqliteDb cell variant" design
+(plans/sqlitedb-cell-type-exploration.md) end to end, each increment gated on the
+FULL workspace `deno task test` + `deno task integration`.
+
+**Increment 0 (prior commit 3a368…):** `"sqlite"` added to `CellKind`;
+`CellImpl.exec` (folds onto `this.tx` via the Stage-1 seam; throws on undefined
+params; encodes `_cf_link`). Tested by minting a `"sqlite"`-kind cell.
+
+**Increment 1 (538e8fc…):** ergonomic wiring. THE BLOCKER was real — the
+schema-generator's `brandToWrapperKind` (cell-brand.ts) is a closed switch with
+no `"sqlite"` arm, so a `SqliteDb` field never lowered to `asCell:["sqlite"]`.
+Fix: add `"sqlite"`/`"SqliteDb"` arms to the CellBrand/CellWrapperKind unions +
+`brandToWrapperKind`/`wrapperKindToBrand`, an object-formatter branch, and
+`"sqlite"` to `isOpaqueRefType`. api: `ISqliteDb`/`SqliteDb` cell variant
+(BrandedCell<"sqlite">, no IWritable); `SqliteDatabaseFunction` returns
+`OpaqueRef<SqliteDb>`. **`HandlerState<T>` had to preserve `SqliteDb` whole**
+(like Cell/Stream) — otherwise it maps over the interface and `db.exec` is "not
+callable" in a handler. Two findings vs the spec: (a) the static
+`commonfabric.d.ts` is a SYMLINK to api/index.ts (auto-synced — no manual mirror,
+contrary to the spec's warning); (b) the schema-generator UNIT test harness
+(`test/utils.ts`) has its own minimal cell-type preamble that also needed a
+`SqliteDb` declare. Proof: schema-generator unit test + a ts-transformers
+handler-schema fixture (db field → asCell:["sqlite"] AND db.exec type-checks).
+
+**Increment 2 (1201bb4…):** `db.query<Row>` method (CellImpl, sugar over the
+sqliteQuery factory, kind-guarded, in `cellMethods`) + transformer method-call
+lowering: `call-kind.ts` classifies `db.query<Row>(...)` by receiver brand
+`"sqlite"` as the existing `sqliteQuery` runtime-call; `schema-injection.ts` forks
+the `rowSchema` injection to the method arg shape (options is arg 1, sql is arg
+0). Proof: fixture `db-query-row-schema` (injected rowSchema.author.asCell on the
+aliased link col) + runner kind-guard.
+
+**Increment 3 (this commit):** dropped the reactive `sqliteExecute` node entirely
+— builtin action + ExecuteState + the `rev` bump (sqlite-builtins.ts), the
+factory (built-in.ts), the registration (builtins/index.ts), the api type/const,
+the registry entry, and the builder wiring (factory.ts, builder/types.ts).
+`db.exec` is the sole write path. Migrated the declarative `cf.sqliteExecute`
+test call sites: removed the old reactive-write + reactOn-rev-bump tests
+(sqlite-builtins.test.ts; that re-run is intentionally dropped) and converted
+sqlite-cf-link-decode.test.ts to seed via the storage provider. `sqliteQuery` and
+the storage provider `sqliteExecute` method stay.
+
+**Still pending (Piece A, task #6):** the runtime half of `_cf_link` auto-decode —
+the sqliteQuery builtin reading the injected `rowSchema`, storing sigil OBJECTS,
+and writing through an asCell schema so a typed `db.query<Row>` row surfaces a
+live Cell. The transformer half (rowSchema injection) is done; the skip in
+sqlite-cf-link-decode.test.ts pins the target.

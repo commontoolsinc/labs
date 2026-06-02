@@ -27,7 +27,6 @@ import type {
   PatternToolFunction,
   PatternToolResult,
   SqliteDatabaseFunction,
-  SqliteExecuteFunction,
   SqliteQueryFunction,
   WishParams,
   WishState,
@@ -180,11 +179,6 @@ export const sqliteQuery = createNodeFactory({
   type: "ref",
   implementation: "sqliteQuery",
 }) as SqliteQueryFunction;
-
-export const sqliteExecute = createNodeFactory({
-  type: "ref",
-  implementation: "sqliteExecute",
-}) as SqliteExecuteFunction;
 
 // ifElse with optional schema arguments (backward compatible)
 // See SIGNATURE_ARGS documentation above for why we use arguments.length

@@ -181,12 +181,6 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     callKind: "runtime-call",
     reactiveOrigin: true,
   },
-  {
-    exportName: "sqliteExecute",
-    category: "call",
-    callKind: "runtime-call",
-    reactiveOrigin: true,
-  },
 ] as const satisfies readonly CommonFabricRuntimeExportSpec[];
 
 export const COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME: ReadonlyMap<

@@ -49,44 +49,12 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     });
   });
 
-  it("executes a write through the builtin against the emulated server", async () => {
-    const execPattern = cf.pattern(() => {
-      const db = cf.sqliteDatabase({
-        tables: {
-          notes: cf.table({ id: "integer primary key", body: "text" }),
-        },
-      });
-      return cf.sqliteExecute({
-        db,
-        sql: "INSERT INTO notes (body) VALUES (?)",
-        params: ["hi"],
-      });
-    });
-    const resultCell = runtime.getCell(
-      space,
-      "sqlite-exec-real",
-      execPattern.resultSchema,
-      tx,
-    );
-    const result = runtime.run(tx, execPattern, {}, resultCell);
-    tx.commit();
-
-    const e = await waitUntil<ExecState>(
-      runtime,
-      result,
-      (v) => v.pending === false,
-    );
-    expect(e.error).toBeUndefined();
-    expect(e.result?.changes).toBe(1);
-  });
-
   it("reads through the query builtin (full builder->server->engine path)", async () => {
     // Deterministic single-effect read: a fresh db's declared table is created
-    // server-side (ensureTables) and the query returns an empty result. Reading
-    // non-empty data written by a *sibling* sqliteExecute in the same pattern
-    // depends on cross-effect reactОn sequencing, which is proven at the storage
-    // (sqlite-storage.test) and protocol (v2-sqlite-protocol-test) layers;
-    // builtin-level reactive re-query is tracked in IMPLEMENTATION_LOG.
+    // server-side (ensureTables) and the query returns an empty result. Writes
+    // are the imperative SqliteDb.exec (folded into the caller's commit; see
+    // sqlite-db-exec.test.ts / sqlite-commit-fold.test.ts); read-after-write
+    // reactivity within a pattern is intentionally not auto-driven.
     const queryPattern = cf.pattern(() => {
       const db = cf.sqliteDatabase({
         tables: {
@@ -112,58 +80,8 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     expect(q.error).toBeUndefined();
     expect(q.result).toEqual([]);
   });
-
-  it("re-runs a reactOn:db query after a sibling write (reactive loop)", async () => {
-    // Unique space per test => unique (space, db-id) => fresh cell-db temp file,
-    // so persistent per-id files don't leak rows across runs (the real cause of
-    // the earlier "failure"; see plans/reactivity.md). Assert exact length so
-    // any leak fails loudly.
-    const reactiveSpace =
-      (await Identity.fromPassphrase(`reactive-${crypto.randomUUID()}`)).did();
-    const p = cf.pattern(() => {
-      const db = cf.sqliteDatabase({
-        tables: {
-          notes: cf.table({ id: "integer primary key", body: "text" }),
-        },
-      });
-      const q = cf.sqliteQuery({
-        db,
-        sql: "SELECT body FROM notes ORDER BY id",
-        reactOn: db,
-      });
-      const exec = cf.sqliteExecute({
-        db,
-        sql: "INSERT INTO notes (body) VALUES (?)",
-        params: ["reactive"],
-      });
-      return { q, exec };
-    });
-    const resultCell = runtime.getCell(
-      reactiveSpace,
-      "sqlite-reactive",
-      p.resultSchema,
-      tx,
-    );
-    const result = runtime.run(tx, p, {}, resultCell);
-    tx.commit();
-
-    const v = await waitUntil<{ q: QueryState }>(
-      runtime,
-      result,
-      (s) =>
-        s.q?.pending === false && Array.isArray(s.q?.result) &&
-        s.q.result.length === 1,
-    );
-    expect(v.q.error).toBeUndefined();
-    expect(v.q.result).toEqual([{ body: "reactive" }]);
-  });
 });
 
-type ExecState = {
-  pending: boolean;
-  result?: { changes: number; lastInsertRowid?: number };
-  error?: unknown;
-};
 type QueryState = { pending: boolean; result?: unknown[]; error?: unknown };
 
 // Wait until `pred(cell value)` holds. A `sink` keeps the effect chain live so

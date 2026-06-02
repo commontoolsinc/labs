@@ -46,7 +46,6 @@ import type {
   SELF as SELFSymbol,
   SqliteCfLinkFunction,
   SqliteDatabaseFunction,
-  SqliteExecuteFunction,
   SqliteQueryFunction,
   SqliteTableFunction,
   StreamDataFunction,
@@ -316,7 +315,6 @@ export interface BuilderFunctionsAndConstants {
   compileAndRun: CompileAndRunFunction;
   sqliteDatabase: SqliteDatabaseFunction;
   sqliteQuery: SqliteQueryFunction;
-  sqliteExecute: SqliteExecuteFunction;
   table: SqliteTableFunction;
   cfLink: SqliteCfLinkFunction;
   navigateTo: NavigateToFunction;

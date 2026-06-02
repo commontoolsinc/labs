@@ -1,22 +1,21 @@
 // Runtime Actions for the SQLite builtins.
 //
-// Wire the builder factories (sqliteDatabase / sqliteQuery / sqliteExecute)
-// through the module registry to the server-side SQLite verbs over the storage
-// provider (which routes the v2 protocol to the engine, real or emulated).
+// Wire the builder factories (sqliteDatabase / sqliteQuery) through the module
+// registry to the server-side SQLite verbs over the storage provider (which
+// routes the v2 protocol to the engine, real or emulated).
 //
-// - sqliteDatabase yields an opaque handle cell whose value is the SqliteDbRef
+// - sqliteDatabase yields a SqliteDb handle cell whose value is the SqliteDbRef
 //   ({ id, tables }); the id is the handle cell's own (causal, opaque) entity id.
 // - sqliteQuery issues a server read after commit and writes { pending, result,
 //   error } back; re-runs when its `reactOn`/inputs change (it is an effect).
-// - sqliteExecute issues a server write after commit; cell params bound to a
-//   `_cf_link` column are encoded to sigil links (Section 02).
 //
-// - `reactOn: db` re-query works via a post-commit handle `rev` bump (below).
+// Writes are NOT here — they are the imperative `SqliteDb.exec` (cell.ts), which
+// folds a `sqlite` op into the caller's commit (atomic with cell writes). See
+// docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
 //
-// Known V1 gaps (tracked in IMPLEMENTATION_LOG): writes are a separate RPC, not
-// folded into the cell commit (no cells+rows atomicity yet); no multi-tab mutex
-// / cancel / narrowest-read-scope (cf. fetch-data.ts); `_cf_link` decode of
-// result rows is not yet wired (encode on write is).
+// Known V1 gaps (tracked in IMPLEMENTATION_LOG): no multi-tab mutex / cancel /
+// narrowest-read-scope (cf. fetch-data.ts); `_cf_link` decode of result rows is
+// not yet wired at runtime (encode on write is; see Piece A).
 
 import { type Cell, createCell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -31,9 +30,6 @@ import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 type SqliteDbRef = {
   id: string;
   tables?: Record<string, unknown>;
-  /** Reactivity token bumped by sqliteExecute post-commit; `reactOn: db` reads
-   *  the handle whole, so a bump re-runs the query (spec Section 05). */
-  rev?: number;
 };
 type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
 
@@ -136,7 +132,7 @@ export function sqliteDatabase(
         | { tables?: Record<string, unknown> }
         | undefined;
       const id = handle.entityId?.["/"] ?? JSON.stringify(handle.getAsLink());
-      handle.withTx(tx).set({ id, tables: options?.tables, rev: 0 });
+      handle.withTx(tx).set({ id, tables: options?.tables });
       sendResult(tx, handle);
       initialized = true;
     }
@@ -219,105 +215,6 @@ export function sqliteQuery(
               pending: false,
               result: res.rows,
               requestHash: hash,
-            });
-          });
-        } catch (error) {
-          await runtime.editWithRetry((wtx) => {
-            result.withTx(wtx).set({
-              pending: false,
-              error: errMsg(error),
-              requestHash: hash,
-            });
-          });
-        }
-      },
-    });
-  };
-  return { action };
-}
-
-type ExecuteState = {
-  pending: boolean;
-  result?: { lastInsertRowid?: number; changes: number };
-  error?: unknown;
-  requestHash?: string;
-};
-
-/** sqliteExecute: server-side write. */
-export function sqliteExecute(
-  inputsCell: Cell<any>,
-  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  _addCancel: (cancel: () => void) => void,
-  cause: Cell<any>[],
-  parentCell: Cell<any>,
-  runtime: Runtime,
-): RawBuiltinResult {
-  let initialized = false;
-  let result: Cell<ExecuteState>;
-  const space = parentCell.space;
-
-  const action: Action = (tx: IExtendedStorageTransaction) => {
-    if (!initialized) {
-      result = makeResultCell<ExecuteState>(
-        runtime,
-        parentCell,
-        cause,
-        "sqliteExecute",
-        tx,
-      );
-      sendResult(tx, result);
-      initialized = true;
-    }
-
-    const inputs = inputsCell.withTx(tx).get() as {
-      db?: unknown;
-      sql?: string;
-      params?: WireParams;
-    } | undefined;
-    if (!inputs?.db || typeof inputs.sql !== "string") return;
-
-    const db = readDbRef(inputs.db);
-    let encodedParams: WireParams;
-    try {
-      encodedParams = encodeParams(inputs.sql, inputs.params);
-    } catch (error) {
-      result.withTx(tx).set({ pending: false, error: errMsg(error) });
-      return;
-    }
-
-    const hash = computeInputHashFromValue({
-      db,
-      sql: inputs.sql,
-      params: encodedParams ?? null,
-    });
-    // Dedup against committed state (survives abort+retry; see sqliteQuery).
-    if (result.withTx(tx).get()?.requestHash === hash) return;
-    result.withTx(tx).set({ pending: true, requestHash: hash });
-
-    const sql = inputs.sql;
-    // The db handle cell — bumped post-commit so `reactOn: db` queries re-run
-    // against the committed write (spec Section 05; plans/reactivity.md).
-    const dbCell = inputsCell.key("db");
-    tx.enqueuePostCommitEffect({
-      id: `sqliteExecute:${hash}`,
-      idempotencyKey: `sqliteExecute:${hash}`,
-      kind: "sqlite-execute",
-      async flush() {
-        const provider = runtime.storageManager.open(space);
-        try {
-          const res = await provider.sqliteExecute!(db, sql, encodedParams);
-          await runtime.editWithRetry((wtx) => {
-            result.withTx(wtx).set({
-              pending: false,
-              result: res,
-              requestHash: hash,
-            });
-            const cur = dbCell.withTx(wtx).get() as
-              | { rev?: number }
-              | undefined;
-            dbCell.withTx(wtx).set({
-              ...(cur ?? {}),
-              rev: (cur?.rev ?? 0) + 1,
             });
           });
         } catch (error) {

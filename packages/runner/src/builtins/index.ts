@@ -11,11 +11,7 @@ import { when } from "./when.ts";
 import { unless } from "./unless.ts";
 import type { Runtime } from "../runtime.ts";
 import { compileAndRun } from "./compile-and-run.ts";
-import {
-  sqliteDatabase,
-  sqliteExecute,
-  sqliteQuery,
-} from "./sqlite-builtins.ts";
+import { sqliteDatabase, sqliteQuery } from "./sqlite-builtins.ts";
 import { navigateTo } from "./navigate-to.ts";
 import { wish } from "./wish.ts";
 import type { Cell } from "../cell.ts";
@@ -48,14 +44,11 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("sqliteDatabase", raw(sqliteDatabase));
   // sqliteQuery does a server round-trip and writes results back, so it is an
   // effect (like generateText/llm), and re-runs when its `reactOn` input
-  // changes. sqliteExecute is effectful (writes).
+  // changes. (Writes are the imperative SqliteDb.exec, folded into the caller's
+  // commit — not a builtin node.)
   moduleRegistry.addModuleByRef(
     "sqliteQuery",
     raw(sqliteQuery, { isEffect: true }),
-  );
-  moduleRegistry.addModuleByRef(
-    "sqliteExecute",
-    raw(sqliteExecute, { isEffect: true }),
   );
   moduleRegistry.addModuleByRef(
     "generateObject",
