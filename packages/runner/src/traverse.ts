@@ -1072,8 +1072,9 @@ export abstract class BaseObjectTraverser {
   private internCoverageSelector(
     selector: SchemaPathSelector,
   ): SchemaPathSelector {
-    // A schema-less selector is normalized to `false` in place (it is owned).
-    const schema = selector.schema ??= false;
+    // A schema-less selector is treated as `false` ("reject"). Never mutate the
+    // input — it may be frozen; only allocate a normalized copy when needed.
+    const schema = selector.schema ?? false;
     const schemaKey = typeof schema === "boolean"
       ? String(schema)
       : hashSchema(schema);
@@ -1082,7 +1083,9 @@ export abstract class BaseObjectTraverser {
     if (cached !== undefined) {
       return cached;
     }
-    const interned = internPathSelector(selector);
+    const interned = internPathSelector(
+      selector.schema === undefined ? { ...selector, schema } : selector,
+    );
     this.coverageSelectorCache.set(cacheKey, interned);
     return interned;
   }
