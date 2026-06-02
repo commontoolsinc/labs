@@ -11,6 +11,36 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    numLiteral: number;
+    floatLiteral: number;
+    strLiteral: string;
+}, string>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        numLiteral: {
+            type: "number"
+        },
+        floatLiteral: {
+            type: "number"
+        },
+        strLiteral: {
+            type: "string"
+        }
+    },
+    required: ["value", "numLiteral", "floatLiteral", "strLiteral"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
+    // Use all captured literals to ensure they're all widened
+    const combined = value.get() + numLiteral + floatLiteral;
+    return boolLiteral ? strLiteral + combined : "";
+});
 // Test that all literal types are widened in closure captures
 // FIXTURE: derive-all-literal-types
 // Verifies: literal values (number, string, boolean, float) are captured and their types widened in schemas
@@ -25,36 +55,7 @@ export default pattern(() => {
     const strLiteral = "hello";
     const boolLiteral = true;
     const floatLiteral = 3.14;
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        numLiteral: number;
-        floatLiteral: number;
-        strLiteral: string;
-    }, string>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            numLiteral: {
-                type: "number"
-            },
-            floatLiteral: {
-                type: "number"
-            },
-            strLiteral: {
-                type: "string"
-            }
-        },
-        required: ["value", "numLiteral", "floatLiteral", "strLiteral"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
-        // Use all captured literals to ensure they're all widened
-        const combined = value.get() + numLiteral + floatLiteral;
-        return boolLiteral ? strLiteral + combined : "";
-    })({
+    const result = __cfLift_1({
         value: value,
         numLiteral: numLiteral,
         floatLiteral: floatLiteral,

@@ -4,9 +4,12 @@ _Status: Phase 1 complete in CT-1615 (lift-applied form
 `__cfHelpers.lift(cb)(input)`). Registry-architecture follow-up landed in PR
 #3707 (registries consolidated into `CrossStageState`). No-input form switch
 landed in PR #3709 (`computed`-origin lifts now emit `lift(false, fn)()` instead
-of the `lift(...)({})` stopgap). Still outstanding: removing the runtime
-`derive` export (deferred — not dead; see follow-ups below). Phases 2 & 3
-designed at high level; details deferred._
+of the `lift(...)({})` stopgap). **Phase 2 complete in CT-1644**
+(`LiftHoistingTransformer` hoists every lift call to a module-scope
+`const __cfLift_N = __cfHelpers.lift(...)`, after SchemaInjection; subsumes lift
+from the CT-1585 callback hoister). Still outstanding: removing the runtime
+`derive` export (deferred — not dead; see follow-ups below). Phase 3 designed at
+high level; details deferred._
 
 ## Motivation
 
@@ -232,25 +235,48 @@ Note three changes from the existing CT-1585 hoist:
    callbacks; now we have a builder-specific hoist and can use a
    builder-specific prefix.
 
-### Open questions for Phase 2
+### Open questions for Phase 2 — RESOLVED (CT-1644)
 
-- **Where in the pipeline?** Likely after `SchemaInjectionTransformer` (so the
-  hoisted `lift(...)` call has its schemas baked in). But determine empirically
-  — the CT-1585 hoist had to go before SchemaInjection because of
-  `getBuilderCallbackIndices` arg-position assumptions; Phase 2 has different
-  constraints since we're hoisting the _call_, not the callback.
-- **Interaction with the existing CT-1585 hoist.** Once Phase 2 lands for
-  `lift`, the existing CT-1585 hoist still handles `pattern`, `handler`,
-  `patternTool` (and previously `derive`, which is gone post-Phase-1). Phase 2's
-  lift-specific hoist might subsume or coexist with it.
-- **Naming collision.** If a source file already has a top-level
-  `const __cfLift_5 = ...`, the per-file counter still produces a unique name
-  (the source file's user-authored identifiers are visible at the time we
-  synthesize the name). But verify.
-- **`createUniqueName` trap.** Use the same explicit-counter +
-  `createIdentifier` approach that CT-1585 commit 3 introduced. Don't use
-  `factory.createUniqueName` — `.text` only carries the bare prefix at synthesis
-  time.
+- **Where in the pipeline?** **After `SchemaInjectionTransformer`, before
+  SchemaGenerator. Verified empirically 2026-06-02.** A spike initially suggested
+  hoisting _before_ injection was viable (injection reached the relocated const),
+  but a fixture audit found it silently truncated the argSchema in nested /
+  multi-capture lifts: SchemaInjection derives the argument schema from the
+  _applied captures object_ (`call.arguments[0]` of the outer application), which
+  hoisting-before severs from the lift — the callback's parameter type alone does
+  not recover all captures. Hoisting _after_ injection bakes the complete schema
+  into the still-applied `lift(argSchema, resSchema, cb)(captures)` first, so the
+  relocation is schema-transparent. (Map-element `$ref` schemas regressed the same
+  way under hoist-before and are likewise fixed by hoist-after.) See
+  `session_outputs/2026-06-02_lift-hoist-phase2/02-ordering-correction.md`.
+- **Interaction with the existing CT-1585 hoist.** **Subsume, verified.** Phase 2
+  owns lift hoisting: `lift` is removed from CT-1585's `HOISTABLE_BUILDER_NAMES`
+  and the lift-applied branch in `resolveHoistTarget` is disabled. Coexistence
+  produced a double-hoist that TDZ-crashed at module load (`Cannot access
+  '__cfModuleCallback_1' before initialization` — Phase 2's lift const hoisted
+  above CT-1585's callback const). CT-1585 still owns `pattern`/`handler`/
+  `patternTool`; both coexist correctly in one file (e.g. `patternTool` callback
+  stays `__cfModuleCallback_N` while sibling lifts become `__cfLift_N`). When
+  `pattern`/`handler` get whole-call hoisting they fold into `LiftHoistingTransformer`.
+- **Naming collision.** Per-file counter + `factory.createIdentifier(\`__cfLift_${n}\`)`.
+  `__cfLift` added to `isTransformerInjectedIdentifier` so a `__cfLift_N` reference
+  inside another hoisted callback isn't miscounted as a user module-scope use.
+  Call-site recognition (the synthetic `__cfLift_N(captures)` identifier the
+  checker can't resolve) is carried via `ts.setOriginalNode(name, innerCall)` plus
+  a `getOriginalNode` fallback in `resolveBuilderExpressionKind` — so
+  ReactiveVariableFor still attaches the `.for(...)` tail.
+- **`createUniqueName` trap.** Avoided — explicit counter + `createIdentifier`, per
+  CT-1585 commit 3.
+
+### Inputs to Phase 3 (sandboxable / selfcontained)
+
+After CT-1644, every reactive lift is a module-scope `const __cfLift_N =
+__cfHelpers.lift(argSchema, resSchema, cb)` with the callback inline — the exact
+substrate Phase 3 wraps as `__cfHelpers.lift(__cfHelpers.selfcontained(...))`.
+The sandboxability predicate is CT-1585's `analyzeCallbackForHoisting` machinery
+(the `localNames` pre-pass, `isTransformerInjectedIdentifier`, the ambient-globals
+exclusion), now repurposed from a _hoist gate_ to a _sandboxable gate_ applied to
+each `__cfLift_N`'s inline callback body.
 
 ## Phase 3: sandboxable marker (sketch)
 

@@ -11,6 +11,39 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        taxRate: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["taxRate"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 + state.taxRate));
 interface Item {
     id: number;
     price: number;
@@ -64,39 +97,7 @@ export default pattern((state) => {
                 const item = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<div>
-              Total: {__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        taxRate: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                taxRate: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["taxRate"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 + state.taxRate))({
+              Total: {__cfLift_1({
                     item: {
                         price: item.key("price")
                     },

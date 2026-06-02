@@ -11,6 +11,27 @@ import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    msg: {
+        type: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        msg: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string"
+                }
+            },
+            required: ["type"]
+        }
+    },
+    required: ["msg"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ msg }) => msg.type === "system");
 const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element");
     return ifElse({
@@ -145,27 +166,7 @@ export default pattern((__cf_pattern_input) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    msg: {
-                        type: string;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        msg: {
-                            type: "object",
-                            properties: {
-                                type: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["type"]
-                        }
-                    },
-                    required: ["msg"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ msg }) => msg.type === "system")({ msg: {
+                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ msg: {
                         type: msg.key("type")
                     } }), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
                 open

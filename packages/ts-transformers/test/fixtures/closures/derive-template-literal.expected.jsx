@@ -11,6 +11,25 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    prefix: __cfHelpers.ReadonlyCell<string>;
+    value: __cfHelpers.ReadonlyCell<number>;
+}, string>({
+    type: "object",
+    properties: {
+        prefix: {
+            type: "string",
+            asCell: ["readonly"]
+        },
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["prefix", "value"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ prefix, value }) => `${prefix.get()}${value.get()}`);
 // FIXTURE: derive-template-literal
 // Verifies: captured cells used inside a template literal expression are extracted
 //   computed(() => `${prefix.get()}${value.get()}`) → lift(...)({ value, prefix })
@@ -21,25 +40,7 @@ export default pattern(() => {
     const prefix = new Writable("Value: ", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("prefix", true);
-    const result = __cfHelpers.lift<{
-        prefix: __cfHelpers.ReadonlyCell<string>;
-        value: __cfHelpers.ReadonlyCell<number>;
-    }, string>({
-        type: "object",
-        properties: {
-            prefix: {
-                type: "string",
-                asCell: ["readonly"]
-            },
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["prefix", "value"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ prefix, value }) => `${prefix.get()}${value.get()}`)({
+    const result = __cfLift_1({
         prefix: prefix,
         value: value
     }).for("result", true);

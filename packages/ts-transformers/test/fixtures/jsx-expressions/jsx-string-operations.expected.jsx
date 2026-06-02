@@ -11,6 +11,290 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        title: string;
+        firstName: string;
+        lastName: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                firstName: {
+                    type: "string"
+                },
+                lastName: {
+                    type: "string"
+                }
+            },
+            required: ["title", "firstName", "lastName"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.title + ": " + state.firstName + " " + state.lastName);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        firstName: string;
+        lastName: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                firstName: {
+                    type: "string"
+                },
+                lastName: {
+                    type: "string"
+                }
+            },
+            required: ["firstName", "lastName"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.firstName + state.lastName);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        firstName: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                firstName: {
+                    type: "string"
+                }
+            },
+            required: ["firstName"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => "Hello, " + state.firstName + "!");
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        firstName: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                firstName: {
+                    type: "string"
+                }
+            },
+            required: ["firstName"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => `Welcome, ${state.firstName}!`);
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        firstName: string;
+        lastName: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                firstName: {
+                    type: "string"
+                },
+                lastName: {
+                    type: "string"
+                }
+            },
+            required: ["firstName", "lastName"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => `Full name: ${state.firstName} ${state.lastName}`);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        title: string;
+        firstName: string;
+        lastName: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                firstName: {
+                    type: "string"
+                },
+                lastName: {
+                    type: "string"
+                }
+            },
+            required: ["title", "firstName", "lastName"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => `${state.title}: ${state.firstName} ${state.lastName}`);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        firstName: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                firstName: {
+                    type: "string"
+                }
+            },
+            required: ["firstName"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.firstName.toUpperCase());
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        title: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                }
+            },
+            required: ["title"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.title.toLowerCase());
+const __cfLift_9 = __cfHelpers.lift<{
+    state: {
+        message: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                message: {
+                    type: "string"
+                }
+            },
+            required: ["message"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.message.substring(0, 5));
+const __cfLift_10 = __cfHelpers.lift<{
+    state: {
+        firstName: string;
+        count: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                firstName: {
+                    type: "string"
+                },
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["firstName", "count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.firstName + " has " + state.count + " items");
+const __cfLift_11 = __cfHelpers.lift<{
+    state: {
+        firstName: string;
+        count: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                firstName: {
+                    type: "string"
+                },
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["firstName", "count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => `${state.firstName} has ${state.count} items`);
+const __cfLift_12 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => "Count: " + state.count);
 interface State {
     firstName: string;
     lastName: string;
@@ -27,327 +311,55 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>String Concatenation</h3>
-        <h1>{__cfHelpers.lift<{
-            state: {
-                title: string;
-                firstName: string;
-                lastName: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        title: {
-                            type: "string"
-                        },
-                        firstName: {
-                            type: "string"
-                        },
-                        lastName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["title", "firstName", "lastName"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.title + ": " + state.firstName + " " + state.lastName)({ state: {
+        <h1>{__cfLift_1({ state: {
                 title: state.key("title"),
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } })}</h1>
-        <p>{__cfHelpers.lift<{
-            state: {
-                firstName: string;
-                lastName: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        firstName: {
-                            type: "string"
-                        },
-                        lastName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["firstName", "lastName"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.firstName + state.lastName)({ state: {
+        <p>{__cfLift_2({ state: {
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } })}</p>
-        <p>{__cfHelpers.lift<{
-            state: {
-                firstName: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        firstName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["firstName"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => "Hello, " + state.firstName + "!")({ state: {
+        <p>{__cfLift_3({ state: {
                 firstName: state.key("firstName")
             } })}</p>
 
         <h3>Template Literals</h3>
-        <p>{__cfHelpers.lift<{
-            state: {
-                firstName: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        firstName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["firstName"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => `Welcome, ${state.firstName}!`)({ state: {
+        <p>{__cfLift_4({ state: {
                 firstName: state.key("firstName")
             } })}</p>
-        <p>{__cfHelpers.lift<{
-            state: {
-                firstName: string;
-                lastName: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        firstName: {
-                            type: "string"
-                        },
-                        lastName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["firstName", "lastName"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => `Full name: ${state.firstName} ${state.lastName}`)({ state: {
+        <p>{__cfLift_5({ state: {
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } })}</p>
-        <p>{__cfHelpers.lift<{
-            state: {
-                title: string;
-                firstName: string;
-                lastName: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        title: {
-                            type: "string"
-                        },
-                        firstName: {
-                            type: "string"
-                        },
-                        lastName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["title", "firstName", "lastName"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => `${state.title}: ${state.firstName} ${state.lastName}`)({ state: {
+        <p>{__cfLift_6({ state: {
                 title: state.key("title"),
                 firstName: state.key("firstName"),
                 lastName: state.key("lastName")
             } })}</p>
 
         <h3>String Methods</h3>
-        <p>Uppercase: {__cfHelpers.lift<{
-            state: {
-                firstName: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        firstName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["firstName"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.firstName.toUpperCase())({ state: {
+        <p>Uppercase: {__cfLift_7({ state: {
                 firstName: state.key("firstName")
             } })}</p>
-        <p>Lowercase: {__cfHelpers.lift<{
-            state: {
-                title: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        title: {
-                            type: "string"
-                        }
-                    },
-                    required: ["title"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.title.toLowerCase())({ state: {
+        <p>Lowercase: {__cfLift_8({ state: {
                 title: state.key("title")
             } })}</p>
         <p>Length: {state.key("message", "length")}</p>
-        <p>Substring: {__cfHelpers.lift<{
-            state: {
-                message: string;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        message: {
-                            type: "string"
-                        }
-                    },
-                    required: ["message"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.message.substring(0, 5))({ state: {
+        <p>Substring: {__cfLift_9({ state: {
                 message: state.key("message")
             } })}</p>
 
         <h3>Mixed String and Number</h3>
-        <p>{__cfHelpers.lift<{
-            state: {
-                firstName: string;
-                count: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        firstName: {
-                            type: "string"
-                        },
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["firstName", "count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.firstName + " has " + state.count + " items")({ state: {
+        <p>{__cfLift_10({ state: {
                 firstName: state.key("firstName"),
                 count: state.key("count")
             } })}</p>
-        <p>{__cfHelpers.lift<{
-            state: {
-                firstName: string;
-                count: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        firstName: {
-                            type: "string"
-                        },
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["firstName", "count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => `${state.firstName} has ${state.count} items`)({ state: {
+        <p>{__cfLift_11({ state: {
                 firstName: state.key("firstName"),
                 count: state.key("count")
             } })}</p>
-        <p>Count as string: {__cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => "Count: " + state.count)({ state: {
+        <p>Count as string: {__cfLift_12({ state: {
                 count: state.key("count")
             } })}</p>
       </div>),

@@ -11,6 +11,61 @@ import { Cell, handler, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    castVote: __cfHelpers.HandlerFactory<{ votes: __cfHelpers.Cell<VoteEvent[]>; }, unknown>;
+    state: {
+        votes: VoteEvent[];
+    };
+}, import("commonfabric").Stream<unknown>>({
+    type: "object",
+    properties: {
+        castVote: {
+            type: "object",
+            properties: {
+                type: {
+                    "enum": ["ref", "javascript", "pattern", "raw", "isolated", "passthrough"]
+                },
+                defaultScope: {
+                    $ref: "#/$defs/CellScope"
+                },
+                "with": {
+                    asCell: ["stream"]
+                }
+            },
+            required: ["type", "with"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                votes: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/VoteEvent"
+                    }
+                }
+            },
+            required: ["votes"]
+        }
+    },
+    required: ["castVote", "state"],
+    $defs: {
+        VoteEvent: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                step: {
+                    "enum": ["single", "double"]
+                }
+            },
+            required: ["id", "step"]
+        },
+        CellScope: {
+            "enum": ["space", "user", "session"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }));
 interface Item {
     id: string;
     label: string;
@@ -66,61 +121,7 @@ const castVote = handler({
 // Context: The conditional branch makes expression rewriting recurse into the
 // handler subtree; the authored handler arrow must be treated as safe context.
 export default pattern((state) => {
-    const boundCastVote = __cfHelpers.lift<{
-        castVote: __cfHelpers.HandlerFactory<{ votes: __cfHelpers.Cell<VoteEvent[]>; }, unknown>;
-        state: {
-            votes: VoteEvent[];
-        };
-    }, import("commonfabric").Stream<unknown>>({
-        type: "object",
-        properties: {
-            castVote: {
-                type: "object",
-                properties: {
-                    type: {
-                        "enum": ["ref", "javascript", "pattern", "raw", "isolated", "passthrough"]
-                    },
-                    defaultScope: {
-                        $ref: "#/$defs/CellScope"
-                    },
-                    "with": {
-                        asCell: ["stream"]
-                    }
-                },
-                required: ["type", "with"]
-            },
-            state: {
-                type: "object",
-                properties: {
-                    votes: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/VoteEvent"
-                        }
-                    }
-                },
-                required: ["votes"]
-            }
-        },
-        required: ["castVote", "state"],
-        $defs: {
-            VoteEvent: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    step: {
-                        "enum": ["single", "double"]
-                    }
-                },
-                required: ["id", "step"]
-            },
-            CellScope: {
-                "enum": ["space", "user", "session"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }))({
+    const boundCastVote = __cfLift_1({
         castVote: castVote,
         state: {
             votes: state.key("votes")

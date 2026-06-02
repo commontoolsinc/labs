@@ -11,6 +11,47 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: {
+            done: boolean;
+        }[];
+    };
+}, { done: boolean; }[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            done: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["done"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "object",
+        properties: {
+            done: {
+                type: "boolean"
+            }
+        },
+        required: ["done"]
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.map((item) => ({ done: item.done })));
 interface Item {
     done: boolean;
 }
@@ -24,47 +65,7 @@ interface State {
 //   rows.map((row) => row.done ? "Done" : "Pending")
 //   → rows.mapWithPattern(pattern(... return ifElse(row.done, "Done", "Pending")))
 export default pattern((state) => {
-    const rows = __cfHelpers.lift<{
-        state: {
-            items: {
-                done: boolean;
-            }[];
-        };
-    }, { done: boolean; }[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                done: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["done"]
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "object",
-            properties: {
-                done: {
-                    type: "boolean"
-                }
-            },
-            required: ["done"]
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.map((item) => ({ done: item.done })))({ state: {
+    const rows = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("rows", true);
     return {

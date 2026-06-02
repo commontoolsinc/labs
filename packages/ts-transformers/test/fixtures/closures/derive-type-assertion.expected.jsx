@@ -11,6 +11,25 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    multiplier: __cfHelpers.ReadonlyCell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        multiplier: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["value", "multiplier"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => (value.get() * multiplier.get()) as number);
 // FIXTURE: derive-type-assertion
 // Verifies: a type assertion (`as number`) in the callback body is preserved after capture extraction
 //   computed(() => (value.get() * multiplier.get()) as number) → lift(...)({ value, multiplier })
@@ -22,25 +41,7 @@ export default pattern(() => {
     const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        multiplier: __cfHelpers.ReadonlyCell<number>;
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            multiplier: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["value", "multiplier"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => (value.get() * multiplier.get()) as number)({
+    const result = __cfLift_1({
         value: value,
         multiplier: multiplier
     }).for("result", true);

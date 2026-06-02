@@ -18,6 +18,30 @@ import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    card: {
+        description: string;
+    };
+}, boolean | "">({
+    type: "object",
+    properties: {
+        card: {
+            type: "object",
+            properties: {
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["description"]
+        }
+    },
+    required: ["card"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    "enum": [false, true, ""]
+} as const satisfies __cfHelpers.JSONSchema, ({ card }) => {
+    const desc = card.description;
+    return desc && desc.length > 0;
+});
 interface Card {
     title: string;
     description: string;
@@ -50,30 +74,7 @@ export default pattern((__cf_pattern_input) => {
     })({
         isEditing: isEditing
     }).for({ stream: "startEditing" }, true);
-    const hasDescription = __cfHelpers.lift<{
-        card: {
-            description: string;
-        };
-    }, boolean | "">({
-        type: "object",
-        properties: {
-            card: {
-                type: "object",
-                properties: {
-                    description: {
-                        type: "string"
-                    }
-                },
-                required: ["description"]
-            }
-        },
-        required: ["card"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": [false, true, ""]
-    } as const satisfies __cfHelpers.JSONSchema, ({ card }) => {
-        const desc = card.description;
-        return desc && desc.length > 0;
-    })({ card: {
+    const hasDescription = __cfLift_1({ card: {
             description: card.key("description")
         } }).for("hasDescription", true);
     return {

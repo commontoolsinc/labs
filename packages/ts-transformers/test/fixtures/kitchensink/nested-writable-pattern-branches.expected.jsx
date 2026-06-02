@@ -22,6 +22,125 @@ import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        sections: __cfHelpers.ReadonlyCell<unknown[]>;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                sections: {
+                    type: "array",
+                    items: {
+                        type: "unknown"
+                    },
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["sections"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.sections.get().length > 0);
+const __cfLift_2 = __cfHelpers.lift<{
+    task: {
+        note?: string | undefined;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        task: {
+            type: "object",
+            properties: {
+                note: {
+                    type: "string"
+                }
+            }
+        }
+    },
+    required: ["task"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ task }) => task.note !== undefined);
+const __cfLift_3 = __cfHelpers.lift<{
+    tagIndex: number;
+    taskIndex: number;
+}, boolean>({
+    type: "object",
+    properties: {
+        tagIndex: {
+            type: "number"
+        },
+        taskIndex: {
+            type: "number"
+        }
+    },
+    required: ["tagIndex", "taskIndex"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ tagIndex, taskIndex }) => tagIndex === taskIndex);
+const __cfLift_4 = __cfHelpers.lift<{
+    section: {
+        tasks: {
+            length: number;
+        };
+        title: string;
+    };
+}, import("commonfabric").JSXElement>({
+    type: "object",
+    properties: {
+        section: {
+            type: "object",
+            properties: {
+                tasks: {
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
+                },
+                title: {
+                    type: "string"
+                }
+            },
+            required: ["tasks", "title"]
+        }
+    },
+    required: ["section"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ section }) => 
+// [TRANSFORM] ternary preserved inside the ifElse(expanded) false branch:
+//   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
+//   → plain local ternary inside the JSX branch
+section.tasks.length > 0
+    ? <small>{section.title} collapsed</small>
+    : <small>empty</small>);
 interface Task {
     id: string;
     label: string;
@@ -74,31 +193,7 @@ export default pattern((state) => {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("hoveredSectionId", true);
     // [TRANSFORM] computed() -> lift(): captures state.sections (asCell — Writable<Section[]>)
-    const hasSections = __cfHelpers.lift<{
-        state: {
-            sections: __cfHelpers.ReadonlyCell<unknown[]>;
-        };
-    }, boolean>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    sections: {
-                        type: "array",
-                        items: {
-                            type: "unknown"
-                        },
-                        asCell: ["readonly"]
-                    }
-                },
-                required: ["sections"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.sections.get().length > 0)({ state: {
+    const hasSections = __cfLift_1({ state: {
             sections: state.key("sections")
         } }).for("hasSections", true);
     return {
@@ -204,26 +299,7 @@ export default pattern((state) => {
                                     type: "boolean"
                                 } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
-                                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                                    task: {
-                                        note?: string | undefined;
-                                    };
-                                }, boolean>({
-                                    type: "object",
-                                    properties: {
-                                        task: {
-                                            type: "object",
-                                            properties: {
-                                                note: {
-                                                    type: "string"
-                                                }
-                                            }
-                                        }
-                                    },
-                                    required: ["task"]
-                                } as const satisfies __cfHelpers.JSONSchema, {
-                                    type: "boolean"
-                                } as const satisfies __cfHelpers.JSONSchema, ({ task }) => task.note !== undefined)({ task: {
+                                } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ task: {
                                         note: task.key("note")
                                     } }), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
@@ -246,23 +322,7 @@ export default pattern((state) => {
                                             type: "string"
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                                            tagIndex: number;
-                                            taskIndex: number;
-                                        }, boolean>({
-                                            type: "object",
-                                            properties: {
-                                                tagIndex: {
-                                                    type: "number"
-                                                },
-                                                taskIndex: {
-                                                    type: "number"
-                                                }
-                                            },
-                                            required: ["tagIndex", "taskIndex"]
-                                        } as const satisfies __cfHelpers.JSONSchema, {
-                                            type: "boolean"
-                                        } as const satisfies __cfHelpers.JSONSchema, ({ tagIndex, taskIndex }) => tagIndex === taskIndex)({
+                                        } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({
                                             tagIndex: tagIndex,
                                             taskIndex: taskIndex
                                         }), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
@@ -468,63 +528,7 @@ export default pattern((state) => {
                                 showCompleted: state.key("showCompleted")
                             }
                         })}
-                  </div>, __cfHelpers.lift<{
-                        section: {
-                            tasks: {
-                                length: number;
-                            };
-                            title: string;
-                        };
-                    }, import("commonfabric").JSXElement>({
-                        type: "object",
-                        properties: {
-                            section: {
-                                type: "object",
-                                properties: {
-                                    tasks: {
-                                        type: "object",
-                                        properties: {
-                                            length: {
-                                                type: "number"
-                                            }
-                                        },
-                                        required: ["length"]
-                                    },
-                                    title: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["tasks", "title"]
-                            }
-                        },
-                        required: ["section"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }, {
-                                $ref: "#/$defs/UIRenderable"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }],
-                        $defs: {
-                            UIRenderable: {
-                                type: "object",
-                                properties: {
-                                    $UI: {
-                                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                                    }
-                                },
-                                required: ["$UI"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, ({ section }) => 
-                    // [TRANSFORM] ternary preserved inside the ifElse(expanded) false branch:
-                    //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
-                    //   → plain local ternary inside the JSX branch
-                    section.tasks.length > 0
-                        ? <small>{section.title} collapsed</small>
-                        : <small>empty</small>)({ section: {
+                  </div>, __cfLift_4({ section: {
                             tasks: {
                                 length: section.key("tasks", "length")
                             },

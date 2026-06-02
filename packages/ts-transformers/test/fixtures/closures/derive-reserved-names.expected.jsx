@@ -11,6 +11,25 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    __cf_reserved: __cfHelpers.ReadonlyCell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        __cf_reserved: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["value", "__cf_reserved"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, __cf_reserved }) => value.get() * __cf_reserved.get());
 // FIXTURE: derive-reserved-names
 // Verifies: variables with __cf_ prefixed names are captured without special treatment
 //   computed(() => value.get() * __cf_reserved.get()) → lift(...)({ value, __cf_reserved })
@@ -22,25 +41,7 @@ export default pattern(() => {
     const __cf_reserved = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        __cf_reserved: __cfHelpers.ReadonlyCell<number>;
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            __cf_reserved: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["value", "__cf_reserved"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, __cf_reserved }) => value.get() * __cf_reserved.get())({
+    const result = __cfLift_1({
         value: value,
         __cf_reserved: __cf_reserved
     }).for("result", true);

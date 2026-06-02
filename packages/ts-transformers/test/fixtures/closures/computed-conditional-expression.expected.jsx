@@ -11,6 +11,35 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    threshold: __cfHelpers.ReadonlyCell<number>;
+    a: __cfHelpers.ReadonlyCell<number>;
+    b: __cfHelpers.ReadonlyCell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        threshold: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        a: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        b: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["value", "threshold", "a", "b"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get());
 // FIXTURE: computed-conditional-expression
 // Verifies: computed(() => expr) with four cell captures in a ternary expression
 //   computed(() => value.get() > threshold.get() ? a.get() : b.get()) → derive(captureSchema, resultSchema, { value, threshold, a, b }, ({ value, threshold, a, b }) => ...)
@@ -28,35 +57,7 @@ export default pattern(() => {
     const b = new Writable(200, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("b", true);
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        threshold: __cfHelpers.ReadonlyCell<number>;
-        a: __cfHelpers.ReadonlyCell<number>;
-        b: __cfHelpers.ReadonlyCell<number>;
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            threshold: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            a: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            b: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["value", "threshold", "a", "b"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get())({
+    const result = __cfLift_1({
         value: value,
         threshold: threshold,
         a: a,

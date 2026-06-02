@@ -11,6 +11,51 @@ import { action, Default, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    people: __cfHelpers.PerSpace<__cfHelpers.Cell<Person[]>>;
+}, readonly Person[]>({
+    type: "object",
+    properties: {
+        people: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Person"
+            },
+            asCell: [{
+                    kind: "cell",
+                    scope: "space"
+                }]
+        }
+    },
+    required: ["people"],
+    $defs: {
+        Person: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Person"
+    },
+    $defs: {
+        Person: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get());
 interface Person {
     name: string;
 }
@@ -90,51 +135,7 @@ export default pattern((__cf_pattern_input) => {
                 const setAssign = __cf_pattern_input.key("params", "setAssign");
                 return (<div>
             <span>{row.key("label")}</span>
-            {(__cfHelpers.lift<{
-                        people: __cfHelpers.PerSpace<__cfHelpers.Cell<Person[]>>;
-                    }, readonly Person[]>({
-                        type: "object",
-                        properties: {
-                            people: {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/Person"
-                                },
-                                asCell: [{
-                                        kind: "cell",
-                                        scope: "space"
-                                    }]
-                            }
-                        },
-                        required: ["people"],
-                        $defs: {
-                            Person: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Person"
-                        },
-                        $defs: {
-                            Person: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get())({ people: people }) ?? []).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            {(__cfLift_1({ people: people }) ?? []).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                         const p = __cf_pattern_input.key("element");
                         const setAssign = __cf_pattern_input.key("params", "setAssign");
                         return (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {

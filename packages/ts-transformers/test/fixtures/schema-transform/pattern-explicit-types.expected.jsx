@@ -11,6 +11,34 @@ import { computed, pattern, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    input: { foo: string; } & {} & { [SELF]: Output; };
+}, { bar: number; foo: string; [SELF]: Output; }>({
+    type: "object",
+    properties: {
+        input: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                }
+            },
+            required: ["foo"]
+        }
+    },
+    required: ["input"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        bar: {
+            type: "number"
+        },
+        foo: {
+            type: "string"
+        }
+    },
+    required: ["bar", "foo"]
+} as const satisfies __cfHelpers.JSONSchema, ({ input }) => ({ ...input, bar: 123 }));
 interface Input {
     foo: string;
 }
@@ -22,34 +50,7 @@ interface Output extends Input {
 //   pattern<Input, Output>() → input schema from Input, output schema from Output (includes inherited fields)
 //   Output extends Input → output schema includes both own (bar) and inherited (foo) properties
 export default pattern((input) => {
-    return __cfHelpers.lift<{
-        input: { foo: string; } & {} & { [SELF]: Output; };
-    }, { bar: number; foo: string; [SELF]: Output; }>({
-        type: "object",
-        properties: {
-            input: {
-                type: "object",
-                properties: {
-                    foo: {
-                        type: "string"
-                    }
-                },
-                required: ["foo"]
-            }
-        },
-        required: ["input"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            bar: {
-                type: "number"
-            },
-            foo: {
-                type: "string"
-            }
-        },
-        required: ["bar", "foo"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ input }) => ({ ...input, bar: 123 }))({ input: input }).for("__patternResult", true);
+    return __cfLift_1({ input: input }).for("__patternResult", true);
 }, {
     type: "object",
     properties: {

@@ -11,6 +11,36 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    config: __cfHelpers.ReadonlyCell<{
+        multiplier?: number;
+    } | null>;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        config: {
+            anyOf: [{
+                    type: "object",
+                    properties: {
+                        multiplier: {
+                            type: "number"
+                        }
+                    }
+                }, {
+                    type: "null"
+                }],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["value", "config"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1));
 // FIXTURE: computed-optional-chaining
 // Verifies: computed() with optional chaining and nullish coalescing on captured cells
 //   computed(() => value.get() * (config.get()?.multiplier ?? 1)) → derive(..., { value, config }, ({ value, config }) => ...)
@@ -33,36 +63,7 @@ export default pattern(() => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        config: __cfHelpers.ReadonlyCell<{
-            multiplier?: number;
-        } | null>;
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            config: {
-                anyOf: [{
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number"
-                            }
-                        }
-                    }, {
-                        type: "null"
-                    }],
-                asCell: ["readonly"]
-            }
-        },
-        required: ["value", "config"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1))({
+    const result = __cfLift_1({
         value: value,
         config: config
     }).for("result", true);

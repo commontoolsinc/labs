@@ -11,6 +11,113 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        discount: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.discount);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        items: { price: number; }[];
+        selectedIndex: __cfHelpers.Cell<number>;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    }
+                },
+                selectedIndex: {
+                    type: "number",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["items", "selectedIndex"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        items: { price: number; }[];
+        selectedIndex: __cfHelpers.Cell<number>;
+        discount: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    }
+                },
+                selectedIndex: {
+                    type: "number",
+                    asCell: ["cell"]
+                },
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["items", "selectedIndex", "discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount);
 interface State {
     items: Array<{
         price: number;
@@ -31,39 +138,7 @@ export default pattern((state) => {
                 const index = __cf_pattern_input.key("index");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<div>
-            <span>{__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        discount: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.discount)({
+            <span>{__cfLift_1({
                     item: {
                         price: item.key("price")
                     },
@@ -161,83 +236,11 @@ export default pattern((state) => {
                 }
             })}
         <div>
-          Selected: {__cfHelpers.lift<{
-            state: {
-                items: { price: number; }[];
-                selectedIndex: __cfHelpers.Cell<number>;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    price: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["price"]
-                            }
-                        },
-                        selectedIndex: {
-                            type: "number",
-                            asCell: ["cell"]
-                        }
-                    },
-                    required: ["items", "selectedIndex"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)({ state: {
+          Selected: {__cfLift_2({ state: {
                 items: state.key("items"),
                 selectedIndex: state.key("selectedIndex")
             } })} x {state.key("discount")} ={" "}
-          {__cfHelpers.lift<{
-            state: {
-                items: { price: number; }[];
-                selectedIndex: __cfHelpers.Cell<number>;
-                discount: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    price: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["price"]
-                            }
-                        },
-                        selectedIndex: {
-                            type: "number",
-                            asCell: ["cell"]
-                        },
-                        discount: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "selectedIndex", "discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount)({ state: {
+          {__cfLift_3({ state: {
                 items: state.key("items"),
                 selectedIndex: state.key("selectedIndex"),
                 discount: state.key("discount")

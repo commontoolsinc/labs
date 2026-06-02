@@ -12,6 +12,19 @@ import "commonfabric/schema";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    count: number;
+}, number>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count * 2);
 // Test that pattern with both schemas already present is not transformed
 interface Input {
     count: number;
@@ -27,19 +40,7 @@ interface Result {
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
-        doubled: __cfHelpers.lift<{
-            count: number;
-        }, number>({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                }
-            },
-            required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count * 2)({ count: count }).for(["__patternResult", "doubled"], true)
+        doubled: __cfLift_1({ count: count }).for(["__patternResult", "doubled"], true)
     };
 }, {
     type: "object",

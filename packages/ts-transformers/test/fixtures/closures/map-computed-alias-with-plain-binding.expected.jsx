@@ -11,43 +11,45 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    element: any;
+    __cf_val_key: any;
+}, number>({
+    type: "object",
+    properties: {
+        element: true,
+        __cf_val_key: true
+    },
+    required: ["element", "__cf_val_key"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ element, __cf_val_key }) => element[__cf_val_key]);
+const __cfLift_2 = __cfHelpers.lift<{
+    foo: number;
+    val: number;
+}, number>({
+    type: "object",
+    properties: {
+        foo: {
+            type: "number"
+        },
+        val: {
+            type: "number"
+        }
+    },
+    required: ["foo", "val"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ foo, val }) => foo + val);
 const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
     const element = __cf_pattern_input.key("element");
     const __cf_val_key = dynamicKey();
     const foo = element.key("foo");
-    const val = __cfHelpers.lift<{
-        element: any;
-        __cf_val_key: any;
-    }, number>({
-        type: "object",
-        properties: {
-            element: true,
-            __cf_val_key: true
-        },
-        required: ["element", "__cf_val_key"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ element, __cf_val_key }) => element[__cf_val_key])({
+    const val = __cfLift_1({
         element: element,
         __cf_val_key: __cf_val_key
     }).for("val", true);
-    return (<span>{__cfHelpers.lift<{
-        foo: number;
-        val: number;
-    }, number>({
-        type: "object",
-        properties: {
-            foo: {
-                type: "number"
-            },
-            val: {
-                type: "number"
-            }
-        },
-        required: ["foo", "val"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ foo, val }) => foo + val)({
+    return (<span>{__cfLift_2({
         foo: foo,
         val: val
     })}</span>);

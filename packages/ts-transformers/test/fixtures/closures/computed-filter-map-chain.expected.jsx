@@ -11,6 +11,49 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        preferences: {
+            ingredient: string;
+            preference: "liked" | "disliked";
+        }[];
+    };
+}, string[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                preferences: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            ingredient: {
+                                type: "string"
+                            },
+                            preference: {
+                                "enum": ["liked", "disliked"]
+                            }
+                        },
+                        required: ["ingredient", "preference"]
+                    }
+                }
+            },
+            required: ["preferences"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => {
+    return state.preferences
+        .filter((p) => p.preference === "liked")
+        .map((p) => p.ingredient);
+});
 interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";
@@ -21,49 +64,7 @@ interface Preference {
 //   .filter() and .map() are standard Array methods — they must remain
 //   untransformed. This is a negative test for the reactive method detection.
 export default pattern((state) => {
-    const liked = __cfHelpers.lift<{
-        state: {
-            preferences: {
-                ingredient: string;
-                preference: "liked" | "disliked";
-            }[];
-        };
-    }, string[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    preferences: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                ingredient: {
-                                    type: "string"
-                                },
-                                preference: {
-                                    "enum": ["liked", "disliked"]
-                                }
-                            },
-                            required: ["ingredient", "preference"]
-                        }
-                    }
-                },
-                required: ["preferences"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => {
-        return state.preferences
-            .filter((p) => p.preference === "liked")
-            .map((p) => p.ingredient);
-    })({ state: {
+    const liked = __cfLift_1({ state: {
             preferences: state.key("preferences")
         } }).for("liked", true);
     return { liked };

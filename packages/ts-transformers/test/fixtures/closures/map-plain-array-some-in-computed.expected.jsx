@@ -11,6 +11,58 @@ import { Writable, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    logs: __cfHelpers.ReadonlyCell<HabitLog[]>;
+    habit: {
+        name: string;
+    };
+    todayDate: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        logs: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/HabitLog"
+            },
+            asCell: ["readonly"]
+        },
+        habit: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        todayDate: {
+            type: "string"
+        }
+    },
+    required: ["logs", "habit", "todayDate"],
+    $defs: {
+        HabitLog: {
+            type: "object",
+            properties: {
+                habitName: {
+                    type: "string"
+                },
+                date: {
+                    type: "string"
+                },
+                completed: {
+                    type: "boolean"
+                }
+            },
+            required: ["habitName", "date", "completed"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ logs, habit, todayDate }) => logs.get().some((log) => log.habitName === habit.name &&
+    log.date === todayDate &&
+    log.completed));
 interface Habit {
     name: string;
 }
@@ -38,58 +90,7 @@ export default pattern((__cf_pattern_input) => {
                 const habit = __cf_pattern_input.key("element");
                 const logs = __cf_pattern_input.key("params", "logs");
                 const todayDate = __cf_pattern_input.key("params", "todayDate");
-                const doneToday = __cfHelpers.lift<{
-                    logs: __cfHelpers.ReadonlyCell<HabitLog[]>;
-                    habit: {
-                        name: string;
-                    };
-                    todayDate: string;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        logs: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/HabitLog"
-                            },
-                            asCell: ["readonly"]
-                        },
-                        habit: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        },
-                        todayDate: {
-                            type: "string"
-                        }
-                    },
-                    required: ["logs", "habit", "todayDate"],
-                    $defs: {
-                        HabitLog: {
-                            type: "object",
-                            properties: {
-                                habitName: {
-                                    type: "string"
-                                },
-                                date: {
-                                    type: "string"
-                                },
-                                completed: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["habitName", "date", "completed"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ logs, habit, todayDate }) => logs.get().some((log) => log.habitName === habit.name &&
-                    log.date === todayDate &&
-                    log.completed))({
+                const doneToday = __cfLift_1({
                     logs: logs,
                     habit: {
                         name: habit.key("name")

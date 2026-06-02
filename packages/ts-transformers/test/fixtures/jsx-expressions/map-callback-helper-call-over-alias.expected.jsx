@@ -17,7 +17,19 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ kind }) => describeKind(kind));
+const __cfLift_1 = __cfHelpers.lift<{
+    kind: string;
+}, string>({
+    type: "object",
+    properties: {
+        kind: {
+            type: "string"
+        }
+    },
+    required: ["kind"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ kind }) => describeKind(kind));
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -37,19 +49,7 @@ export default pattern((__cf_pattern_input) => {
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
                 const kind = file.key("type");
-                const label = __cfHelpers.lift<{
-                    kind: string;
-                }, string>({
-                    type: "object",
-                    properties: {
-                        kind: {
-                            type: "string"
-                        }
-                    },
-                    required: ["kind"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ kind: kind }).for("label", true);
+                const label = __cfLift_1({ kind: kind }).for("label", true);
                 return <span>{label}</span>;
             }, {
                 type: "object",

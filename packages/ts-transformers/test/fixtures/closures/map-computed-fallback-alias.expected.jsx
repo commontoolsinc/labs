@@ -11,7 +11,54 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ msg }) => (msg.reactions ?? []) as Reaction[]);
+const __cfLift_1 = __cfHelpers.lift<{
+    msg: {
+        reactions?: Reaction[] | undefined;
+    };
+}, Reaction[]>({
+    type: "object",
+    properties: {
+        msg: {
+            type: "object",
+            properties: {
+                reactions: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Reaction"
+                    }
+                }
+            }
+        }
+    },
+    required: ["msg"],
+    $defs: {
+        Reaction: {
+            type: "object",
+            properties: {
+                emoji: {
+                    type: "string"
+                }
+            },
+            required: ["emoji"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Reaction"
+    },
+    $defs: {
+        Reaction: {
+            type: "object",
+            properties: {
+                emoji: {
+                    type: "string"
+                }
+            },
+            required: ["emoji"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ msg }) => (msg.reactions ?? []) as Reaction[]);
 interface Reaction {
     emoji: string;
 }
@@ -33,54 +80,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {messages.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const msg = __cf_pattern_input.key("element");
-                const messageReactions = __cfHelpers.lift<{
-                    msg: {
-                        reactions?: Reaction[] | undefined;
-                    };
-                }, Reaction[]>({
-                    type: "object",
-                    properties: {
-                        msg: {
-                            type: "object",
-                            properties: {
-                                reactions: {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Reaction"
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    required: ["msg"],
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["emoji"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Reaction"
-                    },
-                    $defs: {
-                        Reaction: {
-                            type: "object",
-                            properties: {
-                                emoji: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["emoji"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ msg: {
+                const messageReactions = __cfLift_1({ msg: {
                         reactions: msg.key("reactions")
                     } }).for("messageReactions", true);
                 return (<div>

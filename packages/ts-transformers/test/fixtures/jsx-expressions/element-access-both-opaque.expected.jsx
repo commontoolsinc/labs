@@ -11,6 +11,28 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: __cfHelpers.Cell<string[]>;
+    index: __cfHelpers.Cell<number>;
+}, string | undefined>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["readonly"]
+        },
+        index: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items", "index"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()]);
 // FIXTURE: element-access-both-opaque
 // Verifies: element access where both array and index are cell-backed OpaqueRefs is wrapped in derive()
 //   items.get()[index.get()] → derive({items, index}, ({items, index}) => items.get()[index.get()])
@@ -28,28 +50,7 @@ export default pattern((_state) => {
         [UI]: (<div>
         <h3>Element Access with Both OpaqueRefs</h3>
         {/* Both items and index are OpaqueRefs */}
-        <p>Selected item: {__cfHelpers.lift<{
-            items: __cfHelpers.Cell<string[]>;
-            index: __cfHelpers.Cell<number>;
-        }, string | undefined>({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    },
-                    asCell: ["readonly"]
-                },
-                index: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["items", "index"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()])({
+        <p>Selected item: {__cfLift_1({
             items: items,
             index: index
         })}</p>

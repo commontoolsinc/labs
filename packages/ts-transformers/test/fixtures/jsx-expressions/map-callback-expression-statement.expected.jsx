@@ -18,6 +18,31 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    file: {
+        name: string;
+        type: string;
+    };
+}, void>({
+    type: "object",
+    properties: {
+        file: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                type: {
+                    type: "string"
+                }
+            },
+            required: ["name", "type"]
+        }
+    },
+    required: ["file"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    asCell: ["opaque"]
+} as const satisfies __cfHelpers.JSONSchema, ({ file }) => console.log("mapping", file.name, file.type));
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -35,31 +60,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
-                __cfHelpers.lift<{
-                    file: {
-                        name: string;
-                        type: string;
-                    };
-                }, void>({
-                    type: "object",
-                    properties: {
-                        file: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                },
-                                type: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name", "type"]
-                        }
-                    },
-                    required: ["file"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    asCell: ["opaque"]
-                } as const satisfies __cfHelpers.JSONSchema, ({ file }) => console.log("mapping", file.name, file.type))({ file: {
+                __cfLift_1({ file: {
                         name: file.key("name"),
                         type: file.key("type")
                     } });

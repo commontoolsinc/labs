@@ -11,6 +11,93 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+        index: number;
+    };
+}, string | undefined>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                index: {
+                    type: "number"
+                }
+            },
+            required: ["items", "index"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.index]);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+    };
+}, string | undefined>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.items.length - 1]);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        matrix: number[][];
+        row: number;
+        col: number;
+    };
+}, number | undefined>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                matrix: {
+                    type: "array",
+                    items: {
+                        type: "array",
+                        items: {
+                            type: "number"
+                        }
+                    }
+                },
+                row: {
+                    type: "number"
+                },
+                col: {
+                    type: "number"
+                }
+            },
+            required: ["matrix", "row", "col"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.matrix[state.row]![state.col]);
 interface State {
     items: string[];
     index: number;
@@ -28,102 +115,18 @@ export default pattern((state) => {
         [UI]: (<div>
         <h3>Dynamic Element Access</h3>
         {/* Basic dynamic index */}
-        <p>Item: {__cfHelpers.lift<{
-            state: {
-                items: string[];
-                index: number;
-            };
-        }, string | undefined>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        },
-                        index: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "index"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.index])({ state: {
+        <p>Item: {__cfLift_1({ state: {
                 items: state.key("items"),
                 index: state.key("index")
             } })}</p>
 
         {/* Computed index */}
-        <p>Last: {__cfHelpers.lift<{
-            state: {
-                items: string[];
-            };
-        }, string | undefined>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.items.length - 1])({ state: {
+        <p>Last: {__cfLift_2({ state: {
                 items: state.key("items")
             } })}</p>
 
         {/* Double indexing */}
-        <p>Matrix: {__cfHelpers.lift<{
-            state: {
-                matrix: number[][];
-                row: number;
-                col: number;
-            };
-        }, number | undefined>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        matrix: {
-                            type: "array",
-                            items: {
-                                type: "array",
-                                items: {
-                                    type: "number"
-                                }
-                            }
-                        },
-                        row: {
-                            type: "number"
-                        },
-                        col: {
-                            type: "number"
-                        }
-                    },
-                    required: ["matrix", "row", "col"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["number", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.matrix[state.row]![state.col])({ state: {
+        <p>Matrix: {__cfLift_3({ state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")

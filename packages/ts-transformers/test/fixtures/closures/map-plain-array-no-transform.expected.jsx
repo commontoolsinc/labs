@@ -11,6 +11,31 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        multiplier: number;
+    };
+    n: number;
+}, number>({
+    type: "object",
+    properties: {
+        n: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["n", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state, n }) => n * state.multiplier);
 interface State {
     multiplier: number;
 }
@@ -26,31 +51,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => (<span>{__cfHelpers.lift<{
-                state: {
-                    multiplier: number;
-                };
-                n: number;
-            }, number>({
-                type: "object",
-                properties: {
-                    n: {
-                        type: "number"
-                    },
-                    state: {
-                        type: "object",
-                        properties: {
-                            multiplier: {
-                                type: "number"
-                            }
-                        },
-                        required: ["multiplier"]
-                    }
-                },
-                required: ["n", "state"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __cfHelpers.JSONSchema, ({ state, n }) => n * state.multiplier)({
+        {plainArray.map((n) => (<span>{__cfLift_1({
                 state: {
                     multiplier: state.multiplier
                 },

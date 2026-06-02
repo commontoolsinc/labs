@@ -11,6 +11,150 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                wishes: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            status: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "status"]
+                    }
+                }
+            },
+            required: ["wishes"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => JSON.stringify(state.wishes[1]));
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+    };
+}, string[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                wishes: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            status: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "status"]
+                    }
+                }
+            },
+            required: ["wishes"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.keys(state.wishes[1]));
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+    };
+}, string[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                wishes: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            status: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "status"]
+                    }
+                }
+            },
+            required: ["wishes"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.values(state.wishes[1]));
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+    };
+}, [string, string][]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                wishes: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            status: {
+                                type: "string"
+                            }
+                        },
+                        required: ["id", "status"]
+                    }
+                }
+            },
+            required: ["wishes"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.entries(state.wishes[1]));
 interface State {
     wishes: [
         {
@@ -27,156 +171,16 @@ interface State {
 // Verifies: wildcard traversal calls lower as whole JSX call roots
 export default pattern((state) => ({
     [UI]: (<div>
-      <p>{__cfHelpers.lift<{
-        state: {
-            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
-        };
-    }, string>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    wishes: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                },
-                                status: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "status"]
-                        }
-                    }
-                },
-                required: ["wishes"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => JSON.stringify(state.wishes[1]))({ state: {
+      <p>{__cfLift_1({ state: {
             wishes: state.key("wishes")
         } })}</p>
-      <p>{__cfHelpers.lift<{
-        state: {
-            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
-        };
-    }, string[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    wishes: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                },
-                                status: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "status"]
-                        }
-                    }
-                },
-                required: ["wishes"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.keys(state.wishes[1]))({ state: {
+      <p>{__cfLift_2({ state: {
             wishes: state.key("wishes")
         } })}</p>
-      <p>{__cfHelpers.lift<{
-        state: {
-            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
-        };
-    }, string[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    wishes: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                },
-                                status: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "status"]
-                        }
-                    }
-                },
-                required: ["wishes"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.values(state.wishes[1]))({ state: {
+      <p>{__cfLift_3({ state: {
             wishes: state.key("wishes")
         } })}</p>
-      <p>{__cfHelpers.lift<{
-        state: {
-            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
-        };
-    }, [string, string][]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    wishes: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                },
-                                status: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "status"]
-                        }
-                    }
-                },
-                required: ["wishes"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.entries(state.wishes[1]))({ state: {
+      <p>{__cfLift_4({ state: {
             wishes: state.key("wishes")
         } })}</p>
     </div>),

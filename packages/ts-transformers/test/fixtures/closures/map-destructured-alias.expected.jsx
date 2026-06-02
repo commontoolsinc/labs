@@ -11,6 +11,31 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    cost: number;
+    state: {
+        discount: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        cost: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["cost", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cost, state }) => cost * state.discount);
 interface State {
     items: Array<{
         price: number;
@@ -28,31 +53,7 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const cost = __cf_pattern_input.key("element", "price");
                 const state = __cf_pattern_input.key("params", "state");
-                return (<span>{__cfHelpers.lift<{
-                    cost: number;
-                    state: {
-                        discount: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        cost: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount"]
-                        }
-                    },
-                    required: ["cost", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ cost, state }) => cost * state.discount)({
+                return (<span>{__cfLift_1({
                     cost: cost,
                     state: {
                         discount: state.key("discount")

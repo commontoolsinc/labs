@@ -17,6 +17,51 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.join(", "));
+const __cfLift_2 = __cfHelpers.lift<{
+    summary: {
+        length: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        summary: {
+            type: "object",
+            properties: {
+                length: {
+                    type: "number"
+                }
+            },
+            required: ["length"]
+        }
+    },
+    required: ["summary"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length);
 interface State {
     items: string[];
 }
@@ -27,55 +72,12 @@ interface State {
 //   When the second computed() accesses summary.length, the capture is rewritten
 //   to summary.key("length") because summary is an OpaqueRef, not a plain value.
 export default pattern((state) => {
-    const summary = __cfHelpers.lift<{
-        state: {
-            items: string[];
-        };
-    }, string>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.join(", "))({ state: {
+    const summary = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("summary", true);
     return {
         summary,
-        charCount: __cfHelpers.lift<{
-            summary: {
-                length: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                summary: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
-                }
-            },
-            required: ["summary"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length)({ summary: {
+        charCount: __cfLift_2({ summary: {
                 length: summary.key("length")
             } }).for(["__patternResult", "charCount"], true)
     };

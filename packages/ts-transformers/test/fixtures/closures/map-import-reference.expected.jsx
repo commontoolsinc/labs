@@ -11,7 +11,27 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ item }) => formatPrice(item.price * (1 + TAX_RATE)));
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)));
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 // Module-level function - should NOT be captured
@@ -38,27 +58,7 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const item = __cf_pattern_input.key("element");
                 return (<div>
-            Item: {__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        }
-                    },
-                    required: ["item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ item: {
+            Item: {__cfLift_1({ item: {
                         price: item.key("price")
                     } })}
           </div>);

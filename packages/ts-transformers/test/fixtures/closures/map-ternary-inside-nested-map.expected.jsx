@@ -21,6 +21,52 @@ import { Cell, computed, Default, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: __cfHelpers.ReadonlyCell<unknown[]>;
+}, boolean>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0);
+const __cfLift_2 = __cfHelpers.lift<{
+    item: {
+        tags: {
+            length: number;
+        };
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                tags: {
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
+                }
+            },
+            required: ["tags"]
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.tags.length > 0);
 interface Tag {
     name: string;
     active: boolean;
@@ -44,23 +90,7 @@ interface PatternInput {
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const showInactive = __cf_pattern_input.key("showInactive");
-    const hasItems = __cfHelpers.lift<{
-        items: __cfHelpers.ReadonlyCell<unknown[]>;
-    }, boolean>({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    type: "unknown"
-                },
-                asCell: ["readonly"]
-            }
-        },
-        required: ["items"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0)({ items: items }).for("hasItems", true);
+    const hasItems = __cfLift_1({ items: items }).for("hasItems", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({
@@ -94,35 +124,7 @@ export default pattern((__cf_pattern_input) => {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                item: {
-                    tags: {
-                        length: number;
-                    };
-                };
-            }, boolean>({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            tags: {
-                                type: "object",
-                                properties: {
-                                    length: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["length"]
-                            }
-                        },
-                        required: ["tags"]
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.tags.length > 0)({ item: {
+            } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ item: {
                     tags: {
                         length: item.key("tags", "length")
                     }

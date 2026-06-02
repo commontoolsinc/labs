@@ -11,6 +11,27 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    input: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        input: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["input"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.value * 2);
 interface MyInput {
     value: number;
 }
@@ -21,27 +42,7 @@ interface MyInput {
 // Context: Type comes from inline parameter annotation, not generic type argument
 export default pattern((input: MyInput) => {
     return {
-        result: __cfHelpers.lift<{
-            input: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                input: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["input"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.value * 2)({ input: {
+        result: __cfLift_1({ input: {
                 value: input.key("value")
             } }).for(["__patternResult", "result"], true)
     };

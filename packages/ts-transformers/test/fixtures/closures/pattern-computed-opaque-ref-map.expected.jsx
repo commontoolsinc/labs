@@ -11,6 +11,25 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: number[] & {} & { [SELF]: OpaqueRef<any>; };
+}, number[]>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "number"
+            }
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((n) => n * 2));
 // FIXTURE: pattern-computed-opaque-ref-map
 // Verifies: .map() on an OpaqueRef inside computed() is NOT transformed to mapWithPattern
 //   computed(() => items.map((n) => n * 2)) → derive({ items }, ({ items }) => items.map((n) => n * 2))
@@ -20,25 +39,7 @@ const __cfAmdHooks = undefined;
 export default pattern((items) => {
     // items is OpaqueRef<number[]> as a pattern parameter
     // Inside the computed callback (which becomes derive), items.map should NOT be transformed
-    const doubled = __cfHelpers.lift<{
-        items: number[] & {} & { [SELF]: OpaqueRef<any>; };
-    }, number[]>({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    type: "number"
-                }
-            }
-        },
-        required: ["items"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "number"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((n) => n * 2))({ items: items }).for("doubled", true);
+    const doubled = __cfLift_1({ items: items }).for("doubled", true);
     return doubled;
 }, {
     type: "array",

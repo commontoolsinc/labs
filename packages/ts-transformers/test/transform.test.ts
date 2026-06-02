@@ -69,9 +69,11 @@ export default pattern<{ count: number }, { doubled: number }>((state) => ({
     });
     const main = output["/main.tsx"]!;
 
-    // After CT-1615 Phase 1, pattern-owned synthesized derives lower to
-    // lift-applied: `doubled: __cfHelpers.lift<...>(cb)(input)`.
-    assertStringIncludes(main, "doubled: __cfHelpers.lift<");
+    // After CT-1615 Phase 1 the pattern-owned synthesized derive lowers to
+    // lift-applied; after CT-1644 Phase 2 the lift call is hoisted to a
+    // module-scope const and the result reads as `doubled: __cfLift_N(input)`.
+    assertStringIncludes(main, "const __cfLift_1 = __cfHelpers.lift<");
+    assertMatch(main, /doubled: __cfLift_\d+\(/);
     assertStringIncludes(main, '.for(["__patternResult", "doubled"], true)');
     assertNotMatch(main, /state\.key\("count"\)\.for/);
   });

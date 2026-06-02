@@ -11,6 +11,31 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    item: number;
+    settings: {
+        multiplier: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        item: {
+            type: "number"
+        },
+        settings: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["item", "settings"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, settings }) => item * settings.multiplier);
 interface State {
     items: number[];
     settings: {
@@ -28,31 +53,7 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const item = __cf_pattern_input.key("element");
                 const settings = __cf_pattern_input.key("params", "settings");
-                return (<span>{__cfHelpers.lift<{
-                    item: number;
-                    settings: {
-                        multiplier: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "number"
-                        },
-                        settings: {
-                            type: "object",
-                            properties: {
-                                multiplier: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["multiplier"]
-                        }
-                    },
-                    required: ["item", "settings"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, settings }) => item * settings.multiplier)({
+                return (<span>{__cfLift_1({
                     item: item,
                     settings: {
                         multiplier: settings.key("multiplier")

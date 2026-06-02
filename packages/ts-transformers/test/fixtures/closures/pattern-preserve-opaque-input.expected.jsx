@@ -11,6 +11,34 @@ import { pattern, type Writable, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    input: __cfHelpers.Writable<State>;
+}, string>({
+    type: "object",
+    properties: {
+        input: {
+            $ref: "#/$defs/State",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["input"],
+    $defs: {
+        State: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                },
+                bar: {
+                    type: "string"
+                }
+            },
+            required: ["foo", "bar"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.key("foo").get());
 interface State {
     foo: string;
     bar: string;
@@ -23,34 +51,7 @@ interface State {
 //   reactive context, so it gets wrapped in a derive.
 export default pattern((input: Writable<State>) => {
     return {
-        [UI]: <div>{__cfHelpers.lift<{
-            input: __cfHelpers.Writable<State>;
-        }, string>({
-            type: "object",
-            properties: {
-                input: {
-                    $ref: "#/$defs/State",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["input"],
-            $defs: {
-                State: {
-                    type: "object",
-                    properties: {
-                        foo: {
-                            type: "string"
-                        },
-                        bar: {
-                            type: "string"
-                        }
-                    },
-                    required: ["foo", "bar"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.key("foo").get())({ input: input })}</div>,
+        [UI]: <div>{__cfLift_1({ input: input })}</div>,
     };
 }, {
     $ref: "#/$defs/State",

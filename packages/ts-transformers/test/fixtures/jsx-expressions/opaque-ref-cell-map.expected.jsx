@@ -11,6 +11,31 @@ import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, pattern, UI, } fro
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    cellRef: unknown[];
+}, boolean>({
+    type: "object",
+    properties: {
+        cellRef: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["cellRef"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ cellRef }) => !cellRef?.length);
+const __cfLift_2 = __cfHelpers.lift<{
+    charm: any;
+}, any>({
+    type: "object",
+    properties: {
+        charm: true
+    },
+    required: ["charm"]
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ charm }) => charm[__cfHelpers.NAME]);
 // the simple charm (to which we'll store references within a cell)
 const SimplePattern = pattern(() => ({
     [NAME]: "Some Simple Pattern",
@@ -175,22 +200,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            cellRef: unknown[];
-        }, boolean>({
-            type: "object",
-            properties: {
-                cellRef: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    }
-                }
-            },
-            required: ["cellRef"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ cellRef }) => !cellRef?.length)({ cellRef: cellRef }), <div>No charms created yet</div>, <ul>
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ cellRef: cellRef }), <div>No charms created yet</div>, <ul>
             {cellRef.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const charm = __cf_pattern_input.key("element");
                 const index = __cf_pattern_input.key("index");
@@ -200,15 +210,7 @@ export default pattern(() => {
                 </cf-button>
                 <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    charm: any;
-                }, any>({
-                    type: "object",
-                    properties: {
-                        charm: true
-                    },
-                    required: ["charm"]
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ charm }) => charm[__cfHelpers.NAME])({ charm: charm }), "Unnamed")}</span>
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ charm: charm }), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",

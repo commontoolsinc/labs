@@ -11,6 +11,59 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        checkout: {
+            discount: number;
+        };
+        upsell: {
+            discount: number;
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                checkout: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount"]
+                },
+                upsell: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount"]
+                }
+            },
+            required: ["checkout", "upsell"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount);
 interface State {
     items: Array<{
         price: number;
@@ -34,59 +87,7 @@ export default pattern((state) => {
                 const item = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<span>
-            {__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        checkout: {
-                            discount: number;
-                        };
-                        upsell: {
-                            discount: number;
-                        };
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                checkout: {
-                                    type: "object",
-                                    properties: {
-                                        discount: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["discount"]
-                                },
-                                upsell: {
-                                    type: "object",
-                                    properties: {
-                                        discount: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["discount"]
-                                }
-                            },
-                            required: ["checkout", "upsell"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)({
+            {__cfLift_1({
                     item: {
                         price: item.key("price")
                     },

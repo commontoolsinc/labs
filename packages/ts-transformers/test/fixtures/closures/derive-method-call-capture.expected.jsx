@@ -11,6 +11,40 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    state: {
+        counter: {
+            value: number;
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                counter: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
+                }
+            },
+            required: ["counter"]
+        }
+    },
+    required: ["value", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, state }) => value.get() + state.counter.value);
 interface State {
     counter: {
         value: number;
@@ -25,40 +59,7 @@ export default pattern((state: State) => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // Capture a deep property path on the pattern input
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        state: {
-            counter: {
-                value: number;
-            };
-        };
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            state: {
-                type: "object",
-                properties: {
-                    counter: {
-                        type: "object",
-                        properties: {
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["value"]
-                    }
-                },
-                required: ["counter"]
-            }
-        },
-        required: ["value", "state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, state }) => value.get() + state.counter.value)({
+    const result = __cfLift_1({
         value: value,
         state: {
             counter: {

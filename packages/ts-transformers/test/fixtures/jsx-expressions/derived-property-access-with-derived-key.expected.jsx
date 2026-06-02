@@ -11,7 +11,141 @@ import { Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ itemsWithAisles }) => {
+const __cfLift_1 = __cfHelpers.lift<{
+    items: Item[];
+}, { aisle: string; item: Item; }[]>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            }
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "object",
+        properties: {
+            aisle: {
+                type: "string"
+            },
+            item: {
+                $ref: "#/$defs/Item"
+            }
+        },
+        required: ["aisle", "item"]
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((item, idx) => ({
+    aisle: `Aisle ${(idx % 3) + 1}`,
+    item: item,
+})));
+const __cfLift_2 = __cfHelpers.lift<{
+    itemsWithAisles: { aisle: string; item: Item; }[];
+}, Record<string, Assignment[]>>({
+    type: "object",
+    properties: {
+        itemsWithAisles: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    aisle: {
+                        type: "string"
+                    },
+                    item: {
+                        $ref: "#/$defs/Item"
+                    }
+                },
+                required: ["aisle", "item"]
+            }
+        }
+    },
+    required: ["itemsWithAisles"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {},
+    additionalProperties: {
+        type: "array",
+        items: {
+            $ref: "#/$defs/Assignment"
+        }
+    },
+    $defs: {
+        Assignment: {
+            type: "object",
+            properties: {
+                aisle: {
+                    type: "string"
+                },
+                item: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["aisle", "item"]
+        },
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ itemsWithAisles }) => {
     const groups: Record<string, Assignment[]> = {};
     for (const assignment of itemsWithAisles) {
         if (!groups[assignment.aisle]) {
@@ -21,6 +155,141 @@ const __cfModuleCallback_1 = __cfHardenFn(({ itemsWithAisles }) => {
     }
     return groups;
 });
+const __cfLift_3 = __cfHelpers.lift<{
+    groupedByAisle: Record<string, Assignment[]>;
+}, string[]>({
+    type: "object",
+    properties: {
+        groupedByAisle: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                type: "array",
+                items: {
+                    $ref: "#/$defs/Assignment"
+                }
+            }
+        }
+    },
+    required: ["groupedByAisle"],
+    $defs: {
+        Assignment: {
+            type: "object",
+            properties: {
+                aisle: {
+                    type: "string"
+                },
+                item: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["aisle", "item"]
+        },
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort());
+const __cfLift_4 = __cfHelpers.lift<{
+    groupedByAisle: Record<string, Assignment[]>;
+    aisleName: string;
+}, Assignment[] | undefined>({
+    type: "object",
+    properties: {
+        groupedByAisle: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                type: "array",
+                items: {
+                    $ref: "#/$defs/Assignment"
+                }
+            }
+        },
+        aisleName: {
+            type: "string"
+        }
+    },
+    required: ["groupedByAisle", "aisleName"],
+    $defs: {
+        Assignment: {
+            type: "object",
+            properties: {
+                aisle: {
+                    type: "string"
+                },
+                item: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["aisle", "item"]
+        },
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "undefined"
+        }, {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Assignment"
+            }
+        }],
+    $defs: {
+        Assignment: {
+            type: "object",
+            properties: {
+                aisle: {
+                    type: "string"
+                },
+                item: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["aisle", "item"]
+        },
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]);
 interface Item {
     name: string;
     done: Cell<boolean>;
@@ -40,193 +309,11 @@ interface Assignment {
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     // Create assignments with aisle data (whole-array map kept inside computed)
-    const itemsWithAisles = __cfHelpers.lift<{
-        items: Item[];
-    }, { aisle: string; item: Item; }[]>({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                }
-            }
-        },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: ["cell"]
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "object",
-            properties: {
-                aisle: {
-                    type: "string"
-                },
-                item: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["aisle", "item"]
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: ["cell"]
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((item, idx) => ({
-        aisle: `Aisle ${(idx % 3) + 1}`,
-        item: item,
-    })))({ items: items }).for("itemsWithAisles", true);
+    const itemsWithAisles = __cfLift_1({ items: items }).for("itemsWithAisles", true);
     // Group by aisle - returns Record<string, Assignment[]>
-    const groupedByAisle = __cfHelpers.lift<{
-        itemsWithAisles: { aisle: string; item: Item; }[];
-    }, Record<string, Assignment[]>>({
-        type: "object",
-        properties: {
-            itemsWithAisles: {
-                type: "array",
-                items: {
-                    type: "object",
-                    properties: {
-                        aisle: {
-                            type: "string"
-                        },
-                        item: {
-                            $ref: "#/$defs/Item"
-                        }
-                    },
-                    required: ["aisle", "item"]
-                }
-            }
-        },
-        required: ["itemsWithAisles"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: ["cell"]
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {},
-        additionalProperties: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Assignment"
-            }
-        },
-        $defs: {
-            Assignment: {
-                type: "object",
-                properties: {
-                    aisle: {
-                        type: "string"
-                    },
-                    item: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["aisle", "item"]
-            },
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: ["cell"]
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ itemsWithAisles: itemsWithAisles }).for("groupedByAisle", true);
+    const groupedByAisle = __cfLift_2({ itemsWithAisles: itemsWithAisles }).for("groupedByAisle", true);
     // Derive sorted aisle names from grouped object
-    const aisleNames = __cfHelpers.lift<{
-        groupedByAisle: Record<string, Assignment[]>;
-    }, string[]>({
-        type: "object",
-        properties: {
-            groupedByAisle: {
-                type: "object",
-                properties: {},
-                additionalProperties: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Assignment"
-                    }
-                }
-            }
-        },
-        required: ["groupedByAisle"],
-        $defs: {
-            Assignment: {
-                type: "object",
-                properties: {
-                    aisle: {
-                        type: "string"
-                    },
-                    item: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["aisle", "item"]
-            },
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: ["cell"]
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort())({ groupedByAisle: groupedByAisle }).for("aisleNames", true);
+    const aisleNames = __cfLift_3({ groupedByAisle: groupedByAisle }).for("aisleNames", true);
     // The pattern from CT-1036:
     // - Map over derived keys (aisleNames)
     // - Access derived object with derived key (groupedByAisle[aisleName])
@@ -238,91 +325,7 @@ export default pattern((__cf_pattern_input) => {
                 const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
                 return (<div>
               <h3>{aisleName}</h3>
-              {__cfHelpers.lift<{
-                        groupedByAisle: Record<string, Assignment[]>;
-                        aisleName: string;
-                    }, Assignment[] | undefined>({
-                        type: "object",
-                        properties: {
-                            groupedByAisle: {
-                                type: "object",
-                                properties: {},
-                                additionalProperties: {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Assignment"
-                                    }
-                                }
-                            },
-                            aisleName: {
-                                type: "string"
-                            }
-                        },
-                        required: ["groupedByAisle", "aisleName"],
-                        $defs: {
-                            Assignment: {
-                                type: "object",
-                                properties: {
-                                    aisle: {
-                                        type: "string"
-                                    },
-                                    item: {
-                                        $ref: "#/$defs/Item"
-                                    }
-                                },
-                                required: ["aisle", "item"]
-                            },
-                            Item: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    done: {
-                                        type: "boolean",
-                                        asCell: ["cell"]
-                                    }
-                                },
-                                required: ["name", "done"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{
-                                type: "undefined"
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/Assignment"
-                                }
-                            }],
-                        $defs: {
-                            Assignment: {
-                                type: "object",
-                                properties: {
-                                    aisle: {
-                                        type: "string"
-                                    },
-                                    item: {
-                                        $ref: "#/$defs/Item"
-                                    }
-                                },
-                                required: ["aisle", "item"]
-                            },
-                            Item: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    done: {
-                                        type: "boolean",
-                                        asCell: ["cell"]
-                                    }
-                                },
-                                required: ["name", "done"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])({
+              {__cfLift_4({
                         groupedByAisle: groupedByAisle,
                         aisleName: aisleName
                     })!.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

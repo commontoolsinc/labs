@@ -11,6 +11,304 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: {
+            name: string;
+        }[];
+        filter: string;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            }
+                        },
+                        required: ["name"]
+                    }
+                },
+                filter: {
+                    type: "string"
+                }
+            },
+            required: ["items", "filter"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length);
+const __cfLift_2 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        discount: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2));
+const __cfLift_3 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        discount: number;
+        taxRate: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                },
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["discount", "taxRate"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
+    .toFixed(2));
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["active"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.active).length);
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        discount: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.discount * 100);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        taxRate: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["taxRate"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.taxRate * 100);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["active"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.every((i) => i.active));
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["active"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.active));
+const __cfLift_9 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["price"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.price > 100));
+const __cfLift_10 = __cfHelpers.lift<{
+    state: {
+        filter: {
+            length: number;
+        };
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                filter: {
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
+                }
+            },
+            required: ["filter"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.filter.length > 0);
 interface Item {
     id: number;
     name: string;
@@ -37,42 +335,7 @@ export default pattern((state) => {
         <p>Total items: {state.key("items", "length")}</p>
         <p>
           Filtered count:{" "}
-          {__cfHelpers.lift<{
-            state: {
-                items: {
-                    name: string;
-                }[];
-                filter: string;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        filter: {
-                            type: "string"
-                        }
-                    },
-                    required: ["items", "filter"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)({ state: {
+          {__cfLift_1({ state: {
                 items: state.key("items"),
                 filter: state.key("filter")
             } })}
@@ -87,39 +350,7 @@ export default pattern((state) => {
               <span>{item.key("name")}</span>
               <span>- Original: ${item.key("price")}</span>
               <span>
-                - Discounted: ${__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        discount: number;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2))({
+                - Discounted: ${__cfLift_2({
                     item: {
                         price: item.key("price")
                     },
@@ -130,44 +361,7 @@ export default pattern((state) => {
               </span>
               <span>
                 - With tax:
-                ${__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        discount: number;
-                        taxRate: number;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                },
-                                taxRate: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount", "taxRate"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
-                    .toFixed(2))({
+                ${__cfLift_3({
                     item: {
                         price: item.key("price")
                     },
@@ -254,84 +448,15 @@ export default pattern((state) => {
 
         <h3>Array Methods</h3>
         <p>Item count: {state.key("items", "length")}</p>
-        <p>Active items: {__cfHelpers.lift<{
-            state: {
-                items: Item[];
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["active"]
-                            }
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.active).length)({ state: {
+        <p>Active items: {__cfLift_4({ state: {
                 items: state.key("items")
             } })}</p>
 
         <h3>Simple Operations</h3>
-        <p>Discount percent: {__cfHelpers.lift<{
-            state: {
-                discount: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        discount: {
-                            type: "number"
-                        }
-                    },
-                    required: ["discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.discount * 100)({ state: {
+        <p>Discount percent: {__cfLift_5({ state: {
                 discount: state.key("discount")
             } })}%</p>
-        <p>Tax percent: {__cfHelpers.lift<{
-            state: {
-                taxRate: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        taxRate: {
-                            type: "number"
-                        }
-                    },
-                    required: ["taxRate"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.taxRate * 100)({ state: {
+        <p>Tax percent: {__cfLift_6({ state: {
                 taxRate: state.key("taxRate")
             } })}%</p>
 
@@ -344,36 +469,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                items: Item[];
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["active"]
-                            }
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.every((i) => i.active))({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_7({ state: {
                 items: state.key("items")
             } }), "Yes", "No")}</p>
         <p>Any active: {__cfHelpers.ifElse({
@@ -384,36 +480,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                items: Item[];
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["active"]
-                            }
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.active))({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_8({ state: {
                 items: state.key("items")
             } }), "Yes", "No")}</p>
         <p>
@@ -426,70 +493,13 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                items: Item[];
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    price: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["price"]
-                            }
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.price > 100))({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_9({ state: {
                 items: state.key("items")
             } }), "Yes", "No")}
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={state.key("items", "length")} data-has-filter={__cfHelpers.lift<{
-            state: {
-                filter: {
-                    length: number;
-                };
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        filter: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["filter"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.filter.length > 0)({ state: {
+        <div data-item-count={state.key("items", "length")} data-has-filter={__cfLift_10({ state: {
                 filter: {
                     length: state.key("filter", "length")
                 }

@@ -11,6 +11,11 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift(false, () => ({ bar: 1 }));
+const __cfLift_2 = __cfHelpers.lift(false, () => {
+    const foo = __cfLift_1().for("foo", true);
+    return foo.key("bar");
+});
 // FIXTURE: computed-in-computed-property-access
 // Verifies: property access on a computed() result declared INSIDE another computed()
 //   gets transformed to .key() access
@@ -19,10 +24,7 @@ const __cfAmdHooks = undefined;
 //   inside a derive callback need .key() rewriting even though they are not
 //   captured from an outer scope.
 export default pattern(() => {
-    const outer = __cfHelpers.lift(false, () => {
-        const foo = __cfHelpers.lift(false, () => ({ bar: 1 }))().for("foo", true);
-        return foo.key("bar");
-    })().for("outer", true);
+    const outer = __cfLift_2().for("outer", true);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

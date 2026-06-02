@@ -11,6 +11,50 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        subItems: SubItem[];
+    };
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                subItems: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/SubItem"
+                    }
+                }
+            },
+            required: ["subItems"]
+        }
+    },
+    required: ["item"],
+    $defs: {
+        SubItem: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.subItems
+    .filter((s) => s.active)
+    .map((s) => s.name)
+    .join(", "));
 interface SubItem {
     id: number;
     name: string;
@@ -43,50 +87,7 @@ export default pattern((state) => {
             <h2>{item.key("title")}</h2>
             <p>
               Active items:{" "}
-              {__cfHelpers.lift<{
-                        item: {
-                            subItems: SubItem[];
-                        };
-                    }, string>({
-                        type: "object",
-                        properties: {
-                            item: {
-                                type: "object",
-                                properties: {
-                                    subItems: {
-                                        type: "array",
-                                        items: {
-                                            $ref: "#/$defs/SubItem"
-                                        }
-                                    }
-                                },
-                                required: ["subItems"]
-                            }
-                        },
-                        required: ["item"],
-                        $defs: {
-                            SubItem: {
-                                type: "object",
-                                properties: {
-                                    id: {
-                                        type: "number"
-                                    },
-                                    name: {
-                                        type: "string"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["id", "name", "active"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.subItems
-                        .filter((s) => s.active)
-                        .map((s) => s.name)
-                        .join(", "))({ item: {
+              {__cfLift_1({ item: {
                             subItems: item.key("subItems")
                         } })}
             </p>

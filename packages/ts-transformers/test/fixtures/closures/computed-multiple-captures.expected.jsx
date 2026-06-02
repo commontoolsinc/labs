@@ -11,6 +11,33 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    a: __cfHelpers.ReadonlyCell<number>;
+    b: __cfHelpers.ReadonlyCell<number>;
+    c: __cfHelpers.ReadonlyCell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        a: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        b: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        c: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["a", "b", "c"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ a, b, c }) => {
+    const sum = a.get() + b.get();
+    return sum * c.get();
+});
 // FIXTURE: computed-multiple-captures
 // Verifies: computed() with a multi-statement body capturing three cells is closure-extracted
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → derive(captureSchema, resultSchema, { a, b, c }, ({ a, b, c }) => { ... })
@@ -25,33 +52,7 @@ export default pattern(() => {
     const c = new Writable(30, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("c", true);
-    const result = __cfHelpers.lift<{
-        a: __cfHelpers.ReadonlyCell<number>;
-        b: __cfHelpers.ReadonlyCell<number>;
-        c: __cfHelpers.ReadonlyCell<number>;
-    }, number>({
-        type: "object",
-        properties: {
-            a: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            b: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            c: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["a", "b", "c"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ a, b, c }) => {
-        const sum = a.get() + b.get();
-        return sum * c.get();
-    })({
+    const result = __cfLift_1({
         a: a,
         b: b,
         c: c

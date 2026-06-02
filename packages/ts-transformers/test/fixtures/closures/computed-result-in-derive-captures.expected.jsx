@@ -16,6 +16,75 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: {
+            done: boolean;
+        }[];
+    };
+}, { count: number; total: number; }>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            done: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["done"]
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        },
+        total: {
+            type: "number"
+        }
+    },
+    required: ["count", "total"]
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => ({
+    count: state.items.filter((i) => i.done).length,
+    total: state.items.length,
+}));
+const __cfLift_2 = __cfHelpers.lift<{
+    stats: {
+        count: number;
+        total: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        stats: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                },
+                total: {
+                    type: "number"
+                }
+            },
+            required: ["count", "total"]
+        }
+    },
+    required: ["stats"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ stats }) => `${stats.count} of ${stats.total} done`);
 interface State {
     items: Array<{
         name: string;
@@ -30,79 +99,12 @@ interface State {
 //   transform rewrites them to stats.key("count") and stats.key("total") in
 //   the captures object because stats is an OpaqueRef.
 export default pattern((state) => {
-    const stats = __cfHelpers.lift<{
-        state: {
-            items: {
-                done: boolean;
-            }[];
-        };
-    }, { count: number; total: number; }>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                done: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["done"]
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            count: {
-                type: "number"
-            },
-            total: {
-                type: "number"
-            }
-        },
-        required: ["count", "total"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => ({
-        count: state.items.filter((i) => i.done).length,
-        total: state.items.length,
-    }))({ state: {
+    const stats = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("stats", true);
     return {
         [UI]: (<div>
-        {__cfHelpers.lift<{
-            stats: {
-                count: number;
-                total: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                stats: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        },
-                        total: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count", "total"]
-                }
-            },
-            required: ["stats"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ stats }) => `${stats.count} of ${stats.total} done`)({ stats: {
+        {__cfLift_2({ stats: {
                 count: stats.key("count"),
                 total: stats.key("total")
             } })}

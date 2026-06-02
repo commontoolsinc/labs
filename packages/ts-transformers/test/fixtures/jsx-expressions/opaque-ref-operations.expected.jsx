@@ -11,6 +11,48 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    count: __cfHelpers.Cell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() + 1);
+const __cfLift_2 = __cfHelpers.lift<{
+    count: __cfHelpers.Cell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() * 2);
+const __cfLift_3 = __cfHelpers.lift<{
+    price: __cfHelpers.Cell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        price: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["price"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ price }) => price.get() * 1.1);
 // FIXTURE: opaque-ref-operations
 // Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in derive() with asCell schema
 //   {count}           → {count}  (bare ref, no transform)
@@ -26,48 +68,9 @@ export default pattern((_state) => {
     return {
         [UI]: (<div>
         <p>Count: {count}</p>
-        <p>Next: {__cfHelpers.lift<{
-            count: __cfHelpers.Cell<number>;
-        }, number>({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() + 1)({ count: count })}</p>
-        <p>Double: {__cfHelpers.lift<{
-            count: __cfHelpers.Cell<number>;
-        }, number>({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() * 2)({ count: count })}</p>
-        <p>Total: {__cfHelpers.lift<{
-            price: __cfHelpers.Cell<number>;
-        }, number>({
-            type: "object",
-            properties: {
-                price: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["price"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ price }) => price.get() * 1.1)({ price: price })}</p>
+        <p>Next: {__cfLift_1({ count: count })}</p>
+        <p>Double: {__cfLift_2({ count: count })}</p>
+        <p>Total: {__cfLift_3({ price: price })}</p>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

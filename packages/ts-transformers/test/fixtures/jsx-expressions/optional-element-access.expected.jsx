@@ -11,6 +11,27 @@ import { cell, NAME, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    list: __cfHelpers.Cell<string[] | undefined>;
+}, boolean>({
+    type: "object",
+    properties: {
+        list: {
+            anyOf: [{
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }, {
+                    type: "undefined"
+                }],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["list"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ list }) => !list.get()?.[0]);
 // FIXTURE: optional-element-access
 // Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(derive(...))
 //   !list.get()?.[0] && <span> → when(derive({list}, ({list}) => !list.get()?.[0]), <span>)
@@ -43,27 +64,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            list: __cfHelpers.Cell<string[] | undefined>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                list: {
-                    anyOf: [{
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }, {
-                            type: "undefined"
-                        }],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["list"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ list }) => !list.get()?.[0])({ list: list }), <span>No first entry</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ list: list }), <span>No first entry</span>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

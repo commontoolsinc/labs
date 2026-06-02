@@ -11,6 +11,55 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        task: {
+            done: boolean;
+        };
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                task: {
+                    type: "object",
+                    properties: {
+                        done: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["done"]
+                }
+            },
+            required: ["task"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.task.done);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        label?: string | null | undefined;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                label: {
+                    type: ["null", "string", "undefined"]
+                }
+            }
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.label ?? "Pending");
 // FIXTURE: jsx-direct-branch-roots
 // Verifies: direct JSX branch roots lower structurally without leaving raw
 //   child expressions in place.
@@ -34,35 +83,7 @@ export default pattern((state) => ({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfHelpers.lift<{
-        state: {
-            task: {
-                done: boolean;
-            };
-        };
-    }, boolean>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    task: {
-                        type: "object",
-                        properties: {
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["done"]
-                    }
-                },
-                required: ["task"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.task.done)({ state: {
+    } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfLift_1({ state: {
             task: {
                 done: state.key("task", "done")
             }
@@ -99,26 +120,7 @@ export default pattern((state) => ({
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, state.key("fallbackLabel"), "C"))}</p>
-      <p>{__cfHelpers.lift<{
-        state: {
-            label?: string | null | undefined;
-        };
-    }, string>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    label: {
-                        type: ["null", "string", "undefined"]
-                    }
-                }
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.label ?? "Pending")({ state: {
+      <p>{__cfLift_2({ state: {
             label: state.key("label")
         } })}</p>
     </div>),

@@ -11,6 +11,20 @@ import { Cell, Default, handler, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    count: Default<number, 0>;
+}, number>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            "default": 0
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1);
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -47,20 +61,7 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
           {/* Regular JSX expression - should be wrapped in derive */}
-          <span>Count: {__cfHelpers.lift<{
-            count: Default<number, 0>;
-        }, number>({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number",
-                    "default": 0
-                }
-            },
-            required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1)({ count: count })}</span>
+          <span>Count: {__cfLift_1({ count: count })}</span>
 
           {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
           <cf-button onClick={handleClick({ count })}>

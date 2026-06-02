@@ -11,33 +11,34 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        done: boolean;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.done);
 // FIXTURE: pattern-object-prefix-not
 // Verifies: top-level non-JSX unary boolean negation in an object property is
 //   lowered after closure normalization into a direct derive wrapper.
 //   return { hidden: !state.done }
 //   → return { hidden: derive(!state.done) }
 export default pattern((state) => ({
-    hidden: __cfHelpers.lift<{
-        state: {
-            done: boolean;
-        };
-    }, boolean>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.done)({ state: {
+    hidden: __cfLift_1({ state: {
             done: state.key("done")
         } }).for(["__patternResult", "hidden"], true)
 }), {

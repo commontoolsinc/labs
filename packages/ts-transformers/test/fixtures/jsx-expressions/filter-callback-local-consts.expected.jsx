@@ -14,6 +14,27 @@ import { pattern, UI, VNode, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    file: {
+        type: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        file: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string"
+                }
+            },
+            required: ["type"]
+        }
+    },
+    required: ["file"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.type === "folder");
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -30,27 +51,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {files.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
-                const isFolder = __cfHelpers.lift<{
-                    file: {
-                        type: string;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        file: {
-                            type: "object",
-                            properties: {
-                                type: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["type"]
-                        }
-                    },
-                    required: ["file"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.type === "folder")({ file: {
+                const isFolder = __cfLift_1({ file: {
                         type: file.key("type")
                     } }).for("isFolder", true);
                 return isFolder;

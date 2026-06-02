@@ -11,6 +11,71 @@ import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    people: __cfHelpers.ReadonlyCell<Person[]>;
+}, { name: string; rank: number; isFirst: boolean; }[]>({
+    type: "object",
+    properties: {
+        people: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Person"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["people"],
+    $defs: {
+        Person: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                rank: {
+                    type: "number"
+                }
+            },
+            required: ["name", "rank"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "object",
+        properties: {
+            name: {
+                type: "string"
+            },
+            rank: {
+                type: "number"
+            },
+            isFirst: {
+                type: "boolean"
+            }
+        },
+        required: ["name", "rank", "isFirst"]
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ people }) => [...people.get()]
+    .sort((a, b) => a.rank - b.rank)
+    .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })));
+const __cfLift_2 = __cfHelpers.lift<{
+    people: __cfHelpers.ReadonlyCell<unknown[]>;
+}, number>({
+    type: "object",
+    properties: {
+        people: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["people"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length);
 interface Person {
     name: string;
     rank: number;
@@ -31,71 +96,8 @@ export default pattern((__cf_pattern_input) => {
     const showAdmin = new Writable(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showAdmin", true);
-    const adminData = __cfHelpers.lift<{
-        people: __cfHelpers.ReadonlyCell<Person[]>;
-    }, { name: string; rank: number; isFirst: boolean; }[]>({
-        type: "object",
-        properties: {
-            people: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Person"
-                },
-                asCell: ["readonly"]
-            }
-        },
-        required: ["people"],
-        $defs: {
-            Person: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    rank: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "rank"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                rank: {
-                    type: "number"
-                },
-                isFirst: {
-                    type: "boolean"
-                }
-            },
-            required: ["name", "rank", "isFirst"]
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ people }) => [...people.get()]
-        .sort((a, b) => a.rank - b.rank)
-        .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })))({ people: people }).for("adminData", true);
-    const count = __cfHelpers.lift<{
-        people: __cfHelpers.ReadonlyCell<unknown[]>;
-    }, number>({
-        type: "object",
-        properties: {
-            people: {
-                type: "array",
-                items: {
-                    type: "unknown"
-                },
-                asCell: ["readonly"]
-            }
-        },
-        required: ["people"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length)({ people: people }).for("count", true);
+    const adminData = __cfLift_1({ people: people }).for("adminData", true);
+    const count = __cfLift_2({ people: people }).for("count", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({

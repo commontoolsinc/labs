@@ -11,6 +11,39 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    multiplier: __cfHelpers.ReadonlyCell<number>;
+}, { value: number; data: { multiplier: import("commonfabric").Cell<number>; }; }>({
+    type: "object",
+    properties: {
+        multiplier: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["multiplier"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        data: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["value", "data"]
+} as const satisfies __cfHelpers.JSONSchema, ({ multiplier }) => ({
+    value: multiplier.get() * 3,
+    data: { multiplier: multiplier },
+}));
 // FIXTURE: derive-collision-shorthand
 // Verifies: a shorthand property `{ multiplier }` over a captured cell expands correctly
 //   computed(() => ({ value, data: { multiplier } })) → lift(...)({ multiplier })
@@ -20,39 +53,7 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // The callback uses shorthand property { multiplier } over the captured cell.
-    const result = __cfHelpers.lift<{
-        multiplier: __cfHelpers.ReadonlyCell<number>;
-    }, { value: number; data: { multiplier: import("commonfabric").Cell<number>; }; }>({
-        type: "object",
-        properties: {
-            multiplier: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["multiplier"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            value: {
-                type: "number"
-            },
-            data: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number",
-                        asCell: ["cell"]
-                    }
-                },
-                required: ["multiplier"]
-            }
-        },
-        required: ["value", "data"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ multiplier }) => ({
-        value: multiplier.get() * 3,
-        data: { multiplier: multiplier },
-    }))({ multiplier: multiplier }).for("result", true);
+    const result = __cfLift_1({ multiplier: multiplier }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

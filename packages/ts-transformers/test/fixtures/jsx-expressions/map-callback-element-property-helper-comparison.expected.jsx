@@ -18,7 +18,116 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ message, name }) => message.author === senderName(name.get()));
+const __cfLift_1 = __cfHelpers.lift<{
+    selectedRoom: __cfHelpers.ReadonlyCell<Default<{
+        messages: Message[];
+    }, {
+        messages: [
+        ];
+    }>>;
+}, Message[]>({
+    type: "object",
+    properties: {
+        selectedRoom: {
+            type: "object",
+            properties: {
+                messages: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Message"
+                    }
+                }
+            },
+            required: ["messages"],
+            "default": {
+                messages: []
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["selectedRoom"],
+    $defs: {
+        Message: {
+            type: "object",
+            properties: {
+                author: {
+                    type: "string"
+                },
+                body: {
+                    type: "string"
+                }
+            },
+            required: ["author", "body"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Message"
+    },
+    $defs: {
+        Message: {
+            type: "object",
+            properties: {
+                author: {
+                    type: "string"
+                },
+                body: {
+                    type: "string"
+                }
+            },
+            required: ["author", "body"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ selectedRoom }) => selectedRoom.get()?.messages);
+const __cfLift_2 = __cfHelpers.lift<{
+    message: {
+        author: string;
+    };
+    name: Writable<Default<string, "">>;
+}, boolean>({
+    type: "object",
+    properties: {
+        message: {
+            type: "object",
+            properties: {
+                author: {
+                    type: "string"
+                }
+            },
+            required: ["author"]
+        },
+        name: {
+            type: "string",
+            "default": "",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["message", "name"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ message, name }) => message.author === senderName(name.get()));
+const __cfLift_3 = __cfHelpers.lift<{
+    message: {
+        author: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        message: {
+            type: "object",
+            properties: {
+                author: {
+                    type: "string"
+                }
+            },
+            required: ["author"]
+        }
+    },
+    required: ["message"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ message }) => message.author === "Alice");
 interface Message {
     author: string;
     body: string;
@@ -41,123 +150,16 @@ export default pattern((__cf_pattern_input) => {
     const selectedRoom = __cf_pattern_input.key("selectedRoom");
     return {
         [UI]: (<div>
-        {__cfHelpers.lift<{
-            selectedRoom: __cfHelpers.ReadonlyCell<Default<{
-                messages: Message[];
-            }, {
-                messages: [
-                ];
-            }>>;
-        }, Message[]>({
-            type: "object",
-            properties: {
-                selectedRoom: {
-                    type: "object",
-                    properties: {
-                        messages: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Message"
-                            }
-                        }
-                    },
-                    required: ["messages"],
-                    "default": {
-                        messages: []
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["selectedRoom"],
-            $defs: {
-                Message: {
-                    type: "object",
-                    properties: {
-                        author: {
-                            type: "string"
-                        },
-                        body: {
-                            type: "string"
-                        }
-                    },
-                    required: ["author", "body"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Message"
-            },
-            $defs: {
-                Message: {
-                    type: "object",
-                    properties: {
-                        author: {
-                            type: "string"
-                        },
-                        body: {
-                            type: "string"
-                        }
-                    },
-                    required: ["author", "body"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, ({ selectedRoom }) => selectedRoom.get()?.messages)({ selectedRoom: selectedRoom }).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        {__cfLift_1({ selectedRoom: selectedRoom }).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const message = __cf_pattern_input.key("element");
             const name = __cf_pattern_input.key("params", "name");
-            const isMine = __cfHelpers.lift<{
-                message: {
-                    author: string;
-                };
-                name: Writable<Default<string, "">>;
-            }, boolean>({
-                type: "object",
-                properties: {
-                    message: {
-                        type: "object",
-                        properties: {
-                            author: {
-                                type: "string"
-                            }
-                        },
-                        required: ["author"]
-                    },
-                    name: {
-                        type: "string",
-                        "default": "",
-                        asCell: ["readonly"]
-                    }
-                },
-                required: ["message", "name"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+            const isMine = __cfLift_2({
                 message: {
                     author: message.key("author")
                 },
                 name: name
             }).for("isMine", true);
-            const isKnownAuthor = __cfHelpers.lift<{
-                message: {
-                    author: string;
-                };
-            }, boolean>({
-                type: "object",
-                properties: {
-                    message: {
-                        type: "object",
-                        properties: {
-                            author: {
-                                type: "string"
-                            }
-                        },
-                        required: ["author"]
-                    }
-                },
-                required: ["message"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, ({ message }) => message.author === "Alice")({ message: {
+            const isKnownAuthor = __cfLift_3({ message: {
                     author: message.key("author")
                 } }).for("isKnownAuthor", true);
             return (<div data-author-kind={__cfHelpers.ifElse({

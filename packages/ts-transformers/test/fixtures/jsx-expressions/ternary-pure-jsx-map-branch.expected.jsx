@@ -11,6 +11,22 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    recentEvents: TagEvent[];
+}, boolean>({
+    type: "object",
+    properties: {
+        recentEvents: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["recentEvents"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ recentEvents }) => recentEvents.length === 0);
 interface TagEvent {
     label: string;
 }
@@ -42,22 +58,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            recentEvents: TagEvent[];
-        }, boolean>({
-            type: "object",
-            properties: {
-                recentEvents: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    }
-                }
-            },
-            required: ["recentEvents"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ recentEvents }) => recentEvents.length === 0)({ recentEvents: recentEvents }), <span>No events yet</span>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ recentEvents: recentEvents }), <span>No events yet</span>, <div>
             {recentEvents.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const event = __cf_pattern_input.key("element");
                 const idx = __cf_pattern_input.key("index");

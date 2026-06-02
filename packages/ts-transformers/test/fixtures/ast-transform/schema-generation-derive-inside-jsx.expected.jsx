@@ -11,13 +11,14 @@ import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift(false, () => value * 2);
 declare const value: number;
 // FIXTURE: schema-generation-derive-inside-jsx
 // Verifies: a reactive builder inside a JSX expression still gets schemas injected
 //   computed(() => value * 2) → captures `value` and lowers to lift(inputSchema, outputSchema, ...)
 // Context: computed() appears as a JSX child expression, not a standalone statement
 export const result = (<div>
-    {__cfHelpers.lift(false, () => value * 2)()}
+    {__cfLift_1()}
   </div>);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

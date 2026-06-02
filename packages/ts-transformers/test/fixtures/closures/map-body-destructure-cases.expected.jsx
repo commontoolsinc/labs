@@ -11,6 +11,38 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    spotPreferences: string[];
+}, boolean>({
+    type: "object",
+    properties: {
+        spotPreferences: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["spotPreferences"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0);
+const __cfLift_2 = __cfHelpers.lift<{
+    spotPreferences: string[];
+}, string>({
+    type: "object",
+    properties: {
+        spotPreferences: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
+    },
+    required: ["spotPreferences"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "));
 interface Spot {
     spotNumber: string;
 }
@@ -101,37 +133,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    spotPreferences: string[];
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        spotPreferences: {
-                            type: "array",
-                            items: {
-                                type: "unknown"
-                            }
-                        }
-                    },
-                    required: ["spotPreferences"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0)({ spotPreferences: spotPreferences }), <span>{__cfHelpers.lift<{
-                    spotPreferences: string[];
-                }, string>({
-                    type: "object",
-                    properties: {
-                        spotPreferences: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["spotPreferences"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))({ spotPreferences: spotPreferences })}</span>, null)}
+                } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ spotPreferences: spotPreferences }), <span>{__cfLift_2({ spotPreferences: spotPreferences })}</span>, null)}
               </li>);
             }, {
                 type: "object",

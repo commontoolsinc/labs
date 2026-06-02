@@ -11,6 +11,23 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    list: __cfHelpers.Cell<string[]>;
+}, boolean>({
+    type: "object",
+    properties: {
+        list: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["list"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ list }) => list.get().length > 0);
 // FIXTURE: map-array-length-conditional
 // Verifies: length-guard && map pattern is transformed to when() wrapping mapWithPattern()
 //   list.get().length > 0 && (<div>{list.map(...)}</div>) → when(derive(...length), <div>{list.mapWithPattern(...)}</div>)
@@ -37,23 +54,7 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            list: __cfHelpers.Cell<string[]>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                list: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["list"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ list }) => list.get().length > 0)({ list: list }), <div>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ list: list }), <div>
             {list.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const name = __cf_pattern_input.key("element");
                 return (<span>{name}</span>);

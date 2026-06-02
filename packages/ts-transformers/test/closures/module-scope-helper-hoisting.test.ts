@@ -35,20 +35,24 @@ Deno.test("Closure Transformer hoists nested computed callbacks that close over 
   const output = await transformSource(source, options);
   const normalized = output.replace(/\s+/g, " ");
 
+  // After CT-1644 Phase 2 the computed lowers to a lift whose WHOLE call is
+  // hoisted to a module-scope `const __cfLift_N = __cfHelpers.lift(...)`, with
+  // the callback inline (no separate `__cfModuleCallback` hardened wrapper —
+  // CT-1644 subsumes lift from the CT-1585 callback hoister). The hoisted
+  // const is module-scope, which is the property this test guards: a computed
+  // closing over the module-scoped helper `formatDateShort` becomes a named,
+  // module-scope, self-contained unit.
   const hoistedMatch = normalized.match(
-    /const (\S+) = __cfHardenFn\(\(\{ dateStr \}\) => formatDateShort\(dateStr\)\);/,
+    /const (__cfLift_\d+) = __cfHelpers\.lift[\s\S]*?, \(\{ dateStr \}\) => formatDateShort\(dateStr\)\);/,
   );
 
-  assert(hoistedMatch, `expected hoisted helper in output:\n${output}`);
+  assert(hoistedMatch, `expected hoisted lift in output:\n${output}`);
 
   const hoistedName = hoistedMatch[1]!;
-  // computed() closure-extracts captured reactive reads and lowers to the
-  // lift-applied form: __cfHelpers.lift(argSchema, resultSchema, callback)(input)
+  // The original site applies the captures to the hoisted name.
   assertMatch(
     normalized,
-    new RegExp(
-      `__cfHelpers\\.lift[\\s\\S]*?, ${hoistedName}\\)\\(\\{ dateStr: dateStr \\}\\)`,
-    ),
+    new RegExp(`${hoistedName}\\(\\{ dateStr: dateStr \\}\\)`),
   );
 });
 
