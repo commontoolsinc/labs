@@ -31,24 +31,26 @@ act as the same DID.
 
 ## Existing Browser Mnemonic To CLI
 
-If the browser identity already exists and you need a matching CLI key, export a
-PKCS8 key from the browser mnemonic:
+If the browser identity already exists and you need a matching CLI key, derive a
+PKCS8 key from the browser recovery phrase with `cf id from-mnemonic`. Quote the
+whole phrase as a single argument:
 
 ```bash
-deno eval '
-import { Identity } from "./packages/identity/src/identity.ts";
-const mnemonic = "your 24-word mnemonic here";
-const id = await Identity.fromMnemonic(mnemonic, { implementation: "noble" });
-await Deno.writeFile(".cf/browser.key", id.toPkcs8());
-'
+deno run -A packages/cli/mod.ts id from-mnemonic "your 24-word mnemonic here" \
+  > .cf/browser.key
 
 export CF_IDENTITY="$PWD/.cf/browser.key"
 deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
 ```
 
-Do not use `cf id derive <mnemonic>` for this. Browser mnemonic login uses
-`Identity.fromMnemonic()`, while `cf id derive` uses
-`Identity.fromPassphrase()`. The same text produces different DIDs.
+Do not use `cf id derive <mnemonic>` for this. `from-mnemonic` uses
+`Identity.fromMnemonic()` (the same path as browser mnemonic login), while
+`cf id derive` uses `Identity.fromPassphrase()`. The same text produces
+different DIDs.
+
+> Use `deno run -A packages/cli/mod.ts`, not `deno task cf`, when redirecting to
+> a key file: the `deno task` wrapper prints colored preamble to stdout that
+> would corrupt the key.
 
 ## Existing CLI Key To Browser
 
