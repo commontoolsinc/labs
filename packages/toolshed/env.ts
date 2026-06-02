@@ -199,7 +199,7 @@ const EnvSchema = z.object({
   SHELL_URL: z.string().optional(),
 
   // ===========================================================================
-  // Experimental space-model feature flags (see ExperimentalOptions in runner)
+  // Experimental feature flags (see ExperimentalOptions in runner)
   // Note: We intentionally avoid z.coerce.boolean() here. Zod's coerce uses
   // Boolean(), which treats any non-empty string as truthy -- so setting an
   // env var to "false" would incorrectly enable the flag. The other boolean

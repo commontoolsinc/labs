@@ -61,8 +61,7 @@ export async function awaitSyncWithTimeout(
         new Error(
           `Sync timed out after ${timeoutMs / 1000}s. ` +
             `This often indicates a client/server configuration mismatch ` +
-            `(e.g., EXPERIMENTAL_MODERN_DATA_MODEL enabled on the server but not the CLI). ` +
-            `Also check EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE. ` +
+            `(e.g., an EXPERIMENTAL_* option enabled on the server but not the CLI). ` +
             `Check toolshed logs for AuthorizationError details.`,
         ),
       );

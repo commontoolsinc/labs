@@ -886,8 +886,8 @@ Current branch status:
 | Demand-targeted dirty recovery beyond subscription startup | Future work. |
 | Replication, retention, and mirror repair | Future work. |
 
-The version 1 implementation is gated by the same experimental-option plumbing
-as `EXPERIMENTAL_MODERN_DATA_MODEL`. With
+The version 1 implementation is gated by the project's common
+experimental-option plumbing. With
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false` or unset, the runner does not
 attach scheduler observations to transactions, memory clients do not request
 scheduler snapshots, and the memory server does not write scheduler observation

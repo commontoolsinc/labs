@@ -54,11 +54,13 @@ the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
 
 ```bash
 # Pass experiment env vars to CLI commands:
-EXPERIMENTAL_MODERN_DATA_MODEL=true \
+EXPERIMENTAL_EXAMPLE_NAME_1=true \
+EXPERIMENTAL_EXAMPLE_NAME_2=true \
 deno task cf piece new pattern.tsx ...
 ```
 
-See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
+Replace `EXAMPLE_NAME_*` with an actual defined experiment name. See
+`docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 
 **Local servers**: See `docs/development/LOCAL_DEV_SERVERS.md`
 
