@@ -1,4 +1,3 @@
-import { getDataModelConfig } from "@commonfabric/data-model/fabric-value";
 import { getModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
 import {
   jsonFromValue,
@@ -155,7 +154,6 @@ export interface SessionOpenResult {
 
 export interface MemoryProtocolFlags {
   modernCellRep: boolean;
-  modernDataModel: boolean;
   persistentSchedulerState: boolean;
 }
 
@@ -430,7 +428,6 @@ export function resetPersistentSchedulerStateConfig(): void {
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
-  modernDataModel: getDataModelConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
 });
 
@@ -439,7 +436,6 @@ export const sameMemoryProtocolFlags = (
   right: MemoryProtocolFlags,
 ): boolean =>
   left.modernCellRep === right.modernCellRep &&
-  left.modernDataModel === right.modernDataModel &&
   left.persistentSchedulerState === right.persistentSchedulerState;
 
 /**
@@ -451,9 +447,7 @@ export const sameMemoryProtocolFlags = (
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean =>
-  (left.modernCellRep === right.modernCellRep) &&
-  (left.modernDataModel === right.modernDataModel);
+): boolean => left.modernCellRep === right.modernCellRep;
 
 /**
  * Parses and normalizes incoming wire-protocol flags. Returns `null` if the
@@ -487,7 +481,6 @@ export const parseMemoryProtocolFlags = (
   return {
     flags: {
       modernCellRep: modernCellRep === true,
-      modernDataModel: false,
       persistentSchedulerState: persistentSchedulerState === true,
     },
     wireKey: "modernDataModel",
@@ -502,9 +495,8 @@ export const parseMemoryProtocolFlags = (
  */
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
-  wireKey: string = "modernDataModel",
+  _wireKey: string = "modernDataModel",
 ): WireMemoryProtocolFlags => ({
-  [wireKey]: flags.modernDataModel,
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
 });

@@ -536,7 +536,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
   }
 });
 
-Deno.test("memory v2 server rejects handshakes when data-model flags disagree", async () => {
+Deno.test("memory v2 server rejects handshakes when modernCellRep flags disagree", async () => {
   const server = createServer("memory://memory-v2-server-handshake-flags");
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -547,7 +547,6 @@ Deno.test("memory v2 server rejects handshakes when data-model flags disagree", 
       protocol: MEMORY_PROTOCOL,
       flags: {
         modernCellRep: !HELLO_FLAGS.modernCellRep,
-        modernDataModel: !HELLO_FLAGS.modernDataModel,
       },
     }));
 
@@ -559,7 +558,6 @@ Deno.test("memory v2 server rejects handshakes when data-model flags disagree", 
         message: `memory flag mismatch: client=${
           JSON.stringify({
             modernCellRep: !HELLO_FLAGS.modernCellRep,
-            modernDataModel: !HELLO_FLAGS.modernDataModel,
           })
         } server=${JSON.stringify(HELLO_FLAGS)}`,
       },
