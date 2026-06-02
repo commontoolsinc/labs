@@ -13,19 +13,25 @@ Only the cell-derived source is fully specified for v1; the others are stubbed
 so the API is stable when their backends land.
 
 In all cases the **physical identity of the database is opaque to the pattern**.
-The handle's readable value is empty (Section [01](./01-api.md#the-handle-type));
-the source descriptor lives as server-side state keyed by the handle cell's id.
-Pattern code holds an opaque handle; it never names a file or attach alias.
+The handle (a `SqliteDb` cell, Section [01](./01-api.md#the-handle-type)) reads
+back a small descriptor `{ id, tables, rev }`, where `id` is the handle cell's
+own entity id — patterns forward the handle to `db.query`/`db.exec`/`reactOn`,
+not name a file or attach alias. For non-default sources the resolved source
+descriptor lives as server-side state keyed by the handle cell's id.
 
 ## 03.1 Cell-derived (default)
 
 ```ts
-const db = sqliteDatabase({ tables }); // bound to a cell the runtime allocates here
+const db = sqliteDatabase({ tables }); // -> OpaqueRef<SqliteDb>, bound to a cell the runtime allocates here
 ```
 
-The database is tied to a cell the runtime allocates for this call, and its
-**name is derived from that cell's entity id** — which is itself causal to
-creation and opaque to the pattern.
+**Status: implemented.** This is the source used by everything specified in this
+directory. The database is tied to a cell the runtime allocates for this call,
+and its **name is derived from that cell's entity id** — which is itself causal
+to creation and opaque to the pattern. The handle cell reads back
+`{ id, tables, rev }` where `id` is that entity id (see
+[`packages/runner/src/builtins/sqlite-builtins.ts`](../../../packages/runner/src/builtins/sqlite-builtins.ts)
+`sqliteDatabase`).
 
 - There is **no way to point the database at an arbitrary cell**. A pattern
   cannot pass "some other cell" as the database's identity; doing so would
@@ -71,10 +77,10 @@ and atomic with the pattern's cells.
 ## 03.2 VM file (stub)
 
 ```ts
-const db = sqliteDatabase({ vm: vmHandle, path: "/data/app.db" });
+const db = sqliteDatabase({}, { vm: vmHandle, path: "/data/app.db" });
 ```
 
-A database that is a **file inside a VM**. Today VM files are reached through
+**Status: stub (not implemented).** A database that is a **file inside a VM**. Today VM files are reached through
 toolshed `/api` calls, which we intend to improve regardless. For this spec the
 source is **stubbed**: it assumes
 
@@ -95,14 +101,15 @@ cross-store atomicity they won't get.
 
 ## 03.3 On-disk file, injected via `cf` (stub)
 
-A database that is a **plain file on disk**, opaque to the pattern. The pattern
-does **not** select it with the builder; instead it declares a database
-**input** and an operator connects a file to it via `cf`:
+**Status: stub (not implemented).** A database that is a **plain file on disk**,
+opaque to the pattern. The pattern does **not** select it with the builder;
+instead it declares a database **input** (typed `SqliteDb`) and an operator
+connects a file to it via `cf`:
 
 ```tsx
 // The pattern is source-agnostic — it just consumes whatever is wired into `db`.
-pattern<{ db: SqliteDatabase }>(({ db }) => {
-  const rows = sqliteQuery({ db, sql: "SELECT … FROM lookup", reactOn: db });
+pattern<{ db: SqliteDb }>(({ db }) => {
+  const rows = db.query("SELECT … FROM lookup", { reactOn: db });
   // Until connected, `rows.pending` stays true (Section 05 / Example 07-#5).
 });
 ```

@@ -5,23 +5,37 @@ scalars. This section defines how a cell crosses that boundary losslessly.
 
 ## The rule
 
-A column (or bound parameter) is a **link column** iff **both**:
-
-1. its name ends with the suffix `_cf_link`, and
-2. it is declared `TEXT` — by the database's table schema
-   (`cfLink<T>()`, Section [01](./01-api.md)), by a `sqliteQuery<Row>` result
-   field typed `Cell<T>`, or by SQLite column affinity.
+A column (or bound parameter) is a **link column** iff its name ends with the
+suffix `_cf_link`. In SQLite it is stored as `TEXT`. The database's table schema
+(`cfLink<T>()`, Section [01](./01-api.md)) declares it and validates it is
+`TEXT`.
 
 For a link column:
 
-- **On write**, the bound value **must** be a cell reference (a `Cell`, an
-  `OpaqueRef` to a cell, or anything that resolves to a link). It is opaquely
-  encoded to a **full sigil link string** before the `INSERT`/`UPDATE`.
-- **On read**, the stored string is transparently decoded back into a live
-  `Cell` before the row reaches the pattern.
+- **On write** (`db.exec`), a bound `Cell` is opaquely encoded to a **full sigil
+  link string** before the `INSERT`/`UPDATE`. (A `Cell` bound to a *non*-link
+  column throws.)
+- **On read** the behavior depends on whether the query is **typed**:
+  - A **typed `db.query<{ col_cf_link: Cell<T> }>`** surfaces the column as a
+    live `Cell`. (Mechanically: the runtime decodes the stored sigil **string**
+    into a sigil **object**, and the consumer's `<Row>` `asCell` schema
+    rehydrates that object into a `Cell<T>` on read.)
+  - An **untyped `db.query`** returns the raw stored **sigil-link string** — the
+    consumer can decode it on demand via `decodeCfLinkValue` (Section
+    "Decode path").
+- `NULL` → `null` in both cases.
 
-The encoding is **opaque to the pattern**: pattern code binds a cell and reads a
-cell; the string form is never exposed.
+> **Spec evolution.** The original draft said reads *transparently* decode
+> `_cf_link` columns to `Cell`s for every query, driven by the table schema or
+> the column-name suffix. As built, decode-to-`Cell` is driven by the **typed
+> `db.query<Row>`** result schema (a `Cell<T>` field → `asCell`), not by the
+> table declaration or the suffix alone. An untyped query returns the raw string.
+> This keeps the per-query `<Row>` the single source of truth for which result
+> columns are cell-bearing.
+
+The write encoding is **opaque to the pattern**: pattern code binds a cell and
+(for a typed read) reads a cell; the string form is exposed only to an untyped
+read.
 
 ## Throw conditions
 
@@ -29,13 +43,12 @@ The system fails loudly rather than silently mis-storing data:
 
 | Condition | Result |
 | --- | --- |
-| Binding a cell reference to a **non-`_cf_link`** column/parameter | **throw** — cells may only be persisted via link columns. |
+| Binding a cell reference to a **non-`_cf_link`** column/parameter (write) | **throw** — cells may only be persisted via link columns. |
 | A column named `*_cf_link` that is **not** declared/affined as `string` | **throw** — link columns must be a single string field. |
-| Binding a **non-cell** value to a `_cf_link` column | **throw** — link columns store cells only. |
-| Reading a `_cf_link` column whose value is non-null and **not a parseable sigil link** | **throw** (surfaced as the query's `error`). |
-| A `_cf_link` value that is itself multi-field / not a single scalar string | **throw** — "they must be a single field of type string and end with `_cf_link`". |
+| Binding a **non-cell** value to a `_cf_link` column (write) | **throw** — link columns store cells only (`encodeCfLinkValue`). |
+| Decoding a `_cf_link` value (via `decodeCfLinkValue`) that is non-null and **not a parseable sigil link** | **throw** — not valid JSON, or JSON that is not a single `link@1` sigil. |
 
-`NULL` in a link column is allowed and decodes to `null` (an absent cell).
+`NULL`/`undefined` in a link column decodes to `null` (an absent cell).
 
 ## Encoding format
 
@@ -74,15 +87,16 @@ Rationale for absolute links:
 
 ## Encode path (write)
 
-Executed during the write built-in's mutation phase, before the statement is
-queued into the commit (Section [04](./04-server-execution-and-transactions.md)):
+Executed during `db.exec`, before the `sqlite` op is recorded onto the commit
+(Section [04](./04-server-execution-and-transactions.md)). The codec is
+`encodeCfLinkValue`
+([`packages/runner/src/builtins/sqlite/cf-link.ts`](../../../packages/runner/src/builtins/sqlite/cf-link.ts)):
 
 1. Determine which parameters target link columns by mapping each parameter to
-   its column (from the statement's named columns) and checking the database's
-   table schema (`cfLink` marker); lacking that, fall back to the `*_cf_link`
-   column name when the SQL names columns explicitly.
+   its column (from the statement's named columns) and the `*_cf_link` suffix /
+   the database's table schema (`cfLink` marker).
 2. For each link parameter:
-   - If the value is not a cell reference → **throw**.
+   - If the value is not a cell reference (or `toCell`-bearing) → **throw**.
    - Resolve it to a `NormalizedFullLink`, build an absolute `SigilLink` via
      `createSigilLinkFromParsedLink(link, { includeSchema: false })` (no base),
      and `JSON.stringify` it.
@@ -94,21 +108,28 @@ encoded string is stable regardless of where the row is later read.
 
 ## Decode path (read)
 
-Executed in the query built-in after rows return from the server, before
-`sendResult`:
+The server returns raw stored strings; decoding happens **on the client** in the
+query built-in after rows return
+([`packages/runner/src/builtins/sqlite-builtins.ts`](../../../packages/runner/src/builtins/sqlite-builtins.ts)),
+and is **driven by the typed `db.query<Row>` schema**:
 
-1. Identify link columns from, in order: the `sqliteQuery<Row>` schema (a field
-   typed `Cell<T>` → `asCell`), the database's table schema (`cfLink` marker),
-   or the `*_cf_link` column-name convention from the result set.
-2. For each link column value:
-   - `null` → `null`.
-   - Else `JSON.parse` and validate it is a single `link@1` sigil. If not →
-     **throw** into the query `error`.
-   - Reconstruct a `Cell` from the normalized link via the runtime (the same
-     path `Cell.fromLink`/link resolution uses), carrying the column's declared
-     element schema (from `cfLink<T>()` or the `Cell<T>` in `Row`) so downstream
-     `.get()`/`.key()` are typed.
-3. Non-link columns pass through unchanged.
+1. From the transformer-injected `rowSchema`, identify which result columns are
+   marked `asCell` (a `Cell<T>` field in `Row`). An **untyped** query injects no
+   `rowSchema` → no columns are decoded.
+2. For each `asCell` column, replace the stored sigil-link **string** with the
+   parsed sigil-link **object** (`parseCfLinkToSigil`). `null`/`undefined` →
+   `null`. A value that is not a decodable link is left as-is (the `asCell` read
+   then yields `undefined` rather than crashing the whole query). This step
+   converts the string to the link **object** that the runtime's link resolution
+   recognizes — link resolution does not recognize a JSON string.
+3. When the consumer reads `q.result[i].<col>` under its own `<Row>` schema, the
+   `asCell` marker rehydrates that sigil object into a live `Cell<T>`, carrying
+   the column's declared element schema so downstream `.get()`/`.key()` are
+   typed.
+4. Untyped reads return the raw sigil-link **string** unchanged; a consumer can
+   decode it on demand with `decodeCfLinkValue` (which `JSON.parse`s and
+   reconstructs a `Cell` via `runtime.getCellFromLink`). Non-link columns pass
+   through unchanged either way.
 
 The decoded `Cell` is a normal reactive cell: reading it later subscribes to
 *its* contents independently of the SQL query's own reactivity (Section
@@ -117,10 +138,12 @@ The decoded `Cell` is a normal reactive cell: reading it later subscribes to
 ## Why a naming convention rather than schema-only
 
 The `*_cf_link` suffix makes the contract legible directly in SQL and in raw
-table dumps, and lets the encode/decode rules apply even when neither the table
-schema nor a `sqliteQuery<Row>` type covers a column. The schemas
-(`cfLink<T>()`, or a `Cell<T>` field in `Row`) refine it with the element type
-and, later, CFC labels — but the suffix is the load-bearing, self-documenting
-marker.
-This mirrors how the runtime already keys behavior off structural conventions
-rather than out-of-band registration.
+table dumps, and drives the **write** encode rule and the storage type
+(`cfLink<T>()` declares the column `TEXT`). The suffix is the load-bearing,
+self-documenting marker for storage. **Decode-to-`Cell` on read, however, is
+driven by the typed `db.query<Row>` schema** (a `Cell<T>` field → `asCell`), not
+by the suffix alone: an untyped query returns the raw string regardless of the
+column name. The `Row` schema also carries the element type and, later, CFC
+labels. This keeps the per-query `<Row>` the single source of truth for which
+result columns rehydrate to live cells, while the suffix keeps the storage
+contract self-documenting.

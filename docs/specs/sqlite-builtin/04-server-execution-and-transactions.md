@@ -102,11 +102,27 @@ Server handling (mirrors `Server.transact` / `Server.queryGraph`):
 client** after the rows return, because reconstructing a `Cell` needs the
 runtime. The server returns raw strings.
 
-### Writes: folded into `transact`
+### Writes: `db.exec`, folded into `transact`
 
-Writes are **not** a separate RPC. They are appended to the commit that the
-write built-in's transaction already produces, so they apply in the **same
-SQLite transaction** as the cell writes.
+Writes are **not** a separate RPC and **not** a reactive built-in. The author
+calls `db.exec(sql, params?)` (a method on the `SqliteDb` cell, Section
+[01](./01-api.md#dbexecsql-params--imperative-write)) inside a handler. It
+returns `void` and records a `sqlite` op onto the **caller's transaction** — the
+same transaction that carries the surrounding cell writes — so they apply in the
+**same SQLite transaction**.
+
+The client-side seam is:
+
+```
+db.exec(...)                                  // packages/runner/src/cell.ts
+  → tx.recordSqliteWrite(space, { op: "sqlite", db, sql, params })
+                                              // storage transaction (interface.ts +
+                                              //   v2-transaction.ts / extended-storage-transaction.ts)
+  → getNativeCommit                           // folds the op into the pending commit
+  → ClientCommit { operations: [...cellOps, sqliteOp] }
+                                              // packages/memory/v2.ts
+  → engine applies all operations atomically  // applyCommitTransaction
+```
 
 The client commit (`ClientCommit` in
 [`packages/memory/v2.ts`](../../../packages/memory/v2.ts)) carries an
@@ -114,7 +130,7 @@ The client commit (`ClientCommit` in
 `engine.database.transaction(applyCommitTransaction).immediate(...)`
 ([`packages/memory/v2/engine.ts`](../../../packages/memory/v2/engine.ts)
 `applyCommit` → `applyCommitTransaction`, which iterates operations through
-`writeOperation`). We add a new operation kind:
+`writeOperation`). The `sqlite` operation kind:
 
 ```ts
 interface SqliteOperation {
@@ -125,7 +141,7 @@ interface SqliteOperation {
 }
 ```
 
-`writeOperation` gains a `case "sqlite"` that, for a cell-derived db:
+`writeOperation` handles `case "sqlite"` that, for a cell-derived db:
 
 1. Ensures the db is ATTACHed to `engine.database` (the connection already
    inside the open transaction).
@@ -133,25 +149,43 @@ interface SqliteOperation {
    `.immediate()` transaction that writes cell revisions. Either everything
    commits or everything rolls back.
 
+**Abort-only on failure.** `db.exec` returns `void` and exposes no result cell:
+there is no `pending`/`success`/`error` state. If the SQL statement fails, the
+`.immediate()` transaction throws and the **whole commit aborts** — the cell
+writes that rode the same transaction roll back too. The author surfaces failure
+through the commit failing, not through a per-write result. (`db.exec` also
+**throws on the client** before the commit if a param is `undefined` — a value
+that isn't ready yet — or if a cell is bound to a non-`_cf_link` column; Sections
+[01](./01-api.md) and [02](./02-cf-link-encoding.md).)
+
 `_cf_link` parameters are **encoded on the client** (Section
 [02](./02-cf-link-encoding.md)) before the operation is placed in the commit, so
 the server stores ready-made link strings and never needs runtime cell access.
 
+The same commit also carries the `rev`-bumped handle-cell value that drives
+`reactOn: db` re-query and write serialization (Section
+[05](./05-reactivity.md)).
+
 This keeps the atomicity property the runtime already relies on: a commit is one
 SQLite transaction with a single global `seq`. Cell writes and SQLite writes
 land together.
+
+> **Spec evolution.** The engine/server/protocol layers already supported a
+> `sqlite` op inside a commit; the implementation added only the client seam
+> (`recordSqliteWrite` → `getNativeCommit`) that lets `db.exec` append that op to
+> the caller's transaction. There is no reactive write RPC.
 
 ## Ordering within a commit
 
 Per the goals, **writes are executed after** the rest of the commit's cell
 operations, and **read-after-write within the same transaction fails**:
 
-- `sqlite` operations are ordered last among the commit's operations.
+- `sqlite` operations are ordered last among the commit's operations (the
+  `sqlite` op is appended after the cell ops).
 - A `sqlite.query` issued from inside the same transaction that has pending
   (uncommitted) `sqlite` writes is rejected with a `read-after-write-unsupported`
-  error. v1 does not simulate the pending write. (The write built-in records
-  that its db has pending writes in the current transaction; a query against
-  that db in the same transaction throws rather than reading stale state.)
+  error. v1 does not simulate the pending write: a query against a db with
+  pending writes in the same transaction throws rather than reading stale state.
 
 ## Atomicity across cells and SQLite (and WAL caveat)
 
@@ -194,6 +228,14 @@ Goal: transactions are **atomic across cells and the attached SQLite database**.
   and (later) consider a read replica or a separate read connection in WAL mode.
 - Multi-tab / multi-client coordination for the *write* side is inherited from
   the existing commit model (seq-based validation, optimistic local commit,
-  server confirmation), so no new mutex is needed for writes. (Contrast
-  `fetchData`, which needs `tryClaimMutex` because it has no transactional
-  backstop.)
+  server confirmation), so no new mutex is needed for writes. Concretely, because
+  `db.exec` does a read-modify-write of the handle cell's `rev` in the same
+  commit, two concurrent `db.exec` commits conflict on that cell's
+  optimistic-concurrency revision and serialize — one retries (Section
+  [05](./05-reactivity.md)). (Contrast `fetchData`, which needs `tryClaimMutex`
+  because it has no transactional backstop.)
+
+> **As-built proof.** Atomic cells + the `sqlite` op in one commit is proven
+> engine → server → protocol → runner and end-to-end through `cf check` plus the
+> real server (`integration/sqlite-db-query-decode.test.ts`). See
+> [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md).

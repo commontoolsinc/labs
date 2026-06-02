@@ -5,14 +5,18 @@ during design are marked **[resolved]** with the decision.
 
 ## API surface
 
-1. **Handle methods vs. free built-ins.** We chose free built-ins
-   (`sqliteQuery`/`sqliteExecute`) over methods on the handle (Section
-   [01](./01-api.md)). Is ergonomic sugar (`db.query(...)` / `db.execute(...)`)
-   worth adding as a thin forwarder, or does that re-blur the read/write
-   capability split CFC wants kept separate?
-2. **Multi-statement writes.** Should `sqliteExecute` accept multiple statements
-   in one `sql`, or one statement per call (clearer atomicity story, easier
-   `_cf_link` param mapping)?
+1. **[resolved — handle methods]** The original draft chose free built-ins
+   (`sqliteQuery`/`sqliteExecute`) over methods on the handle. **As built**, the
+   handle is a `SqliteDb` cell variant exposing `db.query` (reactive read) and
+   `db.exec` (imperative write) directly (Section [01](./01-api.md)). The
+   read/write capability split is preserved at the type level — `.query` and
+   `.exec` are distinct methods CFC can gate separately — and the reactive
+   `sqliteExecute` built-in was removed (`db.exec` folds the write into the
+   caller's commit instead). A free `sqliteQuery<Row>(...)` function remains as an
+   equivalent alias for `db.query<Row>(...)`.
+2. **Multi-statement writes.** Should `db.exec` accept multiple statements in one
+   `sql`, or one statement per call (clearer atomicity story, easier `_cf_link`
+   param mapping)? Still open.
 3. **[resolved] Transformer support for `sqliteQuery<Row>`.** Routine: the
    transformer already lowers type arguments to schemas for `toSchema<T>`,
    `generateObject`, and `lift`. Add a registry entry + a schema-injection rule —
@@ -22,14 +26,17 @@ during design are marked **[resolved]** with the decision.
 
 ## `_cf_link`
 
-4. **[resolved] Suffix vs. schema-only.** Keep both: the `*_cf_link` suffix is
-   the self-documenting fallback (legible in raw SQL); the database table schema
-   (`cfLink<T>()`) and `sqliteQuery<Row>` `Cell<T>` fields refine it with element
-   type and CFC labels and take precedence. The suffix is not required when a
-   schema covers the column, but remains the default driver when none does.
+4. **[resolved] Suffix vs. schema — as built.** The `*_cf_link` suffix drives the
+   **write** path (which params encode as links) and the storage type (`TEXT`),
+   and is self-documenting in raw SQL. **Decode-to-`Cell` on read is driven by the
+   typed `db.query<Row>` schema** (a `Cell<T>` field → `asCell`), *not* by the
+   suffix alone: an **untyped** query returns the raw sigil-link string regardless
+   of the column name (Section [02](./02-cf-link-encoding.md)). So the suffix is
+   the storage/write marker and `<Row>` is the read-decode driver — they are
+   complementary, not a fallback chain.
 5. **Schema in stored links.** We strip `schema`/`asCell` from the stored sigil
    (Section [02](./02-cf-link-encoding.md)) and re-attach the element schema from
-   the table schema or `Row` on read. If neither covers a column, the decoded
+   the `Row` on read. If `Row` does not cover a column (untyped query), the decoded
    cell has no schema — acceptable, or should we store a minimal schema
    reference?
 
@@ -106,14 +113,22 @@ during design are marked **[resolved]** with the decision.
 
 ## Reactivity
 
-10. **Commit-only inputs as a scheduler primitive.** Section
-    [05](./05-reactivity.md) emulates "re-run only on committed inputs" with the
-    post-commit handle-cell dirtying. Should the scheduler gain a first-class
-    `committedReads` annotation, and would `sqliteQuery` then drop the manual
-    bump entirely?
+10. **[resolved — commit-fold rev bump]** Earlier designs emulated "re-run only
+    on committed inputs" with a *separate* post-commit handle-cell dirtying (and
+    contemplated a first-class `committedReads` scheduler annotation). **As
+    built**, `db.exec` bumps the handle cell's `rev` **inside its own write
+    commit** (Section [05](./05-reactivity.md)). The scheduler's existing
+    own-commit propagation then notifies `reactOn: db` queries exactly when the
+    write commits durably — no separate post-commit signal, and no new scheduler
+    primitive needed for the cell-derived case. (A `committedReads` annotation may
+    still be worth it as a general feature, but `sqliteQuery` does not need it.)
+    This same read-modify-write also resolves the **multi-tab write mutex**: two
+    concurrent `db.exec` commits conflict on the handle cell's revision and
+    serialize (one retries) — for free, with no separate mutex primitive.
 11. **Finer invalidation.** Is coarse `reactOn: db` (whole-database) invalidation
     good enough for v1, or do we want table-level handle cells (dirtied per
-    touched table) out of the box, parsed from the write SQL?
+    touched table) out of the box, parsed from the write SQL? Still open;
+    `reactOn` already accepts a narrower cell the author bumps manually.
 12. **Cross-space dirty signal for injected handles.** A `cf`-injected on-disk
     handle cell lives in a service space while its writes ride the pattern's
     space commit (Section [05](./05-reactivity.md)). The post-commit dirty signal

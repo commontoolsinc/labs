@@ -1,7 +1,9 @@
 # 07 — Usage examples
 
-These illustrate the intended authoring surface. They are aspirational pattern
-code, not yet runnable.
+These illustrate the intended authoring surface against the as-built `SqliteDb`
+cell-variant API: `sqliteDatabase(...)` returns a `SqliteDb` cell on which you
+call `.query<Row>(...)` (reactive read) and `.exec(...)` (imperative write, inside
+a handler).
 
 ## Example 1 — A reactive message log with cell references
 
@@ -11,8 +13,6 @@ via a `_cf_link` column, and renders the 20 most recent messages reactively.
 ```tsx
 import {
   sqliteDatabase,
-  sqliteQuery,
-  sqliteExecute,
   table,
   cfLink,
   handler,
@@ -37,21 +37,23 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
     },
   });
 
-  // No <Row> needed: the projection maps 1:1 to the declared `messages` table,
-  // so the runtime already knows `author_cf_link` is a link column.
-  const recent = sqliteQuery({
-    db,
-    sql: "SELECT id, body, ts, author_cf_link FROM messages ORDER BY ts DESC LIMIT 20",
-    reactOn: db, // re-run after any committed write to this db
-  });
+  // Typed read: the <Row> Cell<User> field marks author_cf_link as cell-bearing,
+  // so it rehydrates to a live Cell<User> on read. (An untyped db.query would
+  // return the raw sigil-link string for that column.)
+  const recent = db.query<{ id: number; body: string; ts: number; author_cf_link: Cell<User> }>(
+    "SELECT id, body, ts, author_cf_link FROM messages ORDER BY ts DESC LIMIT 20",
+    { reactOn: db }, // re-run after any committed write to this db
+  );
 
   const send = handler<{ body: string }, { author: Cell<User> }>(
     ({ body }, { author }) => {
-      sqliteExecute({
-        db,
-        sql: "INSERT INTO messages (author_cf_link, body, ts) VALUES (?, ?, ?)",
-        params: [author, body, Date.now()], // `author` Cell -> sigil link (param 1 targets a _cf_link column)
-      });
+      // Imperative write inside a handler. Returns void; commits atomically with
+      // any surrounding cell writes. `author` (a Cell) targets a _cf_link column
+      // and is encoded to a sigil link.
+      db.exec(
+        "INSERT INTO messages (author_cf_link, body, ts) VALUES (?, ?, ?)",
+        [author, body, Date.now()],
+      );
     },
   );
 
@@ -70,30 +72,29 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
 
 Key points:
 
-- The database owns the `messages` schema, so `author_cf_link` is known to be a
-  link column without any per-query/per-write annotation. Binding the `author`
-  cell to a non-link column (e.g. `body`) would throw (Section
-  [02](./02-cf-link-encoding.md)).
-- `reactOn: db` subscribes to the handle cell; the `INSERT` marks it dirty only
-  after it **commits durably** (Section [05](./05-reactivity.md)), so `recent`
-  never shows phantom rows.
-- Each `m.author_cf_link` decodes to a `Cell<User>`; the inner `derive` updates
-  if that user's name changes, without re-running the SQL query.
+- The database owns the `messages` schema (storage type + `_cf_link` markers);
+  binding the `author` cell to a non-link column (e.g. `body`) would throw
+  (Section [02](./02-cf-link-encoding.md)).
+- `db.exec` bumps the handle's `rev` in the **same commit** as the `INSERT`, so
+  `reactOn: db` re-runs `recent` only after the write commits durably (Section
+  [05](./05-reactivity.md)) — never phantom rows.
+- The typed `<Row>` field `author_cf_link: Cell<User>` is what decodes the stored
+  link to a `Cell<User>`; the inner `derive` updates if that user's name changes,
+  without re-running the SQL query.
 
 ## Example 2 — A projection that needs `<Row>`
 
 When the result shape diverges from a declared table (joins, aliases, computed
-columns), declare it with the `sqliteQuery<Row>` type argument. A `Cell<T>`
-field marks a decoded link column even when the alias drops the `_cf_link`
-suffix.
+columns), the `<Row>` type argument is the single source for both the result
+type and which columns are cell-bearing. A `Cell<T>` field marks a decoded link
+column even when the alias drops the `_cf_link` suffix.
 
 ```tsx
-const leaderboard = sqliteQuery<{ author: Cell<User>; n: number }>({
-  db,
-  sql: `SELECT author_cf_link AS author, count(*) AS n
-        FROM messages GROUP BY author_cf_link ORDER BY n DESC LIMIT 10`,
-  reactOn: db,
-});
+const leaderboard = db.query<{ author: Cell<User>; n: number }>(
+  `SELECT author_cf_link AS author, count(*) AS n
+   FROM messages GROUP BY author_cf_link ORDER BY n DESC LIMIT 10`,
+  { reactOn: db },
+);
 
 return derive(
   { rows: leaderboard.result, pending: leaderboard.pending, error: leaderboard.error },
@@ -106,51 +107,70 @@ return derive(
 );
 ```
 
-## Example 3 — Atomic cell + SQLite write in one handler
-
-The handler mutates a cell and inserts a row. Both land in the same commit, so
-an observer never sees the counter incremented without the row (or vice versa).
+The free-function form is equivalent if you prefer it:
 
 ```tsx
-const bump = handler<{ body: string }, { count: Cell<number>; db: SqliteDatabase }>(
+import { sqliteQuery } from "commonfabric";
+
+const leaderboard = sqliteQuery<{ author: Cell<User>; n: number }>({
+  db,
+  sql: `SELECT author_cf_link AS author, count(*) AS n
+        FROM messages GROUP BY author_cf_link ORDER BY n DESC LIMIT 10`,
+  reactOn: db,
+});
+```
+
+## Example 3 — Atomic cell + SQLite write in one handler
+
+The handler mutates a cell and inserts a row. Both land in the same commit, so an
+observer never sees the counter incremented without the row (or vice versa). If
+the `INSERT` fails, the whole commit aborts and the counter write rolls back too
+(abort-only — `db.exec` has no result/error cell; Section
+[04](./04-server-execution-and-transactions.md)).
+
+```tsx
+const bump = handler<{ body: string }, { count: Cell<number>; db: SqliteDb }>(
   ({ body }, { count, db }) => {
     count.set(count.get() + 1);                 // cell write
-    sqliteExecute({                              // SQLite write, same transaction
-      db,
-      sql: "INSERT INTO events (body, ts) VALUES (?, ?)",
-      params: [body, Date.now()],
-    });
+    db.exec(                                     // SQLite write, same transaction
+      "INSERT INTO events (body, ts) VALUES (?, ?)",
+      [body, Date.now()],
+    );
   },
 );
 ```
 
-If the commit is rejected (seq conflict) or the process crashes mid-commit, the
-post-crash reconciliation (Section [04](./04-server-execution-and-transactions.md))
-ensures the row and the counter agree.
+If the commit is rejected (seq conflict) it retries; if the process crashes
+mid-commit, the post-crash reconciliation (Section
+[04](./04-server-execution-and-transactions.md)) ensures the row and the counter
+agree.
+
+> Pass a **resolved** value to `db.exec` params. An `undefined` param (e.g. a
+> value that isn't ready yet) **throws**; use `null` for an intentional SQL NULL.
 
 ## Example 4 — VM-file source (stubbed)
 
 ```tsx
 // vmHandle is an opaque capability handle to a VM; path is inside that VM.
-const db = sqliteDatabase({ vm: vmHandle, path: "/var/lib/app/data.db" });
+const db = sqliteDatabase({}, { vm: vmHandle, path: "/var/lib/app/data.db" });
 
 // In v1 this resolves but the server returns `not-implemented` for VM sources.
-const rows = sqliteQuery({ db, sql: "SELECT * FROM kv", reactOn: db });
+const rows = db.query("SELECT * FROM kv", { reactOn: db });
 ```
 
 ## Example 5 — On-disk source injected via `cf` (stubbed)
 
-The pattern is **source-agnostic**: it declares a `db` *input* and consumes it.
-It never names a file or picks a source — an operator connects one.
+The pattern is **source-agnostic**: it declares a `db` *input* (typed `SqliteDb`)
+and consumes it. It never names a file or picks a source — an operator connects
+one.
 
 ```tsx
-export default pattern<{ db: SqliteDatabase }>(({ db }) => {
-  const lookup = sqliteQuery<{ value: string }>({
-    db,
-    sql: "SELECT value FROM lookup WHERE key = ?",
-    params: [key],
+export default pattern<{ db: SqliteDb; key: string }>(({ db, key }) => {
+  const lookup = db.query<{ value: string }>(
+    "SELECT value FROM lookup WHERE key = ?",
+    { params: [key] },
     // No reactOn: a static reference dataset the operator manages out of band.
-  });
+  );
 
   return derive(
     { rows: lookup.result, pending: lookup.pending, error: lookup.error },
