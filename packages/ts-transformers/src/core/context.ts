@@ -176,7 +176,7 @@ export class TransformationContext {
    * Mark a builder call/new node that SchemaInjection has finalized, so a
    * later re-traversal of the transformer's own output skips re-injection.
    * Replaces the arg-count idempotency guards in schema-injection.ts. See
-   * `schemaInjectedRegistry` docs in core/mod.ts (CT-1621).
+   * the `nodeLinks.schemaInjected` docs in core/mod.ts (CT-1621).
    */
   markSchemaInjected(node: ts.Node): void {
     this.options.state?.markSchemaInjected(node);
@@ -213,8 +213,8 @@ export class TransformationContext {
   /**
    * Record a per-function capability summary computed by
    * PatternCallbackLoweringTransformer (expensive interprocedural analysis;
-   * cached here for SchemaInjection to reuse). See `CapabilitySummaryRegistry`
-   * docs in core/mod.ts.
+   * cached here for SchemaInjection to reuse). See the
+   * `nodeLinks.capabilitySummary` docs in core/mod.ts.
    */
   recordCapabilitySummary(
     fn: ts.Node,
