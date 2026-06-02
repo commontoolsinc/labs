@@ -73,13 +73,17 @@ Transformers always run in this order:
 11. `PatternCallbackLoweringTransformer`
 12. `BuilderCallbackHoistingTransformer`
 13. `SchemaInjectionTransformer`
-14. `SchemaGeneratorTransformer`
-15. `ReactiveVariableForTransformer`
-16. `ModuleScopeShadowingTransformer`
-17. `ModuleScopeCfDataTransformer`
-18. `ModuleScopeFunctionHardeningTransformer`
+14. `LiftHoistingTransformer`
+15. `SchemaGeneratorTransformer`
+16. `ReactiveVariableForTransformer`
+17. `ModuleScopeShadowingTransformer`
+18. `ModuleScopeCfDataTransformer`
+19. `ModuleScopeFunctionHardeningTransformer`
 
-The order is behaviorally significant.
+The order is behaviorally significant. (`LiftHoistingTransformer`, stage 14,
+runs **after** `SchemaInjectionTransformer` so the lift call it relocates to
+module scope already carries its injected schemas — see CT-1644 and
+`packages/ts-transformers/docs/derive-to-lift-design.md`.)
 
 ## 4. Global Modes
 
