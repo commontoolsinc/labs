@@ -38,7 +38,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     const sum = a.get() + b.get();
     return sum * c.get();
 });
-// FIXTURE: derive-local-variable
+// FIXTURE: computed-local-variable
 // Verifies: callback-local variables are not captured, but outer cells are
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → lift(...)({ a, b, c })
 // Context: `sum` is a local const inside the callback and must not appear in captures

@@ -36,7 +36,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         type: "number"
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.get().map((n) => n * multiplier.get()));
-// FIXTURE: derive-nested-callback
+// FIXTURE: computed-nested-callback
 // Verifies: capture extraction works with a nested .map() over a captured cell's array value
 //   computed(() => numbers.get().map(n => n * multiplier.get())) → lift(...)({ numbers, multiplier })
 //   inner numbers.get().map(fn) runs on a plain array → NOT rewritten to mapWithPattern

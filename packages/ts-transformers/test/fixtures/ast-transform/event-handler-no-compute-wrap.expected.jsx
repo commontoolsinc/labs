@@ -46,7 +46,7 @@ const handleClick = handler({
 } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
-// FIXTURE: event-handler-no-derive
+// FIXTURE: event-handler-no-compute-wrap
 // Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
 // wrapper (formerly derive, now lift-applied post-CT-1615), while
 // expressions are.
@@ -60,15 +60,15 @@ export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
-          {/* Regular JSX expression - should be wrapped in derive */}
+          {/* Regular JSX expression - should be wrapped in a lift-applied computation */}
           <span>Count: {__cfLift_1({ count: count })}</span>
 
-          {/* Event handler with OpaqueRef - should NOT be wrapped in derive */}
+          {/* Event handler with OpaqueRef - should NOT be wrapped in a lift-applied computation */}
           <cf-button onClick={handleClick({ count })}>
             Click me
           </cf-button>
 
-          {/* Event handler inside map - should NOT be wrapped in derive */}
+          {/* Event handler inside map - should NOT be wrapped in a lift-applied computation */}
           {[1, 2, 3].map((n) => (<cf-button key={n} onClick={handleClick({ count })}>
               Button {n}
             </cf-button>))}

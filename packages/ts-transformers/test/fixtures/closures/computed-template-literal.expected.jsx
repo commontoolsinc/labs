@@ -30,7 +30,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ prefix, value }) => `${prefix.get()}${value.get()}`);
-// FIXTURE: derive-template-literal
+// FIXTURE: computed-template-literal
 // Verifies: captured cells used inside a template literal expression are extracted
 //   computed(() => `${prefix.get()}${value.get()}`) → lift(...)({ value, prefix })
 export default pattern(() => {

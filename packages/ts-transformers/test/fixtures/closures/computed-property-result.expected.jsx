@@ -42,7 +42,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ value, config, key }) => value.get() * config[key]);
-// FIXTURE: derive-computed-property
+// FIXTURE: computed-property-result
 // Verifies: computed property access with a dynamic key captures both the object and the key
 //   computed(() => expr) → lift(schema, schema)({ value, config, key })
 // Context: `config[key]` requires both `config` and `key` to be captured as plain values

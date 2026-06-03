@@ -30,7 +30,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => (value.get() * multiplier.get()) as number);
-// FIXTURE: derive-type-assertion
+// FIXTURE: computed-type-assertion
 // Verifies: a type assertion (`as number`) in the callback body is preserved after capture extraction
 //   computed(() => (value.get() * multiplier.get()) as number) → lift(...)({ value, multiplier })
 // Context: the `as number` cast remains intact in the transformed callback expression

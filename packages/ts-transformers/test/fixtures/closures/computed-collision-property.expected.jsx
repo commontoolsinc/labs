@@ -37,7 +37,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     multiplier: multiplier.get(),
     value: multiplier.get() * 3,
 }));
-// FIXTURE: derive-collision-property
+// FIXTURE: computed-collision-property
 // Verifies: a captured cell named the same as a returned object property does not rename the property
 //   computed(() => ({ multiplier: multiplier.get(), value: ... })) → lift(...)({ multiplier })
 // Context: returned object literal `{ multiplier: ... }` property name stays unchanged while the

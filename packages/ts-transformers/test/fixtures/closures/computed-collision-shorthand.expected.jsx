@@ -44,7 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     value: multiplier.get() * 3,
     data: { multiplier: multiplier },
 }));
-// FIXTURE: derive-collision-shorthand
+// FIXTURE: computed-collision-shorthand
 // Verifies: a shorthand property `{ multiplier }` over a captured cell expands correctly
 //   computed(() => ({ value, data: { multiplier } })) → lift(...)({ multiplier })
 // Context: shorthand must keep the property name while binding to the captured value

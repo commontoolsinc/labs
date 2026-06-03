@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ value, factors }) => value.get() * factors[1]!);
-// FIXTURE: derive-array-element-access
+// FIXTURE: computed-array-element-access
 // Verifies: an array variable accessed by index inside a computed is captured as a whole array
 //   computed(() => expr) → lift(schema, schema)({ value, factors })
 // Context: `factors[1]!` uses bracket access; the entire `factors` array is captured
