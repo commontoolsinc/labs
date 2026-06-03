@@ -1,7 +1,9 @@
 # DESIGN — "My Car" × Parking, a CFC worked example
 
 **Status:** Design phase. No code, no implementation. Concrete and
-type-precise. Built on the shared-profile / `wish()` substrate (PR #3762).
+type-precise. Built on the shared-profile / `wish()` substrate (PR #3762). A
+companion `voucher-last-mile-investigation.md` works through Berni's
+profile-reference primitive for §4's last mile — see §4 "Closing the last mile".
 
 **Authoritative inputs:** `DESIGN-BRIEF.md` (the locked spine),
 `naming-proposals.md` (the ratified vocabulary — used verbatim here),
@@ -257,6 +259,42 @@ system does not stop him. What it guarantees is that *we know who vouched* — t
 (c-757): infrastructure that makes Dave's trust go further, with accountability,
 not a claim of perfect gatekeeping.
 
+### Closing the last mile — profile references (recommended; Berni's direction)
+
+The roster-of-raw-DIDs above is the *initial* cheat. The better shape (Bernhard
+Seefeld, authoritative): make the trust leaf a **profile reference**, not a DID.
+Define "current employee" as **"owner of a member profile,"** so the allow rule
+becomes:
+
+> a self-claim is `"ours"` iff its `represents-principal` subject equals the
+> owner (`represents-principal` subject) of some **member profile** the org holds.
+
+`voucherRegistry<RawDID>` becomes `memberProfiles: ProfileRef[]` — still
+owner-signed by Dave via `AdminRegistryValue` (curation unchanged), but the leaf
+is a profile whose owner atom is the system's *strongest* guarantee
+(`ownerPrincipal === actingPrincipal` + matching `represents-principal`,
+`prepare.ts:1099-1110`; `profile-owner-cfc.test.ts:284`), not a bare string.
+
+**Key finding (`voucher-last-mile-investigation.md`):** the hard operation —
+resolve a referenced profile's owner DID and compare it to a value's author — is
+**already working, tested code** in `cf-cfc-authorship.ts:243-307`
+(`representsPrincipalSubjectForLabel` + `integrityAtomMatchesAuthor`), today a
+read-time *verification badge* in `packages/ui`. Our allow rule is itself a
+read-time **derivation** (§5 `classifyPlate(affiliatedVehicles)`), not an
+owner-protected write — so v1 needs **no new runner gate**: lift that helper into
+a shared module and call it inside the coordinator's `computed()`. A type-only
+alias `SameAuthorAs<T, Reference>` (`api/cfc.ts`, sibling to
+`RepresentsCurrentUser` `cfc.ts:259`) carries the intent. Promoting it to a real
+`prepare.ts:1057` write-gate is genuine-but-deferrable substrate growth (only if
+`GuestVouch` *writes* must be gated this way; it forces a cross-space owner-read
+inside the write transaction — keep the rule in §5 derivation for v1).
+
+**The cheat moves up one level; it does not disappear.** The owner-signed *set*
+(now of profile refs) is still the last-mile oracle — the win is the leaf's
+quality (a profile-bound, unforgeable owner atom) and the unification with the
+fan-out (§6), not the elimination of an owner-curated membership list. Fully in
+the spirit of "scaled trust, not trustlessness" (c-757).
+
 ---
 
 ## 5. The org-side allow-set & reactive retro-resolution
@@ -377,6 +415,15 @@ Trust-boundary note (ux-journeys EF5/PV3): fanning over `voucherRegistry` DIDs
 *is* the org-membership gate — a revoked employee leaves the roster, so their
 profile is no longer fanned over and their plate drops out of `"ours"` on the
 next recompute.
+
+**Unification with §4 (per `voucher-last-mile-investigation.md`):** once the
+trust leaf is a **profile reference** (§4 "Closing the last mile"), one
+`memberProfiles: ProfileRef[]` is *simultaneously* the trust anchor (own owner =
+"ours") and the fan-out set (resolve each member's `#car`). One list, two jobs —
+the unification this section was reaching for. The fan-out *mechanism* is still
+option (1) (iterate the refs, resolve each profile's `#car`); the org-scoped wish
+of option (2) remains deferred substrate work, to be decided together with
+`shared-profile-space.md:429` ("profiles readable by collaborators?").
 
 ---
 
@@ -560,6 +607,18 @@ Each guarantee → the CFC primitive that delivers it.
 6. **Granularity seam confirmation.** Lock rung names `"owner"`/`"description"`/
    `"plate"` and card placement as the *only* in-scope granularity work; policy
    engine deferred.
+
+**Update (Berni's steer + `voucher-last-mile-investigation.md`):** Q1/Q2 now have
+a recommended shape. Replace `voucherRegistry<RawDID>` with
+`memberProfiles: ProfileRef[]` and define trust as "author == owner of a member
+profile" (the `SameAuthorAs<T, Reference>` alias). v1 enforces it as a **§5
+derivation** reusing the already-tested `cf-cfc-authorship` resolve+compare
+helper (`:243-307`) — **no new runner primitive required**. Deferred to substrate
+follow-up, to be decided together: (i) promoting `SameAuthorAs` to a real
+`prepare.ts:1057` write-gate, and (ii) the org-scoped wish / cross-space profile
+readability (`shared-profile-space.md:429`). Net: the last mile is no longer an
+unknown — it's a small, grounded derivation, with the heavier substrate options
+clearly bracketed.
 
 ---
 
