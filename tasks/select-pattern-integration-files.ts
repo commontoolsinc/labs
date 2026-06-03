@@ -1,9 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read
 
-type Shard = {
-  index: number;
-  total: number;
-};
+import { parseShard, shardForFile, stableShardForName } from "./shard-utils.ts";
+export { parseShard, stableShardForName };
 
 // Explicit assignments balance the four browser-integration shards by
 // wall-time. The heaviest end-to-end tests (~45-52s each) are spread one per
@@ -32,38 +30,11 @@ const FOUR_SHARD_ASSIGNMENTS: Record<string, number> = {
   "cfc-spec-gallery.test.ts": 4, // ~45s
 };
 
-export function parseShard(raw: string): Shard {
-  const match = raw.match(/^([1-9][0-9]*)\/([1-9][0-9]*)$/);
-  if (!match) {
-    throw new Error(`Expected shard argument like 1/4, got: ${raw}`);
-  }
-
-  const index = Number(match[1]);
-  const total = Number(match[2]);
-  if (index > total) {
-    throw new Error(`Shard index ${index} exceeds total shard count ${total}`);
-  }
-
-  return { index, total };
-}
-
-export function stableShardForName(name: string, total: number): number {
-  let hash = 2166136261;
-  for (const char of name) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) % total + 1;
-}
-
 export function shardForPatternIntegrationFile(
   name: string,
   total: number,
 ): number {
-  if (total === 4 && FOUR_SHARD_ASSIGNMENTS[name]) {
-    return FOUR_SHARD_ASSIGNMENTS[name];
-  }
-  return stableShardForName(name, total);
+  return shardForFile(name, total, FOUR_SHARD_ASSIGNMENTS);
 }
 
 async function listPatternIntegrationTests(): Promise<string[]> {
