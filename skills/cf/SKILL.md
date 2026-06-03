@@ -32,8 +32,15 @@ deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
 deno run -A packages/cli/mod.ts id new > cf.key
 
 # To match a browser identity registered with a recovery phrase:
-deno run -A packages/cli/mod.ts id from-mnemonic "word1 word2 ... word24" > cf.key
+deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > cf.key
 ```
+
+Both `id derive` and `id from-mnemonic` accept the secret three ways: as a file
+(`-- <file>`), on stdin (`-`, or no argument), or as an inline positional
+argument. Prefer a file or stdin for real secrets — an inline argument is
+visible in shell history and to other processes via `ps`. A single trailing
+newline is stripped from file/stdin input, so `echo`/editor input matches the
+equivalent inline value.
 
 Note: `id derive` (passphrase) and `id from-mnemonic` (BIP-39 phrase) use
 different derivations and produce different DIDs from the same text. Use

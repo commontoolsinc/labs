@@ -1,8 +1,4 @@
 import {
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
   assert,
   assertEquals,
   assertNotStrictEquals,
@@ -17,7 +13,6 @@ const space = signer.did();
 const type = "application/json" as const;
 
 Deno.test("memory v2 raw reads freeze the returned subtree without exposing mutable state", async () => {
-  setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
   });
@@ -67,12 +62,10 @@ Deno.test("memory v2 raw reads freeze the returned subtree without exposing muta
     assertEquals(full.stats.visits, 3);
   } finally {
     await storage.close();
-    resetDataModelConfig();
   }
 });
 
 Deno.test("memory v2 raw reads reuse frozen snapshots until the document changes", async () => {
-  setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
   });
@@ -147,12 +140,10 @@ Deno.test("memory v2 raw reads reuse frozen snapshots until the document changes
     assert(Object.isFrozen(afterWrite));
   } finally {
     await storage.close();
-    resetDataModelConfig();
   }
 });
 
 Deno.test("memory v2 read cache: sibling-path snapshot survives write, ancestor and written-subtree snapshots get rebuilt", async () => {
-  setDataModelConfig(true);
   const storage = StorageManager.emulate({ as: signer });
 
   try {
@@ -232,7 +223,6 @@ Deno.test("memory v2 read cache: sibling-path snapshot survives write, ancestor 
     assertNotStrictEquals(ancestorBefore, ancestorAfter);
   } finally {
     await storage.close();
-    resetDataModelConfig();
   }
 });
 
@@ -242,7 +232,6 @@ Deno.test("memory v2 read cache: array `.length` reads invalidate when an index 
   // `/items/length` pointer is not on the chain of `/items/1` by path-string
   // overlap, but it IS semantically dependent on the index write -- so the
   // cache invalidator must drop it.
-  setDataModelConfig(true);
   const storage = StorageManager.emulate({ as: signer });
 
   try {
@@ -276,12 +265,10 @@ Deno.test("memory v2 read cache: array `.length` reads invalidate when an index 
     assertEquals(lenAfter, 2);
   } finally {
     await storage.close();
-    resetDataModelConfig();
   }
 });
 
 Deno.test("memory v2 raw reads keep prior frozen snapshots stable after sibling writes", async () => {
-  setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
   });
@@ -340,6 +327,5 @@ Deno.test("memory v2 raw reads keep prior frozen snapshots stable after sibling 
     assert(Object.isFrozen(second.stats));
   } finally {
     await storage.close();
-    resetDataModelConfig();
   }
 });

@@ -1,7 +1,4 @@
-import {
-  cloneIfNecessary,
-  getDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { unclaimed } from "@commonfabric/memory/fact";
 import type { PatchOp, SqliteOperation } from "@commonfabric/memory/v2";
@@ -49,9 +46,7 @@ import { createReadOnlyTransactionError } from "./interface.ts";
 import {
   claim,
   load as loadInline,
-  NotFound,
   read as readAttestation,
-  TypeMismatchError,
 } from "./transaction/attestation.ts";
 import {
   applyMutablePathWrite,
@@ -990,37 +985,6 @@ export class V2StorageTransaction implements IStorageTransaction {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
-    }
-    if (!getDataModelConfig()) {
-      const inspected = inspectPath(current.value, memoryAddress.path);
-      if (
-        !address.id.startsWith("data:") &&
-        !doc.validated
-      ) {
-        doc.validated = true;
-      }
-      if (inspected.kind === "notFound") {
-        return {
-          error: NotFound(current, memoryAddress, inspected.path).from(
-            address.space,
-          ),
-        };
-      }
-      if (inspected.kind === "typeMismatch") {
-        return {
-          error: TypeMismatchError(
-            { ...memoryAddress, path: inspected.path },
-            inspected.actualType,
-            "read",
-          ).from(address.space),
-        };
-      }
-      return {
-        ok: {
-          address: memoryAddress,
-          value: inspected.value,
-        },
-      };
     }
 
     if (isMutableTransactionReadAllowed(readMeta)) {
