@@ -7,8 +7,12 @@ import { computed, pattern } from "commonfabric";
 export const PatternLogicalAnd = pattern<{
   foo: boolean;
   user: { name: string };
-}>(({ foo, user: { name } }) => <div>{foo && name}</div>);
+}>(({ foo, user: { name } }) => (
+  <div>{foo && name}</div>
+));
 
 export const ComputedLogicalAnd = pattern<{ foo: boolean; bar: string }>((
   { foo, bar },
-) => <div>{computed(() => foo && bar)}</div>);
+) => (
+  <div>{computed(() => foo && bar)}</div>
+));

@@ -15,7 +15,9 @@ export default pattern((_state: any) => {
       <div>
         {people.get().length > 0 && (
           <ul>
-            {people.map((person, index) => <li key={index}>{person.name}</li>)}
+            {people.map((person, index) => (
+              <li key={index}>{person.name}</li>
+            ))}
           </ul>
         )}
       </div>

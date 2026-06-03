@@ -1,4 +1,4 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-multiple-captures
 // Verifies: computed() with a multi-statement body capturing three cells is closure-extracted

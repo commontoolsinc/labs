@@ -1,4 +1,4 @@
-import { pattern, Writable } from "commonfabric";
+import { Writable, pattern } from "commonfabric";
 
 // FIXTURE: collections-empty
 // Verifies: empty arrays and objects produce valid degenerate schemas

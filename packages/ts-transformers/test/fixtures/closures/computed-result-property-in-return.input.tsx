@@ -17,7 +17,9 @@ interface State {
 //   When the second computed() accesses summary.length, the capture is rewritten
 //   to summary.key("length") because summary is an OpaqueRef, not a plain value.
 export default pattern<State>((state) => {
-  const summary = computed(() => state.items.join(", "));
+  const summary = computed(() =>
+    state.items.join(", ")
+  );
 
   return {
     summary,

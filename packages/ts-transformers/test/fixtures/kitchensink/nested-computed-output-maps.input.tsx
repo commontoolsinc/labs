@@ -104,8 +104,8 @@ export default pattern<{
               >
                 {comment.flagged
                   ? <strong>{comment.text}</strong>
-                  /* [TRANSFORM] ifElse: schema-injected authored ifElse(thread.muted, ..., ...) */
-                  : ifElse(
+                  : /* [TRANSFORM] ifElse: schema-injected authored ifElse(thread.muted, ..., ...) */
+                  ifElse(
                     thread.muted,
                     <em>{comment.text}</em>,
                     <span>{comment.text}</span>,

@@ -39,11 +39,7 @@ export default pattern<State>((state) => {
               <li>
                 <span>{name}</span>
                 {spotPreferences.length > 0
-                  ? (
-                    <span>
-                      {spotPreferences.map((n) => "#" + n).join(", ")}
-                    </span>
-                  )
+                  ? <span>{spotPreferences.map((n) => "#" + n).join(", ")}</span>
                   : null}
               </li>
             );

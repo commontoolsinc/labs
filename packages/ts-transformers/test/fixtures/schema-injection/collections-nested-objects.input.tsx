@@ -11,10 +11,10 @@ export default function TestCollectionsNestedObjects() {
       age: 30,
       address: {
         street: "123 Main St",
-        city: "NYC",
-      },
+        city: "NYC"
+      }
     },
-    timestamp: 1234567890,
+    timestamp: 1234567890
   });
 
   return _nested;

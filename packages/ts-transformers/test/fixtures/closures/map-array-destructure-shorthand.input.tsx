@@ -15,11 +15,11 @@ export default pattern<State>(({ items }) => {
   return {
     [UI]: (
       <div>
-        {
-          /* Array destructured parameter - without fix, 'item' would be
-            incorrectly captured in params due to shorthand usage in JSX */
-        }
-        {items.map(([item]) => <div data-item={item}>{item}</div>)}
+        {/* Array destructured parameter - without fix, 'item' would be
+            incorrectly captured in params due to shorthand usage in JSX */}
+        {items.map(([item]) => (
+          <div data-item={item}>{item}</div>
+        ))}
 
         {/* Multiple array destructured params */}
         {items.map(([item, count], index) => (

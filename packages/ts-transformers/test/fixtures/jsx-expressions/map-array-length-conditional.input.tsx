@@ -11,7 +11,9 @@ export default pattern((_state) => {
       <div>
         {list.get().length > 0 && (
           <div>
-            {list.map((name) => <span>{name}</span>)}
+            {list.map((name) => (
+              <span>{name}</span>
+            ))}
           </div>
         )}
       </div>

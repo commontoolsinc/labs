@@ -1,4 +1,4 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-local-variable
 // Verifies: callback-local variables are not captured, but outer cells are

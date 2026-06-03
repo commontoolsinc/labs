@@ -18,7 +18,9 @@ export default pattern<State>((state) => {
     [UI]: (
       <div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => <span>{n * state.multiplier}</span>)}
+        {plainArray.map((n) => (
+          <span>{n * state.multiplier}</span>
+        ))}
       </div>
     ),
   };

@@ -13,8 +13,7 @@ interface User {
 export default function TestSqliteQueryRowSchema(db: any) {
   const q = sqliteQuery<{ author: Cell<User>; n: number }>({
     db,
-    sql:
-      "SELECT author_cf_link AS author, count(*) AS n FROM m GROUP BY author_cf_link",
+    sql: "SELECT author_cf_link AS author, count(*) AS n FROM m GROUP BY author_cf_link",
   });
   return { q };
 }

@@ -1,4 +1,4 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-pattern-param
 // Verifies: computed() inside a pattern captures the pattern parameter as a structured object

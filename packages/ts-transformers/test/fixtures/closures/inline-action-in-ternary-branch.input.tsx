@@ -26,15 +26,15 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <cf-card>
-        {state.isEditing ? <div>Editing</div> : (
+        {state.isEditing ? (
+          <div>Editing</div>
+        ) : (
           <div>
             <span>{state.card.title}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the lift-applied computation */}
             {computed(() => (
-              <cf-button onClick={() => state.isEditing.set(true)}>
-                Edit
-              </cf-button>
+              <cf-button onClick={() => state.isEditing.set(true)}>Edit</cf-button>
             ))}
           </div>
         )}

@@ -1,4 +1,4 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-array-element-access
 // Verifies: an array variable accessed by index inside a computed is captured as a whole array

@@ -49,35 +49,31 @@ const addItem = handler // <
 //   items.map((item, index) => JSX) → items.mapWithPattern(pattern(...), {})
 //   pattern<In, Out>() → uses pre-generated inputSchema/outputSchema passed as arguments
 // Context: kitchen-sink pattern with NAME, UI, handler, array .map(), and Default<> types
-export default pattern<InputSchemaInterface, OutputSchemaInterface>(
-  ({ title, items }) => {
-    const items_count = items.length;
+export default pattern<InputSchemaInterface, OutputSchemaInterface>(({ title, items }) => {
+  const items_count = items.length;
 
-    return {
-      [NAME]: title,
-      [UI]: (
-        <div>
-          <h3>{title}</h3>
-          <p>Basic pattern</p>
-          <p>Items count: {items_count}</p>
-          <ul>
-            {items.map((item: Item, index: number) => (
-              <li key={index}>{item.text}</li>
-            ))}
-          </ul>
-          <cf-message-input
-            name="Send"
-            placeholder="Type a message..."
-            appearance="rounded"
-            oncf-send={addItem({ items })}
-          />
-        </div>
-      ),
-      title,
-      items,
-      items_count,
-    };
-  },
-  inputSchema,
-  outputSchema,
-);
+  return {
+    [NAME]: title,
+    [UI]: (
+      <div>
+        <h3>{title}</h3>
+        <p>Basic pattern</p>
+        <p>Items count: {items_count}</p>
+        <ul>
+          {items.map((item: Item, index: number) => (
+            <li key={index}>{item.text}</li>
+          ))}
+        </ul>
+        <cf-message-input
+          name="Send"
+          placeholder="Type a message..."
+          appearance="rounded"
+          oncf-send={addItem({ items })}
+        />
+      </div>
+    ),
+    title,
+    items,
+    items_count,
+  };
+}, inputSchema, outputSchema);

@@ -1,4 +1,4 @@
-import { action, Cell, pattern } from "commonfabric";
+import { Cell, pattern, action } from "commonfabric";
 
 interface BaseState {
   a: Cell<string>;

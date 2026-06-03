@@ -1,4 +1,4 @@
-import { action, Cell, pattern } from "commonfabric";
+import { Cell, pattern, action } from "commonfabric";
 
 interface State {
   count: Cell<number>;

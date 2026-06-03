@@ -1,8 +1,8 @@
 import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 
-const moduleHasSettings = lift((
-  { piece }: { piece: { settingsUI?: string } },
-) => !!piece?.settingsUI);
+const moduleHasSettings = lift(({ piece }: { piece: { settingsUI?: string } }) =>
+  !!piece?.settingsUI
+);
 
 const selectMessage = handler<
   unknown,

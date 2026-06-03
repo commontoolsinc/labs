@@ -5,7 +5,13 @@
  * This bare statement call consumes reactive callback fields and should cross an explicit
  * compute boundary instead of operating directly on `file.key(...)` refs in plain code.
  */
-import { Default, pattern, UI, VNode, Writable } from "commonfabric";
+import {
+  Default,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 interface FileEntry {
   name: string;

@@ -1,4 +1,4 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-pattern-param-mixed
 // Verifies: computed() capturing a mix of cells, pattern params, and plain locals

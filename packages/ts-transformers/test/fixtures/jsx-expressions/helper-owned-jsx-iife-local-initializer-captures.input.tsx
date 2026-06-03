@@ -6,7 +6,14 @@
  * themselves (`tree`, `p`, `unsorted`, `items`) is wrong because they are not
  * in scope at the synthetic lift-applied call site.
  */
-import { action, Default, pattern, UI, VNode, Writable } from "commonfabric";
+import {
+  action,
+  Default,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 interface Entry {
   id: string;

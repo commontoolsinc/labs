@@ -1,9 +1,4 @@
-import {
-  cell,
-  ComparableCell,
-  ReadonlyCell,
-  WriteonlyCell,
-} from "commonfabric";
+import { cell, ComparableCell, ReadonlyCell, WriteonlyCell } from "commonfabric";
 
 // FIXTURE: cell-like-classes
 // Verifies: schema injection works for cell(), new ComparableCell(), new ReadonlyCell(), and new WriteonlyCell()

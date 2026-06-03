@@ -6,7 +6,14 @@
  * must not hide the explicit `path -> visible` dependency when later helper-owned
  * derives are created.
  */
-import { action, Default, pattern, UI, VNode, Writable } from "commonfabric";
+import {
+  action,
+  Default,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 interface Entry {
   name: string;

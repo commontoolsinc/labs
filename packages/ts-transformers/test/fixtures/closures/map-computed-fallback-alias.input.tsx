@@ -23,9 +23,7 @@ export default pattern<Input>(({ messages }) => {
     [UI]: (
       <div>
         {messages.map((msg) => {
-          const messageReactions = computed(() =>
-            (msg.reactions ?? []) as Reaction[]
-          );
+          const messageReactions = computed(() => (msg.reactions ?? []) as Reaction[]);
           return (
             <div>
               {messageReactions.map((reaction) => (

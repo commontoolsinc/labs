@@ -17,7 +17,9 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.flatMap((item) => <div>Item #{item.id}</div>)}
+        {state.items.flatMap((item) => (
+          <div>Item #{item.id}</div>
+        ))}
       </div>
     ),
   };

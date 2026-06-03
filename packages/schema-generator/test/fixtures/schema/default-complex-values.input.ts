@@ -10,7 +10,7 @@ interface Config {
 
 interface SchemaRoot {
   // Object default
-  config: Default<Config, { timeout: 30; retries: 3 }>;
+  config: Default<Config, { timeout: 30, retries: 3 }>;
 
   // Array default
   tags: Default<string[], ["default", "tags"]>;

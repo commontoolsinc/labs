@@ -1,11 +1,4 @@
-import {
-  computed,
-  generateText,
-  pattern,
-  patternTool,
-  type PatternToolResult,
-  Writable,
-} from "commonfabric";
+import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 
 const content = new Writable("Hello world");
 

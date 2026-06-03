@@ -12,10 +12,10 @@ type OpaqueRef<T> =
   & BrandedCell<T, "opaque">
   & OpaqueRefMethods<T>
   & (
-    T extends Array<infer U> ? Array<OpaqueRef<U>>
-      : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
-      : T
-  );
+  T extends Array<infer U> ? Array<OpaqueRef<U>>
+  : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
+  : T
+);
 
 // Opaque<T> is a union: T | OpaqueRef<T>
 type Opaque<T> =
@@ -29,7 +29,7 @@ interface LLMState {
   pending: boolean;
   result?: string;
   error: unknown;
-  cancelGeneration: Stream<void>; // This becomes problematic when wrapped
+  cancelGeneration: Stream<void>;  // This becomes problematic when wrapped
 }
 
 // When we have OpaqueRef<LLMState>, the cancelGeneration property becomes:

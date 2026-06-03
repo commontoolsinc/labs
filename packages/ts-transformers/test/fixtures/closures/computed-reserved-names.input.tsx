@@ -1,4 +1,4 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-reserved-names
 // Verifies: variables with __cf_ prefixed names are captured without special treatment

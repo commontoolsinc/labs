@@ -1,4 +1,4 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { Writable, computed, pattern } from "commonfabric";
 
 // FIXTURE: computed-conditional-expression
 // Verifies: computed(() => expr) with four cell captures in a ternary expression

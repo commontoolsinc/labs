@@ -1,7 +1,13 @@
 /**
  * TRANSFORM REPRO: helper-owned JSX IIFE final filter callback captures reactive state.
  */
-import { Default, pattern, UI, VNode, Writable } from "commonfabric";
+import {
+  Default,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 interface Entry {
   name: string;
@@ -38,9 +44,7 @@ export default pattern<Input, Output>(({ entries }) => {
           const filtered = visible.filter((entry) =>
             entry.name.startsWith(`${labelPrefix}`)
           );
-          return filtered.map((entry) => (
-            <button type="button">{entry.name}</button>
-          ));
+          return filtered.map((entry) => <button type="button">{entry.name}</button>);
         })()}
       </div>
     ),

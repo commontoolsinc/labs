@@ -1,4 +1,7 @@
-import { computed, pattern } from "commonfabric";
+import {
+  computed,
+  pattern,
+} from "commonfabric";
 
 interface Input {
   foo: string;

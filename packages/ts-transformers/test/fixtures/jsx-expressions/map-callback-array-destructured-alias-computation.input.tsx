@@ -4,7 +4,13 @@
  * Destructuring a reactive array-valued field into a local alias should still
  * let later computations lower through that alias.
  */
-import { Default, pattern, UI, VNode, Writable } from "commonfabric";
+import {
+  Default,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 interface FileEntry {
   name: string;

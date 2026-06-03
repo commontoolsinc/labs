@@ -1,4 +1,4 @@
-import { Cell, handler, pattern, UI } from "commonfabric";
+import { pattern, UI, handler, Cell } from "commonfabric";
 
 declare global {
   namespace JSX {
@@ -9,11 +9,9 @@ declare global {
 }
 
 // Event handler defined at module scope
-const handleClick = handler<unknown, { count: Cell<number> }>(
-  (_, { count }) => {
-    count.set(count.get() + 1);
-  },
-);
+const handleClick = handler<unknown, { count: Cell<number> }>((_, { count }) => {
+  count.set(count.get() + 1);
+});
 
 interface Item {
   id: number;

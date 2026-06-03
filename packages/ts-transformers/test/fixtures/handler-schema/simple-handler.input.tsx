@@ -1,4 +1,4 @@
-import { Cell, handler } from "commonfabric";
+import { handler, Cell } from "commonfabric";
 
 interface CounterEvent {
   increment: number;

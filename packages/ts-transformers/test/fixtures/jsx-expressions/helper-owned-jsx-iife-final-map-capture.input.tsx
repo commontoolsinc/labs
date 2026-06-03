@@ -5,7 +5,13 @@
  * as a plain map call. That is only safe when the callback depends only on the mapped
  * element. If it captures outer reactive state, it must lower through mapWithPattern.
  */
-import { Default, pattern, UI, VNode, Writable } from "commonfabric";
+import {
+  Default,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 interface Entry {
   name: string;

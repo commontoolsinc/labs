@@ -1,7 +1,7 @@
 import {
   Cell,
-  type PerUser,
   Stream,
+  type PerUser,
   type Writable,
   Writable as WritableConstructor,
 } from "commonfabric";

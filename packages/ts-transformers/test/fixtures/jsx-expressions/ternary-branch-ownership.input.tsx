@@ -38,22 +38,26 @@ export default pattern<State>((state) => {
     [UI]: (
       <div>
         <p>{state.user.settings.notifications ? "enabled" : "disabled"}</p>
-        {state.recentEvents.length === 0 ? <span>No events yet</span> : (
-          <div>
-            {state.recentEvents.map((event: TagEvent, idx: number) => (
-              <cf-hstack key={idx} gap="2">
-                <span>{event.label}</span>
-              </cf-hstack>
-            ))}
-          </div>
-        )}
+        {state.recentEvents.length === 0
+          ? <span>No events yet</span>
+          : (
+            <div>
+              {state.recentEvents.map((event: TagEvent, idx: number) => (
+                <cf-hstack key={idx} gap="2">
+                  <span>{event.label}</span>
+                </cf-hstack>
+              ))}
+            </div>
+          )}
         {showList
           ? (() => {
             const itemCount = count + " items";
             return (
               <div>
                 <span>{itemCount}</span>
-                {sorted.map((item: Item) => <span>{item.name}</span>)}
+                {sorted.map((item: Item) => (
+                  <span>{item.name}</span>
+                ))}
               </div>
             );
           })()

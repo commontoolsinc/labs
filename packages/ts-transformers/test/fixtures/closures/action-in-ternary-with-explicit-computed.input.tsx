@@ -31,7 +31,9 @@ export default pattern<Input>(({ card }) => {
   return {
     [UI]: (
       <cf-card>
-        {isEditing ? <div>Editing</div> : (
+        {isEditing ? (
+          <div>Editing</div>
+        ) : (
           <div>
             <span>{card.title}</span>
             {/* Explicit computed() wrapping JSX that references the action */}

@@ -16,20 +16,20 @@ pair of files:
    file.
 3. It runs the full compiler transform pipeline on the input.
 4. It compares the output against the expected file — exact string match.
-5. If `UPDATE_GOLDENS=1` is set, it overwrites the expected file with the actual
-   output instead of comparing.
+5. If `UPDATE_GOLDENS=1` is set, it overwrites the expected file with the
+   actual output instead of comparing.
 
 ## Directories
 
-| Directory           | What it tests                                                                                      |
-| ------------------- | -------------------------------------------------------------------------------------------------- |
-| `closures/`         | Closure extraction: map/filter/flatMap to WithPattern, computed, derive, handler, action           |
-| `kitchensink/`      | Deeply nested cross-feature regressions spanning closures, JSX, helper branches, and computed maps |
-| `jsx-expressions/`  | JSX expression handling: derive wrapping, conditionals, method chains                              |
-| `schema-injection/` | Schema argument injection for new Cell, derive, lift, etc.                                         |
-| `schema-transform/` | Schema generation from TypeScript types                                                            |
-| `handler-schema/`   | Handler-specific schema generation                                                                 |
-| `ast-transform/`    | General AST transforms: pattern schemas, builder patterns                                          |
+| Directory | What it tests |
+|---|---|
+| `closures/` | Closure extraction: map/filter/flatMap to WithPattern, computed, derive, handler, action |
+| `kitchensink/` | Deeply nested cross-feature regressions spanning closures, JSX, helper branches, and computed maps |
+| `jsx-expressions/` | JSX expression handling: derive wrapping, conditionals, method chains |
+| `schema-injection/` | Schema argument injection for new Cell, derive, lift, etc. |
+| `schema-transform/` | Schema generation from TypeScript types |
+| `handler-schema/` | Handler-specific schema generation |
+| `ast-transform/` | General AST transforms: pattern schemas, builder patterns |
 
 ## Documenting test intent
 

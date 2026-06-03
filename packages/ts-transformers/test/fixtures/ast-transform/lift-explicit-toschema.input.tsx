@@ -1,4 +1,4 @@
-import { Cell, lift, toSchema } from "commonfabric";
+import { lift, Cell, toSchema } from "commonfabric";
 
 interface CharmEntry {
   id: string;

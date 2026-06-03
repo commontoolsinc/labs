@@ -19,14 +19,14 @@ export default pattern<Record<string, never>>(() => {
   const output1 = ifElse(
     computed(() => pending || !result),
     undefined,
-    { result },
+    { result }
   );
 
   // Pattern 2: undefined as ifFalse (error state returns nothing)
   const output2 = ifElse(
     computed(() => !!result),
     { data: result },
-    undefined,
+    undefined
   );
 
   return {

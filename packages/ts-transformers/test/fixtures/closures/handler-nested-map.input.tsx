@@ -15,9 +15,7 @@ export default pattern<State>((state) => {
       <button
         type="button"
         onClick={() => {
-          const scaled = state.items.map((item) =>
-            item.value * state.multiplier
-          );
+          const scaled = state.items.map((item) => item.value * state.multiplier);
           console.log(scaled);
         }}
       >

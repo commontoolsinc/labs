@@ -14,7 +14,9 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map((_, index) => <span key={index}>{element}</span>)}
+        {state.items.map((_, index) => (
+          <span key={index}>{element}</span>
+        ))}
       </div>
     ),
   };

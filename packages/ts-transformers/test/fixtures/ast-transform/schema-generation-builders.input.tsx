@@ -8,11 +8,9 @@ type TodoEvent = {
   add: string;
 };
 
-const addTodo = handler<TodoEvent, { items: Cell<string[]> }>(
-  (event, state) => {
-    state.items.push(event.add);
-  },
-);
+const addTodo = handler<TodoEvent, { items: Cell<string[]> }>((event, state) => {
+  state.items.push(event.add);
+});
 
 // FIXTURE: schema-generation-builders
 // Verifies: handler with generic type args generates event+state schemas; .map() becomes .mapWithPattern()

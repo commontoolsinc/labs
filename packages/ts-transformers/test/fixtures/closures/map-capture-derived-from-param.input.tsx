@@ -14,7 +14,9 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map((item) => <span>{item * settings.multiplier}</span>)}
+        {state.items.map((item) => (
+          <span>{item * settings.multiplier}</span>
+        ))}
       </div>
     ),
   };

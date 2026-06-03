@@ -12,7 +12,9 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map(({ couponCode: code }) => <span>{code}</span>)}
+        {state.items.map(({ couponCode: code }) => (
+          <span>{code}</span>
+        ))}
       </div>
     ),
   };

@@ -5,7 +5,14 @@
  * The final callback array method should lower to mapWithPattern, but the
  * IIFE itself should stay decomposed rather than being blanket-wrapped.
  */
-import { action, Default, pattern, UI, VNode, Writable } from "commonfabric";
+import {
+  action,
+  Default,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commonfabric";
 
 interface Entry {
   id: string;
@@ -61,22 +68,25 @@ export default pattern<Input, Output>(({ entries }) => {
 
           return items.map((item: Entry) => {
             const isFolder = item.type === "folder";
-            const isOpenable = !isFolder &&
+            const isOpenable =
+              !isFolder &&
               !!item.contentType &&
               item.contentType !== "binary";
 
             return (
               <button
                 type="button"
-                onClick={isFolder
-                  ? action(() =>
-                    handleNavigateInto.send({
-                      name: item.name,
-                    })
-                  )
-                  : isOpenable
-                  ? action(() => handleOpenFile.send({ item }))
-                  : undefined}
+                onClick={
+                  isFolder
+                    ? action(() =>
+                        handleNavigateInto.send({
+                          name: item.name,
+                        })
+                      )
+                    : isOpenable
+                    ? action(() => handleOpenFile.send({ item }))
+                    : undefined
+                }
               >
                 {item.name}
               </button>
