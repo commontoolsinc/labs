@@ -38,11 +38,6 @@ function rejectExtraProperties(value: object, typeName: string): void {
  * the result if it is an object or array. If the value is already a frozen
  * `FabricValue`, returns it as-is (identity optimization).
  *
- * This function is self-contained (does not delegate back to `shallowFabricFromNativeValue`)
- * to avoid circular dispatch when the `modernDataModel` flag is ON.
- *
- * Used when the `modernDataModel` flag is ON.
- *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
  *   object or array. When `false`, wrapping and validation still occur but
@@ -622,7 +617,7 @@ function isFabricCompatibleInternal(
 export function nativeFromFabricValueModern(
   value: FabricValue,
   frozen = true,
-): unknown {
+): FabricValue | FabricNativeObject {
   if (value instanceof FabricError) {
     return deepUnwrapFabricError(value, frozen);
   }

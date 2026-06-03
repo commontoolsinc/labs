@@ -71,7 +71,7 @@ export function fabricFromNativeValue(
 export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
-): FabricValue {
+): FabricValue | FabricNativeObject {
   return nativeFromFabricValueModern(value, frozen);
 }
 
