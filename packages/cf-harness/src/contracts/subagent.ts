@@ -17,7 +17,7 @@ export const WEB_FETCH_SUBAGENT_PROFILE = "web_fetch" as const;
 export const WEB_SEARCH_SUBAGENT_PROFILE = "web_search" as const;
 export const WEB_SEARCH_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
-export const MAX_SUBAGENT_MAX_MODEL_TURNS = 16;
+export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
 export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
   "summary-and-sanitized-state" as const;
 export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [

@@ -63,7 +63,10 @@ import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
-import type { HarnessAllowedSkillScript } from "./contracts/skill.ts";
+import type {
+  HarnessAllowedSkillScript,
+  HarnessSkillScriptExecutionTarget,
+} from "./contracts/skill.ts";
 import {
   digestJsonValue,
   parseStructuredResultJson,
@@ -94,6 +97,7 @@ const CLI_STRING_FLAGS = [
   "model",
   "skills-root",
   "skill",
+  "skill-script-execution-target",
   "gateway-base-url",
   "gateway-auth-mode",
   "artifact-root",
@@ -147,6 +151,7 @@ export interface CfHarnessCliConfig {
   skillsRootSandboxPath?: string;
   skillNames: readonly string[];
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];
+  skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   skillCatalogEnabled: boolean;
   model?: string;
   gatewayBaseUrl: string;
@@ -303,6 +308,8 @@ Options:
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
   --skill <name>                Preload a skill for this run (repeatable)
+  --skill-script-execution-target <target>
+                                Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --gateway-base-url <url>      OpenAI-compatible gateway URL
@@ -458,6 +465,20 @@ const parseAllowedSkillScripts = (
       }`,
     );
   }
+};
+
+const parseSkillScriptExecutionTarget = (
+  input: string | undefined,
+): HarnessSkillScriptExecutionTarget => {
+  if (input === undefined || input === "") {
+    return "sandbox";
+  }
+  if (input === "sandbox" || input === "host") {
+    return input;
+  }
+  throw new Error(
+    "skill script execution target must be one of sandbox, host",
+  );
 };
 
 const parseSubagentProfile = (
@@ -814,6 +835,11 @@ export const parseCfHarnessCliArgs = async (
   if (allowedSkillScripts.length > 0 && skillsRoot === undefined) {
     throw new Error("--allow-skill-script requires --skills-root");
   }
+  const skillScriptExecutionTarget = parseSkillScriptExecutionTarget(
+    typeof args["skill-script-execution-target"] === "string"
+      ? args["skill-script-execution-target"]
+      : undefined,
+  );
   const allowedToolIds = parseBuiltinToolIds(
     args["allow-tool"] as string | readonly string[] | undefined,
   );
@@ -976,6 +1002,7 @@ export const parseCfHarnessCliArgs = async (
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
     allowedSkillScripts,
+    skillScriptExecutionTarget,
     skillCatalogEnabled: args["no-skill-catalog"] !== true,
     ...(typeof args.model === "string"
       ? { model: args.model }
@@ -1572,6 +1599,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
@@ -1604,6 +1632,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
@@ -1650,6 +1679,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
@@ -1682,6 +1712,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,

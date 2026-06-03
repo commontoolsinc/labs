@@ -43,7 +43,7 @@ export const delegateTaskTool: HarnessToolDefinition<
         maxModelTurns: {
           type: "integer",
           minimum: 1,
-          maximum: 16,
+          maximum: 64,
           description:
             "Optional child model-turn cap. Defaults to the harness subagent cap.",
         },
