@@ -106,13 +106,23 @@ export function map(
         "map",
         opPattern.resultSchema,
       );
+      // CT-1623: identify the result container by the reserved output spot —
+      // the fully-resolved write-redirect target the runner supplies in `cause`.
+      // It is a stable, position-derived, program-independent identity, unlike
+      // the serialized `op` / `cause.inputs`, both of which drag in the
+      // session-varying `program` and force the container id (and every per-row
+      // id derived from it) to churn across reloads. A `map` node always writes
+      // through a write redirect, so the absence of an output spot is a bug.
+      const outputSpot = (cause as { outputSpot?: unknown } | undefined)
+        ?.outputSpot;
+      if (!outputSpot) {
+        throw new Error(
+          "map: result container requires a write-redirect output binding",
+        );
+      }
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        {
-          map: parentCell.entityId,
-          op: inputsCell.getAsQueryResult([], tx)?.op,
-          cause,
-        },
+        { map: parentCell.entityId, outputSpot },
         resultSchema,
         tx,
       );
