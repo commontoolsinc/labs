@@ -14,7 +14,7 @@ import {
   Writable,
   WriteAuthorizedBy,
 } from "commonfabric";
-import { formatVehicle } from "../vehicles.ts";
+import { formatVehicle, Vehicle } from "../vehicles.ts";
 import {
   buildSelfClaim,
   extractionToDraft,
@@ -23,10 +23,11 @@ import {
   VehicleClaim,
 } from "./claims.ts";
 
-// Re-export the pure contract surface so consumers can import everything from
-// the pattern entrypoint (the canonical wish token lives in claims.ts).
-export { buildSelfClaim, CAR_TAG, filterOutPlate } from "./claims.ts";
-export type { PlateExtraction, ShareLevel, VehicleClaim } from "./claims.ts";
+// The pure contract surface (CAR_TAG, VehicleClaim, buildSelfClaim, …) is
+// imported from ./claims.ts above and consumers import it from there directly.
+// We deliberately do NOT re-export it from this entrypoint: re-export live
+// bindings are mutable module bindings that the SES module verifier rejects
+// under the ESM loader ("top-level mutable bindings are not allowed").
 
 type ImageUploadEvent = {
   detail?: { images?: ImageData[]; allImages?: ImageData[] };
@@ -65,10 +66,15 @@ export type MyCarOutput = {
   [UI]: unknown;
   selfClaims: OwnerProtectedProfileWrite<VehicleClaim[], typeof addClaim>;
   addClaim: Stream<void>;
+  addCar: Stream<AddCarEvent>;
   removeClaim: Stream<RemoveClaimEvent>;
 };
 
 export type MyCarInput = Record<string, never>;
+
+export type AddCarEvent = {
+  vehicle: Vehicle;
+};
 
 export type RemoveClaimEvent = {
   plateId: string;
@@ -105,6 +111,18 @@ const addClaim = handler<
   if (!claim) return;
   state.selfClaims.push(claim);
   clearDraft(state);
+});
+
+// Event-driven add (the vehicle comes in the event), for programmatic /
+// consumer / test use — the draft-based `addClaim` above reads the UI form. Both
+// write the same owner-protected `selfClaims` through the same trusted surface.
+const addCar = handler<
+  AddCarEvent,
+  { selfClaims: Writable<VehicleClaim[]> }
+>((event, { selfClaims }) => {
+  const claim = buildSelfClaim(event.vehicle, safeDateNow());
+  if (!claim) return;
+  selfClaims.push(claim);
 });
 
 // Event-based: exposed as the `removeClaim` output stream (programmatic/consumer
@@ -197,6 +215,7 @@ export default pattern<MyCarInput, MyCarOutput>(() => {
     [NAME]: "My Car",
     selfClaims,
     addClaim: addClaim({ selfClaims, ...draft }),
+    addCar: addCar({ selfClaims }),
     removeClaim: removeClaim({ selfClaims }),
     [UI]: (
       <cf-screen
