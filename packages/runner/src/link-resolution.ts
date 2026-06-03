@@ -254,12 +254,22 @@ export function resolveLink(
 
     if (nextHop !== undefined) {
       if (!canFollowLinkHop(link, nextHop.link)) {
-        logger.info("scope: blocked narrower link follow", () => [{
-          schemaScope: schemaScopeForLink(link),
-          linkScope: nextHop.link.scope,
-          source: cfcAddressFromLink(link),
-          target: cfcAddressFromLink(nextHop.link),
-        }]);
+        // Blocked narrower-scope follow during link resolution — resolves to
+        // undefined silently. Warn (not info) so the drop is observable; see
+        // the matching site in traverse.ts followPointer (CT-1642).
+        const schemaScope = schemaScopeForLink(link);
+        logger.warn("scope: blocked narrower link follow", () => [
+          `a "${schemaScope}"-scoped read cannot follow a ` +
+          `"${nextHop.link.scope}"-scoped link, so it resolves to undefined. ` +
+          `If this is inside a .map()/lift, resolve the narrower-scoped value ` +
+          `at the top level and pass the value down.`,
+          {
+            schemaScope,
+            linkScope: nextHop.link.scope,
+            source: cfcAddressFromLink(link),
+            target: cfcAddressFromLink(nextHop.link),
+          },
+        ]);
         link = undefinedDataLink(link);
         break;
       }
