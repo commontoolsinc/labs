@@ -25,15 +25,14 @@ describe("default-app notebook reload integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  // TEMPORARILY DISABLED: content-addressed canonical `fn.src` (#3828) makes
-  // scheduler action identity stable across the default-app-bundle vs.
-  // Notebook-entry compilation split, so more persisted snapshots now match on
-  // reload. That surfaces legitimately dirty-at-shutdown actions that the broken
-  // identity previously hid, pushing the total reload action count above this
-  // shard's regression budget (~167 vs the 150 limit). The increase is correct
-  // behavior, not a regression; reducing it is separate follow-up work on
-  // dirty-at-shutdown settling. Re-enable once that lands.
-  it.skip("reloads every rapidly created notebook note in a separate shard", async () => {
+  // Re-enabled (CT-1623): map/flatmap/filter result containers (and nested
+  // pattern result cells) are now identified by the reserved output spot — a
+  // stable, position-derived identity — instead of the serialized `op` / inputs
+  // cell, which dragged in the session-varying `program` and forced per-row
+  // cell ids to churn across reloads. Persisted scheduler state now rehydrates,
+  // dropping reload action runs well under this shard's budget (was ~167 > 150;
+  // now ~80-95).
+  it("reloads every rapidly created notebook note in a separate shard", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const notebookSpaceName = globalThis.crypto.randomUUID();
     const page = shell.page();

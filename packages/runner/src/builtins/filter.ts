@@ -81,13 +81,18 @@ export function filter(
         tx.getCfcState().implementationIdentity,
         "filter",
       );
+      // CT-1623: identify the result container by the reserved output spot
+      // (stable, program-independent). See map.ts for rationale.
+      const outputSpot = (cause as { outputSpot?: unknown } | undefined)
+        ?.outputSpot;
+      if (!outputSpot) {
+        throw new Error(
+          "filter: result container requires a write-redirect output binding",
+        );
+      }
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        {
-          filter: parentCell.entityId,
-          op: inputsCell.getAsQueryResult([], tx)?.op,
-          cause,
-        },
+        { filter: parentCell.entityId, outputSpot },
         resultSchema,
         tx,
       );

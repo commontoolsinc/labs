@@ -356,6 +356,45 @@ const recordRawBuiltinResultSchemaPolicyInput = (
   );
 };
 
+/**
+ * Find the first write-redirect link within an output binding and return its
+ * FULLY RESOLVED normalized link (`id` and `space` populated). The output spot
+ * a pattern node writes through is reserved for that node, so its resolved
+ * coordinates form a stable, position-derived, program-independent identity —
+ * suitable as the cause for the node's result cell instead of hashing the
+ * pattern object (which drags in the session-varying `program`). Returns
+ * undefined if the binding contains no write redirect.
+ */
+function firstResolvedOutputRedirect(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  binding: unknown,
+  baseCell: Cell<any>,
+): NormalizedFullLink | undefined {
+  if (isWriteRedirectLink(binding)) {
+    return resolveLink(
+      runtime,
+      tx,
+      parseLink(binding, baseCell),
+      "writeRedirect",
+    );
+  }
+  if (Array.isArray(binding)) {
+    for (const child of binding) {
+      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (isRecord(binding) && !isCellLink(binding)) {
+    for (const child of Object.values(binding)) {
+      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
 const recordSetupProjectionPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -3501,6 +3540,18 @@ export class Runner {
       tx,
     );
 
+    // CT-1623: the output spot this node writes through is reserved for this
+    // node, so its fully-resolved coordinates are a stable, position-derived,
+    // program-independent identity. Builtins that mint a result container
+    // (map/flatmap/filter) key it on this instead of the serialized op /
+    // inputs cell (both of which drag in the session-varying `program`).
+    const resolvedOutputSpot = firstResolvedOutputRedirect(
+      this.runtime,
+      tx,
+      mappedOutputBindings,
+      processCell,
+    );
+
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
@@ -3544,7 +3595,19 @@ export class Runner {
           );
         },
         addCancel,
-        { inputs: inputsCell, parents: processCell.entityId },
+        {
+          inputs: inputsCell,
+          parents: processCell.entityId,
+          ...(resolvedOutputSpot
+            ? {
+              outputSpot: {
+                space: resolvedOutputSpot.space,
+                id: resolvedOutputSpot.id,
+                path: [...resolvedOutputSpot.path],
+              },
+            }
+            : {}),
+        },
         processCell,
         this.runtime,
       );
@@ -3757,13 +3820,51 @@ export class Runner {
       const resultScope = patternDefaultScope(patternImpl) ??
         module.defaultScope;
       const targetSpace = module.targetSpace ?? resultCell.space;
+      // CT-1623: identify the result cell by the (fully resolved) output spot
+      // reserved for this node — a stable, position-derived, program-independent
+      // identity — rather than hashing the pattern object (which drags in the
+      // session-varying `program` and forces `materializeRuntimeProgram`). We
+      // still mint a NEW cell and point the binding at it (`sendToBindings`
+      // below); we only borrow the resolved output link's coordinates as the
+      // cause. A pattern node always writes through a write redirect, so the
+      // absence of one is a bug (the legacy non-redirect variants are removed).
+      //
+      // Bind the output bindings first (as `instantiateRawNode` does), so the
+      // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
+      // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
+      // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
+      // the base result cell and collide on one shared child cell.
+      // `bindPatterns: false` — output bindings never carry sub-patterns to
+      // instantiate, so skip that work; we only need the pseudo-cell aliases
+      // resolved to their concrete links.
+      const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
+        this.runtime.cfc,
+        outputBindings,
+        argumentCellLink,
+        internalCellLink,
+        resultCellLink,
+        { bindPatterns: false },
+      );
+      const outputRedirect = firstResolvedOutputRedirect(
+        this.runtime,
+        tx,
+        mappedOutputBindings,
+        resultCell,
+      );
+      if (!outputRedirect) {
+        throw new Error(
+          "instantiatePatternNode: result cell requires a write-redirect " +
+            "output binding to anchor a reload-stable identity",
+        );
+      }
       const baseResultCell = this.runtime.getCell(
         targetSpace,
         {
-          pattern: module.implementation,
-          parent: resultCell.entityId,
-          inputBindings,
-          outputBindings,
+          resultFor: {
+            space: outputRedirect.space,
+            id: outputRedirect.id,
+            path: [...outputRedirect.path],
+          },
         },
         patternImpl.resultSchema,
         tx,
