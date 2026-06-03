@@ -14,12 +14,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
 
-import {
-  attachDatabase,
-  detachDatabase,
-  runQuery,
-  setQueryOnly,
-} from "../v2/sqlite/exec.ts";
+import { ReadConnectionPool } from "../v2/sqlite/read-pool.ts";
 import { DiskSourceRegistry } from "../v2/sqlite/disk-source.ts";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
@@ -32,49 +27,36 @@ function seedDiskDb(path: string): void {
   seed.close();
 }
 
-describe("read-only attach of an on-disk file", () => {
-  let db: Database;
+describe("ReadConnectionPool (read-only, unattached)", () => {
+  let pool: ReadConnectionPool;
   let path: string;
 
   beforeEach(() => {
-    db = new Database(":memory:");
+    pool = new ReadConnectionPool();
     path = Deno.makeTempFileSync({ suffix: ".sqlite" });
     seedDiskDb(path);
   });
 
   afterEach(() => {
-    db.close();
+    pool.close();
     try {
       Deno.removeSync(path);
     } catch { /* ignore */ }
   });
 
-  it("reads rows from the on-disk file", () => {
-    attachDatabase(db, "disk_src", path, { readOnly: true });
-    setQueryOnly(db, true);
-    try {
-      const rows = runQuery<{ v: string }>(
-        db,
-        "SELECT v FROM lookup ORDER BY k",
-      );
-      expect(rows).toEqual([{ v: "1" }, { v: "2" }]);
-    } finally {
-      setQueryOnly(db, false);
-      detachDatabase(db, "disk_src");
-    }
+  it("reads rows from the on-disk file on a pooled connection (reused)", () => {
+    const rows = pool.query<{ v: string }>(
+      path,
+      "SELECT v FROM lookup ORDER BY k",
+    );
+    expect(rows).toEqual([{ v: "1" }, { v: "2" }]);
+    // Same path → reuses the same pooled connection.
+    const again = pool.query<{ v: string }>(path, "SELECT v FROM lookup");
+    expect(again.length).toBe(2);
   });
 
-  it("rejects a write to the read-only attached file", () => {
-    attachDatabase(db, "disk_src", path, { readOnly: true });
-    setQueryOnly(db, true);
-    try {
-      expect(() =>
-        db.prepare("INSERT INTO lookup (k, v) VALUES ('c', '3')").run()
-      ).toThrow();
-    } finally {
-      setQueryOnly(db, false);
-      detachDatabase(db, "disk_src");
-    }
+  it("rejects a write through the pool (guard + read-only connection)", () => {
+    expect(() => pool.query(path, "DELETE FROM lookup")).toThrow();
   });
 });
 

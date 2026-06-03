@@ -47,10 +47,10 @@ import {
   detachDatabase,
   ensureTables,
   runQuery,
-  setQueryOnly,
 } from "./sqlite/exec.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
+import { ReadConnectionPool } from "./sqlite/read-pool.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -534,6 +534,10 @@ export class Server {
   // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
   // docs/specs/sqlite-builtin/plans/on-disk-source.md).
   #diskSources = new DiskSourceRegistry();
+  // Pooled read-only connections (keyed by canonical file path) for SQLite
+  // reads — injected on-disk sources and cell-derived dbs alike run here,
+  // unattached, instead of attach/detach-per-op on the engine connection.
+  #readPool = new ReadConnectionPool();
 
   constructor(
     readonly options: {
@@ -578,6 +582,7 @@ export class Server {
     }
     this.#engines.clear();
     this.#connections.clear();
+    this.#readPool.close();
   }
 
   /**
@@ -659,23 +664,9 @@ export class Server {
     const engine = await this.openEngine(space);
     const alias = aliasForDbId(db.id);
 
-    // Phase 7: an injected on-disk source is attached READ-ONLY from its
-    // registered path instead of the cell-derived file, and we do NOT run
-    // ensureTables against it (v1 does not migrate external files). Read-only is
-    // enforced for the synchronous attach→op→detach window via PRAGMA query_only
-    // (the connection is single-threaded; `op` must not await — see below).
-    const disk = this.#diskSources.get(space, db.id);
-    if (disk) {
-      attachDatabase(engine.database, alias, disk.path, { readOnly: true });
-      setQueryOnly(engine.database, true);
-      try {
-        return op(engine); // synchronous — see doc comment
-      } finally {
-        setQueryOnly(engine.database, false);
-        detachDatabase(engine.database, alias);
-      }
-    }
-
+    // Injected on-disk sources are read unattached via the read pool
+    // (Server.sqliteQuery), never here — `#onCellDb` is the cell-derived
+    // attach path (reads today; writes use #attachCommitSqliteDbs).
     attachDatabase(
       engine.database,
       alias,
@@ -867,11 +858,16 @@ export class Server {
       );
     }
     try {
-      const rows = await this.#onCellDb(
-        message.space,
-        message.db,
-        (engine) => runQuery(engine.database, message.sql, message.params),
-      );
+      // Injected on-disk source: read it unattached on a pooled read-only
+      // connection (no ATTACH, real read-only, its own `main` namespace).
+      const disk = this.#diskSources.get(message.space, message.db.id);
+      const rows = disk
+        ? this.#readPool.query(disk.path, message.sql, message.params)
+        : await this.#onCellDb(
+          message.space,
+          message.db,
+          (engine) => runQuery(engine.database, message.sql, message.params),
+        );
       return { type: "response", requestId: message.requestId, ok: { rows } };
     } catch (error) {
       return respondTypedError<SqliteQueryResult>(
