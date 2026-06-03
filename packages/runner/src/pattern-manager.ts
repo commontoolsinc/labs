@@ -545,7 +545,10 @@ export class PatternManager {
         mainSpecifier,
         program.files,
       );
-      return this.patternFromEvaluation(result, program);
+      // Associate the entry identity even on the non-cache ESM branch so the
+      // pattern's {identity, symbol} ref is always consistent (correct export
+      // symbol), regardless of whether the compiled cache was written.
+      return this.patternFromEvaluation(result, program, entryIdentity);
     }
 
     const { cachedCompiler } = this.runtime;

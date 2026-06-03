@@ -100,7 +100,16 @@ export async function compileAndSavePattern(
       files: [{ name: "/main.tsx", contents: patternSrc }],
     };
   }
-  const pattern = await runtime.patternManager.compilePattern(patternSrc);
+  // Compile with the target space so the ESM path participates fully in the
+  // content-addressed cell cache: it learns the entry identity, associates the
+  // pattern's {identity, symbol} ref (with the real export name), and writes the
+  // compiled + source docs into `space`. Without this the save path and the
+  // (cache-backed) load path disagree about the content identity — a non-default
+  // `mainExport` would reload under the wrong symbol and the watcher would never
+  // converge (cf piece setsrc hang under the ESM loader).
+  const pattern = await runtime.patternManager.compilePattern(patternSrc, {
+    space: options.space,
+  });
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");
   }
