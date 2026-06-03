@@ -200,15 +200,22 @@ function hashToken(s: string): string {
 }
 
 /** Extract the table name from a SQLite "no such table: <name>" error, or
- *  undefined if the error is not that shape. Any schema qualifier (`main.t`) is
- *  stripped to the bare table name so it can be matched against declared tables. */
+ *  undefined if the error is not that shape. SQLite reports the *unquoted* name,
+ *  which may itself contain spaces or dots (e.g. `CREATE TABLE "my notes"`), so
+ *  we take the whole remainder of the message. Only a real `main.`/`temp.`
+ *  schema prefix is stripped — a bare table literally named `a.b` is preserved,
+ *  so the result matches a declared-table key exactly. */
 function missingTableName(error: unknown): string | undefined {
   const message = error instanceof Error ? error.message : String(error);
-  const match = /no such table:\s*([^\s]+)/i.exec(message);
+  const match = /no such table:\s*(.+)$/i.exec(message);
   if (match === null) return undefined;
-  const ref = match[1];
-  const dot = ref.lastIndexOf(".");
-  return dot === -1 ? ref : ref.slice(dot + 1);
+  const ref = match[1].trim();
+  const dot = ref.indexOf(".");
+  if (dot !== -1) {
+    const schema = ref.slice(0, dot).toLowerCase();
+    if (schema === "main" || schema === "temp") return ref.slice(dot + 1);
+  }
+  return ref;
 }
 
 const respondTypedError = <Result>(

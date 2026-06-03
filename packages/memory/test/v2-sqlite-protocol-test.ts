@@ -321,6 +321,27 @@ describe("sqlite protocol verbs (loopback)", () => {
     expect(r.rows).toEqual([]);
   });
 
+  it("reads [] for a declared-but-unmaterialized table whose name has a space", async () => {
+    // Guards against the "no such table" parser truncating at whitespace: a
+    // quoted table name with a space (`"my notes"`) must be matched whole
+    // against the declared schema, so reading it before any write yields [].
+    const id = `of:spaced-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        "my notes": table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    const r = await session.sqliteQuery(v2, 'SELECT note FROM "my notes"');
+    expect(r.rows).toEqual([]);
+  });
+
   it("a pooled reader sees a write committed after its connection opened", async () => {
     const db = dbRef();
     await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
