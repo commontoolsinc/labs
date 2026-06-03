@@ -15,6 +15,18 @@ import { pattern, UI, VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Entry {
+    name: string;
+}
+interface Input {
+    entries: Entry[];
+    prefix: string;
+    labelPrefix: string;
+}
+interface Output {
+    [UI]: VNode;
+}
+const visibleEntries = __cfHardenFn((entries: Entry[], prefix: string) => entries.filter((entry) => entry.name.startsWith(prefix)));
 const __cfLift_1 = __cfHelpers.lift<{
     entries: Entry[];
     prefix: string;
@@ -85,18 +97,96 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(labelPrefix));
-interface Entry {
-    name: string;
-}
-interface Input {
-    entries: Entry[];
-    prefix: string;
-    labelPrefix: string;
-}
-interface Output {
-    [UI]: VNode;
-}
-const visibleEntries = __cfHardenFn((entries: Entry[], prefix: string) => entries.filter((entry) => entry.name.startsWith(prefix)));
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
+    return __cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: false
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({
+        entry: {
+            name: entry.key("name")
+        },
+        labelPrefix: labelPrefix
+    }), [entry.key("name")], []).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        },
+        params: {
+            type: "object",
+            properties: {
+                labelPrefix: {
+                    type: "string"
+                }
+            },
+            required: ["labelPrefix"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const label = __cf_pattern_input.key("element");
+    return <button type="button">{label}</button>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const prefix = __cf_pattern_input.key("prefix");
@@ -143,98 +233,10 @@ export default pattern((__cf_pattern_input) => {
                     entries: entries,
                     prefix: prefix
                 }).for(["visible", 3], true), []).for("visible", true);
-                const labels = visible.flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const entry = __cf_pattern_input.key("element");
-                    const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
-                    return __cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "array",
-                        items: false
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({
-                        entry: {
-                            name: entry.key("name")
-                        },
-                        labelPrefix: labelPrefix
-                    }), [entry.key("name")], []);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Entry"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                labelPrefix: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["labelPrefix"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
+                const labels = visible.flatMapWithPattern(__cfPattern_1, {
                     labelPrefix: labelPrefix
                 }).for("labels", true);
-                return labels.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const label = __cf_pattern_input.key("element");
-                    return <button type="button">{label}</button>;
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            type: "string"
-                        }
-                    },
-                    required: ["element"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {});
+                return labels.mapWithPattern(__cfPattern_2, {});
             })()}
     </div>)
     });

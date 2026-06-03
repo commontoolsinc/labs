@@ -11,6 +11,10 @@ import { computed, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    name: string;
+    value: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -95,10 +99,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length);
-interface Item {
-    name: string;
-    value: number;
-}
 // FIXTURE: ternary-hoisted-compute-plain-map-branch
 // Verifies: once a ternary JSX branch is wholly compute-wrapped, compute-owned
 // array maps inside that branch stay plain Array.map() calls.

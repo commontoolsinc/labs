@@ -17,6 +17,9 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    items: string[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: string[];
@@ -62,9 +65,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length);
-interface State {
-    items: string[];
-}
 // FIXTURE: computed-result-property-in-return
 // Verifies: .length on a computed() string result is captured via .key("length") in a subsequent lift-applied computation
 //   computed(() => summary.length) → lift(({ summary }) => summary.length)({ summary: { length: summary.key("length") } })

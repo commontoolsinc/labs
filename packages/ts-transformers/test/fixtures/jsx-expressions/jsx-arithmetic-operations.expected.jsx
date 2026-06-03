@@ -11,6 +11,12 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    count: number;
+    price: number;
+    discount: number;
+    quantity: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -288,12 +294,6 @@ const __cfLift_12 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price + 10);
-interface State {
-    count: number;
-    price: number;
-    discount: number;
-    quantity: number;
-}
 // FIXTURE: jsx-arithmetic-operations
 // Verifies: arithmetic expressions with reactive refs in JSX are wrapped in a lift-applied computation
 //   {state.count + 1}                      → lift(({state}) => state.count + 1)({ count })

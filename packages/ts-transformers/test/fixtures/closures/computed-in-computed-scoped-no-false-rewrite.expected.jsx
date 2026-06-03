@@ -11,6 +11,7 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const config = __cfHelpers.__cf_data({ bar: "module-level" });
 const __cfLift_1 = __cfHelpers.lift(false, () => ({ bar: 1 }));
 const __cfLift_2 = __cfHelpers.lift(false, () => {
     const condition = 1 > 0;
@@ -20,7 +21,6 @@ const __cfLift_2 = __cfHelpers.lift(false, () => {
     }
     return config.bar;
 });
-const config = __cfHelpers.__cf_data({ bar: "module-level" });
 // FIXTURE: computed-in-computed-scoped-no-false-rewrite
 // Verifies: a block-scoped computed() result named `config` does NOT cause
 //   the module-level `config.bar` to be rewritten to `config.key("bar")`.

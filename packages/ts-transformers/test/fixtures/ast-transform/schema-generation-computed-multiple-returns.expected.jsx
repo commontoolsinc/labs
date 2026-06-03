@@ -11,13 +11,13 @@ import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+declare const flag: boolean;
 const __cfLift_1 = __cfHelpers.lift(false, () => {
     if (flag) {
         return "hello";
     }
     return 42;
 });
-declare const flag: boolean;
 // FIXTURE: schema-generation-computed-multiple-returns
 // Verifies: a reactive builder with multiple return paths infers a union output schema
 //   computed(() => { ... }) → output schema is an enum union of the returned literals

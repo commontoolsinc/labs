@@ -26,6 +26,49 @@ interface PatternInput {
     items: Cell<Default<Item[], [
     ]>>;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return <li>{item.key("label")}</li>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: unless-with-map
 // Verifies: || operator becomes unless() with reactive map as fallback
 //   customContent || items.map(...) → unless(customContent, items.mapWithPattern(...))
@@ -46,49 +89,7 @@ export default pattern((__cf_pattern_input) => {
             items: {}
         } as const satisfies __cfHelpers.JSONSchema, {
             asCell: ["cell"]
-        } as const satisfies __cfHelpers.JSONSchema, customContent, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const item = __cf_pattern_input.key("element");
-            return <li>{item.key("label")}</li>;
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        }
-                    },
-                    required: ["label"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {}))}
+        } as const satisfies __cfHelpers.JSONSchema, customContent, items.mapWithPattern(__cfPattern_1, {}))}
       </div>),
     };
 }, {

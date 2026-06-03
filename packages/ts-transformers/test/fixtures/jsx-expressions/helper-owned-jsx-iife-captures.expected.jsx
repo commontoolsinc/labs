@@ -19,6 +19,22 @@ import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Entry {
+    name: string;
+}
+interface Input {
+    entries: Writable<Default<Entry[], [
+    ]>>;
+}
+interface Output {
+    [UI]: VNode;
+}
+function visibleEntries(entries: Writable<Default<Entry[], [
+]>>, prefix: string): Entry[] {
+    const list = entries.get();
+    return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
+}
+__cfHardenFn(visibleEntries);
 const __cfHandler_1 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -158,22 +174,73 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["pushPath", "entry"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, entry }) => pushPath.send({ name: entry.name }));
-interface Entry {
-    name: string;
-}
-interface Input {
-    entries: Writable<Default<Entry[], [
-    ]>>;
-}
-interface Output {
-    [UI]: VNode;
-}
-function visibleEntries(entries: Writable<Default<Entry[], [
-]>>, prefix: string): Entry[] {
-    const list = entries.get();
-    return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
-}
-__cfHardenFn(visibleEntries);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    const pushPath = __cf_pattern_input.key("params", "pushPath");
+    return (<button type="button" onClick={__cfHandler_2({
+        pushPath: pushPath,
+        entry: {
+            name: entry.key("name")
+        }
+    })}>
+              {entry.key("name")}
+            </button>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        },
+        params: {
+            type: "object",
+            properties: {
+                pushPath: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"],
+                    asCell: ["stream"]
+                }
+            },
+            required: ["pushPath"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const path = new Writable<string[]>([], {
@@ -225,73 +292,7 @@ export default pattern((__cf_pattern_input) => {
                     entries: entries,
                     p: p
                 }).for("visible", true);
-                return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const entry = __cf_pattern_input.key("element");
-                    const pushPath = __cf_pattern_input.key("params", "pushPath");
-                    return (<button type="button" onClick={__cfHandler_2({
-                        pushPath: pushPath,
-                        entry: {
-                            name: entry.key("name")
-                        }
-                    })}>
-              {entry.key("name")}
-            </button>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Entry"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                pushPath: {
-                                    type: "object",
-                                    properties: {
-                                        name: {
-                                            type: "string"
-                                        }
-                                    },
-                                    required: ["name"],
-                                    asCell: ["stream"]
-                                }
-                            },
-                            required: ["pushPath"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
+                return visible.mapWithPattern(__cfPattern_1, {
                     pushPath: pushPath
                 });
             })()}

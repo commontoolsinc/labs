@@ -11,6 +11,12 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    done: boolean;
+}
+interface State {
+    items: Item[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: {
@@ -52,12 +58,34 @@ const __cfLift_1 = __cfHelpers.lift<{
         required: ["done"]
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.map((item) => ({ done: item.done })));
-interface Item {
-    done: boolean;
-}
-interface State {
-    items: Item[];
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    return __cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        "enum": ["Done", "Pending"]
+    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    "enum": ["Done", "Pending"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-pre-resolved-return-conditional
 // Verifies: pre-resolving a boolean inside the source computed does not avoid
 //   the need to lower the later direct callback-return ternary.
@@ -70,35 +98,8 @@ export default pattern((state) => {
         } }).for("rows", true);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const row = __cf_pattern_input.key("element");
-            return __cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                "enum": ["Done", "Pending"]
-            } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for("__patternResult", true);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "object",
-                    properties: {
-                        done: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["done"]
-                }
-            },
-            required: ["element"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            "enum": ["Done", "Pending"]
-        } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+        {rows.mapWithPattern(__cfPattern_1, {})}
+      </div>),
     };
 }, {
     type: "object",

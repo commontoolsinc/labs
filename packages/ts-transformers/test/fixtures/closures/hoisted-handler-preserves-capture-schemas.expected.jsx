@@ -11,6 +11,55 @@ import { action, NAME, pattern, SELF, UI, type VNode, Writable, } from "commonfa
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+// `navigateTo` is a CommonFabric built-in for SPA navigation; importing
+// it ensures it lives at module scope and the action bodies that
+// reference it (a) compile and (b) close over a module-level symbol.
+declare const navigateTo: (target: any) => any;
+interface Item {
+    id: number;
+    label: string;
+    [NAME]: string;
+}
+interface ListOutput {
+    [NAME]: string;
+    [UI]: VNode;
+    read: any;
+    write: any;
+}
+const Item = pattern((__cf_pattern_input) => {
+    const id = __cf_pattern_input.key("id");
+    const label = __cf_pattern_input.key("label");
+    return ({
+        id,
+        label,
+        [NAME]: label,
+    });
+}, {
+    type: "object",
+    properties: {
+        id: {
+            type: "number"
+        },
+        label: {
+            type: "string"
+        }
+    },
+    required: ["id", "label"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        id: {
+            type: "number"
+        },
+        label: {
+            type: "string"
+        },
+        $NAME: {
+            type: "string"
+        }
+    },
+    required: ["id", "label", "$NAME"]
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -109,55 +158,6 @@ const __cfHandler_2 = __cfHelpers.handler({
     items.push(newItem as any);
     return newItem;
 });
-// `navigateTo` is a CommonFabric built-in for SPA navigation; importing
-// it ensures it lives at module scope and the action bodies that
-// reference it (a) compile and (b) close over a module-level symbol.
-declare const navigateTo: (target: any) => any;
-interface Item {
-    id: number;
-    label: string;
-    [NAME]: string;
-}
-interface ListOutput {
-    [NAME]: string;
-    [UI]: VNode;
-    read: any;
-    write: any;
-}
-const Item = pattern((__cf_pattern_input) => {
-    const id = __cf_pattern_input.key("id");
-    const label = __cf_pattern_input.key("label");
-    return ({
-        id,
-        label,
-        [NAME]: label,
-    });
-}, {
-    type: "object",
-    properties: {
-        id: {
-            type: "number"
-        },
-        label: {
-            type: "string"
-        }
-    },
-    required: ["id", "label"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        id: {
-            type: "number"
-        },
-        label: {
-            type: "string"
-        },
-        $NAME: {
-            type: "string"
-        }
-    },
-    required: ["id", "label", "$NAME"]
-} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: hoisted-handler-preserves-capture-schemas (CT-1585 regression)
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");

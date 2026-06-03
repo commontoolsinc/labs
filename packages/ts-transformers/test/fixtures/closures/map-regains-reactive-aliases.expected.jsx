@@ -11,6 +11,17 @@ import { Default, computed, lift, pattern, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const passthrough = lift({
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, (items: string[]) => items);
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: string[];
@@ -57,6 +68,20 @@ const __cfLift_2 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ inner }) => inner);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item + "!";
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>({
@@ -77,21 +102,22 @@ const __cfLift_3 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ inner }) => {
     const foo = __cfLift_2({ inner: inner }).for("foo", true);
-    return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return item + "!";
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    return foo.mapWithPattern(__cfPattern_1, {});
 });
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item + "!";
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>({
@@ -112,21 +138,22 @@ const __cfLift_4 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ inner }) => {
     const foo = passthrough(inner).for("foo", true);
-    return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return item + "!";
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    return foo.mapWithPattern(__cfPattern_2, {});
 });
+const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item + "!";
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift(false, () => {
     const foo = wish<Default<string[], [
     ]>>({ query: "#items" }, {
@@ -136,20 +163,7 @@ const __cfLift_5 = __cfHelpers.lift(false, () => {
         },
         "default": []
     } as const satisfies __cfHelpers.JSONSchema).result!;
-    return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return item + "!";
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    return foo.mapWithPattern(__cfPattern_3, {});
 });
 const __cfLift_6 = __cfHelpers.lift<{
     inner: string[];
@@ -170,6 +184,34 @@ const __cfLift_6 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ inner }) => inner);
+const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item.key("length") > 1;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_5 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item + "!";
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>({
@@ -190,34 +232,8 @@ const __cfLift_7 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ inner }) => {
     const foo = __cfLift_6({ inner: inner }).for("foo", true);
-    const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return item.key("length") > 1;
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
-    return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return item + "!";
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    const filtered = foo.filterWithPattern(__cfPattern_4, {}).for("filtered", true);
+    return filtered.mapWithPattern(__cfPattern_5, {});
 });
 const __cfLift_8 = __cfHelpers.lift<{
     inner: string[];
@@ -238,6 +254,20 @@ const __cfLift_8 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ inner }) => inner);
+const __cfPattern_6 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item.key("length") > 1;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     item: string;
 }, string>({
@@ -251,6 +281,20 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.toUpperCase());
+const __cfPattern_7 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return __cfLift_9({ item: item }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_10 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>({
@@ -271,46 +315,9 @@ const __cfLift_10 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ inner }) => {
     const foo = __cfLift_8({ inner: inner }).for("foo", true);
-    const filtered = foo.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return item.key("length") > 1;
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
-    return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return __cfLift_9({ item: item }).for("__patternResult", true);
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {});
+    const filtered = foo.filterWithPattern(__cfPattern_6, {}).for("filtered", true);
+    return filtered.mapWithPattern(__cfPattern_7, {});
 });
-const passthrough = lift({
-    type: "array",
-    items: {
-        type: "string"
-    }
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "array",
-    items: {
-        type: "string"
-    }
-} as const satisfies __cfHelpers.JSONSchema, (items: string[]) => items);
 // FIXTURE: map-regains-reactive-aliases
 // Verifies: compute-owned aliases that still resolve to reactive array roots
 // are rewritten back to mapWithPattern/filterWithPattern when used in pattern

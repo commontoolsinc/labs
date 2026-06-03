@@ -11,6 +11,15 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    a: number;
+    b: number;
+    price: number;
+    text: string;
+    values: number[];
+    name: string;
+    float: string;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         a: number;
@@ -536,15 +545,6 @@ const __cfLift_24 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(state.a + 1, state.b * 2));
-interface State {
-    a: number;
-    b: number;
-    price: number;
-    text: string;
-    values: number[];
-    name: string;
-    float: string;
-}
 // FIXTURE: jsx-function-calls
 // Verifies: function/method calls with reactive args in JSX are wrapped in a lift-applied computation
 //   Math.max(state.a, state.b)     → lift(({state}) => Math.max(state.a, state.b))({ a, b })

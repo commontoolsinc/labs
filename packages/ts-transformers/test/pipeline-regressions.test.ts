@@ -108,7 +108,7 @@ Deno.test(
       "PatternCallbackLoweringTransformer",
       "BuilderCallbackHoistingTransformer",
       "SchemaInjectionTransformer",
-      "LiftHoistingTransformer",
+      "BuilderCallHoistingTransformer",
       "SchemaGeneratorTransformer",
       "ReactiveVariableForTransformer",
       "ModuleScopeShadowingTransformer",
@@ -449,23 +449,29 @@ Deno.test(
       types: COMMONFABRIC_TYPES,
     });
 
-    const mapStart = output.indexOf("{examples.mapWithPattern(");
     assert(
-      mapStart >= 0,
-      "expected transformed examples.mapWithPattern callback",
+      output.includes("{examples.mapWithPattern("),
+      "expected transformed examples.mapWithPattern call site",
     );
-    const mapWindow = output.slice(mapStart, mapStart + 5000);
 
+    // CT-1655: the whole `pattern(...)` call for this map is hoisted to a
+    // module-scope `const __cfPattern_N = __cfHelpers.pattern(...)`, so the
+    // callback (and its `__cf_pattern_input.key("params", …)` prologue) now
+    // lives at module scope, ABOVE the `examples.mapWithPattern(__cfPattern_N,
+    // …)` call site rather than inline at it. The property this test guards is
+    // unchanged: the examples capture's params-keyed prologue survives the
+    // pipeline. Assert against the whole output (the prologue lines are unique
+    // to this map's callback).
     assertStringIncludes(
-      mapWindow,
+      output,
       'const selectedExampleId = __cf_pattern_input.key("params", "selectedExampleId");',
     );
     assertStringIncludes(
-      mapWindow,
+      output,
       'const currentItem = __cf_pattern_input.key("params", "currentItem");',
     );
     assertStringIncludes(
-      mapWindow,
+      output,
       'const examples = __cf_pattern_input.key("params", "examples");',
     );
   },

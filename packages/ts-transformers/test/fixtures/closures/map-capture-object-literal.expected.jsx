@@ -16,6 +16,63 @@ interface State {
         name: string;
     }>;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const style = __cf_pattern_input.params.style;
+    return (<span style={style}>{item.key("name")}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                style: {
+                    type: "object",
+                    properties: {
+                        color: {
+                            type: "string"
+                        },
+                        fontSize: {
+                            type: "number"
+                        }
+                    },
+                    required: ["color", "fontSize"]
+                }
+            },
+            required: ["style"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-capture-object-literal
 // Verifies: plain object literal closed over in .map() is captured as a non-reactive param
 //   .map(fn) → .mapWithPattern(pattern(...), { style: style })
@@ -24,63 +81,7 @@ export default pattern((state) => {
     const style = { color: "red", fontSize: 14 };
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const style = __cf_pattern_input.params.style;
-                return (<span style={style}>{item.key("name")}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            style: {
-                                type: "object",
-                                properties: {
-                                    color: {
-                                        type: "string"
-                                    },
-                                    fontSize: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["color", "fontSize"]
-                            }
-                        },
-                        required: ["style"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 style: style
             })}
       </div>),

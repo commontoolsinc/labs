@@ -13,13 +13,16 @@ of the `lift(...)({})` stopgap). **Phase 2 complete in CT-1644**
 `const __cfLift_N = __cfHelpers.lift(...)`, after SchemaInjection; subsumes lift
 from the CT-1585 callback hoister). `derive` has since been fully retired from
 both the transformer (CT-1643) and the runtime export (CT-1624). **CT-1655
-extends Phase 2's whole-call hoisting to the other builders**: `handler` shipped
-(hoisted to `const __cfHandler_N`, subsuming handler from the CT-1585 callback
-hoister); `pattern`/`patternTool` remain (different `mapWithPattern`-arg
-mechanic). See the follow-up section after the phase table. **Phase 3
-(`selfcontained` marker) is now the active phase** — its design below is current
-and its open questions are mostly resolved (see the Phase 3 section and
-tracker)._
+extends Phase 2's whole-call hoisting to the other builders**: `handler`
+(hoisted to `const __cfHandler_N`) and `pattern` (hoisted to
+`const __cfPattern_N` out of `mapWithPattern`'s first argument) shipped, both
+subsuming their builder from the CT-1585 callback hoister; the hoisting stage
+was renamed `LiftHoistingTransformer` → `BuilderCallHoistingTransformer`
+accordingly. Only `patternTool` remains (its captures thread through the call's
+own argument, so whole-call hoisting needs a safety investigation first). See
+the follow-up section after the phase table. **Phase 3 (`selfcontained` marker)
+is now the active phase** — its design below is current and its open questions
+are mostly resolved (see the Phase 3 section and tracker)._
 
 ## Motivation
 
@@ -64,22 +67,62 @@ on the outer call. Implementation notes:
   injection, write-authorization, etc.) is unaffected.
 - `handler` is removed from CT-1585's `HOISTABLE_BUILDER_NAMES` in the same
   change to avoid the double-hoist TDZ (the two consts would reference each
-  other out of declaration order). `BuilderCallbackHoistingTransformer` now owns
-  only `pattern`/`patternTool`.
+  other out of declaration order).
 - The hoist-prefix original-node fallback in `resolveBuilderExpressionKind` is
   generalized to `__cfHandler` so the synthetic `__cfHandler_N(captures)` site
   still classifies as `handler` for the stages that run after hoisting.
 
-**Pattern / patternTool are the remaining piece of CT-1655.** Their hoist is a
-_different_ mechanic: `pattern` is not applied — it appears as
-`expr.mapWithPattern(__cfHelpers.pattern(cb, …), { extraParams })`, so the bare
-`pattern(...)` call (argument 0 of `mapWithPattern`) is hoisted and the call is
-rewritten to thread the hoisted name, while per-instance captures continue to
-flow through `mapWithPattern`'s second argument. The top-level
-`export default pattern(...)` is already module-scope and must NOT be hoisted.
-When pattern/patternTool land here too, `HOISTABLE_BUILDER_NAMES` empties and
-`BuilderCallbackHoistingTransformer` can be deleted — the "one unified hoisting
-phase" end-state.
+**Pattern shipped in CT-1655 (next).** `pattern`'s hoist is a _different_
+mechanic: pattern is not applied — a reactive map lowers to
+`expr.mapWithPattern(__cfHelpers.pattern(cb, inSchema, outSchema), { params })`,
+so the bare `pattern(...)` call (argument 0 of `mapWithPattern`) is the
+hoistable unit, with per-instance captures flowing through `mapWithPattern`'s
+_second_ argument. The bare pattern call is therefore capture-free and safe to
+evaluate once at module scope. Implementation notes:
+
+- The hoisting stage was renamed `LiftHoistingTransformer` →
+  `BuilderCallHoistingTransformer` (`lift-hoisting.ts` →
+  `builder-call-hoisting.ts`): it now owns lift + handler + pattern, the
+  "Call"-vs-"Callback" contrast distinguishing it from the
+  `BuilderCallbackHoistingTransformer` it is subsuming.
+- `HoistableBuilderSpec` gains an optional `rewriteSite` hook. Applied builders
+  (lift/handler) keep the default callee-swap; pattern provides `rewriteSite` to
+  replace just `mapWithPattern`'s first argument with the hoisted name, leaving
+  the callee and the params argument intact.
+- Recognition is positional via `getMapWithPatternHoistablePatternCall`: a
+  `*WithPattern` call whose first argument is a `pattern(...)` builder call. The
+  top-level `export default pattern(...)` is a _direct_ call (not a
+  `*WithPattern` argument), so it is naturally excluded — no special guard
+  needed.
+- `pattern` is removed from CT-1585's `HOISTABLE_BUILDER_NAMES` in the same
+  change (same double-hoist-TDZ rationale; observed directly without it).
+- Pattern's hoisted reference sits in `mapWithPattern` argument position, not an
+  applied reactive-origin site, so it does _not_ need the
+  `resolveBuilderExpressionKind` original-node fallback (confirmed: full suite
+  green without it).
+- **Insertion ordering (eager-callback hazard).** `pattern(...)` _invokes_ its
+  callback eagerly at construction (`runner/src/builder/pattern.ts`,
+  `const outputs = fn(...)`) to capture the reactive graph — unlike `lift`/
+  `handler`, whose callbacks are stored and run lazily. So a hoisted
+  `const __cfPattern_N = pattern(cb)` placed naïvely after the imports throws a
+  module-load TDZ `ReferenceError` if `cb` reads a module-scoped binding
+  declared later (e.g. `const onRemoveFavorite = handler(...)` used inside a
+  mapped JSX — see `patterns/system/favorites-manager.tsx`). The stage therefore
+  no longer pools all hoists into one after-imports block; it flushes each
+  statement's hoists immediately _before_ that top-level statement. That keeps
+  every hoist after the module-scoped bindings its (eagerly-run) callback
+  references, since the original use site necessarily followed those
+  declarations. The transformer's golden tests only check emitted text, so this
+  was caught by the runner's pattern-execution tests, not the fixture suite.
+
+**`patternTool` is deferred.** Unlike `pattern`,
+`patternTool(fn, { extraParams })` is a direct call whose per-instance captures
+thread through its _own_ second argument — so whole-call hoisting would relocate
+those captures to module scope, which is only safe if `extraParams` can never
+carry per-instance reactive state. That needs investigation, so `patternTool`
+stays in `BuilderCallbackHoistingTransformer` for now. When it is resolved,
+`HOISTABLE_BUILDER_NAMES` empties and `BuilderCallbackHoistingTransformer` can
+be deleted — the "one unified hoisting phase" end-state.
 
 ## Relationship to prior work
 

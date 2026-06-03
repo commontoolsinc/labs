@@ -11,6 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const identity = __cfHardenFn(<T,>(value: T) => value);
 const __cfLift_1 = __cfHelpers.lift<{
     item: string;
 }, string>({
@@ -24,7 +25,20 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ item }) => identity(item.toUpperCase()));
-const identity = __cfHardenFn(<T,>(value: T) => value);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return __cfLift_1({ item: item }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-local-helper-call-root
 // Verifies: non-JSX pattern-owned map callbacks lift ordinary local helper
 //   calls as whole callback-local lift-applied computations rather than lowering only the inner
@@ -33,20 +47,7 @@ const identity = __cfHardenFn(<T,>(value: T) => value);
 //   -> mapWithPattern(..., ({ item }) => lift(({ item }) => identity(item.toUpperCase()))(...))
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return __cfLift_1({ item: item });
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "string"
-            }
-        },
-        required: ["element"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {}).for("__patternResult", true);
+    return items.mapWithPattern(__cfPattern_1, {}).for("__patternResult", true);
 }, {
     type: "object",
     properties: {

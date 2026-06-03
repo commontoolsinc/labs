@@ -18,6 +18,10 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    name: string;
+    done: boolean;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     items: {
         done: boolean;
@@ -129,10 +133,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ result }) => {
     return result.tasks.map((task) => <li>{task.name}</li>);
 });
-interface Item {
-    name: string;
-    done: boolean;
-}
 // FIXTURE: computed-property-access-map
 // Verifies: .map() on a property access of a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => result.tasks.map(fn)) → lift(({ result }) => result.tasks.map(fn))({ result: { tasks: result.key("tasks") } })

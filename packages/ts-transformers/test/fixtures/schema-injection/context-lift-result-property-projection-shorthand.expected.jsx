@@ -11,23 +11,6 @@ import { Cell, computed, lift, pattern, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift<{
-    summary: {
-        difference: any;
-    };
-}, any>({
-    type: "object",
-    properties: {
-        summary: {
-            type: "object",
-            properties: {
-                difference: true
-            },
-            required: ["difference"]
-        }
-    },
-    required: ["summary"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.difference);
 const liftSummary = lift({
     type: "object",
     properties: {
@@ -64,6 +47,23 @@ const liftSummary = lift({
         difference: primaryValue - secondaryValue,
     };
 });
+const __cfLift_1 = __cfHelpers.lift<{
+    summary: {
+        difference: any;
+    };
+}, any>({
+    type: "object",
+    properties: {
+        summary: {
+            type: "object",
+            properties: {
+                difference: true
+            },
+            required: ["difference"]
+        }
+    },
+    required: ["summary"]
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.difference);
 // FIXTURE: context-lift-result-property-projection-shorthand
 // Verifies: shorthand object returns preserve the projected computed() result type
 //   return { difference } → result schema difference: number

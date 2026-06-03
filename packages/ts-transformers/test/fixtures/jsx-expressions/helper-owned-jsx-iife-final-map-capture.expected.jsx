@@ -18,6 +18,22 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Entry {
+    name: string;
+}
+interface Input {
+    entries: Writable<Default<Entry[], [
+    ]>>;
+}
+interface Output {
+    [UI]: VNode;
+}
+function visibleEntries(entries: Writable<Default<Entry[], [
+]>>, prefix: string): Entry[] {
+    const list = entries.get();
+    return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
+}
+__cfHardenFn(visibleEntries);
 const __cfLift_1 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
 }, readonly string[]>({
@@ -89,22 +105,62 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
-interface Entry {
-    name: string;
-}
-interface Input {
-    entries: Writable<Default<Entry[], [
-    ]>>;
-}
-interface Output {
-    [UI]: VNode;
-}
-function visibleEntries(entries: Writable<Default<Entry[], [
-]>>, prefix: string): Entry[] {
-    const list = entries.get();
-    return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
-}
-__cfHardenFn(visibleEntries);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
+    return (<button type="button">
+              {labelPrefix}:{entry.key("name")}
+            </button>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        },
+        params: {
+            type: "object",
+            properties: {
+                labelPrefix: {
+                    type: "string",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["labelPrefix"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const path = new Writable<string[]>([], {
@@ -137,62 +193,7 @@ export default pattern((__cf_pattern_input) => {
                     entries: entries,
                     p: p
                 }).for("visible", true);
-                return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const entry = __cf_pattern_input.key("element");
-                    const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
-                    return (<button type="button">
-              {labelPrefix}:{entry.key("name")}
-            </button>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Entry"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                labelPrefix: {
-                                    type: "string",
-                                    asCell: ["readonly"]
-                                }
-                            },
-                            required: ["labelPrefix"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
+                return visible.mapWithPattern(__cfPattern_1, {
                     labelPrefix: labelPrefix
                 });
             })()}

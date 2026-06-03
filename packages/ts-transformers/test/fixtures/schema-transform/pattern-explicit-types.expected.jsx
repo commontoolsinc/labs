@@ -11,6 +11,12 @@ import { computed, pattern, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Input {
+    foo: string;
+}
+interface Output extends Input {
+    bar: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     input: { foo: string; } & {} & { [SELF]: Output; };
 }, { bar: number; foo: string; [SELF]: Output; }>({
@@ -39,12 +45,6 @@ const __cfLift_1 = __cfHelpers.lift<{
     },
     required: ["bar", "foo"]
 } as const satisfies __cfHelpers.JSONSchema, ({ input }) => ({ ...input, bar: 123 }));
-interface Input {
-    foo: string;
-}
-interface Output extends Input {
-    bar: number;
-}
 // FIXTURE: pattern-explicit-types
 // Verifies: explicit Input and Output type parameters generate separate input/output schemas
 //   pattern<Input, Output>() → input schema from Input, output schema from Output (includes inherited fields)

@@ -15,6 +15,12 @@ import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } f
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface TestOutput {
+    [NAME]: string;
+    [UI]: VNode;
+    title: string;
+    count: number;
+}
 const __cfHandler_1 = __cfHelpers.handler({
     type: "object",
     properties: {},
@@ -76,12 +82,6 @@ const __cfHandler_2 = __cfHelpers.handler({
     console.log("self:", self);
     count.set(count.get() + 1);
 });
-interface TestOutput {
-    [NAME]: string;
-    [UI]: VNode;
-    title: string;
-    count: number;
-}
 // FIXTURE: action-self-closure
 // Verifies: action() closing over SELF captures self properties in the handler
 //   action(() => console.log(self.title)) → handler(eventSchema, { self: { title } }, (_, { self }) => ...)({ self: { title: self.key("title") } })

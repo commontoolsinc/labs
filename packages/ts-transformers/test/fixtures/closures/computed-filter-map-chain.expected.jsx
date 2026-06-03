@@ -11,6 +11,10 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Preference {
+    ingredient: string;
+    preference: "liked" | "disliked";
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         preferences: {
@@ -54,10 +58,6 @@ const __cfLift_1 = __cfHelpers.lift<{
         .filter((p) => p.preference === "liked")
         .map((p) => p.ingredient);
 });
-interface Preference {
-    ingredient: string;
-    preference: "liked" | "disliked";
-}
 // FIXTURE: computed-filter-map-chain
 // Verifies: .filter() and .map() inside computed() are NOT transformed
 // Context: Inside computed(), OpaqueRef auto-unwraps to plain array, so

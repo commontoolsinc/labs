@@ -11,6 +11,10 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Point {
+    x: number;
+    y: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     point: __cfHelpers.ReadonlyCell<Point>;
     multiplier: __cfHelpers.ReadonlyCell<number>;
@@ -47,10 +51,6 @@ const __cfLift_1 = __cfHelpers.lift<{
     const { x, y } = point.get();
     return (x + y) * multiplier.get();
 });
-interface Point {
-    x: number;
-    y: number;
-}
 // FIXTURE: computed-destructured-param
 // Verifies: a captured cell works alongside destructuring inside the computed body
 //   computed(() => { const { x, y } = point.get(); ... }) → lift(...)({ point, multiplier })

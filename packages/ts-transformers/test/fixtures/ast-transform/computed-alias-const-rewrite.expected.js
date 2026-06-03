@@ -11,10 +11,10 @@ import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(false, () => 1);
 // FIXTURE: computed-alias-const-rewrite
 // Verifies: stable const aliases to `computed()` still lower to `derive()`.
 const alias = computed;
+const __cfLift_1 = __cfHelpers.lift(false, () => 1);
 export default __cfLift_1();
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

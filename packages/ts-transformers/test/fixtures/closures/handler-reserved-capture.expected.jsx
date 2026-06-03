@@ -11,6 +11,9 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    label: string;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -20,9 +23,6 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["__cf_handler_event"]
 } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event_1, { __cf_handler_event }) => __cf_handler_event);
-interface State {
-    label: string;
-}
 // FIXTURE: handler-reserved-capture
 // Verifies: captured variable named __cf_handler_event is renamed to avoid collision with the synthetic event param
 //   onClick={() => __cf_handler_event) → handler(false, { __cf_handler_event: ... }, (__cf_handler_event_1, { __cf_handler_event }) => ...)

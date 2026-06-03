@@ -83,20 +83,23 @@ Deno.test("Closure Transformer does not hoist nested handler callbacks that also
   );
 });
 
-Deno.test("CT-1585: Closure Transformer hoists synthesized mapWithPattern callback that closes only over module-level symbols", async () => {
+Deno.test("CT-1655: whole synthesized mapWithPattern pattern() call is hoisted to module scope", async () => {
   // Source shape: a .map() callback whose body invokes a module-level
   // pattern factory (`EntryRow`) and reads a module-level constant
   // (`UI`). After the closure transformer rewrites .map() to
-  // .mapWithPattern(__cfHelpers.pattern(...)), the synthesized pattern
-  // callback closes only over module-scoped references — there are no
-  // per-call-site captures. The `hoistModuleScopedBuilderCallbacks` tail
-  // step should therefore hoist the synthesized callback to module scope
-  // and replace it at the call site with a reference to the hoisted name.
+  // `.mapWithPattern(__cfHelpers.pattern(cb, inSchema, outSchema), { params })`,
+  // the synthesized pattern callback closes only over module-scoped references —
+  // there are no per-call-site captures (the params object is empty).
   //
-  // Currently failing: the hoister does not fire on the synthesized
-  // pattern callback. The inline `__cfHelpers.pattern((_input) => { ... })`
-  // remains at the call site instead of being replaced by a hoisted
-  // reference. See CT-1585.
+  // CT-1585 originally hoisted just the *callback* to `__cfModuleCallback_N`.
+  // CT-1655 instead hoists the WHOLE `pattern(...)` call (the first argument of
+  // mapWithPattern) to a module-scope `const __cfPattern_N = __cfHelpers
+  // .pattern(...)`, with the callback inline, and rewrites the mapWithPattern
+  // first argument to reference the hoisted name. (Hoisting the callback here
+  // too — the CT-1585 mechanic — would double-hoist into a module-load TDZ, so
+  // `pattern` is removed from that hoister's set.) The property this test
+  // guards is unchanged: a module-scope-only pattern becomes a named,
+  // module-scope, self-contained unit.
   const source = `    import { pattern, UI } from "commonfabric";
 
     interface Entry { piece: string }
@@ -122,28 +125,30 @@ Deno.test("CT-1585: Closure Transformer hoists synthesized mapWithPattern callba
   const output = await transformSource(source, options);
   const normalized = output.replace(/\s+/g, " ");
 
-  // The synthesized pattern callback should be hoisted to module scope.
-  // Hoisting runs *after* PatternCallbackLowering (see CT-1585), so the
-  // hoisted callback has the fully-lowered shape:
-  //   `__cf_pattern_input => { const entry = __cf_pattern_input.key("element"); ... }`
-  // (rather than the destructured form `({ element, params }) => ...`
-  // which exists transiently between stages 7 and 11). The exact name
-  // is generated; capture it for the call-site assertion.
+  // The whole pattern() call is hoisted to module scope with its callback
+  // inline. Hoisting runs *after* PatternCallbackLowering, so the inline
+  // callback has the fully-lowered shape
+  // `__cf_pattern_input => { const entry = __cf_pattern_input.key("element"); ... }`.
+  // The exact const name is generated; capture it for the call-site assertion.
   const hoistedMatch = normalized.match(
-    /const (__cfModuleCallback_?\d+) = (?:__cfHardenFn\()?\(?__cf_pattern_input\b/,
+    /const (__cfPattern_\d+) = __cfHelpers\.pattern\(\s*__cf_pattern_input\b/,
   );
   assert(
     hoistedMatch,
-    `expected synthesized pattern callback to be hoisted to module scope. Output was:\n${output}`,
+    `expected whole pattern() call hoisted to module scope. Output was:\n${output}`,
   );
 
   const hoistedName = hoistedMatch[1]!;
-  // The mapWithPattern call site should reference the hoisted name
-  // rather than carry the callback inline.
+  // The mapWithPattern call site references the hoisted name as its first
+  // argument (callback no longer inline at the site).
   assertMatch(
     normalized,
-    new RegExp(
-      `mapWithPattern\\(\\s*__cfHelpers\\.pattern\\(\\s*${hoistedName}\\b`,
-    ),
+    new RegExp(`mapWithPattern\\(\\s*${hoistedName}\\b`),
+  );
+  // And the CT-1585 callback-hoist no longer fires for pattern (no separate
+  // hardened `__cfModuleCallback_N` wrapper for this callback).
+  assertNotMatch(
+    normalized,
+    /const __cfModuleCallback_\d+ = __cfHardenFn\(\(?__cf_pattern_input\b/,
   );
 });

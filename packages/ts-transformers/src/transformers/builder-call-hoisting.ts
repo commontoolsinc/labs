@@ -3,18 +3,25 @@ import {
   detectCallKind,
   getHandlerAppliedInnerCall,
   getLiftAppliedInnerCall,
+  getWithPatternHoistablePatternCall,
   isHandlerAppliedCall,
   SYNTHETIC_HANDLER_HOIST_PREFIX,
   SYNTHETIC_LIFT_HOIST_PREFIX,
+  SYNTHETIC_PATTERN_HOIST_PREFIX,
 } from "../ast/call-kind.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 
 /**
- * Phase 2 of derive→lift→selfcontained (CT-1644): hoist every reactive
- * `lift(...)` call to module scope.
+ * Hoist every reactive *builder call* to module scope: `lift` (CT-1644, Phase 2
+ * of derive→lift→selfcontained), then `handler` and `pattern` (CT-1655). Each
+ * becomes a named, addressable, eventually-selfcontainable module-scope const —
+ * the substrate Phase 3 wraps with `selfcontained(...)`. (Formerly named
+ * `LiftHoistingTransformer` / `lift-hoisting.ts`, when it only owned lift.)
  *
- * After Phase 1 (CT-1615) and SchemaInjection, every reactive lift-style
- * computation in lowered output is the schema-injected *lift-applied* shape:
+ * The hoist mechanic differs by builder shape; see {@link HOISTABLE_BUILDERS}.
+ * For the original lift case: after Phase 1 (CT-1615) and SchemaInjection, every
+ * reactive lift-style computation in lowered output is the schema-injected
+ * *lift-applied* shape:
  *
  * ```ts
  *   __cfHelpers.lift(argSchema, resSchema, callback)(captures).for("result", true)
@@ -69,7 +76,7 @@ import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
  * register here too, converging CT-1585 and this stage into one hoisting phase
  * without restructuring.
  */
-export class LiftHoistingTransformer extends HelpersOnlyTransformer {
+export class BuilderCallHoistingTransformer extends HelpersOnlyTransformer {
   override transform(context: TransformationContext): ts.SourceFile {
     return hoistBuilderCalls(context.sourceFile, context);
   }
@@ -80,10 +87,19 @@ export class LiftHoistingTransformer extends HelpersOnlyTransformer {
  * this builder's hoistable unit and, if so, return the inner call to relocate
  * to module scope plus the name prefix to bind it under.
  *
- * `innerCall` is the expression bound to `const <prefix>_N`. The original
- * outer call is rewritten to `<prefix>_N(...outer arguments)`, preserving any
- * surrounding member chain (e.g. the `.for(...)` tail) since that hangs off the
- * outer call node, which keeps its position.
+ * `innerCall` is the expression bound to `const <prefix>_N`. How the original
+ * site is rewritten to reference that name depends on the builder shape:
+ *
+ *   - **Applied builders** (`lift`/`handler`): the visited call IS the inner
+ *     call applied to captures — `inner(captures)`. The default rewrite swaps
+ *     the callee for the hoisted name, leaving the captures arguments and any
+ *     surrounding member chain (e.g. the `.for(...)` tail) anchored in place.
+ *   - **Argument-position builders** (`pattern`/`patternTool`): the visited
+ *     call is the *enclosing* `mapWithPattern` call and the inner pattern call
+ *     sits in one of its arguments. The default callee-swap is wrong here — the
+ *     callee (`.mapWithPattern`) and the other arguments must survive untouched.
+ *     Such builders provide {@link rewriteSite} to replace just the argument
+ *     that held the inner call with the hoisted name.
  */
 interface HoistableBuilderSpec {
   readonly prefix: string;
@@ -91,6 +107,18 @@ interface HoistableBuilderSpec {
     call: ts.CallExpression,
     context: TransformationContext,
   ) => ts.CallExpression | undefined;
+  /**
+   * Optional: produce the replacement for the visited site once the inner call
+   * has been hoisted to `hoistedName`. Omit for applied builders, which take
+   * the default callee-swap. Provide it when the inner call sits in an argument
+   * position (the visited call is an enclosing call whose callee must survive).
+   */
+  readonly rewriteSite?: (
+    visited: ts.CallExpression,
+    hoistedName: ts.Identifier,
+    innerCall: ts.CallExpression,
+    factory: ts.NodeFactory,
+  ) => ts.Expression;
 }
 
 const LIFT_BUILDER: HoistableBuilderSpec = {
@@ -126,9 +154,35 @@ const HANDLER_BUILDER: HoistableBuilderSpec = {
   },
 };
 
+const PATTERN_BUILDER: HoistableBuilderSpec = {
+  prefix: SYNTHETIC_PATTERN_HOIST_PREFIX,
+  resolveHoistable: (call, context) => {
+    // Pattern is NOT applied: the bare `__cfHelpers.pattern(cb, inSchema,
+    // outSchema)` call sits in the FIRST argument of an enclosing
+    // `receiver.mapWithPattern(pattern(...), { params })` call (per-instance
+    // captures flow through the params object, the second argument). The
+    // visited node here is the `*WithPattern` call; the hoistable unit is its
+    // first argument. Because captures live in the params object, the bare
+    // pattern call is capture-free and safe to relocate to module scope.
+    return getWithPatternHoistablePatternCall(call, context.checker);
+  },
+  rewriteSite: (visited, hoistedName, _innerCall, factory) => {
+    // Replace ONLY the first argument (the pattern call) with the hoisted name,
+    // keeping the `.mapWithPattern` callee and the trailing params argument(s)
+    // intact. (Applied builders take the default callee-swap instead.)
+    return factory.updateCallExpression(
+      visited,
+      visited.expression,
+      visited.typeArguments,
+      [hoistedName, ...visited.arguments.slice(1)],
+    );
+  },
+};
+
 const HOISTABLE_BUILDERS: readonly HoistableBuilderSpec[] = [
   LIFT_BUILDER,
   HANDLER_BUILDER,
+  PATTERN_BUILDER,
 ];
 
 function hoistBuilderCalls(
@@ -136,7 +190,21 @@ function hoistBuilderCalls(
   context: TransformationContext,
 ): ts.SourceFile {
   const factory = context.factory;
-  const hoisted: ts.Statement[] = [];
+
+  // Hoisted consts produced while visiting the CURRENT top-level statement.
+  // They are flushed immediately before that statement (see below), not pooled
+  // into a single after-imports block. This keeps each hoisted const *after*
+  // every module-scoped binding declared in an earlier top-level statement —
+  // which the original use site necessarily followed, since you cannot
+  // reference a binding before its declaration in valid source. That ordering
+  // matters because `pattern(...)` INVOKES its callback eagerly at construction
+  // (unlike `lift`/`handler`, whose callbacks are stored and run lazily): a
+  // hoisted `const __cfPattern_N = pattern(cb)` whose `cb` reads a later
+  // module-scoped `const onRemoveFavorite = handler(...)` would otherwise throw
+  // a module-load TDZ `ReferenceError`. (Verified against
+  // patterns/system/favorites-manager.tsx; the after-imports placement that is
+  // safe for lift/handler is NOT safe for pattern.)
+  let pendingHoists: ts.Statement[] = [];
 
   // Per-file counters keyed by builder prefix. Explicit counters + literal
   // suffixes (NOT `factory.createUniqueName`, whose `.text` carries only the
@@ -171,7 +239,7 @@ function hoistBuilderCalls(
       ts.setOriginalNode(name, innerCall);
 
       // const <prefix>_N = <inner lift(...) call>;
-      hoisted.push(
+      pendingHoists.push(
         factory.createVariableStatement(
           undefined,
           factory.createVariableDeclarationList(
@@ -188,11 +256,16 @@ function hoistBuilderCalls(
         ),
       );
 
-      // Rewrite the site to apply the captures to the hoisted name. We reuse
-      // the visited outer call's own node identity (updateCallExpression) so
-      // any surrounding member chain — notably the `.for(...)` tail that
-      // ReactiveVariableForTransformer later expects on the result — stays
-      // anchored to the same position.
+      // Rewrite the site to reference the hoisted name. Applied builders take
+      // the default callee-swap: reuse the visited outer call's own node
+      // identity (updateCallExpression) so any surrounding member chain —
+      // notably the `.for(...)` tail that ReactiveVariableForTransformer later
+      // expects on the result — stays anchored to the same position.
+      // Argument-position builders (pattern/patternTool) override via
+      // `rewriteSite` to replace just the argument that held the inner call.
+      if (builder.rewriteSite) {
+        return builder.rewriteSite(visited, name, innerCall, factory);
+      }
       return factory.updateCallExpression(
         visited,
         name,
@@ -204,36 +277,20 @@ function hoistBuilderCalls(
     return visited;
   };
 
-  const transformed = ts.visitNode(sourceFile, visit) as ts.SourceFile;
-  if (hoisted.length === 0) {
-    return transformed;
+  // Visit each top-level statement, flushing the hoists it produced immediately
+  // BEFORE it. A statement's hoisted consts are placed after every preceding
+  // top-level statement — and therefore after every module-scoped binding the
+  // hoisted (eagerly-run) pattern callbacks reference, since those bindings had
+  // to precede the original use site. Among hoists from the same statement,
+  // post-order traversal already pushed inner/earlier calls first, so a hoist
+  // that references another hoist (e.g. `__cfPattern` whose callback calls
+  // `__cfLift`) sees it declared above.
+  const resultStatements: ts.Statement[] = [];
+  for (const statement of sourceFile.statements) {
+    pendingHoists = [];
+    const visitedStatement = ts.visitNode(statement, visit) as ts.Statement;
+    resultStatements.push(...pendingHoists, visitedStatement);
   }
 
-  const insertAt = findHoistInsertionIndex(transformed.statements);
-  return factory.updateSourceFile(transformed, [
-    ...transformed.statements.slice(0, insertAt),
-    ...hoisted,
-    ...transformed.statements.slice(insertAt),
-  ]);
-}
-
-/**
- * Insert hoisted consts immediately after the leading import declarations.
- * The hoisted lift const's initializer eagerly evaluates only self-contained
- * schema literals and constructs (does not invoke) its inline callback, so it
- * has no eager module-level identifier dependency that placement after imports
- * could leave undefined. (Verified by spike: a lift closing over a later
- * module-level `const` runs clean, because the reference lives in the
- * lazily-invoked callback body.)
- */
-function findHoistInsertionIndex(
-  statements: readonly ts.Statement[],
-): number {
-  let index = 0;
-  while (
-    index < statements.length && ts.isImportDeclaration(statements[index])
-  ) {
-    index += 1;
-  }
-  return index;
+  return factory.updateSourceFile(sourceFile, resultStatements);
 }

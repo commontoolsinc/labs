@@ -25,6 +25,30 @@ import { action, Default, pattern, Stream, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Default<string, "">>, savedContent: Writable<Default<string, "">>, onSaveFile: Stream<{
+    fileId: string;
+    content: string;
+}>): void {
+    const nextContent = content.get();
+    const lastSaved = savedContent.get();
+    const targetFileId = fileId.get().trim();
+    if (!targetFileId || nextContent === lastSaved)
+        return;
+    onSaveFile.send({ fileId: targetFileId, content: nextContent });
+}
+__cfHardenFn(flushLater);
+interface Input {
+    fileId: Writable<Default<string, "">>;
+    content: Writable<Default<string, "">>;
+    savedContent: Writable<Default<string, "">>;
+    onSaveFile: Stream<{
+        fileId: string;
+        content: string;
+    }>;
+}
+interface Output {
+    trigger: Stream<void>;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -74,30 +98,6 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
         flushLater(fileId, content, savedContent, onSaveFile);
     }, 10));
 });
-function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Default<string, "">>, savedContent: Writable<Default<string, "">>, onSaveFile: Stream<{
-    fileId: string;
-    content: string;
-}>): void {
-    const nextContent = content.get();
-    const lastSaved = savedContent.get();
-    const targetFileId = fileId.get().trim();
-    if (!targetFileId || nextContent === lastSaved)
-        return;
-    onSaveFile.send({ fileId: targetFileId, content: nextContent });
-}
-__cfHardenFn(flushLater);
-interface Input {
-    fileId: Writable<Default<string, "">>;
-    content: Writable<Default<string, "">>;
-    savedContent: Writable<Default<string, "">>;
-    onSaveFile: Stream<{
-        fileId: string;
-        content: string;
-    }>;
-}
-interface Output {
-    trigger: Stream<void>;
-}
 export default pattern((__cf_pattern_input) => {
     const fileId = __cf_pattern_input.key("fileId");
     const content = __cf_pattern_input.key("content");

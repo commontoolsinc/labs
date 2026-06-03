@@ -11,6 +11,81 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    user: {
+        name: string;
+        age: number;
+        email: string;
+        profile: {
+            bio: string;
+            location: string;
+            website: string;
+        };
+        settings: {
+            theme: string;
+            notifications: boolean;
+            privacy: string;
+        };
+    };
+    config: {
+        theme: {
+            colors: {
+                primary: string;
+                secondary: string;
+                background: string;
+            };
+            fonts: {
+                heading: string;
+                body: string;
+                mono: string;
+            };
+            spacing: {
+                small: number;
+                medium: number;
+                large: number;
+            };
+        };
+        features: {
+            darkMode: boolean;
+            animations: boolean;
+            betaFeatures: boolean;
+        };
+    };
+    data: {
+        items: Array<{
+            id: number;
+            name: string;
+            value: number;
+        }>;
+        totals: {
+            count: number;
+            sum: number;
+            average: number;
+        };
+    };
+    deeply: {
+        nested: {
+            structure: {
+                with: {
+                    many: {
+                        levels: {
+                            value: string;
+                            count: number;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    arrays: {
+        first: string[];
+        second: number[];
+        nested: Array<{
+            items: string[];
+            count: number;
+        }>;
+    };
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         user: {
@@ -299,81 +374,6 @@ const __cfLift_8 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.email.toLowerCase());
-interface State {
-    user: {
-        name: string;
-        age: number;
-        email: string;
-        profile: {
-            bio: string;
-            location: string;
-            website: string;
-        };
-        settings: {
-            theme: string;
-            notifications: boolean;
-            privacy: string;
-        };
-    };
-    config: {
-        theme: {
-            colors: {
-                primary: string;
-                secondary: string;
-                background: string;
-            };
-            fonts: {
-                heading: string;
-                body: string;
-                mono: string;
-            };
-            spacing: {
-                small: number;
-                medium: number;
-                large: number;
-            };
-        };
-        features: {
-            darkMode: boolean;
-            animations: boolean;
-            betaFeatures: boolean;
-        };
-    };
-    data: {
-        items: Array<{
-            id: number;
-            name: string;
-            value: number;
-        }>;
-        totals: {
-            count: number;
-            sum: number;
-            average: number;
-        };
-    };
-    deeply: {
-        nested: {
-            structure: {
-                with: {
-                    many: {
-                        levels: {
-                            value: string;
-                            count: number;
-                        };
-                    };
-                };
-            };
-        };
-    };
-    arrays: {
-        first: string[];
-        second: number[];
-        nested: Array<{
-            items: string[];
-            count: number;
-        }>;
-    };
-}
 // FIXTURE: parent-suppression-edge
 // Verifies: property access suppression -- sibling properties share a captured parent in a lift-applied computation
 //   {state.user.name} ... {state.user.age} → individual .key() or shared lift(...)({ user: {...} })

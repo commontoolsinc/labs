@@ -17,6 +17,50 @@ interface Spot {
 interface State {
     spots: Spot[];
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const spot = __cf_pattern_input.key("element");
+    const sn = spot.key("spotNumber");
+    return <li>{sn}</li>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Spot"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Spot: {
+            type: "object",
+            properties: {
+                spotNumber: {
+                    type: "string"
+                }
+            },
+            required: ["spotNumber"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-destructure-alias-action-collision
 // Verifies: destructured alias inside map callback body is lowered to explicit key() access
 //   const { spotNumber: sn } = spot → const sn = spot.key("spotNumber")
@@ -25,50 +69,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<ul>
-        {state.key("spots").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const spot = __cf_pattern_input.key("element");
-                const sn = spot.key("spotNumber");
-                return <li>{sn}</li>;
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Spot"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Spot: {
-                        type: "object",
-                        properties: {
-                            spotNumber: {
-                                type: "string"
-                            }
-                        },
-                        required: ["spotNumber"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {state.key("spots").mapWithPattern(__cfPattern_1, {})}
       </ul>),
     };
 }, {

@@ -11,6 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const double = __cfHardenFn((x: number) => x * 2);
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -32,7 +33,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => double(state.count + 1));
-const double = __cfHardenFn((x: number) => x * 2);
 // FIXTURE: pattern-local-helper-call-roots
 // Verifies: top-level ordinary local helper calls with reactive inputs are
 //   lifted as whole calls, while plain inputs stay plain.

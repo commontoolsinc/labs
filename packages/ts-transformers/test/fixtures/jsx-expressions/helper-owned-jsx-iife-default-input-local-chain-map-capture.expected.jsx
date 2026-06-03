@@ -18,6 +18,31 @@ import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Entry {
+    id: string;
+    name: string;
+    type: "file" | "folder";
+    children?: Entry[];
+    contentType?: string;
+}
+function findChildren(tree: readonly Entry[], path: readonly string[]): readonly Entry[] {
+    let current: readonly Entry[] = tree;
+    for (const name of Array.isArray(path) ? path : []) {
+        const folder = current.find((entry: Entry) => entry.name === name && entry.type === "folder");
+        if (!folder || !folder.children)
+            return [];
+        current = folder.children;
+    }
+    return current;
+}
+__cfHardenFn(findChildren);
+interface Input {
+    entries: Default<Entry[], [
+    ]>;
+}
+interface Output {
+    [UI]: VNode;
+}
 const __cfHandler_1 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -251,31 +276,116 @@ const __cfHandler_4 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, (_, { handleOpenFile, item }) => handleOpenFile.send({ item }));
-interface Entry {
-    id: string;
-    name: string;
-    type: "file" | "folder";
-    children?: Entry[];
-    contentType?: string;
-}
-function findChildren(tree: readonly Entry[], path: readonly string[]): readonly Entry[] {
-    let current: readonly Entry[] = tree;
-    for (const name of Array.isArray(path) ? path : []) {
-        const folder = current.find((entry: Entry) => entry.name === name && entry.type === "folder");
-        if (!folder || !folder.children)
-            return [];
-        current = folder.children;
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const handleNavigateInto = __cf_pattern_input.key("params", "handleNavigateInto");
+    const handleOpenFile = __cf_pattern_input.key("params", "handleOpenFile");
+    const isFolder = item.key("type") === "folder";
+    const isOpenable = __cfHelpers.when({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, !isFolder &&
+        !!item.key("contentType"), item.key("contentType") !== "binary").for("isOpenable", true);
+    return (<button type="button" onClick={isFolder
+            ? __cfHandler_3({
+                handleNavigateInto: handleNavigateInto,
+                item: {
+                    name: item.key("name")
+                }
+            }) : isOpenable
+            ? __cfHandler_4({
+                handleOpenFile: handleOpenFile,
+                item: item
+            }) : undefined}>
+                {item.key("name")}
+              </button>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        },
+        params: {
+            type: "object",
+            properties: {
+                handleNavigateInto: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"],
+                    asCell: ["stream"]
+                },
+                handleOpenFile: {
+                    type: "object",
+                    properties: {
+                        item: {
+                            $ref: "#/$defs/Entry"
+                        }
+                    },
+                    required: ["item"],
+                    asCell: ["stream"]
+                }
+            },
+            required: ["handleNavigateInto", "handleOpenFile"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                },
+                type: {
+                    "enum": ["file", "folder"]
+                },
+                children: {
+                    $ref: "#/$defs/AnonymousType_1"
+                },
+                contentType: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name", "type"]
+        },
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
+        }
     }
-    return current;
-}
-__cfHardenFn(findChildren);
-interface Input {
-    entries: Default<Entry[], [
-    ]>;
-}
-interface Output {
-    [UI]: VNode;
-}
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const path = new Writable<string[]>([], {
@@ -373,116 +483,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ path: path }), [])).for("p", true) as string[];
                 const unsorted = findChildren(tree, p) as Entry[];
                 const items = __cfLift_2({ unsorted: unsorted }).for("items", true);
-                return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const item = __cf_pattern_input.key("element");
-                    const handleNavigateInto = __cf_pattern_input.key("params", "handleNavigateInto");
-                    const handleOpenFile = __cf_pattern_input.key("params", "handleOpenFile");
-                    const isFolder = item.key("type") === "folder";
-                    const isOpenable = __cfHelpers.when({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, !isFolder &&
-                        !!item.key("contentType"), item.key("contentType") !== "binary").for("isOpenable", true);
-                    return (<button type="button" onClick={isFolder
-                            ? __cfHandler_3({
-                                handleNavigateInto: handleNavigateInto,
-                                item: {
-                                    name: item.key("name")
-                                }
-                            }) : isOpenable
-                            ? __cfHandler_4({
-                                handleOpenFile: handleOpenFile,
-                                item: item
-                            }) : undefined}>
-                {item.key("name")}
-              </button>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Entry"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                handleNavigateInto: {
-                                    type: "object",
-                                    properties: {
-                                        name: {
-                                            type: "string"
-                                        }
-                                    },
-                                    required: ["name"],
-                                    asCell: ["stream"]
-                                },
-                                handleOpenFile: {
-                                    type: "object",
-                                    properties: {
-                                        item: {
-                                            $ref: "#/$defs/Entry"
-                                        }
-                                    },
-                                    required: ["item"],
-                                    asCell: ["stream"]
-                                }
-                            },
-                            required: ["handleNavigateInto", "handleOpenFile"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                },
-                                name: {
-                                    type: "string"
-                                },
-                                type: {
-                                    "enum": ["file", "folder"]
-                                },
-                                children: {
-                                    $ref: "#/$defs/AnonymousType_1"
-                                },
-                                contentType: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "name", "type"]
-                        },
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
+                return items.mapWithPattern(__cfPattern_1, {
                     handleNavigateInto: handleNavigateInto,
                     handleOpenFile: handleOpenFile
                 });

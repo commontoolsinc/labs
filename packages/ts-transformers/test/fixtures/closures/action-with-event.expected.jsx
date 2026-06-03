@@ -11,6 +11,12 @@ import { Cell, pattern, action } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface MyEvent {
+    data: string;
+}
+interface State {
+    value: Cell<string>;
+}
 const __cfHandler_1 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -29,12 +35,6 @@ const __cfHandler_1 = __cfHelpers.handler({
     },
     required: ["value"]
 } as const satisfies __cfHelpers.JSONSchema, (e, { value }) => value.set(e.data));
-interface MyEvent {
-    data: string;
-}
-interface State {
-    value: Cell<string>;
-}
 // FIXTURE: action-with-event
 // Verifies: action() with an inline-annotated event parameter generates a typed event schema
 //   action((e: MyEvent) => value.set(e.data)) → handler(MyEvent schema, captureSchema, (e, { value }) => ...)({ value })

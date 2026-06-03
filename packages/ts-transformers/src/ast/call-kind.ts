@@ -108,6 +108,20 @@ export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
  */
 export const SYNTHETIC_HANDLER_HOIST_PREFIX = "__cfHandler";
 
+/**
+ * Prefix for the module-scope const a hoisted `pattern(...)` call is bound to
+ * (CT-1655). Pattern's hoist differs from lift/handler: the bare
+ * `__cfHelpers.pattern(cb, inputSchema, outputSchema)` call sits in the FIRST
+ * argument of an enclosing `receiver.mapWithPattern(pattern(...), { params })`
+ * call (per-instance captures flow through the params object, the second
+ * argument). The bare pattern call is hoisted to
+ * `const __cfPattern_N = __cfHelpers.pattern(...)` and the `*WithPattern` call's
+ * first argument is rewritten to `__cfPattern_N`. The top-level
+ * `export default pattern(...)` is a direct call (not a `*WithPattern`
+ * argument) and is NOT hoisted.
+ */
+export const SYNTHETIC_PATTERN_HOIST_PREFIX = "__cfPattern";
+
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 
 export interface ArrayMethodAccessKind {
@@ -330,6 +344,50 @@ export function getPatternToolCallbackArgument(
   return callbackArg
     ? resolveCallbackFunctionExpression(callbackArg, checker)
     : undefined;
+}
+
+/**
+ * If `call` is a lowered reactive array-method call in the `*WithPattern`
+ * family — `mapWithPattern` / `filterWithPattern` / `flatMapWithPattern`, and
+ * any future lowered array method registered with `lowered: true` — whose FIRST
+ * argument is a bare `pattern(...)` builder call, return that inner pattern call
+ * (the hoistable unit). Otherwise return undefined. Recognition keys on the
+ * array-method family's `lowered` flag, not a hardcoded method name, so new
+ * `*WithPattern` lowerings are picked up automatically. The canonical shape is
+ * `receiver.mapWithPattern(pattern(...), { params })`.
+ *
+ * This is how the hoisting stage finds the pattern call to relocate (CT-1655):
+ * unlike lift/handler, the pattern call is not *applied* — it sits in the first
+ * argument position of the enclosing `*WithPattern` call, with per-instance
+ * captures threaded through that call's SECOND argument (the params object).
+ * So the bare `pattern(...)` is capture-free and safe to evaluate once at
+ * module scope. The top-level `export default pattern(...)` is a direct call,
+ * not a `*WithPattern` argument, so it is naturally excluded.
+ */
+export function getWithPatternHoistablePatternCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.CallExpression | undefined {
+  const callee = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(callee)) {
+    return undefined;
+  }
+  const accessKind = getArrayMethodAccessKindByName(callee.name.text);
+  if (!accessKind?.lowered) {
+    return undefined;
+  }
+  const firstArg = call.arguments[0];
+  if (!firstArg) {
+    return undefined;
+  }
+  const patternCall = stripWrappers(firstArg);
+  if (
+    !ts.isCallExpression(patternCall) ||
+    !isPatternBuilderCall(patternCall, checker)
+  ) {
+    return undefined;
+  }
+  return patternCall;
 }
 
 export function getCapabilitySummaryCallbackArgument(

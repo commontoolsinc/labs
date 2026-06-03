@@ -11,6 +11,13 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    items: string[];
+    index: number;
+    matrix: number[][];
+    row: number;
+    col: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: string[];
@@ -98,13 +105,6 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.matrix[state.row]![state.col]);
-interface State {
-    items: string[];
-    index: number;
-    matrix: number[][];
-    row: number;
-    col: number;
-}
 // FIXTURE: element-access-simple
 // Verifies: dynamic element access on reactive arrays is wrapped in a lift-applied computation
 //   state.items[state.index]            → lift(({state}) => state.items[state.index])({ items, index })
