@@ -47,7 +47,6 @@ import {
   detachDatabase,
   ensureTables,
   runQuery,
-  runWrite,
   setQueryOnly,
 } from "./sqlite/exec.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
