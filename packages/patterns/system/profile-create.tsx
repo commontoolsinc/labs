@@ -98,20 +98,15 @@ export type TrustedProfileLink = Cfc<
   }
 >;
 
-// The home `profiles` list: both the array and its elements are append-gated by
-// `submitProfileCreation` behind the trusted create surface/action.
-export type TrustedProfileList = Cfc<
-  WriteAuthorizedBy<TrustedProfileLink[], typeof submitProfileCreation>,
-  {
-    addIntegrity: ["profile-link"];
-    uiContract: {
-      helper: "UiAction";
-      action: typeof TRUSTED_PROFILE_CREATE_ACTION;
-      trustedPattern: typeof TRUSTED_PROFILE_CREATE_SURFACE;
-      requiredEventIntegrity: [typeof TRUSTED_PROFILE_CREATE_SURFACE];
-    };
-  }
->;
+// The home `profiles` list: a plain array whose *elements* are append-gated by
+// `submitProfileCreation` behind the trusted create surface/action. Protection
+// lives on the elements, NOT the array container: the element contract is what
+// gates untrusted writes (an untrusted `.set([x])` writes element 0, which is
+// rejected), while leaving the container contract-free means appending a second
+// element doesn't re-trigger a container-level trusted-event requirement that
+// the per-create event can't satisfy (CFC exempts the *initial* container write
+// but not later modifications — see prepare.ts verifyTrustedEventRequirements).
+export type TrustedProfileList = TrustedProfileLink[];
 
 // A profile link written via the trusted picker surface (default / MRU writes).
 type PickerProfileLink<Binding, Action extends string> = Cfc<
@@ -135,26 +130,13 @@ export type TrustedDefaultProfile =
   >
   | undefined;
 
-// The home `mru` list: both the array and its elements are write-gated by
-// `setMruProfile` behind the trusted picker surface/action.
-export type TrustedProfileMru = Cfc<
-  WriteAuthorizedBy<
-    PickerProfileLink<
-      typeof setMruProfile,
-      typeof TRUSTED_PROFILE_SET_MRU_ACTION
-    >[],
-    typeof setMruProfile
-  >,
-  {
-    addIntegrity: ["profile-link"];
-    uiContract: {
-      helper: "UiAction";
-      action: typeof TRUSTED_PROFILE_SET_MRU_ACTION;
-      trustedPattern: typeof TRUSTED_PROFILE_PICKER_SURFACE;
-      requiredEventIntegrity: [typeof TRUSTED_PROFILE_PICKER_SURFACE];
-    };
-  }
->;
+// The home `mru` list: a plain array whose *elements* are write-gated by
+// `setMruProfile` behind the trusted picker surface/action (element-level
+// protection, same rationale as TrustedProfileList).
+export type TrustedProfileMru = PickerProfileLink<
+  typeof setMruProfile,
+  typeof TRUSTED_PROFILE_SET_MRU_ACTION
+>[];
 
 export type ProfileCreateInput = {
   profiles: Writable<ProfileHomeOutput[]>;

@@ -400,13 +400,20 @@ describe("profile owner CFC policy", () => {
     try {
       const homePattern = await compileHomePattern(runtime);
       const rootSchema = homePattern.resultSchema as JSONSchema;
-      const profileSchema = resolveLocalSchemaRef(
+      // Protection lives on the array *elements* (TrustedProfileLink), not the
+      // array container — so resolve `profiles.items` and assert there.
+      const profilesSchema = resolveLocalSchemaRef(
         rootSchema,
         (rootSchema as { properties?: Record<string, JSONSchema> }).properties
           ?.profiles ?? {},
+      ) as { type?: string; items?: JSONSchema };
+      expect(profilesSchema.type).toBe("array");
+      const itemSchema = resolveLocalSchemaRef(
+        rootSchema,
+        profilesSchema.items ?? {},
       ) as { ifc?: { addIntegrity?: unknown[]; writeAuthorizedBy?: unknown } };
-      expect(profileSchema.ifc?.addIntegrity).toContain("profile-link");
-      expect(profileSchema.ifc?.writeAuthorizedBy).toBeDefined();
+      expect(itemSchema.ifc?.addIntegrity).toContain("profile-link");
+      expect(itemSchema.ifc?.writeAuthorizedBy).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
