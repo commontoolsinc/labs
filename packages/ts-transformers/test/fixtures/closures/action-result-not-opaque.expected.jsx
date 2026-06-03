@@ -16,6 +16,30 @@ import { action, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+    count.set(count.get() + 1);
+});
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+    count.set(count.get() - 1);
+});
 interface State {
     label: string;
 }
@@ -28,32 +52,10 @@ export default pattern((__cf_pattern_input) => {
     const count = new Writable(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("count", true);
-    const increment = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            count: {
-                type: "number",
-                asCell: ["cell"]
-            }
-        },
-        required: ["count"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
-        count.set(count.get() + 1);
-    })({
+    const increment = __cfHandler_1({
         count: count
     }).for({ stream: "increment" }, true);
-    const decrement = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            count: {
-                type: "number",
-                asCell: ["cell"]
-            }
-        },
-        required: ["count"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
-        count.set(count.get() - 1);
-    })({
+    const decrement = __cfHandler_2({
         count: count
     }).for({ stream: "decrement" }, true);
     return {

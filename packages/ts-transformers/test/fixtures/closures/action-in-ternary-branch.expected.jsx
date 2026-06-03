@@ -18,6 +18,18 @@ import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        isEditing: {
+            type: "boolean",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["isEditing"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
+    isEditing.set(true);
+});
 const __cfLift_1 = __cfHelpers.lift<{
     card: {
         description: string;
@@ -60,18 +72,7 @@ export default pattern((__cf_pattern_input) => {
     const isEditing = new Cell(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("isEditing", true);
-    const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            isEditing: {
-                type: "boolean",
-                asCell: ["writeonly"]
-            }
-        },
-        required: ["isEditing"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
-        isEditing.set(true);
-    })({
+    const startEditing = __cfHandler_1({
         isEditing: isEditing
     }).for({ stream: "startEditing" }, true);
     const hasDescription = __cfLift_1({ card: {

@@ -11,6 +11,16 @@ import { Cell, pattern, action } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => count.set(count.get() + 1));
 interface State {
     count: Cell<number>;
 }
@@ -20,16 +30,7 @@ interface State {
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
-        inc: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                count: {
-                    type: "number",
-                    asCell: ["cell"]
-                }
-            },
-            required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => count.set(count.get() + 1))({
+        inc: __cfHandler_1({
             count: count
         }).for({ stream: ["__patternResult", "inc"] }, true)
     };

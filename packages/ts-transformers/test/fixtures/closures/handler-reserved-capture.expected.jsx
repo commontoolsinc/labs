@@ -11,6 +11,15 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        __cf_handler_event: {
+            type: "string"
+        }
+    },
+    required: ["__cf_handler_event"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event_1, { __cf_handler_event }) => __cf_handler_event);
 interface State {
     label: string;
 }
@@ -21,15 +30,7 @@ interface State {
 export default pattern((state) => {
     const __cf_handler_event = state.key("label");
     return {
-        [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                __cf_handler_event: {
-                    type: "string"
-                }
-            },
-            required: ["__cf_handler_event"]
-        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event_1, { __cf_handler_event }) => __cf_handler_event)({
+        [UI]: (<button type="button" onClick={__cfHandler_1({
             __cf_handler_event: __cf_handler_event
         })}>
         Echo

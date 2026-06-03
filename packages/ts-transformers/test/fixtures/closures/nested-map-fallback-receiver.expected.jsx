@@ -11,6 +11,27 @@ import { action, Default, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler({
+    type: "object",
+    properties: {
+        name: {
+            type: "string"
+        }
+    },
+    required: ["name"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        assignName: {
+            type: "string",
+            asCell: [{
+                    kind: "cell",
+                    scope: "space"
+                }]
+        }
+    },
+    required: ["assignName"]
+} as const satisfies __cfHelpers.JSONSchema, (p, { assignName }) => assignName.set(p.name));
 const __cfLift_1 = __cfHelpers.lift<{
     people: __cfHelpers.PerSpace<__cfHelpers.Cell<Person[]>>;
 }, readonly Person[]>({
@@ -56,6 +77,31 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get());
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        setAssign: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"],
+            asCell: ["stream"]
+        },
+        p: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["setAssign", "p"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { setAssign, p }) => setAssign.send({ name: p.name }));
 interface Person {
     name: string;
 }
@@ -104,27 +150,7 @@ export default pattern((__cf_pattern_input) => {
         type: "string",
         scope: "space"
     } as const satisfies __cfHelpers.JSONSchema).for("assignName", true);
-    const setAssign = __cfHelpers.handler({
-        type: "object",
-        properties: {
-            name: {
-                type: "string"
-            }
-        },
-        required: ["name"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            assignName: {
-                type: "string",
-                asCell: [{
-                        kind: "cell",
-                        scope: "space"
-                    }]
-            }
-        },
-        required: ["assignName"]
-    } as const satisfies __cfHelpers.JSONSchema, (p, { assignName }) => assignName.set(p.name))({
+    const setAssign = __cfHandler_1({
         assignName: assignName
     }).for({ stream: "setAssign" }, true);
     return {
@@ -138,31 +164,7 @@ export default pattern((__cf_pattern_input) => {
             {(__cfLift_1({ people: people }) ?? []).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                         const p = __cf_pattern_input.key("element");
                         const setAssign = __cf_pattern_input.key("params", "setAssign");
-                        return (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-                            type: "object",
-                            properties: {
-                                setAssign: {
-                                    type: "object",
-                                    properties: {
-                                        name: {
-                                            type: "string"
-                                        }
-                                    },
-                                    required: ["name"],
-                                    asCell: ["stream"]
-                                },
-                                p: {
-                                    type: "object",
-                                    properties: {
-                                        name: {
-                                            type: "string"
-                                        }
-                                    },
-                                    required: ["name"]
-                                }
-                            },
-                            required: ["setAssign", "p"]
-                        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { setAssign, p }) => setAssign.send({ name: p.name }))({
+                        return (<button type="button" onClick={__cfHandler_2({
                             setAssign: setAssign,
                             p: {
                                 name: p.key("name")

@@ -11,6 +11,24 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                counter: {
+                    type: "number",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["counter"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { state }) => state.counter.set(state.counter.get() + 1));
 interface State {
     counter: Cell<number>;
 }
@@ -20,24 +38,7 @@ interface State {
 // Context: Event param is named _ (unused); transformer emits a generic event schema placeholder
 export default pattern((state) => {
     return {
-        [UI]: (<button type="button" onClick={__cfHelpers.handler({
-            type: "unknown"
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        counter: {
-                            type: "number",
-                            asCell: ["cell"]
-                        }
-                    },
-                    required: ["counter"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (_, { state }) => state.counter.set(state.counter.get() + 1))({
+        [UI]: (<button type="button" onClick={__cfHandler_1({
             state: {
                 counter: state.key("counter")
             }

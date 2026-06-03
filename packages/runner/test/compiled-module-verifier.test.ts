@@ -83,6 +83,30 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts a hoisted handler(...) call at module scope", () => {
+    // CT-1655: extends CT-1644's whole-call hoisting to `handler`. A reactive
+    // handler (or an `action` lowered to one) is hoisted to a module-scope
+    // const `__cfHandler_N = handler(eventSchema, stateSchema, cb)`, with the
+    // captures applied at the original site. The 3-arg form puts the callback
+    // at index 2; the verifier must accept this trusted-builder call at module
+    // scope and verify the callback there (previously the handler call only
+    // appeared inline inside a pattern/JSX body, unverified at module scope).
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfHandler_1 = (0, commonfabric_1.handler)(false, false, (_event, { count }) => count.set(count.get() + 1));
+    exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
+      inc: __cfHandler_1({ count: __cf_pattern_input.key("count") }),
+    }));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts a previously parsed compiled bundle", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

@@ -11,6 +11,36 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            value: {
+                                type: "number"
+                            }
+                        },
+                        required: ["value"]
+                    }
+                },
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["items", "multiplier"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => {
+    const scaled = state.items.map((item) => item.value * state.multiplier);
+    console.log(scaled);
+});
 interface State {
     items: Array<{
         value: number;
@@ -23,36 +53,7 @@ interface State {
 // Context: .map() on a plain array inside a handler remains a normal JS .map(), not a reactive transform
 export default pattern((state) => {
     return {
-        [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    value: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["value"]
-                            }
-                        },
-                        multiplier: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "multiplier"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => {
-            const scaled = state.items.map((item) => item.value * state.multiplier);
-            console.log(scaled);
-        })({
+        [UI]: (<button type="button" onClick={__cfHandler_1({
             state: {
                 items: state.key("items"),
                 multiplier: state.key("multiplier")
