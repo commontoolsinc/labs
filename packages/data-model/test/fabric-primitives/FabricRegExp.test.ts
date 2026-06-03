@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
 import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
-import { isConvertibleNativeInstance } from "../../src/native-instance-utils.ts";
+import { isConvertibleNativeInstance } from "../../src/native-conversion.ts";
 import {
   isFabricCompatible,
   shallowFabricFromNativeValue,

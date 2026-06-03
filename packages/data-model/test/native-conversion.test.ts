@@ -7,25 +7,25 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
   RECONSTRUCT,
-} from "../../src/interface.ts";
-import { FabricError } from "../../src/fabric-instances/FabricError.ts";
-import { FabricMap } from "../../src/fabric-instances/FabricMap.ts";
-import { FabricSet } from "../../src/fabric-instances/FabricSet.ts";
-import { isConvertibleNativeInstance } from "../../src/native-instance-utils.ts";
-import { nativeFromFabricValue } from "../../src/native-conversion.ts";
-import { FrozenMap, FrozenSet } from "../../src/frozen-builtins.ts";
+} from "../src/interface.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
+import { FabricSet } from "../src/fabric-instances/FabricSet.ts";
+import { isConvertibleNativeInstance } from "../src/native-conversion.ts";
+import { nativeFromFabricValue } from "../src/native-conversion.ts";
+import { FrozenMap, FrozenSet } from "../src/frozen-builtins.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../../src/native-type-tags.ts";
-import { UnknownValue } from "../../src/fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "../../src/fabric-instances/ProblematicValue.ts";
-import { BaseFabricInstance } from "../../src/fabric-instances/BaseFabricInstance.ts";
-import { deepFreeze, isDeepFrozen } from "../../src/deep-freeze.ts";
-import { DummyReconstructionContext } from "./fixtures.ts";
+} from "../src/native-type-tags.ts";
+import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
+import { BaseFabricInstance } from "../src/fabric-instances/BaseFabricInstance.ts";
+import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
+import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 
-describe("native-instance-utils", () => {
+describe("native-conversion", () => {
   describe("nativeFromFabricValue()", () => {
     it("unwraps `FabricError` in nested object", () => {
       const se = FabricError.fromNativeError(new Error("deep"));
