@@ -10,22 +10,23 @@
 //   error } back; re-runs when its `reactOn`/inputs change (it is an effect).
 //
 // Writes are NOT here — they are the imperative `SqliteDb.exec` (cell.ts), which
-// folds a `sqlite` op into the caller's commit (atomic with cell writes). See
+// folds a `sqlite` op into the caller's commit (atomic with cell writes), and
+// shares param encoding via `encodeSqliteParams` (cell.ts). See
 // docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
 //
-// Known V1 gaps (tracked in IMPLEMENTATION_LOG): no multi-tab mutex / cancel /
-// narrowest-read-scope (cf. fetch-data.ts); `_cf_link` decode of result rows is
-// not yet wired at runtime (encode on write is; see Piece A).
+// `_cf_link` result columns ARE decoded here when the transformer injects a
+// `rowSchema` (asCell columns -> sigil objects; see decodeRowLinkColumns). The
+// multi-tab write mutex is the handle-cell `rev` bump in db.exec (cell.ts), not
+// this read path.
 
-import { type Cell, createCell, isCell } from "../cell.ts";
+import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
-import { encodeCfLinkValue, parseCfLinkToSigil } from "./sqlite/cf-link.ts";
-import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
+import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 
 type SqliteDbRef = {
   id: string;
@@ -55,46 +56,6 @@ function makeResultCell<T>(
   setPatternCell(cell, parentCell.key("pattern"));
   cell.sync();
   return cell as Cell<T>;
-}
-
-/**
- * Encode bound params for the wire: a cell bound to a `_cf_link` parameter is
- * turned into a sigil-link string; a cell bound elsewhere throws (cells may only
- * be persisted via link columns). For positional params we use the SQL's named
- * columns when available; lacking column info, a cell param is treated as a link
- * (encoded) — refined once column mapping lands.
- */
-function encodeParams(sql: string, params: WireParams): WireParams {
-  if (params === undefined) return undefined;
-  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
-    if (isCell(value)) {
-      if (!isLinkCol) {
-        throw new TypeError("cells may only be bound to _cf_link columns");
-      }
-      return encodeCfLinkValue(value);
-    }
-    return value;
-  };
-  if (Array.isArray(params)) {
-    // Map positional params to the INSERT column list when present.
-    const cols = parseInsertColumns(sql);
-    return params.map((v, i) =>
-      encodeOne(v, cols ? isCfLinkColumn(cols[i] ?? "") : isCell(v))
-    );
-  }
-  const rec = params as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(rec)) {
-    out[k] = encodeOne(v, isCfLinkColumn(k));
-  }
-  return out;
-}
-
-/** Best-effort parse of the column list from `INSERT INTO t (a, b, c) ...`. */
-function parseInsertColumns(sql: string): string[] | undefined {
-  const m = sql.match(/insert\s+into\s+[^(]+\(([^)]*)\)/i);
-  if (!m) return undefined;
-  return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
 }
 
 function readDbRef(value: unknown): SqliteDbRef {
@@ -234,7 +195,7 @@ export function sqliteQuery(
     const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
     let params: WireParams;
     try {
-      params = encodeParams(inputs.sql, inputs.params);
+      params = encodeSqliteParams(inputs.sql, inputs.params);
     } catch (error) {
       result.withTx(tx).set({ pending: false, error: errMsg(error) });
       return;

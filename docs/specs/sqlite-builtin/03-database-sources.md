@@ -99,63 +99,69 @@ transaction. When implemented, VM-file writes will run as a post-commit effect
 commit. This limitation is intentional and called out so callers don't assume
 cross-store atomicity they won't get.
 
-## 03.3 On-disk file, injected via `cf` (stub)
+## 03.3 On-disk file, injected via `cf` (read-only v1)
 
-**Status: stub (not implemented).** A database that is a **plain file on disk**,
-opaque to the pattern. The pattern does **not** select it with the builder;
-instead it declares a database **input** (typed `SqliteDb`) and an operator
-connects a file to it via `cf`:
+**Status: implemented (read-only v1).** A database that is a **plain file on
+disk**, opaque to the pattern. The pattern does **not** select it with the
+builder; instead it declares a database **input** (typed `SqliteDb`) and an
+operator connects a file to it via `cf`:
 
 ```tsx
 // The pattern is source-agnostic — it just consumes whatever is wired into `db`.
 pattern<{ db: SqliteDb }>(({ db }) => {
-  const rows = db.query("SELECT … FROM lookup", { reactOn: db });
+  const rows = db.query<{ name: string }>("SELECT name FROM lookup");
   // Until connected, `rows.pending` stays true (Section 05 / Example 07-#5).
+  // `reactOn` is omitted for injected sources in v1 (deferred — Q12).
 });
 ```
 
 ```bash
 # Operator wires an on-disk SQLite file into the piece's `db` input.
-cf piece link <piece-id> db sqlite:/abs/path/reference-data.db
+# Source first (the sqlite: file), target second (the piece field).
+cf piece link sqlite:/abs/path/reference-data.db <piece-id>/db
 ```
 
-How the `sqlite:` scheme works (it reuses `cf piece link`'s source parsing —
-[`parseLink`](../../../packages/cli/commands/piece.ts) — alongside existing
-schemes like `of:`, `did:key:`, and the `data:` URI links the runtime already
-resolves):
+How the `sqlite:` scheme works
+([`parseSqliteSource`/`deriveDiskHandleId`](../../../packages/cli/lib/sqlite-source.ts),
+[`linkSqliteDiskSource`](../../../packages/cli/lib/piece.ts); the `cf piece link`
+action detects the scheme before its normal `parseLink`):
 
 1. `cf` recognizes the `sqlite:` scheme and **create-if-absents a handle cell**
-   whose id is **content-derived from `(space DID, absolute path)`** — the same
-   content-addressing as
-   [`createRef`](../../../packages/runner/src/create-ref.ts). The cell lives in
-   an operator/service space; the source descriptor (`{ disk: { path } }`) is
-   stored as server-side registration state (webhook-ingress style), not in the
-   cell's readable value.
-2. `cf` then writes a **normal sigil link** from the piece's `db` input field to
-   that handle cell. Because the id is deterministic, this is a genuine
-   cell-to-cell link, not a special value-write — and linking the same path
-   twice resolves to the same handle, so multiple pieces share one handle cell.
+   whose id is **content-derived from `(space DID, absolute path)`** via
+   [`createRef`](../../../packages/runner/src/create-ref.ts). As built the handle
+   cell lives **in the piece's own space** at that derived id (so its entity id,
+   its `value.id`, and the server registry key are the same string); the source
+   descriptor (`{ disk: { path } }`) is **server-side registration state keyed by
+   `(space, id)`** (`DiskSourceRegistry`), never the cell's readable value.
+2. `cf` registers the source over the session
+   (`sqlite.register-disk-source` → the server canonicalizes the path and
+   rejects any path inside the engine store directory), then writes a **normal
+   sigil link** from the piece's `db` input field to the handle cell
+   (`manager.link`). Because the id is deterministic, this is a genuine
+   cell-to-cell link, and linking the same path twice resolves to the same
+   handle, so multiple pieces share one handle cell.
 
 **Pending-until-connected** falls out of reactivity: an unpopulated `db` input
 is an empty cell, so `sqliteQuery` reports `pending: true`; when `cf` writes the
 link, the input cell changes, the query action re-runs, and it connects. (A
 populated-but-unreachable database surfaces `error` instead.)
 
-v1 contract: the `sqlite:` registration is **stubbed** — the server returns
-`not-implemented` until on-disk attach + the `cf` command exist. Like the VM
-source, an on-disk file the server can co-locate with the space *could* be
-ATTACHed and made atomic; whether to require co-location is an open question
-([08-open-questions.md](./08-open-questions.md)). Until then, treat on-disk
-writes as non-atomic post-commit effects. Reactive re-query for injected
-service-space handles also carries a cross-space dirty-signal wrinkle (Section
-[05](./05-reactivity.md)); injected datasets are usually read-mostly
-(`reactOn` omitted), so this does not block v1.
+v1 behavior: the server attaches the registered file **read-only** (PRAGMA
+`query_only` for the synchronous attach→op→detach window) instead of the
+cell-derived db, and **skips migration** (the on-disk db owns its schema).
+**Writes are rejected:** a folded `sqlite` op against a registered injected
+source is refused before any attach — on-disk write/atomicity is gated on
+co-location (Q13/Q14), and `reactOn` for injected handles carries a cross-space
+dirty-signal wrinkle (Q12). Injected datasets are read-mostly, so this does not
+block v1. Authorization of the registration verb (operator vs. pattern) and
+confining injected paths to an allowlist await CFC labels
+([08-open-questions.md](./08-open-questions.md) Q18).
 
 ## Source comparison
 
 | | Cell-derived (03.1) | VM file (03.2) | On-disk via `cf` (03.3) |
 | --- | --- | --- | --- |
-| v1 status | **Implemented** | Stub (builder) | Stub (injected input) |
+| v1 status | **Implemented** | Stub (builder) | **Implemented (read-only)** |
 | Chosen by | Pattern (`sqliteDatabase()`) | Pattern (`sqliteDatabase({ vm })`) | Operator (`cf piece link sqlite:`) |
 | Identity | Handle cell entity id | VM handle + path | Handle cell id from `(space, path)` |
 | Co-located with space | Yes | No | Maybe |

@@ -430,12 +430,55 @@ const cellMethods = new Set<
 ]);
 
 /** Best-effort parse of the column list from `INSERT INTO t (a, b, c) ...`,
- *  used to map positional `_cf_link` params (mirrors sqlite-builtins.ts;
- *  consolidate when the reactive sqliteExecute node is removed). */
+ *  used to map positional `_cf_link` params. */
 function parseSqliteInsertColumns(sql: string): string[] | undefined {
   const m = sql.match(/insert\s+into\s+[^(]+\(([^)]*)\)/i);
   if (!m) return undefined;
   return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
+}
+
+/**
+ * Encode SQLite bind params for the wire: a cell bound to a `_cf_link` column is
+ * encoded to an absolute sigil-link string; a cell bound to any other column
+ * throws; an `undefined` value throws (the pending-value guard — `null` is
+ * allowed for SQL NULL). Shared by `db.exec` (CellImpl) and the `sqliteQuery`
+ * builtin so the encode rules and the undefined guard cannot drift.
+ */
+export function encodeSqliteParams(
+  sql: string,
+  params?: ReadonlyArray<unknown> | Record<string, unknown>,
+): SqliteParamsWire | undefined {
+  if (params === undefined) return undefined;
+  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+    if (value === undefined) {
+      throw new TypeError(
+        "sqlite: param is undefined (it may be a value that isn't ready yet); " +
+          "pass a resolved value, or null for SQL NULL",
+      );
+    }
+    if (isCell(value)) {
+      if (!isLinkCol) {
+        throw new TypeError("cells may only be bound to _cf_link columns");
+      }
+      return JSON.stringify(
+        createSigilLinkFromParsedLink(value.getAsNormalizedFullLink(), {
+          includeSchema: false,
+        }),
+      );
+    }
+    return value;
+  };
+  if (Array.isArray(params)) {
+    const cols = parseSqliteInsertColumns(sql);
+    return params.map((v, i) =>
+      encodeOne(v, cols ? isCfLinkColumn(cols[i] ?? "") : isCell(v))
+    ) as SqliteParamsWire;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(params)) {
+    out[k] = encodeOne(v, isCfLinkColumn(k));
+  }
+  return out as SqliteParamsWire;
 }
 
 export function createCell<T>(
@@ -895,7 +938,7 @@ export class CellImpl<T extends FabricValue>
         tables: handle.tables as Record<string, unknown> | undefined,
       },
       sql,
-      params: this.#encodeSqliteParams(sql, params),
+      params: encodeSqliteParams(sql, params),
     });
     // Bump a write counter on the DB handle cell in THIS SAME commit. Two
     // effects, both intended:
@@ -907,49 +950,6 @@ export class CellImpl<T extends FabricValue>
     this.withTx(this.tx).set(
       { ...(handle as Record<string, unknown>), rev: rev + 1 } as unknown as T,
     );
-  }
-
-  /**
-   * Encode `db.exec` params for the wire: a cell bound to a `_cf_link` column is
-   * encoded to a sigil-link string; a cell bound elsewhere throws; an
-   * `undefined` value throws (the interim pending guard — `null` is allowed for
-   * SQL NULL). Mirrors `encodeParams` in sqlite-builtins.ts.
-   */
-  #encodeSqliteParams(
-    sql: string,
-    params?: ReadonlyArray<unknown> | Record<string, unknown>,
-  ): SqliteParamsWire | undefined {
-    if (params === undefined) return undefined;
-    const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
-      if (value === undefined) {
-        throw new TypeError(
-          "sqlite: param is undefined (it may be a value that isn't ready " +
-            "yet); pass a resolved value, or null for SQL NULL",
-        );
-      }
-      if (isCell(value)) {
-        if (!isLinkCol) {
-          throw new TypeError("cells may only be bound to _cf_link columns");
-        }
-        return JSON.stringify(
-          createSigilLinkFromParsedLink(value.getAsNormalizedFullLink(), {
-            includeSchema: false,
-          }),
-        );
-      }
-      return value;
-    };
-    if (Array.isArray(params)) {
-      const cols = parseSqliteInsertColumns(sql);
-      return params.map((v, i) =>
-        encodeOne(v, cols ? isCfLinkColumn(cols[i] ?? "") : isCell(v))
-      ) as SqliteParamsWire;
-    }
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(params)) {
-      out[k] = encodeOne(v, isCfLinkColumn(k));
-    }
-    return out as SqliteParamsWire;
   }
 
   set(

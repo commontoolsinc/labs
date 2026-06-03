@@ -179,3 +179,12 @@ during design are marked **[resolved]** with the decision.
       multi-tenant VM:** review how `fuse` authorizes callables and what
       `cf-harness` does inside a VM, and align the SQLite verbs' authorization
       with that model.
+    - **Related — forgeable `_cf_link` (review H1).** A stored `_cf_link` is an
+      **absolute** sigil link (id + space + scope), and any writer to a cell-db
+      can set a link column to point anywhere — including another space. A typed
+      `db.query<Row>` decodes it to a live `Cell`. Decoding must **not** by
+      itself confer cross-space read authority: the resolved target has to remain
+      subject to the reader's normal cell read policy (the CFC work above). v1
+      does not add a separate space-constraint at decode time (which could also
+      break legitimate cross-space links); closing this is part of wiring read
+      policy through `getCellFromLink` for SQLite-sourced links.
