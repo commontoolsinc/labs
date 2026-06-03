@@ -55,6 +55,13 @@ export const patternMetaSchema = internSchema(
       spec: { type: "string" },
       parents: { type: "array", items: { type: "string" } },
       patternName: { type: "string" },
+      // Content identity of the entry module (the prefix-free `cf:module/<hash>`
+      // minus the scheme), learned on the first cold ESM compile. Persisting it
+      // here is what makes the resolve-free by-identity fast path fire on every
+      // later load: `compilePatternOnce` reads it back and passes it as
+      // `knownEntryIdentity`. Absent on legacy/AMD patterns (the load simply
+      // falls back to resolve + compile, then re-learns + stores it).
+      entryIdentity: { type: "string" },
       program: {
         type: "object",
         properties: {
@@ -489,6 +496,10 @@ export class PatternManager {
       // in pattern metadata from a prior compile), the ESM cache path loads the
       // compiled closure by identity and skips resolve + compile entirely.
       knownEntryIdentity?: string;
+      // Invoked once the entry module's content identity is known for this
+      // compile (warm-by-identity or cold). Lets the caller persist it (e.g.
+      // into pattern metadata) so subsequent loads can take the fast path.
+      onEntryIdentity?: (entryIdentity: string) => void;
     },
   ): Promise<Pattern> {
     let program: RuntimeProgram;
@@ -513,8 +524,9 @@ export class PatternManager {
       if (cacheCtx && this.runtime.cfcEnforcementMode !== "disabled") {
         return await this.compileViaCellCache(program, cacheCtx);
       }
-      const { id, graph, mainSpecifier } = await this.runtime.harness
-        .compileToRecordGraph(program);
+      const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
+        .harness.compileToRecordGraph(program);
+      cacheCtx?.onEntryIdentity?.(entryIdentity);
       const result = this.runtime.harness.evaluateRecordGraph(
         id,
         graph,
@@ -561,6 +573,7 @@ export class PatternManager {
       space: MemorySpace;
       tx?: IExtendedStorageTransaction;
       knownEntryIdentity?: string;
+      onEntryIdentity?: (entryIdentity: string) => void;
     },
   ): Promise<Pattern> {
     const harness = this.runtime.harness;
@@ -586,6 +599,7 @@ export class PatternManager {
       );
       if (byIdentity) {
         this.esmCacheStats.byIdentityHits++;
+        cacheCtx.onEntryIdentity?.(cacheCtx.knownEntryIdentity);
         return byIdentity;
       }
     }
@@ -638,6 +652,7 @@ export class PatternManager {
       readTx.abort?.("compile-cache read complete");
     }
     const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
+    cacheCtx.onEntryIdentity?.(entryIdentity);
 
     const evalStart = performance.now();
     const result = harness.evaluateRecordGraph!(
@@ -891,13 +906,34 @@ export class PatternManager {
     }
 
     const source = patternMeta.program!;
+    // A previously-stored entry identity (set on the first cold ESM compile)
+    // lets the cache path skip resolve + compile and load by identity.
+    const knownEntryIdentity = patternMeta.entryIdentity;
+    let learnedEntryIdentity: string | undefined;
     // Pass the target space so the ESM path can use the per-space cell cache.
-    const pattern = await this.compilePattern(source, { space, tx });
+    const pattern = await this.compilePattern(source, {
+      space,
+      tx,
+      knownEntryIdentity,
+      onEntryIdentity: (id) => {
+        learnedEntryIdentity = id;
+      },
+    });
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());
     this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
+    // Persist the entry identity once learned (cold compile) so the next load
+    // takes the by-identity fast path. Fire-and-forget — never blocks the load,
+    // but tracked alongside the cache writes so shutdown / tests can flush it.
+    if (learnedEntryIdentity && learnedEntryIdentity !== knownEntryIdentity) {
+      const metaWrite = this.setPatternMetaFields(patternId, {
+        entryIdentity: learnedEntryIdentity,
+      });
+      this.compileCacheWrites.add(metaWrite);
+      metaWrite.finally(() => this.compileCacheWrites.delete(metaWrite));
+    }
     return pattern;
   }
 
