@@ -132,7 +132,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
 
   /**
-   * Encodes a fabric value to a JSON string. Serializes modern types into
+   * Encodes a fabric value to a JSON string. Serializes fabric types into
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
@@ -141,7 +141,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /**
    * Decodes a JSON string back into a fabric value. Parses the string,
-   * then deserializes tagged forms back into modern runtime types.
+   * then deserializes tagged forms back into runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): FabricValue {
     if (!JsonEncodingContext.seemsLikeEncoded(data)) {
@@ -385,7 +385,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
 
   /**
-   * Deserializes a wire-format value back into modern runtime types.
+   * Deserializes a wire-format value back into runtime types.
    * See Section 4.5 of the formal spec.
    *
    * Frozen-ness contract: values returned via the type-handler dispatch arm

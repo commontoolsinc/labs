@@ -160,7 +160,7 @@ describe("json-encoding", () => {
       });
     });
 
-    it("mixed value with modern types and slash-keys round-trips", () => {
+    it("mixed value with fabric types and slash-keys round-trips", () => {
       const value = {
         count: 42n,
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
@@ -206,8 +206,8 @@ describe("json-encoding", () => {
     });
 
     it("rejects plain JSON without the prefix", () => {
-      // These are all things the legacy heuristic accepts; under the modern
-      // dispatch they must be rejected, since they don't carry the prefix.
+      // These are plain JSON without the prefix, so the dispatch must reject
+      // them.
       expect(seemsLikeJsonEncodedFabricValue("true")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("false")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("null")).toBe(false);

@@ -2491,10 +2491,11 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   // Convert value to fabric form. This handles:
-  // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
-  // - Instances (e.g., Error → @Error wrapper)
+  // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
+  //   symbols)
+  // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
   // - Objects/arrays with toJSON() methods
-  // - Sparse arrays (densified with null in holes)
+  // - Sparse arrays (holes preserved)
   const converted = shallowFabricFromNativeValue(value);
 
   // `FabricInstance` returned by the conversion step (e.g. `FabricError`
@@ -2511,7 +2512,8 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   // Primitives need no further processing. Cache the conversion when it
-  // changed the value (e.g. `-0 → 0`) so callers see consistent results.
+  // produced a different value (e.g. an object whose `toJSON()` returns a
+  // primitive) so callers see consistent results.
   if (!isRecord(converted)) {
     if (converted !== value) seen.set(value, converted);
     return converted as T;
@@ -2657,8 +2659,8 @@ export function convertCellsToLinks(
 
   seen.set(value, path); // ...which needs to be tracked for circularity.
 
-  // Convert the (top level of) the value to something JSON-encodable if not
-  // already JSON-encodable, or throw if it's neither already valid nor
+  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
+  // if it isn't already, or throw if it's neither already valid nor
   // convertible.
   value = shallowFabricFromNativeValue(value);
 

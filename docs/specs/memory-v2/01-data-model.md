@@ -11,10 +11,10 @@ TypeScript type definition.
 
 Unless a subsection is explicitly talking about pure JSON schema/query syntax,
 runtime payloads in the current implementation should be read as
-`FabricValue`, not plain `JSONValue`. `FabricValue` is the shared rich-value
-surface from the data-model layer: it includes ordinary JSON values and also
-runtime-supported richer leaves such as `bigint`, `undefined`, and the escaped
-single-slash object forms used by the boundary codec.
+`FabricValue`, not plain `JSONValue`. `FabricValue` is the shared value
+surface from the data-model layer: it includes ordinary JSON values plus the
+extra leaves the runtime supports, such as `bigint`, `undefined`, and the
+escaped single-slash object forms used by the boundary codec.
 
 ---
 
@@ -565,8 +565,9 @@ snapshot_v10 → apply(patch_v11) → apply(patch_v12) → ... → current_state
 A `PatchWrite` fact stores its patch operations directly. The fact's content
 hash covers the full patch operation list, ensuring integrity.
 
-In the storage layer, patch operations are serialized with the shared rich-value
-boundary codec and stored inline on the seq-addressed `revision.data` column.
+In the storage layer, patch operations are serialized with the shared
+FabricValue boundary codec and stored inline on the seq-addressed
+`revision.data` column.
 See §02 Storage for details.
 
 ---
@@ -748,9 +749,8 @@ type JSONValue =
 
 /**
  * Any runtime value accepted by the shared memory-v2 boundary codec.
- * This strictly contains JSONValue and additionally supports richer leaves
- * such as bigint/undefined plus escaped slash-key objects when the active
- * runtime experimental flags enable them.
+ * This strictly contains JSONValue and additionally supports extra leaves
+ * such as bigint/undefined plus escaped slash-key objects.
  */
 type FabricValue = unknown;
 

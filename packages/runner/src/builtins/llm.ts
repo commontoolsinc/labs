@@ -1083,7 +1083,7 @@ export function generateObject<T extends Record<string, unknown>>(
             description:
               "Call this tool with the final structured result matching the required schema. This should be your last action.",
             // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-            // cloneSchemaMutable() before turning on modern data-model.
+            // cloneSchemaMutable() here.
             inputSchema: llmToolExecutionHelpers.prepareSchemaForLLM(
               JSON.parse(JSON.stringify(schema)),
             ),
@@ -1401,7 +1401,7 @@ export function generateObject<T extends Record<string, unknown>>(
         messages: requestMessages,
         maxTokens: maxTokens ?? 8192,
         // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-        // cloneSchemaMutable() before turning on modern data-model.
+        // cloneSchemaMutable() here.
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           JSON.parse(JSON.stringify(schema)),
         ) as Record<string, unknown>,

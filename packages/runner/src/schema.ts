@@ -838,7 +838,7 @@ function annotateWithBackToCellSymbols(
     // back-to-cell symbol. See function header comment for details.
     // `shallowMutableClone` deep-freezes the bound children as
     // inexpensive defense-in-depth; in practice the only trigger here is a
-    // non-extensible (hence, under the modern data model, deep-frozen) value,
+    // non-extensible (hence deep-frozen) value,
     // so the children are already deep-frozen and pass through by identity.
     value = shallowMutableClone(value as FabricValue);
   }

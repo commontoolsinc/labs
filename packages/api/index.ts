@@ -269,8 +269,7 @@ export interface IAnyCell<T> {}
 export interface IReadable<T> {
   /**
    * Read the cell's current value as a Proxy view. See the
-   * {@link IReadable} interface docs for the modern-mode frozenness
-   * contract.
+   * {@link IReadable} interface docs for the frozenness contract.
    */
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
@@ -318,7 +317,7 @@ export interface IMetaCell {
 export interface IWritable<T, C extends AnyBrandedCell<any>> {
   /**
    * Set the cell's value. See the {@link IWritable} interface docs for
-   * the modern-mode frozenness contract on the input.
+   * the frozenness contract on the input.
    */
   set(value: T | AnyCellWrapping<T>): C;
   /**
@@ -332,8 +331,8 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
   ): C;
   /**
    * Append one or more values to an array cell. See the
-   * {@link IWritable} interface docs for the modern-mode frozenness
-   * contract on the inputs.
+   * {@link IWritable} interface docs for the frozenness contract on the
+   * inputs.
    */
   push(
     this: IsThisArray,

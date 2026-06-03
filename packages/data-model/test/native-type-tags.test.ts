@@ -97,7 +97,7 @@ describe("native-type-tags", () => {
 
     // Functions are non-objects and return Primitive from tagFromNativeValue.
     // In practice, functions with toJSON() are handled separately in
-    // the modern conversion path, not via tagFromNativeValue.
+    // the conversion path, not via tagFromNativeValue.
     it("returns `Primitive` for functions (even with `toJSON`)", () => {
       const fn = () => {};
       (fn as unknown as { toJSON: () => string }).toJSON = () => "converted";
