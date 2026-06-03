@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("load-by-identity-meta-bridge");
 const space = signer.did();
@@ -95,6 +96,51 @@ describe("load by identity — pattern-metadata bridge", () => {
       expect(typeof loaded).toBe("function");
     } finally {
       await rt3.dispose();
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("loadPatternByIdentity runs source-free, with no program attached", async () => {
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
+    try {
+      // Populate the compiled cache + learn the entry identity.
+      const tx1 = rt1.edit();
+      const pm1 = rt1.patternManager;
+      const cold = await pm1.compilePattern(PROGRAM, { space, tx: tx1 });
+      const entryIdentity = pm1.getPatternEntryIdentity(cold);
+      expect(typeof entryIdentity).toBe("string");
+      await tx1.commit();
+      await pm1.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+
+      // Fresh runtime loads the pattern by {identity, symbol} alone — no
+      // program, no meta cell. It still runs correctly.
+      const pm2 = rt2.patternManager;
+      const loaded = await pm2.loadPatternByIdentity(
+        entryIdentity!,
+        "default",
+        space,
+      );
+      expect(typeof loaded).toBe("function");
+      expect(pm2.getCompileCacheStats().byIdentityHits).toBe(1);
+      // No TypeScript source was pulled: the builder stamps a program stub, but
+      // its `files` are empty on the source-free path (vs. the authored set).
+      expect(getPatternProgram(loaded!)?.files ?? []).toEqual([]);
+
+      const tx2 = rt2.edit();
+      const resultCell = rt2.getCell<{ result: number }>(
+        space,
+        "by-identity source-free run",
+        undefined,
+        tx2,
+      );
+      const result = rt2.run(tx2, loaded!, { value: 7 }, resultCell);
+      await tx2.commit();
+      await result.pull();
+      expect(result.getAsQueryResult()).toEqual({ result: 14 });
+    } finally {
       await rt2.dispose();
       await rt1.dispose();
     }

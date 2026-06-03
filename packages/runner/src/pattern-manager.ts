@@ -94,6 +94,11 @@ export class PatternManager {
   private patternIdMap = new Map<URI, Pattern>();
   // Map from pattern object instance to patternId
   private patternToIdMap = new WeakMap<Pattern, URI>();
+  // Map from pattern object instance to the entry module's content identity
+  // (prefix-free `cf:module/<hash>` minus the scheme). Learned on the ESM cache
+  // path; lets a result cell reference a pattern by {identity, symbol} and load
+  // it straight from the compiled cache without the program/meta indirection.
+  private patternToEntryIdentity = new WeakMap<Pattern, string>();
   private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
@@ -680,7 +685,7 @@ export class PatternManager {
       writeBack.finally(() => this.compileCacheWrites.delete(writeBack));
     }
 
-    return this.patternFromEvaluation(result, program);
+    return this.patternFromEvaluation(result, program, entryIdentity);
   }
 
   /**
@@ -735,7 +740,7 @@ export class PatternManager {
         entryIdentity,
         { sourceFiles: program.files },
       );
-      return this.patternFromEvaluation(result, program);
+      return this.patternFromEvaluation(result, program, entryIdentity);
     } catch (error) {
       // Incomplete/invalid cached closure — fall back to recompile.
       logger.warn("compile-cache-by-identity-miss", () => [
@@ -744,6 +749,112 @@ export class PatternManager {
       ]);
       return undefined;
     }
+  }
+
+  /**
+   * Load a pattern referenced purely by content identity — the
+   * `{identity, symbol}` result-cell reference — straight from the compiled
+   * cache, with NO TypeScript program in hand and NO meta-cell roundtrip. The
+   * pattern's TS source is never pulled on this path; it is only needed for cold
+   * recovery, which the caller handles by falling back to the patternId load.
+   *
+   * Returns the pattern, or `undefined` when the by-identity load is
+   * unavailable (ESM loader off / CFC not enforcing / closure absent or
+   * incomplete / invalid) so the caller can fall back to `loadPattern`.
+   */
+  async loadPatternByIdentity(
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
+    if (
+      this.runtime.experimental.esmModuleLoader !== true ||
+      !harness.evaluateCachedModules ||
+      this.runtime.cfcEnforcementMode === "disabled"
+    ) {
+      return undefined;
+    }
+    const cacheOpts = {
+      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      compilerDid: this.runtime.userIdentityDID,
+    };
+
+    const readTx = this.runtime.edit();
+    let closure;
+    try {
+      const readStart = performance.now();
+      closure = await loadCompiledClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        cacheOpts,
+        readTx,
+      );
+      logger.time(readStart, "compile-cache", "load-pattern-by-identity");
+    } finally {
+      readTx.abort?.("load-pattern-by-identity read complete");
+    }
+    if (!closure.has(entryIdentity)) return undefined;
+
+    const cachedModules: CachedCompiledModule[] = [...closure].map(
+      ([identity, doc]) => ({
+        identity,
+        filename: doc.filename,
+        code: doc.code,
+        ...(doc.sourceMap !== undefined
+          ? { sourceMap: doc.sourceMap as never }
+          : {}),
+        imports: doc.imports
+          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
+      }),
+    );
+
+    try {
+      // Source-free: no sourceFiles. Sub-patterns fall back to identity.
+      const result = await harness.evaluateCachedModules(
+        cachedModules,
+        entryIdentity,
+      );
+      const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      this.esmCacheStats.byIdentityHits++;
+      return pattern;
+    } catch (error) {
+      logger.warn("load-pattern-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        `symbol=${symbol}`,
+        String(error),
+      ]);
+      return undefined;
+    }
+  }
+
+  /**
+   * Build a pattern object from an evaluation result by export `symbol`, with
+   * NO program attached (the source-free by-identity path). Mirrors
+   * `patternFromEvaluation` minus `setPatternProgram` — recovery of the program
+   * happens by identity via the source closure, not from the pattern object.
+   */
+  private patternFromMain(
+    { main, loadId }: EvaluateResult,
+    symbol: string,
+    entryIdentity: string,
+  ): Pattern {
+    if (!main) {
+      throw new Error("Pattern compilation produced no exports.");
+    }
+    if (!(symbol in main)) {
+      throw new Error(`No "${symbol}" export found in compiled pattern.`);
+    }
+    const pattern = main[symbol] as Pattern;
+    if (isTrustedPattern(pattern)) {
+      this.patternToEntryIdentity.set(pattern, entryIdentity);
+      if (loadId) {
+        this.seedVerifiedLoadIds(pattern, loadId);
+      }
+    }
+    return pattern;
   }
 
   /**
@@ -792,6 +903,7 @@ export class PatternManager {
   private patternFromEvaluation(
     { main, loadId }: EvaluateResult,
     program: RuntimeProgram,
+    entryIdentity?: string,
   ): Pattern {
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
@@ -808,11 +920,26 @@ export class PatternManager {
     // cannot masquerade as a verified-loaded pattern in the side-tables.
     if (isTrustedPattern(pattern)) {
       setPatternProgram(pattern, program);
+      if (entryIdentity) {
+        this.patternToEntryIdentity.set(pattern, entryIdentity);
+      }
       if (loadId) {
         this.seedVerifiedLoadIds(pattern, loadId);
       }
     }
     return pattern;
+  }
+
+  /**
+   * The entry module's content identity for a pattern object, if known (it is
+   * learned on the ESM cache path). Lets callers persist a result cell's
+   * reference as {identity, symbol} so the pattern reloads straight from the
+   * compiled cache. Returns undefined for legacy/AMD patterns.
+   */
+  getPatternEntryIdentity(pattern: Pattern | Module): string | undefined {
+    return this.patternToEntryIdentity.get(
+      this.findOriginalPattern(pattern as Pattern),
+    );
   }
 
   /**
