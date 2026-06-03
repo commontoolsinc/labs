@@ -3,7 +3,6 @@ declare global {
   var $API_URL: string | undefined;
   var $COMMIT_SHA: string | undefined;
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
-  var $EXPERIMENTAL_MODERN_DATA_MODEL: string | undefined;
   var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
   var $EXPERIMENTAL_ESM_MODULE_LOADER: string | undefined;
   var $COMPILATION_CACHE_CLIENT: string | undefined;
@@ -19,10 +18,6 @@ const COMMIT_SHA_DEFINE = typeof $COMMIT_SHA === "string"
 const EXPERIMENTAL_MODERN_CELL_REP_DEFINE =
   typeof $EXPERIMENTAL_MODERN_CELL_REP === "string"
     ? $EXPERIMENTAL_MODERN_CELL_REP
-    : undefined;
-const EXPERIMENTAL_MODERN_DATA_MODEL_DEFINE =
-  typeof $EXPERIMENTAL_MODERN_DATA_MODEL === "string"
-    ? $EXPERIMENTAL_MODERN_DATA_MODEL
     : undefined;
 const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
   typeof $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE === "string"
@@ -69,7 +64,6 @@ function esmLoaderFlagValue(flag: string | undefined): boolean | undefined {
 /** Build-time experimental flags, injected via felt.config.ts defines. */
 export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
-  modernDataModel: flagValue(EXPERIMENTAL_MODERN_DATA_MODEL_DEFINE),
   persistentSchedulerState: flagValue(
     EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE,
   ),

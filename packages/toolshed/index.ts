@@ -56,7 +56,6 @@ const initializeRuntime = async () => {
       }),
       experimental: {
         modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
-        modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
         persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
       },
       cachedCompiler,

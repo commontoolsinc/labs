@@ -67,7 +67,6 @@ function createRuntime(identity: Identity, base: URL): Runtime {
     }),
     experimental: {
       modernCellRep: readExperimentalFlag("EXPERIMENTAL_MODERN_CELL_REP"),
-      modernDataModel: readExperimentalFlag("EXPERIMENTAL_MODERN_DATA_MODEL"),
       persistentSchedulerState: readExperimentalFlag(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),

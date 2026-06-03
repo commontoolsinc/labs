@@ -1127,7 +1127,7 @@ const parseHelloOk = (
   if (parsed === null) {
     return null;
   }
-  return { flags: parsed.flags };
+  return { flags: parsed };
 };
 
 const isSessionEffect = (
