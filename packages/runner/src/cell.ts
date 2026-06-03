@@ -9,7 +9,6 @@ import {
   DECONSTRUCT,
   FabricInstance,
   type FabricValue,
-  getDataModelConfig,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -2461,10 +2460,6 @@ export function recursivelyAddIDIfNeeded<T>(
   // Can't add IDs without frame.
   if (!frame) return value;
 
-  // Snapshot the modern-data-model flag once; used below at the freshly-
-  // built-container freeze points.
-  const modern = getDataModelConfig();
-
   // Already seen, return previously annotated result. Check this before
   // shallowFabricFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
@@ -2524,12 +2519,9 @@ export function recursivelyAddIDIfNeeded<T>(
 
   // From here `converted` is an array or record. The result container is
   // pre-registered in `seen` against the original `value` BEFORE descending
-  // into entries, so circular back-references to `value` resolve correctly
-  // even under modern, where shallow conversion allocates a fresh frozen
-  // clone whose own properties still point at the original (unfrozen)
-  // input. Without this, a cycle would re-enter
-  // `shallowFabricFromNativeValue(value)` on every pass and recurse
-  // forever.
+  // into entries, so circular back-references to `value` resolve correctly.
+  // Without this, a cycle would re-enter `shallowFabricFromNativeValue(value)`
+  // on every pass and recurse forever.
   const convertedDiffers = converted !== value;
 
   if (Array.isArray(converted)) {
@@ -2551,9 +2543,9 @@ export function recursivelyAddIDIfNeeded<T>(
       ) {
         changed = true;
         const withId = { [ID]: frame.generatedIdCounter++, ...v };
-        // Under modern, the ID-wrapped object is a freshly-built
-        // container that must also be deep-frozen.
-        if (modern) Object.freeze(withId);
+        // The ID-wrapped object is a freshly-built container that must also be
+        // deep-frozen.
+        Object.freeze(withId);
         result[i] = withId;
       } else {
         if (!Object.is(v, el)) {
@@ -2568,12 +2560,11 @@ export function recursivelyAddIDIfNeeded<T>(
       return value;
     }
 
-    // Under the modern data model, the value enters a write-boundary that
-    // expects deep-frozen `FabricValue` trees. Children are already frozen
-    // by `shallowFabricFromNativeValue()` above; freeze the freshly-built
-    // top-level container so the returned tree is deep-frozen as a whole.
-    if (modern) Object.freeze(result);
-    return result as T;
+    // The value enters a write-boundary that expects deep-frozen `FabricValue`
+    // trees. Children are already frozen by `shallowFabricFromNativeValue()`
+    // above; freeze the freshly-built top-level container so the returned tree
+    // is deep-frozen as a whole.
+    return Object.freeze(result) as T;
   } else {
     const sourceRecord = converted as Record<string, unknown>;
     const result: Record<string, unknown> = {};
@@ -2608,9 +2599,7 @@ export function recursivelyAddIDIfNeeded<T>(
       return value;
     }
 
-    // See array-branch comment above re: modern freeze.
-    if (modern) Object.freeze(result);
-    return result as T;
+    return Object.freeze(result) as T;
   }
 }
 
