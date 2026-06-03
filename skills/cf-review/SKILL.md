@@ -14,8 +14,8 @@ All paths below are relative to the repo root.
 ## What this review is (and is not)
 
 - It is **changeset-scoped**: review the diff and its immediate ripple, not the
-  whole repo. Do not start an open-ended repo audit. (That is a different,
-  heavier job — the coherence-audit. This is fast.)
+  whole repo. Do not start an open-ended repo audit — that broader sweep is a
+  separate, heavier effort. This review is fast.
 - It is **loud on what matters** and **quiet on what doesn't**. Flag bugs,
   regressions, and broken principles unmistakably. Keep nits to a short,
   clearly-optional list — or omit them when there are real issues to focus on.
@@ -154,10 +154,10 @@ steer new code to the canonical home; **do not cargo-cult a nearby fork**. When
 the diff adds or edits any of these, scan it explicitly:
 
 ```bash
-# new hash/serialize/clone defs, or raw crypto / JSON-clone, introduced by the diff
-git diff "$BASE" -- '*.ts' | grep -nE \
-  '^\+.*((export )?(async )?(function|const) (hash|sha256|serialize|deserialize|clone|deepClone)\b|crypto\.subtle\.digest|JSON\.parse\(JSON\.stringify)'
-# PR mode: gh pr diff <N> | grep -nE '…the same pattern…'
+# new hash/serialize/clone defs, or raw crypto / structuredClone / JSON-clone
+PATTERN='^\+.*((export )?(async )?(function|const) (hash|sha256|serialize|deserialize|clone|deepClone)\b|crypto\.subtle\.digest|structuredClone\(|JSON\.parse\(JSON\.stringify)'
+git diff "$BASE" -- '*.ts' '*.tsx' | grep -nE "$PATTERN"                                # local branch
+gh pr diff <N> | awk '/^\+\+\+ b\//{ts=($0 ~ /\.(ts|tsx)$/)} ts' | grep -nE "$PATTERN"  # PR (scoped to .ts/.tsx)
 ```
 
 A new definition is not automatically wrong — but the PR must justify why the
