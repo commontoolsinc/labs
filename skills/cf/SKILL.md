@@ -58,6 +58,12 @@ or default. For identity-sensitive local work, use one key everywhere and import
 the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
 `docs/development/SHARED_IDENTITY.md`.
 
+**`perSession` is per-invocation by default:** each `cf` command mounts a fresh
+memory session, so `perSession` cells reset between commands. Pass
+`--session <id>` (or set `CF_SESSION`) on every command to pin a stable session
+and make `perSession` state persist across invocations. See
+`docs/development/debugging/gotchas/scoped-cell-pitfalls.md`.
+
 **Experimental flags** (must be set on both servers AND CLI commands):
 
 ```bash

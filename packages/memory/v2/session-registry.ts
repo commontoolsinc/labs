@@ -25,6 +25,15 @@ export type SessionState = {
 
 type OpenSessionState = SessionOpenResult & {
   revokedConnectionId?: string;
+  /**
+   * The `seenSeq` the client actually presented on this open (pre-`Math.max`
+   * clamp), i.e. the high-water mark of canonical seqs the client has
+   * integrated into its LOCAL replica. The resume catch-up baseline is
+   * computed from this (per spec), not from the server's `session.entities`
+   * cache — a cold client (fresh process, empty replica) presents `0` and
+   * must be full-synced even though the persisted session looks fully synced.
+   */
+  presentedSeenSeq: number;
 };
 
 const sessionKey = (space: string, sessionId: string): string =>
@@ -111,6 +120,7 @@ export class SessionRegistry {
       sessionId,
       sessionToken,
       serverSeq,
+      presentedSeenSeq: session.seenSeq ?? 0,
       ...(existing !== undefined ? { resumed: true } : {}),
       ...(revokedConnectionId ? { revokedConnectionId } : {}),
     };

@@ -150,7 +150,8 @@ TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
   • After 'set', run 'step' to trigger computed value updates
   • Path format: forward slashes only (items/0/name, not items[0].name)
-  • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`);
+  • JSON values: strings need quotes: echo '"hello"' | cf piece set ...
+  • perSession cells reset every invocation (fresh session per command); pass --session <id> or set CF_SESSION to make them persist across commands`);
 
 export const piece = new Command()
   .name("piece")
@@ -170,6 +171,17 @@ export const piece = new Command()
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
   .globalOption("-s,--space <space:string>", "The space name or DID")
+  .globalEnv(
+    "CF_SESSION=<id:string>",
+    "Pin the memory session id (see --session).",
+    { prefix: "CF_" },
+  )
+  .globalOption(
+    "--session <id:string>",
+    cliText(
+      `Pin the memory session id so \`perSession\` cells persist across \`cf\` commands. By default each invocation gets a fresh session, so \`perSession\` state does NOT carry between commands.`,
+    ),
+  )
   /* piece ls */
   .command("ls", "List pieces in space.")
   .usage(spaceUsage)
@@ -930,6 +942,7 @@ interface PieceCLIOptions {
   identity?: string;
   space?: string;
   url?: string;
+  session?: string;
 }
 
 const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
@@ -1007,6 +1020,10 @@ export function parseSpaceOptions(
   const output: Partial<PieceConfig> = {
     identity: absPath(input.identity),
   };
+
+  // Pin the memory session id when provided (via --session / CF_SESSION).
+  // Applies regardless of whether the space comes from --url or --space.
+  if (input.session) output.sessionId = input.session;
 
   if (input.url) {
     const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);

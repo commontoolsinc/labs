@@ -369,6 +369,17 @@ export interface Options {
   id?: string;
   settings?: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
+  /**
+   * Opt-in: pin the memory session id so server-side `perSession` state
+   * persists across separate StorageManager lifecycles. The rotated session
+   * token must be persisted via `onToken` and replayed via `getToken` to
+   * avoid the server's revokedError on reuse within the session TTL.
+   */
+  session?: {
+    id: string;
+    getToken?: () => string | undefined;
+    onToken?: (token: string | undefined) => void;
+  };
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -526,7 +537,7 @@ export class StorageManager implements IStorageManager {
   static open(options: Options) {
     return new this(
       options,
-      new RemoteSessionFactory(options.address, options.as),
+      new RemoteSessionFactory(options.address, options.as, options.session),
     );
   }
 

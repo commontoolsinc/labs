@@ -45,6 +45,7 @@ import {
   renderPieceCallHelp,
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
+import { getSessionToken, setSessionToken } from "./session-store.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -56,6 +57,12 @@ export interface SpaceConfig {
   apiUrl: string;
   space: string;
   identity: string;
+  /**
+   * Opt-in: pin the memory session id so `perSession` cells persist across
+   * separate `cf` invocations. When unset, each invocation gets a fresh
+   * session and `perSession` state does not carry over.
+   */
+  sessionId?: string;
 }
 
 export interface PieceConfig extends SpaceConfig {
@@ -196,6 +203,17 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
           as: session.as,
           address: new URL("/api/storage/memory", config.apiUrl),
           spaceIdentity: session.spaceIdentity,
+          ...(config.sessionId
+            ? {
+              session: {
+                id: config.sessionId,
+                getToken: () =>
+                  getSessionToken(config.space, config.sessionId!),
+                onToken: (token: string | undefined) =>
+                  setSessionToken(config.space, config.sessionId!, token),
+              },
+            }
+            : {}),
         }),
         errorHandlers: [
           (error) => {
