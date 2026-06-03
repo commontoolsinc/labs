@@ -2200,16 +2200,49 @@ export declare const DEFAULT_MARKER: unique symbol;
 
 type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
 
+// True only for the empty tuple `[]` (a length-0 tuple), false for general
+// arrays like `string[]` (whose `length` is the wide `number`) and non-empty
+// tuples. Used by Default<> to special-case `Default<[]>` (see below).
+type IsEmptyTuple<T> = T extends readonly unknown[]
+  ? number extends T["length"] ? false
+  : T["length"] extends 0 ? true
+  : false
+  : false;
+
 // Default type for specifying default values in type definitions.
 // The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
 // have runtime-provided defaults and make them non-optional in pattern bodies.
 // Detection uses conditional type inference (not keyof) for performance.
 // Nullish-only defaults need a standalone marker because `null & Brand` and
 // `undefined & Brand` collapse to `never`.
-export type Default<T, V extends T = T> =
-  | ([T] extends [null | undefined] ? DefaultMarker<T>
-    : T & DefaultMarker<T>)
-  | T;
+//
+// Empty-tuple special case (CT-1640): for `Default<[]>` we keep ONLY the branded
+// arm and drop the bare `| T` arm. Without this, `Default<[]>` would contribute a
+// bare `[]` (i.e. `never[]`) member; in the documented `T[] | Default<[]>` shape
+// that bare member survives `.get()`'s brand-stripping, leaving `T[] | never[]`,
+// and TypeScript intersects parameter-position element types across the union so
+// `.includes(x)`/`.indexOf(x)` collapse their parameter to `never`. Dropping the
+// bare arm lets the sibling `T[]` member supply the value type while the brand is
+// still present for RequireDefaults<> detection. (The lone `Default<[]>` form —
+// no sibling array — is not used in practice; the docs always pair it as
+// `T[] | Default<[]>`.)
+//
+// Why ONLY the empty tuple, and not all tuples: a non-empty literal-tuple default
+// in a union (e.g. `string[] | Default<["seed"]>`) also narrows parameter-position
+// methods — but to the literal element type, which is a legible error, not the
+// confusing `never`. More importantly, the empty tuple is the unique tuple that
+// can never be a legitimate *standalone* field type, so dropping its plain arm is
+// unconditionally safe. Generalizing to all tuples would collapse a standalone
+// tuple default like `Default<[string, number], ["a", 0]>` to `never` (the lone
+// branded arm strips away), breaking that contract. Authors who want an array
+// field with an empty-ish/seed default and a precise element type should use the
+// two-arg form `Default<string[], []>` (T = the array, not the tuple).
+export type Default<T, V extends T = T> = IsEmptyTuple<T> extends true
+  ? T & DefaultMarker<T>
+  :
+    | ([T] extends [null | undefined] ? DefaultMarker<T>
+      : T & DefaultMarker<T>)
+    | T;
 
 /**
  * Marker for partial, recursive object defaults in `T | DeepDefault<V>` schema
