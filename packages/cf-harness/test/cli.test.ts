@@ -525,6 +525,8 @@ Deno.test({
           "deno-memory-profiler:scripts/memory.ts",
           "--allow-skill-script",
           "deno-memory-profiler:scripts/memory.ts",
+          "--skill-script-execution-target",
+          "host",
         ],
         {
           cwd: root,
@@ -540,10 +542,28 @@ Deno.test({
         skill: "deno-memory-profiler",
         path: "scripts/memory.ts",
       }]);
+      assertEquals(parsed.skillScriptExecutionTarget, "host");
     } finally {
       await Deno.remove(root, { recursive: true });
     }
   },
+});
+
+Deno.test("parseCfHarnessCliArgs rejects invalid skill script execution targets", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--skill-script-execution-target",
+          "remote",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "skill script execution target must be one of sandbox, host",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs rejects skill script allowlists without a skills root", async () => {
