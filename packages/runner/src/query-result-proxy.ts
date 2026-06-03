@@ -127,10 +127,9 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * as `Cell.set()` / `Cell.push()`.
  *
  * **Frozenness contract:** Values handed to the write-side array mutators flow
- * through `recursivelyAddIDIfNeeded()` and so inherit its modern-mode contract:
- * plain unfrozen Object/Array inputs get shallowly frozen at each visited
- * level; already-deep- frozen valid `FabricValue` inputs are accepted
- * identity-preservingly.
+ * through `recursivelyAddIDIfNeeded()` and so plain unfrozen Object/Array
+ * inputs get shallowly frozen at each visited level; already-deep- frozen valid
+ * `FabricValue` inputs are accepted identity-preservingly.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
