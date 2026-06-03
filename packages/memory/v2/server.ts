@@ -769,20 +769,37 @@ export class Server {
       map.set(id, aliasForDbId(id));
       tablesById.set(id, op.db.tables);
     }
-    for (const [id, alias] of map) {
-      attachDatabase(
-        engine.database,
-        alias,
-        this.#cellDbPath(engine, space, id),
-      );
-      const tables = tablesById.get(id);
-      if (tables) {
-        ensureTables(
+    // Attach + create tables. If `ensureTables` throws (e.g. a malformed/hostile
+    // `db.tables` payload — DDL validation rejects it), DETACH everything
+    // attached so far before rethrowing. This helper runs BEFORE the caller's
+    // attach→commit→detach try/finally, and the engine connection is reused per
+    // space, so a leaked attachment would make later writes/queries for the same
+    // alias fail ("already in use") and corrupt unqualified name resolution.
+    const attached: string[] = [];
+    try {
+      for (const [id, alias] of map) {
+        attachDatabase(
           engine.database,
-          tables as Record<string, TableSchema>,
           alias,
+          this.#cellDbPath(engine, space, id),
         );
+        attached.push(alias);
+        const tables = tablesById.get(id);
+        if (tables) {
+          ensureTables(
+            engine.database,
+            tables as Record<string, TableSchema>,
+            alias,
+          );
+        }
       }
+    } catch (error) {
+      for (const alias of attached) {
+        try {
+          detachDatabase(engine.database, alias);
+        } catch { /* best-effort cleanup on the error path */ }
+      }
+      throw error;
     }
     return map;
   }

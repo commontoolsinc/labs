@@ -167,6 +167,45 @@ describe("sqlite protocol verbs (loopback)", () => {
     }
   });
 
+  it("detaches the cell-db when schema setup fails, leaving the handle usable (P2)", async () => {
+    const id = `of:p2-detach-${crypto.randomUUID()}`;
+    // A hostile `db.tables` payload: the sqlType fails DDL validation, so
+    // ensureTables throws AFTER the cell-db is attached. The attach must be
+    // cleaned up, not leaked on the shared per-space connection.
+    const badDb = {
+      id,
+      tables: {
+        messages: {
+          type: "object",
+          required: [],
+          properties: {
+            body: { type: "string", sqlType: "text); DROP TABLE x;--" },
+          },
+        },
+      },
+    } as unknown as SqliteDbRef;
+    await expect(
+      session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "sqlite",
+            db: badDb,
+            sql: "INSERT INTO messages (body) VALUES ('x')",
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+
+    // No leaked alias: a VALID write to the SAME handle id now attaches and
+    // commits (previously the dangling attach would fail re-attach).
+    const goodDb: SqliteDbRef = { id, tables: dbRef().tables };
+    await seedRows(goodDb, "INSERT INTO messages (body) VALUES (?)", ["ok"]);
+    const r = await session.sqliteQuery(goodDb, "SELECT body FROM messages");
+    expect(r.rows).toEqual([{ body: "ok" }]);
+  });
+
   it("rolls back the whole commit when a folded sqlite op fails", async () => {
     const db = dbRef();
     await expect(session.transact({
