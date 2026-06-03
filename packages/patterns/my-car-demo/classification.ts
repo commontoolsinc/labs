@@ -31,7 +31,9 @@ export interface GuestVouch {
 // Stable match key — normalized plate + uppercased state. Never match on plate
 // alone when state is known (EF2: avoids cross-state collisions).
 export const plateKey = (plateId: string, plateState: string): string =>
-  `${normalizePlateId(plateId)}|${(plateState ?? "").toUpperCase().trim()}`;
+  `${normalizePlateId(plateId ?? "")}|${
+    (plateState ?? "").toUpperCase().trim()
+  }`;
 
 // The "ours" set: vehicles from current-employee SELF claims.
 export const affiliatedFromClaims = (

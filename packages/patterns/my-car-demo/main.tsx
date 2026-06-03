@@ -290,9 +290,9 @@ export default pattern(
     });
 
     const revealView = computed(() => {
-      const id = revealClaimId.get().trim();
+      const id = (revealClaimId.get() ?? "").trim();
       if (!id) return "Enter a claim's plate above to manage its note reveal.";
-      const admin = adminDid.get().trim() || "admin";
+      const admin = (adminDid.get() ?? "").trim() || "admin";
       const claim = (carWish.result?.selfClaims ?? []).find((c) =>
         plateKey(c.vehicle.plateId, c.vehicle.plateState) ===
           plateKey(id, testState.get())
