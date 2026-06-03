@@ -94,11 +94,18 @@ export class PatternManager {
   private patternIdMap = new Map<URI, Pattern>();
   // Map from pattern object instance to patternId
   private patternToIdMap = new WeakMap<Pattern, URI>();
-  // Map from pattern object instance to the entry module's content identity
-  // (prefix-free `cf:module/<hash>` minus the scheme). Learned on the ESM cache
-  // path; lets a result cell reference a pattern by {identity, symbol} and load
-  // it straight from the compiled cache without the program/meta indirection.
-  private patternToEntryIdentity = new WeakMap<Pattern, string>();
+  // Map from pattern object instance to its content-addressed {identity, symbol}
+  // reference — the entry module's identity (prefix-free `cf:module/<hash>`
+  // minus the scheme) and the export name this pattern was selected by. Learned
+  // on the ESM cache path; lets a result cell reference a pattern by
+  // {identity, symbol} and load it straight from the compiled cache without the
+  // program/meta indirection. The symbol is recorded from the authored program
+  // (cold) or the load symbol (warm) — never recomputed from a source-free
+  // pattern's stub program, which would lose a non-"default" export name.
+  private patternToEntryRef = new WeakMap<
+    Pattern,
+    { identity: string; symbol: string }
+  >();
   private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
@@ -849,7 +856,7 @@ export class PatternManager {
     }
     const pattern = main[symbol] as Pattern;
     if (isTrustedPattern(pattern)) {
-      this.patternToEntryIdentity.set(pattern, entryIdentity);
+      this.patternToEntryRef.set(pattern, { identity: entryIdentity, symbol });
       if (loadId) {
         this.seedVerifiedLoadIds(pattern, loadId);
       }
@@ -921,7 +928,10 @@ export class PatternManager {
     if (isTrustedPattern(pattern)) {
       setPatternProgram(pattern, program);
       if (entryIdentity) {
-        this.patternToEntryIdentity.set(pattern, entryIdentity);
+        this.patternToEntryRef.set(pattern, {
+          identity: entryIdentity,
+          symbol: exportName,
+        });
       }
       if (loadId) {
         this.seedVerifiedLoadIds(pattern, loadId);
@@ -931,13 +941,15 @@ export class PatternManager {
   }
 
   /**
-   * The entry module's content identity for a pattern object, if known (it is
-   * learned on the ESM cache path). Lets callers persist a result cell's
-   * reference as {identity, symbol} so the pattern reloads straight from the
-   * compiled cache. Returns undefined for legacy/AMD patterns.
+   * The content-addressed {identity, symbol} reference for a pattern object, if
+   * known (learned on the ESM cache path). Lets callers persist a result cell's
+   * reference so the pattern reloads straight from the compiled cache. Returns
+   * undefined for legacy/AMD patterns.
    */
-  getPatternEntryIdentity(pattern: Pattern | Module): string | undefined {
-    return this.patternToEntryIdentity.get(
+  getPatternEntryRef(
+    pattern: Pattern | Module,
+  ): { identity: string; symbol: string } | undefined {
+    return this.patternToEntryRef.get(
       this.findOriginalPattern(pattern as Pattern),
     );
   }

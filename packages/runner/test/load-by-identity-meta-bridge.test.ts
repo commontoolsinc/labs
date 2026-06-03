@@ -109,7 +109,7 @@ describe("load by identity — pattern-metadata bridge", () => {
       const tx1 = rt1.edit();
       const pm1 = rt1.patternManager;
       const cold = await pm1.compilePattern(PROGRAM, { space, tx: tx1 });
-      const entryIdentity = pm1.getPatternEntryIdentity(cold);
+      const entryIdentity = pm1.getPatternEntryRef(cold)?.identity;
       expect(typeof entryIdentity).toBe("string");
       await tx1.commit();
       await pm1.flushCompileCacheWrites();
@@ -140,6 +140,72 @@ describe("load by identity — pattern-metadata bridge", () => {
       await tx2.commit();
       await result.pull();
       expect(result.getAsQueryResult()).toEqual({ result: 14 });
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("preserves a non-default export symbol across a source-free reload", async () => {
+    // A pattern exported under a NON-default name. The {identity, symbol}
+    // reference must keep that symbol — a source-free reload has only a stub
+    // program (mainExport "default"), so the symbol must come from the pattern's
+    // recorded entry ref, never be recomputed from the program.
+    const NAMED: RuntimeProgram = {
+      main: "/main.tsx",
+      mainExport: "myPattern",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { pattern, lift } from 'commonfabric';",
+            "const dbl = lift((x:number)=>x*2);",
+            "export const myPattern = pattern<{ value: number }>(",
+            "  ({ value }) => ({ result: dbl(value) }),",
+            ");",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const rt1 = newRuntime();
+    const rt2 = newRuntime();
+    try {
+      const tx1 = rt1.edit();
+      const pm1 = rt1.patternManager;
+      const cold = await pm1.compilePattern(NAMED, { space, tx: tx1 });
+      // The authored compile records the real export symbol.
+      expect(pm1.getPatternEntryRef(cold)?.symbol).toBe("myPattern");
+      const entryIdentity = pm1.getPatternEntryRef(cold)!.identity;
+      await tx1.commit();
+      await pm1.flushCompileCacheWrites();
+      await rt1.storageManager.synced();
+
+      // Reload by identity with the non-default symbol → still runs, and the
+      // reloaded pattern carries the SAME {identity, symbol} ref (not "default").
+      const pm2 = rt2.patternManager;
+      const reloaded = await pm2.loadPatternByIdentity(
+        entryIdentity,
+        "myPattern",
+        space,
+      );
+      expect(typeof reloaded).toBe("function");
+      expect(pm2.getPatternEntryRef(reloaded!)).toEqual({
+        identity: entryIdentity,
+        symbol: "myPattern",
+      });
+
+      const tx2 = rt2.edit();
+      const resultCell = rt2.getCell<{ result: number }>(
+        space,
+        "named-export by-identity run",
+        undefined,
+        tx2,
+      );
+      const result = rt2.run(tx2, reloaded!, { value: 9 }, resultCell);
+      await tx2.commit();
+      await result.pull();
+      expect(result.getAsQueryResult()).toEqual({ result: 18 });
     } finally {
       await rt2.dispose();
       await rt1.dispose();

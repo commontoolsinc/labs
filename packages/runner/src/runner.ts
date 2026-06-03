@@ -29,7 +29,6 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { getPatternProgram } from "./builder/pattern-metadata.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
@@ -855,14 +854,15 @@ export class Runner {
     // the runtime load straight from the compiled cache by identity — no TS
     // source pulled, no meta-cell roundtrip — falling back to the patternId
     // load when the by-identity load is unavailable. See loadPatternByIdentity.
-    const entryIdentity = this.runtime.patternManager.getPatternEntryIdentity(
-      pattern,
-    );
-    if (entryIdentity) {
-      const symbol = getPatternProgram(pattern)?.mainExport ?? "default";
+    // The ref carries the authoritative export symbol (recorded at compile/load
+    // time); we never recompute it from `pattern`'s program here, since a
+    // source-free reloaded pattern only has a stub program (mainExport
+    // "default"), which would clobber a non-"default" export name.
+    const entryRef = this.runtime.patternManager.getPatternEntryRef(pattern);
+    if (entryRef) {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
-        identity: entryIdentity,
-        symbol,
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
       });
     }
 
