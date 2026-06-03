@@ -218,17 +218,22 @@ function missingTableName(error: unknown): string | undefined {
   return ref;
 }
 
-/** Whether `name` matches a declared table key, case-insensitively (SQLite
- *  resolves table identifiers case-insensitively for ASCII). */
+/** Whether `name` matches a declared table key, using the SAME case-folding
+ *  SQLite uses to resolve table identifiers: **ASCII-only** (A–Z ↔ a–z). A
+ *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
+ *  `ü` as distinct tables, so folding them together here would mask a genuine
+ *  "no such table" error as an empty result. */
 function isDeclaredTable(
   tables: Record<string, unknown> | undefined,
   name: string,
 ): boolean {
   if (tables === undefined) return false;
   if (Object.prototype.hasOwnProperty.call(tables, name)) return true;
-  const lowered = name.toLowerCase();
+  const asciiFold = (value: string): string =>
+    value.replace(/[A-Z]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 32));
+  const lowered = asciiFold(name);
   for (const key of Object.keys(tables)) {
-    if (key.toLowerCase() === lowered) return true;
+    if (asciiFold(key) === lowered) return true;
   }
   return false;
 }
