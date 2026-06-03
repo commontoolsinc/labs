@@ -121,6 +121,7 @@ describe("Schema: CFC authoring aliases", () => {
       type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, { requiredIntegrity: X }>;
       type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, { maxConfidentiality: X }>;
       type ExactCopy<T, P extends string> = Cfc<T, { exactCopyOf: P }>;
+      type SameAuthorAs<T, Reference> = Cfc<T, { sameAuthorAs: Reference }>;
       type LengthPreservedFrom<T, P extends string> = Cfc<T, { collection: { sourceCollection: P; lengthPreserved: true } }>;
       type FilteredFrom<T, P extends string> = Cfc<T, { collection: { filteredFrom: P } }>;
       type SubsetOf<T, P extends string> = Cfc<T, { collection: { subsetOf: P } }>;
@@ -136,6 +137,7 @@ describe("Schema: CFC authoring aliases", () => {
         requiresIntegrity: RequiresIntegrity<string, readonly ["required-integrity"]>;
         maxConfidentiality: MaxConfidentiality<string, readonly ["max-confidentiality"]>;
         exactCopy: ExactCopy<string, "/source">;
+        sameAuthorAs: SameAuthorAs<string, "/member-profile">;
         lengthPreserved: LengthPreservedFrom<string[], "/collection">;
         filteredFrom: FilteredFrom<string[], "/filtered">;
         subsetOf: SubsetOf<string[], "/subset">;
@@ -177,6 +179,8 @@ describe("Schema: CFC authoring aliases", () => {
       .toEqual(["max-confidentiality"]);
     expect((schema.properties?.exactCopy as any).ifc?.exactCopyOf)
       .toBe("/source");
+    expect((schema.properties?.sameAuthorAs as any).ifc?.sameAuthorAs)
+      .toBe("/member-profile");
     expect((schema.properties?.lengthPreserved as any).ifc?.collection).toEqual(
       {
         sourceCollection: "/collection",

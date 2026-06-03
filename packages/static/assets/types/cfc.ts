@@ -173,6 +173,7 @@ export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "FilteredFrom",
   "SubsetOf",
   "PermutationOf",
+  "SameAuthorAs",
 ];
 
 export type CfcCanonicalAliasName = typeof CFC_CANONICAL_ALIAS_NAMES[number];
@@ -227,6 +228,16 @@ export type AuthoredByCurrentUser<T> = Cfc<T, {
     readonly kind: "authored-by";
     readonly subject: { readonly __ctCurrentPrincipal: true };
   }];
+}>;
+
+// "this value's author must be the same principal as the OWNER of <Reference>"
+// — Berni's profile-reference last mile (DESIGN §4): the org trusts a claim iff
+// its author owns a referenced member profile. `Reference` is typically that
+// member profile. v1 is the type-level primitive + the emitted `sameAuthorAs`
+// ifc marker; the runner write-gate that ENFORCES it (resolving Reference's
+// owner and comparing it to the value's author atom) is deferred (CT-1660).
+export type SameAuthorAs<T, Reference> = Cfc<T, {
+  sameAuthorAs: Reference;
 }>;
 
 export type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, {

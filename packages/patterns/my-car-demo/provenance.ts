@@ -10,10 +10,12 @@
 // atoms are read off a cell via `getCfcLabel()` (the same operation
 // packages/ui/.../cf-cfc-authorship.ts does today) and fed in here.
 //
-// Deferred (Berni-domain, see voucher-last-mile-investigation.md): promoting
-// `SameAuthorAs` into api/cfc.ts's CFC_CANONICAL_ALIAS_NAMES + a runner write-gate
-// in prepare.ts, and DRY-consolidating with cf-cfc-authorship's CfcLabelView
-// helpers. v1 enforces the rule as THIS derivation, not a write gate.
+// The `SameAuthorAs<T, Reference>` type primitive now ships in the CFC surface
+// (packages/api/cfc.ts; it lowers to an `ifc.sameAuthorAs` marker). Still
+// deferred (Berni-domain, see voucher-last-mile-investigation.md): the runner
+// write-gate in prepare.ts that ENFORCES it (resolve Reference's owner, compare
+// to the value's author atom), and DRY-consolidating with cf-cfc-authorship's
+// CfcLabelView helpers. v1 enforces the rule as THIS derivation, not a gate.
 
 import { Vehicle } from "../vehicles.ts";
 
@@ -22,9 +24,10 @@ export interface IntegrityAtom {
   subject?: string;
 }
 
-// "this value's author must be the same principal as the owner of <Reference>".
-// A phantom brand documenting the intended primitive; it does NOT yet lower to a
-// CFC ifc claim (that's the deferred api/cfc.ts + transformer work).
+// Local mirror of the CFC-surface `SameAuthorAs<T, Reference>` (packages/api/cfc.ts).
+// Re-declared here (not imported) to keep this module runtime-import-free so it
+// unit-tests with plain `deno test`; the canonical primitive that lowers to an
+// `ifc.sameAuthorAs` marker lives in the CFC surface.
 export type SameAuthorAs<T, Reference> = T & {
   readonly __sameAuthorAs?: Reference;
 };

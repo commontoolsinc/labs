@@ -1313,6 +1313,8 @@ export class CommonFabricFormatter implements TypeFormatter {
         return { maxConfidentiality: readValue(1) };
       case "ExactCopy":
         return { exactCopyOf: readValue(1) };
+      case "SameAuthorAs":
+        return { sameAuthorAs: readValue(1) };
       case "OpaqueInput":
         return {
           opaque: aliasArgs.length > 1 ? readValue(1) : true,
