@@ -121,9 +121,8 @@ Key points:
 2. The **shell build** bakes the flags into the JS bundle via esbuild defines.
 3. The **IPC protocol** carries the flags from the main thread to the Web Worker
    via `InitializationData`.
-4. The **Runtime constructor** calls `setDataModelConfig()`, which
-   sets the module-level ambient config used by `fabricFromNativeValue()` and related
-   functions.
+4. The **Runtime constructor** calls experiment configuration functions, which
+   collectively set up the ambient config for the system.
 
 ## Background Charm Service
 
