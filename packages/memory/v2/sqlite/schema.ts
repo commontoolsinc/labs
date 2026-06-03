@@ -33,6 +33,28 @@ export function cfLink<_T = unknown>(): ColumnSchema {
   return { type: "string", cfLink: true, sqlType: "text" };
 }
 
+// Server trust boundary: column names and the verbatim `sqlType` are
+// interpolated into CREATE TABLE DDL (createTableSQL), so they MUST be validated
+// wherever DDL is generated — not only in the client-side `table()` builder.
+// `db.tables` arrives over the wire (untrusted) and reaches createTableSQL via
+// ensureTables, so the same checks run there too.
+const COLUMN_NAME_RE = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+// Type keywords, constraints, numbers, parens, commas, quotes, hyphen — notably
+// NO ";", so multi-statement DDL injection ("text); DROP TABLE x;--") is rejected.
+const SQL_TYPE_RE = /^[A-Za-z0-9_ (),'-]*$/;
+
+/** Validate a column name + verbatim `sqlType` before they are interpolated into
+ *  DDL. Throws on anything that could smuggle SQL. Safe to call on untrusted
+ *  (wire-supplied) schema; `createTableSQL` calls it for every column. */
+export function assertSafeColumn(name: string, sqlType: string): void {
+  if (!COLUMN_NAME_RE.test(name)) {
+    throw new TypeError(`invalid column name "${name}"`);
+  }
+  if (!SQL_TYPE_RE.test(sqlType)) {
+    throw new TypeError(`invalid sqlType for column "${name}": ${sqlType}`);
+  }
+}
+
 // Map the leading SQL type word to a JSON Schema `type`.
 function jsonTypeForSql(sqlType: string): string {
   const head = sqlType.trim().toLowerCase().split(/\s+/)[0] ?? "";
@@ -62,16 +84,8 @@ function normalizeColumn(name: string, spec: ColumnSpec): ColumnSchema {
 
   // Validate identifiers and the verbatim sqlType so a hostile/buggy table
   // declaration can't smuggle DDL (e.g. `text); DROP TABLE x;--`) through
-  // createTableSQL's interpolation. Column names are quoted at emit time; sqlType
-  // is constrained to type keywords, constraints, numbers, parens and commas.
-  if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(name)) {
-    throw new TypeError(`invalid column name "${name}"`);
-  }
-  if (!/^[A-Za-z0-9_ (),'-]*$/.test(col.sqlType)) {
-    throw new TypeError(
-      `invalid sqlType for column "${name}": ${col.sqlType}`,
-    );
-  }
+  // createTableSQL's interpolation. (createTableSQL re-checks server-side too.)
+  assertSafeColumn(name, col.sqlType);
 
   const looksLink = col.cfLink === true;
   const namedLink = isCfLinkColumn(name);
@@ -129,7 +143,13 @@ export function createTableSQL(
   schema?: string,
 ): string {
   const cols = Object.entries(t.properties).map(
-    ([col, col_schema]) => `  ${quoteIdent(col)} ${col_schema.sqlType}`,
+    ([col, col_schema]) => {
+      // Re-validate at the interpolation site: `t` may be wire-supplied
+      // `db.tables` that never passed through `table()`/normalizeColumn.
+      const sqlType = col_schema.sqlType ?? "text";
+      assertSafeColumn(col, sqlType);
+      return `  ${quoteIdent(col)} ${sqlType}`;
+    },
   );
   const target = schema
     ? `${quoteIdent(schema)}.${quoteIdent(name)}`

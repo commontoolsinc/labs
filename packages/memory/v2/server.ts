@@ -996,43 +996,50 @@ export class Server {
         message.space,
         commitPayload.operations,
       );
+      let commit: Engine.AppliedCommit;
       try {
-        const commit = Engine.applyCommit(engine, {
+        commit = Engine.applyCommit(engine, {
           sessionId: message.sessionId,
           space: message.space,
           principal: session.principal,
           commit: commitPayload,
           sqliteAttachments,
         });
-        await this.runPostCommitSchedulerSideEffects(
-          message.space,
-          commit,
-          schedulerObservations,
-          previousReadSpaces,
-          session,
-        );
-        this.markSpaceDirty(
-          message.space,
-          message.commit.operations
-            .filter((operation) => operation.op !== "sqlite")
-            .map((operation) =>
-              toDirtyKey(operation.id, declaredScope(operation.scope))
-            ),
-          {
-            sessionId: message.sessionId,
-            seq: commit.seq,
-          },
-        );
-        return {
-          type: "response",
-          requestId: message.requestId,
-          ok: commit,
-        };
       } finally {
+        // Detach BEFORE any await. `engine.database` is shared per space, so
+        // holding a cell-db attached across the post-commit await would let a
+        // concurrent connection's commit attach a SECOND cell-db — breaking the
+        // ≤1-attached invariant that unqualified-name resolution relies on
+        // (B1). `applyCommit` is synchronous and is the only step that needs the
+        // attachments.
         for (const alias of sqliteAttachments.values()) {
           detachDatabase(engine.database, alias);
         }
       }
+      await this.runPostCommitSchedulerSideEffects(
+        message.space,
+        commit,
+        schedulerObservations,
+        previousReadSpaces,
+        session,
+      );
+      this.markSpaceDirty(
+        message.space,
+        message.commit.operations
+          .filter((operation) => operation.op !== "sqlite")
+          .map((operation) =>
+            toDirtyKey(operation.id, declaredScope(operation.scope))
+          ),
+        {
+          sessionId: message.sessionId,
+          seq: commit.seq,
+        },
+      );
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: commit,
+      };
     } catch (error) {
       if (error instanceof Engine.ConflictError) {
         this.stageConflictRefreshDirtyIds(message.space, message.commit);

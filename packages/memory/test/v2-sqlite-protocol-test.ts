@@ -102,6 +102,59 @@ describe("sqlite protocol verbs (loopback)", () => {
     expect(r.rows).toEqual([{ body: "folded" }]);
   });
 
+  it("isolates concurrent folded commits to two cell-dbs in one space (B1)", async () => {
+    // Two folded commits to DISTINCT cell-dbs in the SAME space, fired
+    // concurrently over two connections (the engine/Database is shared per
+    // space). The fix detaches each cell-db before the post-commit await, so the
+    // ≤1-attached invariant holds and neither write leaks into the other db.
+    const client2 = await connect({ transport: loopback(server) });
+    const session2 = await client2.mount(SPACE);
+    try {
+      const dbA: SqliteDbRef = {
+        id: `of:b1-a-${crypto.randomUUID()}`,
+        tables: dbRef().tables,
+      };
+      const dbB: SqliteDbRef = {
+        id: `of:b1-b-${crypto.randomUUID()}`,
+        tables: dbRef().tables,
+      };
+      await Promise.all([
+        session.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [
+            { op: "set", id: "of:b1-x", value: { value: { ok: true } } },
+            {
+              op: "sqlite",
+              db: dbA,
+              sql: "INSERT INTO messages (body) VALUES (?)",
+              params: ["A"],
+            },
+          ],
+        }),
+        session2.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [
+            { op: "set", id: "of:b1-y", value: { value: { ok: true } } },
+            {
+              op: "sqlite",
+              db: dbB,
+              sql: "INSERT INTO messages (body) VALUES (?)",
+              params: ["B"],
+            },
+          ],
+        }),
+      ]);
+      expect((await session.sqliteQuery(dbA, "SELECT body FROM messages")).rows)
+        .toEqual([{ body: "A" }]);
+      expect((await session.sqliteQuery(dbB, "SELECT body FROM messages")).rows)
+        .toEqual([{ body: "B" }]);
+    } finally {
+      await client2.close();
+    }
+  });
+
   it("rolls back the whole commit when a folded sqlite op fails", async () => {
     const db = dbRef();
     await expect(session.transact({

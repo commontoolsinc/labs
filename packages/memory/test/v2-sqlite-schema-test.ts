@@ -90,4 +90,25 @@ describe("createTableSQL", () => {
     expect(() => table({ "evil) ; DROP TABLE x --": "integer" })).toThrow();
     expect(() => table({ id: "text); DROP TABLE secret;--" })).toThrow();
   });
+
+  it("re-validates a wire-supplied TableSchema that bypassed table() (C1)", () => {
+    // The server reaches createTableSQL with `db.tables` straight off the wire,
+    // which never passed through table()/normalizeColumn. A hostile `sqlType`
+    // with `;` must be rejected at the interpolation site, not executed.
+    const malicious = {
+      type: "object",
+      required: ["c"],
+      properties: {
+        c: { type: "string", sqlType: "text); SELECT * FROM commit;--" },
+      },
+    } as unknown as Parameters<typeof createTableSQL>[1];
+    expect(() => createTableSQL("t", malicious)).toThrow("invalid sqlType");
+
+    const badName = {
+      type: "object",
+      required: [],
+      properties: { "a) ;--": { type: "string", sqlType: "text" } },
+    } as unknown as Parameters<typeof createTableSQL>[1];
+    expect(() => createTableSQL("t", badName)).toThrow("invalid column name");
+  });
 });
