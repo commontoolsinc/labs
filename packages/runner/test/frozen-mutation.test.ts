@@ -1,9 +1,9 @@
 /**
  * Contract tests for frozen-object safety.
  *
- * When `modernDataModel` is ON, `fabricFromNativeValueModern()` deep-freezes all
- * stored objects at commit time. Code paths that read these frozen objects from
- * storage must clone before mutating.
+ * `fabricFromNativeValueModern()` deep-freezes all stored objects at commit
+ * time. Code paths that read these frozen objects from storage must clone
+ * before mutating.
  *
  * The writeOrThrow tests use a two-transaction pattern to exercise the real
  * freeze:

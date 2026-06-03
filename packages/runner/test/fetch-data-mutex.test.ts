@@ -451,13 +451,6 @@ describe("fetch-data mutex mechanism", () => {
     globalThis.fetch = slowFetch;
   });
 
-  // Bifurcated by data model: the legacy fabric-value layer converts a
-  // thrown `Error` to the `{ "@Error": { name, message, stack } }` wrapper;
-  // the modern layer wraps it as a `FabricError`-shaped value (`typeTag`
-  // "Error@1", observable fields under `.error`). Each variant pins its
-  // own `Runtime` with an explicit `experimental.modernDataModel` (the
-  // constructor snapshots the flag at construction time), per the
-  // `cell-core.test.ts` Error-bifurcation pattern.
   const error404Fetch = () => {
     globalThis.fetch = async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -501,9 +494,6 @@ describe("fetch-data mutex mechanism", () => {
       pending?: boolean;
     };
 
-    // Modern path: error is a `FabricError`-shaped value (`typeTag`
-    // "Error@1"), not the legacy `@Error` wrapper; its observable fields
-    // (`name`, `message`, `stack`) are exposed directly on the wrapper.
     // Regression guard for the `memory/v2/patch.ts` `structuredClone()`
     // class-stripping bug, which made errors round-trip back as `{ ... }`
     // with message/stack lost.

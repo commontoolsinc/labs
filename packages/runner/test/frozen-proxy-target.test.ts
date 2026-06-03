@@ -1,11 +1,10 @@
 /**
  * Tests for the frozen proxy target fix in `query-result-proxy.ts`.
  *
- * When `modernDataModel` is enabled, stored objects are deep-frozen at
- * commit time. After commit, reads in a new transaction return direct
- * references to these frozen objects. The proxy creation function must still
- * wrap them (using an unfrozen stub as the proxy target) so that link
- * resolution and all proxy traps work correctly.
+ * Stored objects are deep-frozen at commit time. After commit, reads in a new
+ * transaction return direct references to these frozen objects. The proxy
+ * creation function must still wrap them (using an unfrozen stub as the proxy
+ * target) so that link resolution and all proxy traps work correctly.
  *
  * These tests now go through a real commit/reopen cycle. The v2 transaction
  * core isolates caller-owned values on write, so pre-freezing inputs is no
@@ -83,7 +82,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     targetCell.set({ answer: 42 });
 
     // Set up a cell whose value contains a sigil link to the target.
-    // Write it deep-frozen to simulate post-commit state with modernDataModel.
+    // Write it deep-frozen to simulate post-commit state.
     const sourceLink = writeCell(
       runtime,
       tx,
@@ -534,7 +533,7 @@ describe("frozen proxy target: committed reads", () => {
     await storageManager?.close();
   });
 
-  it("returns frozen committed objects under modernDataModel", async () => {
+  it("returns frozen committed objects", async () => {
     const link = writeCell(runtime, tx, "modern-frozen-raw", {
       a: 1,
       b: 2,
