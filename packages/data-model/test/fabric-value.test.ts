@@ -235,19 +235,12 @@ describe("fabric-value", () => {
         expect((result as unknown[])[1]).toBe(undefined);
       });
 
-      it("drops enumerable named properties on arrays", () => {
-        // TODO(danfuzz): This is a bug. Arrays with enumerable named
-        // properties should be rejected (thrown on), but `cloneHelper()`
-        // silently drops the named property instead. This test pins the
-        // current (buggy) behavior; fix the impl and flip this to expect a
-        // throw.
+      it("throws for arrays with enumerable named properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
-        const result = shallowFabricFromNativeValue(arr) as unknown[] & {
-          foo?: string;
-        };
-        expect(result).toEqual([1, 2, 3]);
-        expect("foo" in result).toBe(false);
+        expect(() => shallowFabricFromNativeValue(arr)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
       });
     });
 
@@ -1110,43 +1103,31 @@ describe("fabric-value", () => {
       });
     });
 
-    // TODO(danfuzz): This whole block pins buggy behavior. Arrays with
-    // enumerable named properties should be rejected (thrown on), but
-    // `cloneHelper()` silently drops the named property instead. Fix the impl
-    // and flip these to expect a throw.
-    describe("drops enumerable named properties on arrays", () => {
-      it("drops named properties on a top-level array", () => {
+    describe("throws for arrays with enumerable named properties", () => {
+      it("throws for a top-level array with named properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
-        const result = fabricFromNativeValue(arr) as unknown[] & {
-          foo?: string;
-        };
-        expect(result).toEqual([1, 2, 3]);
-        expect("foo" in result).toBe(false);
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
       });
 
-      it("drops named properties on a nested array", () => {
+      it("throws for a nested array with named properties", () => {
         const arr = [1, 2] as unknown[] & { extra?: number };
         arr.extra = 42;
-        const result = fabricFromNativeValue({ data: arr }) as {
-          data: unknown[] & { extra?: number };
-        };
-        expect(result.data).toEqual([1, 2]);
-        expect("extra" in result.data).toBe(false);
+        expect(() => fabricFromNativeValue({ data: arr })).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
       });
 
-      it("drops named properties on a sparse array", () => {
+      it("throws for a sparse array with named properties", () => {
         const sparse = [] as unknown[] & { name?: string };
         sparse[0] = 1;
         sparse[2] = 3;
         sparse.name = "test";
-        const result = fabricFromNativeValue(sparse) as unknown[] & {
-          name?: string;
-        };
-        expect(result[0]).toBe(1);
-        expect(1 in result).toBe(false);
-        expect(result[2]).toBe(3);
-        expect("name" in result).toBe(false);
+        expect(() => fabricFromNativeValue(sparse)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
       });
     });
 
