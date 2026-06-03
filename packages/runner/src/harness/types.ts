@@ -204,4 +204,11 @@ export interface Harness extends EventTarget {
   // location does not correspond to a loaded module, in which case callers fall
   // back to the raw source location. See docs/specs/module-loading.md.
   implementationHashForSource?(sourceLocation: string): string | undefined;
+
+  // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`, as
+  // returned by `mapPosition`) into the reload-stable canonical source
+  // `cf:module/<moduleHash>/<authoredPath>`, keeping the authored path for
+  // debuggability. Returns undefined for built-in / non-program sources, so
+  // callers fall back to the raw value.
+  canonicalModuleSource?(source: string): string | undefined;
 }

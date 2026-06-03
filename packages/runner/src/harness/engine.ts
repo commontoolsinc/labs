@@ -155,6 +155,11 @@ export class Engine extends EventTarget implements Harness {
   // populated at evaluate() time. Used to translate an action's bundle-relative
   // source location into a stable implementation identity.
   private moduleHashByPrefixedSource = new Map<string, string>();
+  // Canonical content-addressed source per prefixed source path, i.e.
+  // `/<programHash>/<authoredPath>` -> `cf:module/<moduleHash>/<authoredPath>`.
+  // Used to rewrite a function's `src` into a reload-stable identity that does
+  // not depend on which bundle/entry-point compiled the module.
+  private canonicalSourceByPrefixed = new Map<string, string>();
   private readonly bundleValidator = new CompiledBundleValidator();
   private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
@@ -335,9 +340,6 @@ export class Engine extends EventTarget implements Harness {
         }
       } else {
         const { compiler } = await this.getCompilerInternals();
-        // Concurrency-safe timing: explicit start (a shared timer key would be
-        // clobbered by parallel compiles). Same for `records`/`verify` below.
-        const tsCompileStart = performance.now();
         const modules = compiler.compileToModules(resolvedProgram, {
           noCheck: options.noCheck,
           runtimeModules: Engine.runtimeModuleNames(),
@@ -349,7 +351,6 @@ export class Engine extends EventTarget implements Harness {
             };
           },
         });
-        logger.time(tsCompileStart, "compileToRecordGraph", "ts-compile");
 
         // Every authored source must have an emitted body; a missing one would
         // otherwise be silently dropped and only fail later at import.
@@ -375,7 +376,6 @@ export class Engine extends EventTarget implements Harness {
           Object.keys(runtimeExports?.[name] ?? {}),
         ]),
       );
-      const recordsStart = performance.now();
       const graph = compileSourcesToRecords(moduleFiles, {
         precompiledBodies,
         precompiledSourceMaps,
@@ -388,7 +388,6 @@ export class Engine extends EventTarget implements Harness {
         // a second hashing/import-resolution pass over the module set.
         identityByPath,
       });
-      logger.time(recordsStart, "compileToRecordGraph", "records");
 
       // Register runtime-module records so cf:runtime/* imports resolve.
       const runtimeRecordExports: Record<string, Record<string, unknown>> = {};
@@ -405,9 +404,6 @@ export class Engine extends EventTarget implements Harness {
       }
 
       // Security-verify every authored module body before it can execute.
-      // (Runs even on a warm cache hit — the integrity label is still only
-      // client-asserted, so we do not yet trust cached bytes unverified.)
-      const verifyStart = performance.now();
       for (const [specifier, body] of graph.compiledBodies) {
         verifyCompiledModuleBody(body, specifier);
       }
@@ -425,7 +421,6 @@ export class Engine extends EventTarget implements Harness {
       // invoked with `verify: false` in evaluateRecordGraph — graph
       // verification happens once, at compile time, before any module executes.
       verifyModuleGraph(graph.records, mainSpecifier);
-      logger.time(verifyStart, "compileToRecordGraph", "verify");
 
       // Serializable per-module descriptors for write-back to the cache, in
       // identity space (the engine's `/<id>` path prefix never leaks out). Each
@@ -578,6 +573,12 @@ export class Engine extends EventTarget implements Harness {
       };
       for (const file of files) addVerifiedSource(file.name);
       for (const path of graph.specifierByPath.keys()) addVerifiedSource(path);
+      // Lockstep with canonical `fn.src`: functions now carry
+      // `cf:module/<hash>/<path>` source locations, so the verified set must
+      // recognize them too (else CFC identity fails closed).
+      for (const canonical of this.canonicalVerifiedSources(id, files)) {
+        addVerifiedSource(canonical);
+      }
       this.executableRegistry.setVerifiedLoadSources(loadId, verifiedSources);
 
       // Register functions defined during this load as verified, mirroring the
@@ -676,7 +677,14 @@ export class Engine extends EventTarget implements Harness {
       );
       this.executableRegistry.setVerifiedLoadSources(
         loadId,
-        collectVerifiedLoadSources(id, jsScript, files),
+        // Include canonical `cf:module/<hash>/<path>` forms so CFC recognizes the
+        // reload-stable source locations functions now carry (lockstep).
+        [
+          ...collectVerifiedLoadSources(id, jsScript, files),
+          ...this.canonicalVerifiedSources(id, files).map(
+            normalizeVerifiedSource,
+          ),
+        ],
       );
       const isolate = runtime.getIsolate(loadId);
       const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
@@ -845,8 +853,39 @@ export class Engine extends EventTarget implements Harness {
     // leaves hash with the empty fingerprint).
     const hashes = computeModuleHashes({ main: "", files });
     for (const [path, hash] of hashes) {
+      // `path` is the authored file path (e.g. `/api/.../notebook.tsx`); the
+      // per-module hash already incorporates it, so the canonical source is a
+      // 1:1, reload-stable identity that keeps the path for debuggability.
       this.moduleHashByPrefixedSource.set(`/${id}${path}`, hash);
+      this.canonicalSourceByPrefixed.set(
+        `/${id}${path}`,
+        `cf:module/${hash}${path}`,
+      );
     }
+  }
+
+  // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`,
+  // as returned by the source map) into the reload-stable canonical source
+  // `cf:module/<moduleHash>/<authoredPath>`. Returns undefined for unmapped
+  // (built-in / non-program) sources so callers can fall back to the raw value.
+  canonicalModuleSource(source: string): string | undefined {
+    return this.canonicalSourceByPrefixed.get(source) ??
+      (source.startsWith("/")
+        ? undefined
+        : this.canonicalSourceByPrefixed.get(`/${source}`));
+  }
+
+  // Canonical verified-source forms for a load, so CFC's isVerifiedSourceInLoad
+  // recognizes the `cf:module/<hash>/<path>` locations that functions now carry.
+  private canonicalVerifiedSources(id: string, files: Source[]): string[] {
+    const out: string[] = [];
+    for (const file of files) {
+      const canonical = this.canonicalSourceByPrefixed.get(
+        `/${id}${file.name}`,
+      );
+      if (canonical) out.push(canonical);
+    }
+    return out;
   }
 
   // Translate a source-location string into a stable content-addressed
@@ -855,6 +894,12 @@ export class Engine extends EventTarget implements Harness {
     const match = sourceLocation.match(/^(.*):(\d+):(\d+)$/);
     const sourcePath = match ? match[1] : sourceLocation;
     const suffix = match ? `:${match[2]}:${match[3]}` : "";
+    // `fn.src` is already canonical (`cf:module/<hash>/<path>`); reduce it to the
+    // pure per-module code identity `cf:module/<hash>` for the fingerprint.
+    const canonical = sourcePath.match(/^cf:module\/([^/]+)/);
+    if (canonical) {
+      return `cf:module/${canonical[1]}${suffix}`;
+    }
     const hash = this.moduleHashByPrefixedSource.get(sourcePath);
     return hash === undefined ? undefined : `cf:module/${hash}${suffix}`;
   }
@@ -922,6 +967,7 @@ export class Engine extends EventTarget implements Harness {
     this.executableRegistry.clear();
     this.bundleValidator.clear();
     this.moduleHashByPrefixedSource.clear();
+    this.canonicalSourceByPrefixed.clear();
   }
 
   private getSESRuntime(): SESRuntime {

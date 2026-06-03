@@ -111,6 +111,10 @@ describe("ESM loader: verified-source location resolution", () => {
     // src maps back to the authored file, not a `<loadId>.js` / `:esm:` bundle.
     expect(r.src).toMatch(/(?:^|\/)main\.tsx:\d+:\d+$/);
     expect(r.src).not.toMatch(/:esm:|\.js:\d+:\d+$/);
+    // src is the reload-stable content-addressed identity, and the canonical
+    // form still resolves through CFC verified-source (set + lookup agree after
+    // normalization — they both gain the same leading slash).
+    expect(r.src).toMatch(/^cf:module\//);
     expect(r.verifiedLoadId).toBeDefined();
     expect(r.isVerifiedSourceInLoad).toBe(true);
     expect(r.kind).toBe("verified");
@@ -122,6 +126,7 @@ describe("ESM loader: verified-source location resolution", () => {
     const r = probeHandlerIdentity(runtime, compiled);
 
     expect(r.src).toMatch(/(?:^|\/)main\.tsx:\d+:\d+$/);
+    expect(r.src).toMatch(/^cf:module\//);
     expect(r.isVerifiedSourceInLoad).toBe(true);
     expect(r.kind).toBe("verified");
   });
