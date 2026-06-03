@@ -1,11 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import {
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -33,22 +28,6 @@ const HELLO_OK = {
 
 const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
-};
-
-const withModernDataModel = async <T>(
-  fn: () => Promise<T> | T,
-): Promise<T> => {
-  const previousDataModel = getDataModelConfig();
-  setDataModelConfig(true);
-  try {
-    return await fn();
-  } finally {
-    if (previousDataModel) {
-      setDataModelConfig(true);
-    } else {
-      resetDataModelConfig();
-    }
-  }
 };
 
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
@@ -233,17 +212,15 @@ Deno.test("memory v2 server direct document helpers round-trip values", async ()
   };
 
   try {
-    await withModernDataModel(async () => {
-      await server.writeDocument(space, id, contents);
+    await server.writeDocument(space, id, contents);
 
-      assertEquals(await server.readDocument(space, id), {
-        value: contents,
-      });
-      assertEquals(
-        await server.readDocument(space, "cid:fid1:missing-document"),
-        null,
-      );
+    assertEquals(await server.readDocument(space, id), {
+      value: contents,
     });
+    assertEquals(
+      await server.readDocument(space, "cid:fid1:missing-document"),
+      null,
+    );
   } finally {
     await server.close();
   }

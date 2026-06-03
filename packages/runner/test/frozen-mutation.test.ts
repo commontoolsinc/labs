@@ -21,14 +21,9 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { resetDataModelConfig } from "@commonfabric/data-model/fabric-value";
 
 const signer = await Identity.fromPassphrase("test frozen mutation");
 const space = signer.did();
-
-function resetAllConfigs() {
-  resetDataModelConfig();
-}
 
 describe("frozen-object safety contracts", () => {
   describe("writeOrThrow clones frozen parents before mutation", () => {
@@ -46,7 +41,6 @@ describe("frozen-object safety contracts", () => {
     afterEach(async () => {
       await runtime?.dispose();
       await storageManager?.close();
-      resetAllConfigs();
     });
 
     it("writes through a frozen parent when intermediate path is missing", async () => {
