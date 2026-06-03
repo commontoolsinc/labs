@@ -140,21 +140,19 @@ To share identity between browser and CLI:
 
 ```bash
 # 1. Create a mnemonic in the browser (login/register screen)
-# 2. Export a CLI key using fromMnemonic (not fromPassphrase):
-deno eval '
-import { Identity } from "./packages/identity/src/identity.ts";
-const mnemonic = "your 24-word mnemonic here";
-const id = await Identity.fromMnemonic(mnemonic, { implementation: "noble" });
-await Deno.writeFile("./browser.key", id.toPkcs8());
-'
+# 2. Export a matching CLI key with `cf id from-mnemonic`, reading the phrase
+#    from a file (`-- <file>`; or `-` for stdin) so it stays out of shell
+#    history and the process list:
+deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > ./browser.key
 
 # 3. Use that key with cf
 cf piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
 ```
 
 Note: `cf id derive <passphrase>` will NOT produce the same identity as the
-browser. You must use `fromMnemonic` with `implementation: "noble"` to get a
-PKCS8 key that matches the browser's identity.
+browser — it uses `Identity.fromPassphrase()`, whereas browser mnemonic login
+and `cf id from-mnemonic` use `Identity.fromMnemonic()`. Use `from-mnemonic` to
+get a PKCS8 key that matches the browser's identity.
 
 ## Default App URL
 
