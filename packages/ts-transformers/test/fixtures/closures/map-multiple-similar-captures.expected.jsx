@@ -78,7 +78,7 @@ interface State {
 // FIXTURE: map-multiple-similar-captures
 // Verifies: .map() correctly captures multiple state properties with the same leaf name
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {checkout: {discount}, upsell: {discount}}})
-//   expression → derive() with both discount paths distinguished
+//   expression → lift(...)(...) with both discount paths distinguished
 // Context: state.checkout.discount and state.upsell.discount share the name "discount" but are separate captures
 export default pattern((state) => {
     return {

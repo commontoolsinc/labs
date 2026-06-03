@@ -29,8 +29,8 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ items }) => !items.get().length);
 // FIXTURE: conditional-empty-check
-// Verifies: !cell.get().length && <JSX> is transformed to when() with derive() predicate
-//   !items.get().length && <span> → when(derive({items}, ({items}) => !items.get().length), <span>)
+// Verifies: !cell.get().length && <JSX> is transformed to when() with a lift-applied predicate
+//   !items.get().length && <span> → when(lift(({items}) => !items.get().length)({items}), <span>)
 // Context: Negated length check on a cell array used as conditional guard
 export default pattern(() => {
     const items = cell<string[]>([], {

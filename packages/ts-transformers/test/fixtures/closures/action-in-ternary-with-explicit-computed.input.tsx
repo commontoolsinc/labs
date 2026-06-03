@@ -3,7 +3,7 @@
  *
  * Variation where the pattern author uses computed() explicitly inside JSX
  * (not encouraged, but should still work). The action is referenced INSIDE
- * the computed expression, so it must be captured in the derive wrapper.
+ * the computed expression, so it must be captured in the lift-applied wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commonfabric";
 
@@ -17,10 +17,10 @@ interface Input {
 }
 
 // FIXTURE: action-in-ternary-with-explicit-computed
-// Verifies: action() referenced inside an explicit computed() in JSX is captured in the derive wrapper
+// Verifies: action() referenced inside an explicit computed() in JSX is captured in the lift-applied wrapper
 //   action(() => ...) → handler(...)({ isEditing })
-//   computed(() => JSX with action ref) → derive(captureSchema, ..., { card, startEditing }, fn)
-// Context: Action referenced inside computed expression must appear in the derive's capture object
+//   computed(() => JSX with action ref) → lift(fn)({ card, startEditing })
+// Context: Action referenced inside computed expression must appear in the lift-applied capture object
 export default pattern<Input>(({ card }) => {
   const isEditing = new Cell(false);
 
@@ -37,7 +37,7 @@ export default pattern<Input>(({ card }) => {
           <div>
             <span>{card.title}</span>
             {/* Explicit computed() wrapping JSX that references the action */}
-            {/* The action must be captured in the derive created for this computed */}
+            {/* The action must be captured in the lift-applied computation created for this computed */}
             {computed(() => (
               <div>
                 <span>{card.description}</span>

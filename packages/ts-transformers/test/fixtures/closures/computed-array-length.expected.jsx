@@ -69,7 +69,7 @@ interface Charm {
 }
 // FIXTURE: computed-array-length
 // Verifies: computed(() => expr) with .length access on an OpaqueRef<T[]> is closure-extracted
-//   computed(() => allCharms.length) → derive(captureSchema, resultSchema, { allCharms: { length: allCharms.length } }, ({ allCharms }) => allCharms.length)
+//   computed(() => allCharms.length) → lift(({ allCharms }) => allCharms.length)({ allCharms: { length: allCharms.length } })
 //   allCharms.map(fn) → allCharms.mapWithPattern(pattern(fn, ...schemas), {})
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.

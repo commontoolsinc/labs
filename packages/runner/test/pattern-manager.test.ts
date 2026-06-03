@@ -427,7 +427,13 @@ describe("PatternManager.compileOrGetPattern", () => {
   });
 });
 
-describe("PatternManager compilation cache integration", () => {
+// AMD bundle-cache path (esmModuleLoader OFF): the persistent CachedCompiler
+// stores a whole-bundle jsScript keyed by program hash and skips evaluate-time
+// SES bundle validation on a hit. The ESM loader path uses an entirely
+// different cache — the per-module content-addressed cell cache — whose
+// cold→warm / cross-session / per-space(inSpace A→B) / CFC fail-closed behavior
+// is covered in esm-cell-cache-integration.test.ts.
+describe("PatternManager compilation cache integration (AMD bundle cache)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let cacheStorage: MemoryCompilationCache;
   let cachedCompiler: CachedCompiler;
@@ -454,6 +460,10 @@ describe("PatternManager compilation cache integration", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cachedCompiler,
+      // Pin the AMD bundle-cache path regardless of CF_ESM_MODULE_LOADER: this
+      // suite asserts CachedCompiler behavior. The ESM cell-cache equivalent is
+      // covered in esm-cell-cache-integration.test.ts.
+      experimental: { esmModuleLoader: false },
     });
   });
 

@@ -12,7 +12,7 @@ import { __cfHelpers } from "commonfabric";
  *
  * When a ternary branch contains both a computed() value and an action() reference,
  * the nested computed expression should still lower locally in JSX without forcing
- * the whole JSX branch through an extra derive wrapper.
+ * the whole JSX branch through an extra lift-applied wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
@@ -51,7 +51,7 @@ interface Input {
 }
 // FIXTURE: action-in-ternary-branch
 // Verifies: action() result used in a ternary branch alongside computed() keeps
-//   local JSX rewrites instead of forcing a whole-branch derive
+//   local JSX rewrites instead of forcing a whole-branch lift-applied computation
 //   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
 //   nested hasDescription ternary → local ifElse(...) inside the JSX branch
 // Context: Regression coverage for JSX-local rewriting with action references in the same branch

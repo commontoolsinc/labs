@@ -38,6 +38,7 @@ describe("ExperimentalOptions", () => {
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
+          modernCellRep: false,
           modernDataModel: false,
           // Explicit so the assertion is deterministic regardless of the
           // CF_ESM_MODULE_LOADER env (e.g. during the flag-on cross-check).
@@ -45,6 +46,7 @@ describe("ExperimentalOptions", () => {
         },
       });
       expect(runtime.experimental).toEqual({
+        modernCellRep: false,
         modernDataModel: false,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
@@ -60,11 +62,13 @@ describe("ExperimentalOptions", () => {
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
+          modernCellRep: true,
           modernDataModel: true,
           esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
       expect(runtime.experimental).toEqual({
+        modernCellRep: true,
         modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
@@ -85,6 +89,7 @@ describe("ExperimentalOptions", () => {
         },
       });
       expect(runtime.experimental).toEqual({
+        modernCellRep: false,
         modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,

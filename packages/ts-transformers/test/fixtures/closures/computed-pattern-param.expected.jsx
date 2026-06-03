@@ -39,7 +39,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() * config.multiplier);
 // FIXTURE: computed-pattern-param
 // Verifies: computed() inside a pattern captures the pattern parameter as a structured object
-//   computed(() => value.get() * config.multiplier) → derive(..., { value, config: { multiplier: config.key("multiplier") } }, ({ value, config }) => ...)
+//   computed(() => value.get() * config.multiplier) → lift(({ value, config }) => ...)({ value, config: { multiplier: config.key("multiplier") } })
 // Context: The pattern parameter `config` is not destructured, so properties
 //   accessed on it (config.multiplier) are rewritten to config.key("multiplier")
 //   in the captures object.

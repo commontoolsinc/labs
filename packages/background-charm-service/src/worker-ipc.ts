@@ -12,6 +12,7 @@ export type InitializationData = {
   toolshedUrl: string;
   rawIdentity: KeyPairRaw;
   experimental?: {
+    modernCellRep?: boolean;
     modernDataModel?: boolean;
     persistentSchedulerState?: boolean;
   };

@@ -30,7 +30,15 @@ deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
 
 # For a fresh random key (e.g., against production):
 deno run -A packages/cli/mod.ts id new > cf.key
+
+# To match a browser identity registered with a recovery phrase:
+deno run -A packages/cli/mod.ts id from-mnemonic "word1 word2 ... word24" > cf.key
 ```
+
+Note: `id derive` (passphrase) and `id from-mnemonic` (BIP-39 phrase) use
+different derivations and produce different DIDs from the same text. Use
+`from-mnemonic` to match browser mnemonic login; see
+`docs/development/SHARED_IDENTITY.md`.
 
 **IMPORTANT:** Do NOT use `deno task cf id new > file` — the `deno task` wrapper
 prints ANSI-colored preamble to stdout, which pollutes the key file. Always use

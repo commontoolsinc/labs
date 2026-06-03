@@ -45,9 +45,9 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ sum }) => sum * 2);
 // FIXTURE: computed-nested
 // Verifies: chained computed() calls where the second captures the result of the first
-//   computed(() => a.get() + b.get()) → derive(..., { a, b }, ({ a, b }) => a.get() + b.get())
-//   computed(() => sum * 2) → derive(..., { sum }, ({ sum }) => sum * 2)
-// Context: The first derive captures cells (asCell: true), the second captures
+//   computed(() => a.get() + b.get()) → lift(({ a, b }) => a.get() + b.get())({ a, b })
+//   computed(() => sum * 2) → lift(({ sum }) => sum * 2)({ sum })
+// Context: The first lift-applied computation captures cells (asCell: true), the second captures
 //   the computed result (asOpaque: true) since it is an OpaqueRef.
 export default pattern(() => {
     const a = new Writable(10, {

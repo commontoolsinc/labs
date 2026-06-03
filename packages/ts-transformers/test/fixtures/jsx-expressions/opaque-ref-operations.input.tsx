@@ -1,10 +1,10 @@
 import { cell, pattern, UI } from "commonfabric";
 
 // FIXTURE: opaque-ref-operations
-// Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in derive() with asCell schema
+// Verifies: arithmetic on cell-backed OpaqueRefs in JSX is wrapped in a lift-applied computation with asCell schema
 //   {count}           → {count}  (bare ref, no transform)
-//   {count.get() + 1} → derive({count: asCell}, ({count}) => count.get() + 1)
-//   {price.get() * 1.1} → derive({price: asCell}, ...)
+//   {count.get() + 1} → lift(({count}) => count.get() + 1)({ count: asCell })
+//   {price.get() * 1.1} → lift(...)({ price: asCell })
 export default pattern((_state) => {
   const count = cell(10);
   const price = cell(10);

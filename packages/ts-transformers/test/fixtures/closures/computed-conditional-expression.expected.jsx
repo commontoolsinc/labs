@@ -42,7 +42,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ value, threshold, a, b }) => value.get() > threshold.get() ? a.get() : b.get());
 // FIXTURE: computed-conditional-expression
 // Verifies: computed(() => expr) with four cell captures in a ternary expression
-//   computed(() => value.get() > threshold.get() ? a.get() : b.get()) → derive(captureSchema, resultSchema, { value, threshold, a, b }, ({ value, threshold, a, b }) => ...)
+//   computed(() => value.get() > threshold.get() ? a.get() : b.get()) → lift(({ value, threshold, a, b }) => ...)({ value, threshold, a, b })
 //   All four cells are captured with asCell: true in the schema.
 export default pattern(() => {
     const value = new Writable(10, {

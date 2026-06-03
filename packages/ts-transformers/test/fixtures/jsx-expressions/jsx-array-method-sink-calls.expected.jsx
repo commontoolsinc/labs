@@ -135,10 +135,10 @@ interface State {
 }
 // FIXTURE: jsx-array-method-sink-calls
 // Verifies: direct JSX sink receiver-methods over structural array-method chains can use the shared post-closure path
-//   state.items.filter(fn).join(", ")                        → shared post-closure derive over the sink call
-//   state.items.filter(fn).map(fn).join(", ")                → shared post-closure derive over the sink call
-//   state.items.filter(fn).join(", ").toUpperCase()          → shared post-closure derive over the chained call
-//   state.items.filter(fn).join(", ").toUpperCase().trim()   → shared post-closure derive over the recursive chained call
+//   state.items.filter(fn).join(", ")                        → shared post-closure lift-applied computation over the sink call
+//   state.items.filter(fn).map(fn).join(", ")                → shared post-closure lift-applied computation over the sink call
+//   state.items.filter(fn).join(", ").toUpperCase()          → shared post-closure lift-applied computation over the chained call
+//   state.items.filter(fn).join(", ").toUpperCase().trim()   → shared post-closure lift-applied computation over the recursive chained call
 // Context: Verifies recursive receiver-method chaining above a shareable array-method sink base
 export default pattern((state) => {
     return {

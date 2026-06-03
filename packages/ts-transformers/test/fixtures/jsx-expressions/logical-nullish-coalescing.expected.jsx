@@ -79,9 +79,9 @@ const __cfLift_3 = __cfHelpers.lift<{
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
 // FIXTURE: logical-nullish-coalescing
-// Verifies: ?? operator combined with && and || is correctly handled in derive()
-//   (config.get().timeout ?? 30) || "disabled" → derive({config}, ...)
-//   (config.get().retries ?? 3) > 0 && "text"  → derive({config}, ...)
+// Verifies: ?? operator combined with && and || is correctly handled in a lift-applied computation
+//   (config.get().timeout ?? 30) || "disabled" → lift(...)({ config })
+//   (config.get().retries ?? 3) > 0 && "text"  → lift(...)({ config })
 // Context: ?? has different semantics from || and must not be transformed to unless
 export default pattern((_state) => {
     const config = cell<{

@@ -40,7 +40,7 @@ const __cfLift_2 = __cfHelpers.lift<{
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-receiver-method-roots
 // Verifies: receiver-method roots inside pattern-owned map callbacks lower reactively
-//   item.toUpperCase()            → callback-local derive
+//   item.toUpperCase()            → callback-local lift-applied computation
 //   identity(item.toUpperCase())  → call-argument receiver-method root lowered reactively
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");

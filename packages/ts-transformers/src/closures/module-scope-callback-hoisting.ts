@@ -223,13 +223,8 @@ function getBuilderCallbackIndices(
     ? callee.name.text
     : undefined;
 
-  // After CT-1615 Phase 1, the hoister deliberately does NOT handle `derive`.
-  // LiftLoweringTransformer rewrites every supported derive shape (2-arg and
-  // 4-arg) into the lift-applied form well before this pass runs, so a
-  // canonically-shaped derive should never reach here. Malformed shapes
-  // (1-arg `derive(fn)` etc.) pass through to validation; refusing to hoist
-  // them is correct. `derive` is intentionally omitted from
-  // `HOISTABLE_BUILDER_NAMES` to enforce this.
+  // Only the builders in `HOISTABLE_BUILDER_NAMES` are hoisted; anything else
+  // (or a malformed call) passes through to validation untouched.
   if (!builderName || !HOISTABLE_BUILDER_NAMES.has(builderName)) {
     return [];
   }

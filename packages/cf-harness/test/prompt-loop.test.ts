@@ -2338,6 +2338,8 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
       leaseId: "lease-browser-1",
       cdpUrl: "http://127.0.0.1:9222",
       owner: "loom",
+      profileMode: "transient",
+      accountAccess: "none",
     },
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
@@ -2411,6 +2413,18 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
   assertStringIncludes(
     childSystemPrompt,
     "Browser Access CDP endpoint: http://127.0.0.1:9222",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Browser Access profile mode: transient",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Browser Access account access: none",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "temporary no-login profile",
   );
   assertStringIncludes(
     childSystemPrompt,

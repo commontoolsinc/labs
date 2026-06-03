@@ -32,7 +32,7 @@ especially:
 - reactive control flow
 - reactive collection operators
 - property/element access over reactive values
-- wrapper introduction (`derive`, `computed`, helper control-flow forms)
+- wrapper introduction (`computed`, helper control-flow forms)
 - callback capture and ownership lowering
 
 ## 3. Semantic Invariants
@@ -71,7 +71,6 @@ An outer rewrite must not silently root-rewrite through a nested reactive
 context boundary such as:
 
 - `computed(...)`
-- `derive(...)`
 - `action(...)`
 - `handler(...)`
 - rewritten collection callbacks

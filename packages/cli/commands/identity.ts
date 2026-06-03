@@ -4,6 +4,7 @@ import { render } from "../lib/render.ts";
 import {
   getDidFromFile,
   pkcs8FromEntropy,
+  pkcs8FromMnemonic,
   pkcs8FromPassphrase,
 } from "../lib/identity.ts";
 
@@ -32,7 +33,20 @@ export const identity = new Command()
     'Create and store a keyfile at ./my.key derived from the string "common user".',
   )
   .arguments("<passphrase:string>")
-  .action(deriveIdentity);
+  .action(deriveIdentity)
+  /* id from-mnemonic */
+  .command(
+    "from-mnemonic",
+    "Derives a keyfile from a BIP-39 mnemonic phrase, matching browser " +
+      "mnemonic login.",
+  )
+  .example(
+    cliText('cf id from-mnemonic "word1 word2 ... word24" > ./my.key'),
+    "Create a keyfile whose DID matches a browser identity registered with " +
+      "the given recovery phrase. Quote the whole phrase as one argument.",
+  )
+  .arguments("<mnemonic:string>")
+  .action(identityFromMnemonic);
 
 async function createIdentity() {
   const pkcs8Material = await pkcs8FromEntropy();
@@ -46,5 +60,10 @@ async function getDid(_: void, keypath: string) {
 
 async function deriveIdentity(_: void, passphrase: string) {
   const pkcs8Material = await pkcs8FromPassphrase(passphrase);
+  render(pkcs8Material);
+}
+
+async function identityFromMnemonic(_: void, mnemonic: string) {
+  const pkcs8Material = await pkcs8FromMnemonic(mnemonic);
   render(pkcs8Material);
 }

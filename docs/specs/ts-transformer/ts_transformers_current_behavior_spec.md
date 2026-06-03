@@ -104,7 +104,6 @@ Current mode-sensitive behavior:
 `detectCallKind()` drives multiple transformers. It recognizes:
 
 - builders: `pattern`, `handler`, `action`, `lift`, `computed`, `render`
-- `derive`
 - `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
   `flatMap`, `flatMapWithPattern`)
@@ -179,7 +178,6 @@ On call `receiver.get()` (no args):
   - structurally traces back to a reactive-origin call result/alias/binding
     initialized from one of:
     - builders (`pattern`, `computed`, `lift`, `handler`, `action`, `render`)
-    - `derive`
     - `ifElse`, `when`, `unless`
     - cell factories / `Cell.for`
     - `wish`
@@ -209,7 +207,7 @@ access chain. This means `as any` single casts do not hide property accesses
 from capability analysis.
 
 When interprocedural analysis is enabled (compute-context builders like `lift`,
-`derive`, `handler`), read paths discovered in helper function bodies propagate
+`handler`), read paths discovered in helper function bodies propagate
 back to the caller's parameter summary, but the current MVP intentionally only
 does this for resolved helper bodies in the same source file. Cross-file or
 otherwise unsupported helper calls fall back to the conservative wildcard path
@@ -281,7 +279,7 @@ Restricted contexts are callbacks of:
 
 Compute wrappers override restrictions:
 
-- `computed`, `action`, `derive`, `lift`, `handler` callbacks
+- `computed`, `action`, `lift`, `handler` callbacks
 - inline JSX `on*` handlers
 - standalone function definitions
 - JSX expressions (handled by opaque-ref JSX transformer)
@@ -298,19 +296,19 @@ Diagnostics emitted in all modes:
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
 - **Error** `standalone-function:reactive-operation`
   - in standalone functions (except inline first arg to `patternTool`):
-    `computed(...)`, `derive(...)`, or reactive collection methods on reactive
+    `computed(...)`, `lift(...)`, or reactive collection methods on reactive
     receivers
   - collection-method diagnostics currently use `.map(...)`-style guidance and
     suggest eager `<cell>.get().map(...)` when explicit eager mapping is
     acceptable
 - **Error** `compute-context:local-reactive-use`
-  - inside a `computed(...)`/`derive(...)` callback, a reactive value created in
+  - inside a `computed(...)`/`lift(...)` callback, a reactive value created in
     that same callback is consumed as a plain value in control-flow or another
     non-lowered computation site
-  - typical culprits are local `computed(...)`, `derive(...)`, `lift(...)`,
+  - typical culprits are local `computed(...)`, `lift(...)`,
     `wish(...)`, or reactive collection aliases and their property accesses
   - message instructs the author to move the use into a nested
-    `computed(() => ...)` or `derive(() => ...)`
+    `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
   - optional calls in restricted reactive context (outside JSX)
   - optional property / element access that appears outside a supported
@@ -392,7 +390,7 @@ For each `JsxExpression`:
 - if no rewrite required and no logical binary operators (`&&`, `||`), skip
 - in compute context:
   - only semantic logical rewrites (`&&`/`||`) are considered
-  - derive/computed wrapping is skipped
+  - computed wrapping is skipped
 - compute-context JSX does not lower `&&` / `||`
 - pattern-context JSX lowers `&&` / `||` deterministically
 - in `mode: "error"`:
@@ -421,9 +419,9 @@ Key rewrite rules:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
 - non-compute contexts:
   - complex reactive expressions are wrapped via `computed(() => expr)` (later
-    lowered to `derive`)
+    lowered to the lift-applied form)
 - compute contexts:
-  - no derive/computed wrappers; only child rewrites and logical conversions
+  - no computed wrappers; only child rewrites and logical conversions
 
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves
@@ -592,7 +590,7 @@ Current-main behavior distinguishes three buckets for non-JSX authored sites:
      `variable-initializer`, `object-property`, `array-element`, and
      `return-expression`
 2. **explicit compute callbacks**
-   - `computed` / `derive` / `action` / `lift` / `handler` callbacks remain the
+   - `computed` / `action` / `lift` / `handler` callbacks remain the
      explicit reactive boundary
    - inside those callbacks, authored conditionals stay authored JS inside the
      callback body rather than being rewritten to helper control flow
@@ -791,9 +789,9 @@ pipeline. Current built-in behavior:
 
 ## 13. Current Known Limits (Observed)
 
-1. Generic helper functions with uninstantiated type-parameter derive result
-   types can degrade schema precision (type arguments may be intentionally
-   omitted).
+1. Generic helper functions with uninstantiated type-parameter lift-applied
+   result types can degrade schema precision (type arguments may be
+   intentionally omitted).
 2. Action and JSX inline handler callback extraction currently unwraps arrow
    functions only.
 3. Optional-call forms on opaque pattern roots are non-lowerable and report
@@ -831,7 +829,7 @@ Additional non-fixture unit suites cover:
 - event-handler detection heuristics
 - opaque-ref analysis/normalization/runtime-style APIs
 - pipeline regression and policy/capability-analysis behavior
-- derive call helper and identifier utilities
+- lift-applied call helper and identifier utilities
 
 ## 15. Stability Statement
 

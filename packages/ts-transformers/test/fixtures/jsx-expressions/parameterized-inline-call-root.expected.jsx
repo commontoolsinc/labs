@@ -30,10 +30,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ prefix, count }) => ((value: number) => prefix + value)(count));
 // FIXTURE: parameterized-inline-call-root
 // Verifies: helper-owned parameterized inline-function call roots lower as a
-// shared post-closure derive around the whole call, not as a derive inside the
+// shared post-closure lift-applied computation around the whole call, not as a lift-applied computation inside the
 // inline function body that leaves the reactive argument outside.
 //   ((value) => prefix + value)(count)
-//     -> derive(..., { prefix, count }, ({ prefix, count }) => ((value) => prefix + value)(count))
+//     -> lift(({ prefix, count }) => ((value) => prefix + value)(count))({ prefix, count })
 export default pattern((__cf_pattern_input) => {
     const prefix = __cf_pattern_input.key("prefix");
     const count = __cf_pattern_input.key("count");

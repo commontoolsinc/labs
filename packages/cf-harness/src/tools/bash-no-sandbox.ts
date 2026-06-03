@@ -57,6 +57,7 @@ export const bashNoSandboxTool: HarnessToolDefinition<
       : context.currentDir;
     const policyResult = validateBrowserHostCommand(input.command, {
       browserAccessCdpUrl: context.browserAccess?.cdpUrl,
+      browserAccessExpiresAt: context.browserAccess?.expiresAt,
     });
     if (!policyResult.allowed) {
       context.setCurrentDir(commandCwd);

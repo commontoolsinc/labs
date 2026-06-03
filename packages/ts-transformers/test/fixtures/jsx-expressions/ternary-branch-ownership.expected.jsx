@@ -127,7 +127,7 @@ type State = {
 //   state.user.settings.notifications ? "enabled" : "disabled"
 //     -> ifElse(...) with a boolean predicate schema after key(...) lowering
 //   recentEvents.length === 0 ? <span>... : <div>{recentEvents.map(...)}</div>
-//     -> single branch derive + recentEvents.mapWithPattern(...)
+//     -> single branch lift-applied computation + recentEvents.mapWithPattern(...)
 //   showList ? (() => { const itemCount = count + " items"; return <div>{sorted.map(...)}</div>; })() : ...
 //     -> whole branch compute-wrapped, so sorted.map(...) stays plain JS
 export default pattern((state) => {

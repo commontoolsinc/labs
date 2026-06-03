@@ -15,7 +15,7 @@ import { __cfHelpers } from "commonfabric";
  * Expected transform:
  * - state.sections.map(...) and section.tasks.map(...) become mapWithPattern()
  * - authored ifElse predicates and branches lower uniformly
- * - nested ternaries inside task/tag callbacks lower without extra derive noise
+ * - nested ternaries inside task/tag callbacks lower without extra lift-applied noise
  * - handler captures preserve section/task/index/local Writable references
  */
 import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";

@@ -1,4 +1,4 @@
-import { getDataModelConfig } from "@commonfabric/data-model/fabric-value";
+import { getModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
 import {
   jsonFromValue,
   valueFromJson,
@@ -153,23 +153,17 @@ export interface SessionOpenResult {
 }
 
 export interface MemoryProtocolFlags {
-  modernDataModel: boolean;
+  modernCellRep: boolean;
   persistentSchedulerState: boolean;
 }
 
-/** Legacy field name accepted on the wire for backward compatibility. */
-const LEGACY_MODERN_DATA_MODEL_KEY = "richStorableValues";
-
-export type WireFlagsKey = "modernDataModel" | "richStorableValues";
-
 /**
- * Wire-format flags object. May use the canonical `modernDataModel` key or
- * the legacy `richStorableValues` alias. Use `parseMemoryProtocolFlags()` to
- * normalize to a `MemoryProtocolFlags`.
+ * Wire-format flags object.
  */
-export type WireMemoryProtocolFlags =
-  & { [K in WireFlagsKey]?: boolean }
-  & { persistentSchedulerState?: boolean };
+export type WireMemoryProtocolFlags = {
+  modernCellRep?: boolean;
+  persistentSchedulerState?: boolean;
+};
 
 export interface HelloMessage {
   type: "hello";
@@ -433,16 +427,9 @@ export function resetPersistentSchedulerStateConfig(): void {
 }
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
-  modernDataModel: getDataModelConfig(),
+  modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
 });
-
-export const sameMemoryProtocolFlags = (
-  left: MemoryProtocolFlags,
-  right: MemoryProtocolFlags,
-): boolean =>
-  left.modernDataModel === right.modernDataModel &&
-  left.persistentSchedulerState === right.persistentSchedulerState;
 
 /**
  * Scheduler-state persistence is an optional capability, not a data-model wire
@@ -453,18 +440,15 @@ export const sameMemoryProtocolFlags = (
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean => left.modernDataModel === right.modernDataModel;
+): boolean => left.modernCellRep === right.modernCellRep;
 
 /**
- * Parses and normalizes incoming wire-protocol flags. Accepts either the
- * current `modernDataModel` key or the legacy `richStorableValues` key (which
- * older peers may send). Returns `null` if the input is not a recognizable
- * flags object. The `wireKey` field captures which key the peer used, so
- * responders can echo the same key for backward compatibility.
+ * Parses and normalizes incoming wire-protocol flags. Returns `null` if the
+ * input is not a recognizable flags object.
  */
 export const parseMemoryProtocolFlags = (
   value: unknown,
-): { flags: MemoryProtocolFlags; wireKey: WireFlagsKey } | null => {
+): MemoryProtocolFlags | null => {
   if (!isRecord(value) || Array.isArray(value)) {
     return null;
   }
@@ -477,41 +461,27 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  if (typeof value.modernDataModel === "boolean") {
-    return {
-      flags: {
-        modernDataModel: value.modernDataModel,
-        persistentSchedulerState: persistentSchedulerState === true,
-      },
-      wireKey: "modernDataModel",
-    };
+  const modernCellRep = value.modernCellRep;
+  if (
+    modernCellRep !== undefined &&
+    typeof modernCellRep !== "boolean"
+  ) {
+    return null;
   }
 
-  const legacy = value[LEGACY_MODERN_DATA_MODEL_KEY];
-  if (typeof legacy === "boolean") {
-    return {
-      flags: {
-        modernDataModel: legacy,
-        persistentSchedulerState: persistentSchedulerState === true,
-      },
-      wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
-    };
-  }
-
-  return null;
+  return {
+    modernCellRep: modernCellRep === true,
+    persistentSchedulerState: persistentSchedulerState === true,
+  };
 };
 
 /**
- * Builds the wire-format flags object for a `hello`/`hello.ok` message,
- * using the given key. Defaults to the canonical `modernDataModel` key;
- * responders should pass the `wireKey` captured by
- * `parseMemoryProtocolFlags()` to echo back what the peer used.
+ * Builds the wire-format flags object for a `hello`/`hello.ok` message.
  */
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
-  wireKey: WireFlagsKey = "modernDataModel",
 ): WireMemoryProtocolFlags => ({
-  [wireKey]: flags.modernDataModel,
+  modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
 });
 

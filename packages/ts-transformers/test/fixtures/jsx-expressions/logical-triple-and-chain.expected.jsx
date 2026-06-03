@@ -55,10 +55,10 @@ const __cfLift_2 = __cfHelpers.lift<{
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name);
 // Tests triple && chain: a && b && c
-// Should produce nested when calls or derive the entire chain
+// Should produce nested when calls or lower the entire chain to a lift-applied computation
 // FIXTURE: logical-triple-and-chain
-// Verifies: triple && chain (a && b && <JSX>) is transformed to nested when() or derive()
-//   user.get().active && user.get().verified && <span> → when(derive({user}, ...), <span>)
+// Verifies: triple && chain (a && b && <JSX>) is transformed to nested when() or a lift-applied computation
+//   user.get().active && user.get().verified && <span> → when(lift(...)({ user }), <span>)
 export default pattern((_state) => {
     const user = cell<{
         active: boolean;

@@ -89,7 +89,7 @@ describe("RuntimeInternals navigation", () => {
       $ENVIRONMENT?: string;
       $COMMIT_SHA?: string;
       $MEMORY_VERSION?: string;
-      $EXPERIMENTAL_MODERN_DATA_MODEL?: string;
+      $EXPERIMENTAL_MODERN_CELL_REP?: string;
       $COMPILATION_CACHE_CLIENT?: string;
     };
     const originalEnv = {
@@ -97,14 +97,14 @@ describe("RuntimeInternals navigation", () => {
       $ENVIRONMENT: env.$ENVIRONMENT,
       $COMMIT_SHA: env.$COMMIT_SHA,
       $MEMORY_VERSION: env.$MEMORY_VERSION,
-      $EXPERIMENTAL_MODERN_DATA_MODEL: env.$EXPERIMENTAL_MODERN_DATA_MODEL,
+      $EXPERIMENTAL_MODERN_CELL_REP: env.$EXPERIMENTAL_MODERN_CELL_REP,
       $COMPILATION_CACHE_CLIENT: env.$COMPILATION_CACHE_CLIENT,
     };
     env.$API_URL = "http://shell.test/";
     env.$ENVIRONMENT = "development";
     env.$COMMIT_SHA = undefined;
     env.$MEMORY_VERSION = undefined;
-    env.$EXPERIMENTAL_MODERN_DATA_MODEL = undefined;
+    env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
     env.$COMPILATION_CACHE_CLIENT = undefined;
 
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
@@ -164,8 +164,8 @@ describe("RuntimeInternals navigation", () => {
       env.$ENVIRONMENT = originalEnv.$ENVIRONMENT;
       env.$COMMIT_SHA = originalEnv.$COMMIT_SHA;
       env.$MEMORY_VERSION = originalEnv.$MEMORY_VERSION;
-      env.$EXPERIMENTAL_MODERN_DATA_MODEL =
-        originalEnv.$EXPERIMENTAL_MODERN_DATA_MODEL;
+      env.$EXPERIMENTAL_MODERN_CELL_REP =
+        originalEnv.$EXPERIMENTAL_MODERN_CELL_REP;
       env.$COMPILATION_CACHE_CLIENT = originalEnv.$COMPILATION_CACHE_CLIENT;
       await runtime.dispose();
     }
@@ -177,7 +177,7 @@ describe("RuntimeInternals navigation", () => {
       $ENVIRONMENT?: string;
       $COMMIT_SHA?: string;
       $MEMORY_VERSION?: string;
-      $EXPERIMENTAL_MODERN_DATA_MODEL?: string;
+      $EXPERIMENTAL_MODERN_CELL_REP?: string;
       $COMPILATION_CACHE_CLIENT?: string;
     };
     const originalEnv = {
@@ -185,14 +185,14 @@ describe("RuntimeInternals navigation", () => {
       $ENVIRONMENT: env.$ENVIRONMENT,
       $COMMIT_SHA: env.$COMMIT_SHA,
       $MEMORY_VERSION: env.$MEMORY_VERSION,
-      $EXPERIMENTAL_MODERN_DATA_MODEL: env.$EXPERIMENTAL_MODERN_DATA_MODEL,
+      $EXPERIMENTAL_MODERN_CELL_REP: env.$EXPERIMENTAL_MODERN_CELL_REP,
       $COMPILATION_CACHE_CLIENT: env.$COMPILATION_CACHE_CLIENT,
     };
     env.$API_URL = "http://shell.test/";
     env.$ENVIRONMENT = "development";
     env.$COMMIT_SHA = undefined;
     env.$MEMORY_VERSION = undefined;
-    env.$EXPERIMENTAL_MODERN_DATA_MODEL = undefined;
+    env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
     env.$COMPILATION_CACHE_CLIENT = undefined;
 
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
@@ -237,8 +237,8 @@ describe("RuntimeInternals navigation", () => {
       env.$ENVIRONMENT = originalEnv.$ENVIRONMENT;
       env.$COMMIT_SHA = originalEnv.$COMMIT_SHA;
       env.$MEMORY_VERSION = originalEnv.$MEMORY_VERSION;
-      env.$EXPERIMENTAL_MODERN_DATA_MODEL =
-        originalEnv.$EXPERIMENTAL_MODERN_DATA_MODEL;
+      env.$EXPERIMENTAL_MODERN_CELL_REP =
+        originalEnv.$EXPERIMENTAL_MODERN_CELL_REP;
       env.$COMPILATION_CACHE_CLIENT = originalEnv.$COMPILATION_CACHE_CLIENT;
       await runtime.dispose();
     }

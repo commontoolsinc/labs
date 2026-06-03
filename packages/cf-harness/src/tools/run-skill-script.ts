@@ -11,6 +11,7 @@ import type {
   HarnessSkillScriptRuntime,
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { validateBrowserAccessLeaseFreshness } from "../contracts/browser-access.ts";
 import {
   isSkillScriptAllowlisted,
   normalizeSkillScriptPath,
@@ -249,7 +250,14 @@ const findCdpArg = (
 const validateHostAgentBrowserScriptArgs = (
   args: readonly string[],
   expectedCdpUrl: string | undefined,
+  browserAccessExpiresAt: string | undefined,
 ): string | undefined => {
+  const expiryError = validateBrowserAccessLeaseFreshness(
+    browserAccessExpiresAt,
+  );
+  if (expiryError !== undefined) {
+    return expiryError;
+  }
   const expectedCdpOrigin = normalizeCdpOrigin(expectedCdpUrl);
   if (expectedCdpOrigin === undefined) {
     return "host agent-browser skill scripts require a Browser Access lease endpoint";
@@ -1093,6 +1101,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
       const browserLeaseError = validateHostAgentBrowserScriptArgs(
         args,
         context.browserAccess?.cdpUrl,
+        context.browserAccess?.expiresAt,
       );
       if (browserLeaseError !== undefined) {
         const output = errorOutput({

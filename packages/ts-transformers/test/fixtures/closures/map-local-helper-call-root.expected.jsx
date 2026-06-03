@@ -27,10 +27,10 @@ const __cfLift_1 = __cfHelpers.lift<{
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-local-helper-call-root
 // Verifies: non-JSX pattern-owned map callbacks lift ordinary local helper
-//   calls as whole callback-local derives rather than lowering only the inner
+//   calls as whole callback-local lift-applied computations rather than lowering only the inner
 //   receiver-method argument expression.
 //   items.map((item) => identity(item.toUpperCase()))
-//   -> mapWithPattern(..., ({ item }) => derive(..., ({ item }) => identity(item.toUpperCase())))
+//   -> mapWithPattern(..., ({ item }) => lift(({ item }) => identity(item.toUpperCase()))(...))
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

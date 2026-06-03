@@ -7,7 +7,7 @@ various major features.
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
-| `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
+| `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` | Enables new "cell representation" classes |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | Enables durable scheduler observations, dirty state, and scheduler rehydration through memory-v2. |
 | `schedulerHistoricalMightWrite` | n/a (`RuntimeOptions` only) | Preserves the scheduler's legacy cumulative write history for dependency scheduling instead of the default current-known write set. |
 
@@ -68,12 +68,15 @@ directly to `new Runtime({ experimental: { ... } })`.
 ```
 Server Process (Deno)
   |
-  +-- ENV: EXPERIMENTAL_MODERN_DATA_MODEL=true
+  +-- ENV: EXPERIMENTAL_EXAMPLE_NAME_1=<value>
+  |        EXPERIMENTAL_EXAMPLE_NAME_2=<value>
+  |        ...
   |
   +-- toolshed/env.ts        --> Zod parses env vars
   +-- toolshed/index.ts      --> new Runtime({ experimental: { ... } })
-                                    +-- setDataModelConfig(...)
-                                    +-- setPersistentSchedulerStateConfig(...)
+                                    +-- setExperimentName1Config(...)
+                                    +-- setExperimentName2Config(...)
+                                    ...
 ```
 
 ### Browser-side (build-time injection)
@@ -84,10 +87,12 @@ via the IPC protocol:
 ```
 Build Time (shell)
   |
-  +-- ENV: EXPERIMENTAL_MODERN_DATA_MODEL=true
+  +-- ENV: EXPERIMENTAL_EXAMPLE_NAME_1=<value>
+  |        EXPERIMENTAL_EXAMPLE_NAME_2=<value>
+  |        ...
   |
-  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_MODERN_DATA_MODEL
-  +-- src/lib/env.ts           --> EXPERIMENTAL.modernDataModel = true
+  +-- felt.config.ts          --> esbuild define: $EXPERIMENTAL_*
+  +-- src/lib/env.ts          --> EXPERIMENTAL.exampleName* = true
   |
 Browser (Main Thread)
   |
@@ -96,17 +101,16 @@ Browser (Main Thread)
   +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
         |
         | postMessage (IPC)
-        | InitializationData { ..., experimental: { modernDataModel: true } }
+        | InitializationData { ..., experimental: { exampleName*: true } }
         |
         v
 Browser Web Worker
   |
   +-- RuntimeProcessor.initialize(data)
         +-- new Runtime({ ..., experimental: data.experimental })
-              +-- setDataModelConfig(true)
-              +-- setPersistentSchedulerStateConfig(...)
-              |    +-- modernDataModelEnabled = true
-              |         +-- fabricFromNativeValue() checks modernDataModelEnabled
+              +-- setExperimentName1Config(...)
+              +-- setExperimentName2Config(...)
+              ...
 ```
 
 Key points:
@@ -166,8 +170,7 @@ deno test --allow-ffi --allow-env --allow-read test/experimental-options.test.ts
 ```
 
 These tests verify that `Runtime` construction correctly sets and resets the
-ambient config, and that `fabricFromNativeValue()` dispatches based on the
-`modernDataModel` flag.
+ambient config.
 
 ## Implementation Details
 
@@ -176,15 +179,8 @@ The flags are defined in `packages/runner/src/runtime.ts` as the
 with defaults (all `false`) and stores the resolved result as
 `runtime.experimental` (type `Required<ExperimentalOptions>`).
 
-The memory layer uses module-level ambient config variables:
-`modernDataModelEnabled` in `packages/data-model/fabric-value.ts` (set by
-`setDataModelConfig()`). This means:
-
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are
   independent of the main thread.
 - Creating a new `Runtime` overwrites the ambient config; disposing it resets
   to defaults.
-
-See the formal spec at `docs/specs/space-model-formal-spec/` for the full
-data model specification that these flags gate.

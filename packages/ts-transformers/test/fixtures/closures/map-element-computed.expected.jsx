@@ -43,8 +43,8 @@ interface State {
 // FIXTURE: map-element-computed
 // Verifies: .map() on reactive array is transformed with computed element property access
 //   .map(fn) → .mapWithPattern(pattern(...), {})
-//   item.name.toUpperCase() → derive() wrapping the computed expression
-// Context: Uses index param; computation on element property triggers derive wrapper
+//   item.name.toUpperCase() → lift-applied computation wrapping the computed expression
+// Context: Uses index param; computation on element property triggers a lift-applied wrapper
 export default pattern((state) => {
     return {
         [UI]: (<div>

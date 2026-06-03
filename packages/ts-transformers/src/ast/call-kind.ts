@@ -14,7 +14,7 @@
  *    Common Fabric declarations or imports.
  *
  * 2. **Alias following**: Follow stable const aliases and call signatures to
- *    preserve detection for `const alias = derive` and `declare const alias:
+ *    preserve detection for `const alias = lift` and `declare const alias:
  *    typeof ifElse` style code.
  *
  * 3. **Synthetic helper support**: Recognize internal `__cfHelpers.*` calls
@@ -326,13 +326,12 @@ export function getCapabilitySummaryCallbackArgument(
 
   let callbackArg: ts.Expression | undefined;
   if (callKind.kind === "lift-applied") {
-    // For lift-applied shape (lift(cb)(input)), the callback lives on the
-    // inner lift call. For legacy derive shape, on the outer call itself.
+    // Lift-applied shape `lift(cb)(input)`: the callback lives on the inner
+    // lift call (the outer call's callee is always that inner CallExpression).
     const innerCallee = stripWrappers(call.expression);
-    const argSource = ts.isCallExpression(innerCallee)
-      ? innerCallee.arguments
-      : call.arguments;
-    callbackArg = argSource[argSource.length - 1];
+    if (ts.isCallExpression(innerCallee)) {
+      callbackArg = innerCallee.arguments[innerCallee.arguments.length - 1];
+    }
   } else if (
     callKind.kind === "builder" &&
     (
@@ -382,38 +381,18 @@ export function getLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // Two shapes are recognized as kind:"lift-applied":
-  //   (a) Legacy derive shape: __cfHelpers.derive(input, cb) or
-  //       __cfHelpers.derive(argSchema, resSchema, input, cb). Recognized
-  //       defensively for any unlowered legacy emission that reaches here.
-  //   (b) Canonical lift-applied shape: __cfHelpers.lift(cb)(input) or
-  //       __cfHelpers.lift(argSchema, resSchema, cb)(input).
-  // The lift-applied shape's outer call has the callee as a CallExpression.
+  // The lift-applied shape `__cfHelpers.lift(...)(input)` always has the outer
+  // call's callee as a CallExpression (the inner `lift(...)` factory). That is
+  // the only way detectCallKind produces kind:"lift-applied" — see its
+  // recognition in resolveExpressionKind (requires ts.isCallExpression(target)).
+  // The callback is the last arg of the inner lift call; the input is the first
+  // arg of the outer applied call.
   const innerCallee = stripWrappers(call.expression);
-  if (ts.isCallExpression(innerCallee)) {
-    // Lift-applied: callback is the last arg of the inner lift call; input
-    // is the first arg of the outer applied call.
-    const innerCall = innerCallee;
-    const callbackIndex = innerCall.arguments.length - 1;
-    const callbackArg = innerCall.arguments[callbackIndex];
-    const callback = callbackArg
-      ? resolveCallbackFunctionExpression(callbackArg, checker)
-      : undefined;
-    if (!callback) {
-      return undefined;
-    }
-
-    const input = call.arguments[0];
-    if (!input) {
-      return undefined;
-    }
-
-    return { input, callback };
+  if (!ts.isCallExpression(innerCallee)) {
+    return undefined;
   }
-
-  // Legacy derive shape.
-  const callbackIndex = call.arguments.length - 1;
-  const callbackArg = call.arguments[callbackIndex];
+  const callbackIndex = innerCallee.arguments.length - 1;
+  const callbackArg = innerCallee.arguments[callbackIndex];
   const callback = callbackArg
     ? resolveCallbackFunctionExpression(callbackArg, checker)
     : undefined;
@@ -421,8 +400,7 @@ export function getLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
-  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  const input = call.arguments[0];
   if (!input) {
     return undefined;
   }
@@ -1157,9 +1135,9 @@ function resolveExpressionKind(
   if (builderKind) {
     // Lift-applied recognition: when the callee is itself a call to lift
     // (e.g. __cfHelpers.lift(cb)({})), the *outer* call applies the lift
-    // factory to inputs and is semantically the lowered form of the
-    // user-source derive(input, cb). Return kind:"lift-applied" so
-    // downstream dispatchers handle it.
+    // factory to inputs and is the canonical lowered form of a reactive
+    // lifted-function computation (e.g. from computed()). Return
+    // kind:"lift-applied" so downstream dispatchers handle it.
     //
     // The plain unapplied builder case (e.g. __cfHelpers.lift(cb) on its
     // own, or a pattern() call) has `target` not as a CallExpression.

@@ -33,8 +33,8 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ list }) => !list.get()?.[0]);
 // FIXTURE: optional-element-access
-// Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(derive(...))
-//   !list.get()?.[0] && <span> → when(derive({list}, ({list}) => !list.get()?.[0]), <span>)
+// Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(lift(...)(...))
+//   !list.get()?.[0] && <span> → when(lift(({list}) => !list.get()?.[0])({ list }), <span>)
 // Context: Cell typed as string[] | undefined, with optional bracket access
 export default pattern(() => {
     const list = cell<string[] | undefined>(undefined, {

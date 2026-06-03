@@ -23,8 +23,8 @@ Established what works, what doesn't, and what looks broken in the runtime.
   leak to another. Concretely observable: CLI `inspect` running as
   `claude.key` shows `myName: ""` while the browser session shows `"Alex"` —
   same cell id, different scope key.
-- **Derived scope checks.** `isJoined = derive(myName, …)` and `isAdmin =
-  derive({myName, adminName}, …)` flip correctly when their dependencies
+- **Derived scope checks.** `isJoined = computed(() => …)` and `isAdmin =
+  computed(() => …)` flip correctly when their dependencies
   update.
 - **First-writer-wins admin claim.** The handler that does `if
   (adminName.get() === "") { adminName.set(me); }` works correctly. The
@@ -52,7 +52,7 @@ These are the things that bit during the build. Each is also captured in
 
 2. **`.length` on a top-level `PerSpace<Array>` doesn't lift reactively.**
    `users.length` snapshots once. Have to write
-   `derive(users, u => u.length)`. Nested access through an object cell
+   `computed(() => users.length)`. Nested access through an object cell
    (`conversation.rooms.length`) works fine, but a top-level array does not.
    First version of the test reported `undefined` for `userCount`.
 
@@ -113,7 +113,7 @@ that locks this case in.
 #### B2. ~~`array.length` on a top-level scoped array doesn't lift reactively~~ — NOT A BUG
 
 **Status:** Investigated and closed. Per `--show-transformed` analysis,
-both `items.length` and `derive(items, i => i.length)` lower to the same
+both `items.length` and `computed(() => items.length)` lower to the same
 underlying reads. The behavioral diff observed in the first cozy-poll test
 was likely an artifact of how the test asserted (see B3) or a misread.
 

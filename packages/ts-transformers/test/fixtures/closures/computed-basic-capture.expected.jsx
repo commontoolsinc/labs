@@ -31,8 +31,8 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => value.get() * multiplier.get());
 // FIXTURE: computed-basic-capture
-// Verifies: computed(() => expr) with two cell captures is closure-extracted into derive()
-//   computed(() => value.get() * multiplier.get()) → derive(captureSchema, resultSchema, { value, multiplier }, ({ value, multiplier }) => value.get() * multiplier.get())
+// Verifies: computed(() => expr) with two cell captures is closure-extracted into a lift-applied computation
+//   computed(() => value.get() * multiplier.get()) → lift(({ value, multiplier }) => value.get() * multiplier.get())({ value, multiplier })
 //   Captured cells are annotated with asCell: true in the capture schema.
 export default pattern(() => {
     const value = new Writable(10, {

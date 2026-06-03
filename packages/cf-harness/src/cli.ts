@@ -15,8 +15,11 @@ import {
 } from "./image-attachments.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import {
+  HARNESS_BROWSER_ACCESS_ACCOUNT_ACCESS,
   HARNESS_BROWSER_ACCESS_LEASE_TYPE,
+  HARNESS_BROWSER_ACCESS_PROFILE_MODES,
   type HarnessBrowserAccessLease,
+  parseBrowserAccessExpiresAt,
 } from "./contracts/browser-access.ts";
 import {
   readHarnessRunArtifacts,
@@ -107,6 +110,8 @@ const CLI_STRING_FLAGS = [
   "browser-access-cdp-url",
   "browser-access-owner",
   "browser-access-expires-at",
+  "browser-access-profile-mode",
+  "browser-access-account-access",
 ] as const;
 const CLI_BOOLEAN_FLAGS = [
   "help",
@@ -312,6 +317,8 @@ Options:
   --browser-access-cdp-url <url> Local CDP origin for the Browser Access lease
   --browser-access-owner <name>  Optional owner label for the Browser Access lease
   --browser-access-expires-at <t> Optional lease expiry timestamp
+  --browser-access-profile-mode <mode> persistent | transient
+  --browser-access-account-access <access> available | none
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
@@ -501,6 +508,20 @@ const optionalStringArg = (
   return typeof raw === "string" ? raw.trim() : undefined;
 };
 
+const optionalStringValue = <T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+  flagName: string,
+): T | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if ((allowed as readonly string[]).includes(value)) {
+    return value as T;
+  }
+  throw new Error(`${flagName} must be one of: ${allowed.join(", ")}`);
+};
+
 const parseBrowserAccessLease = (
   args: ReturnType<typeof parseArgs>,
 ): HarnessBrowserAccessLease | undefined => {
@@ -508,10 +529,22 @@ const parseBrowserAccessLease = (
   const cdpUrl = optionalStringArg(args, "browser-access-cdp-url");
   const owner = optionalStringArg(args, "browser-access-owner");
   const expiresAt = optionalStringArg(args, "browser-access-expires-at");
+  const profileMode = optionalStringValue(
+    optionalStringArg(args, "browser-access-profile-mode"),
+    HARNESS_BROWSER_ACCESS_PROFILE_MODES,
+    "--browser-access-profile-mode",
+  );
+  const accountAccess = optionalStringValue(
+    optionalStringArg(args, "browser-access-account-access"),
+    HARNESS_BROWSER_ACCESS_ACCOUNT_ACCESS,
+    "--browser-access-account-access",
+  );
   const anyProvided = leaseId !== undefined ||
     cdpUrl !== undefined ||
     owner !== undefined ||
-    expiresAt !== undefined;
+    expiresAt !== undefined ||
+    profileMode !== undefined ||
+    accountAccess !== undefined;
   if (!anyProvided) {
     return undefined;
   }
@@ -531,12 +564,22 @@ const parseBrowserAccessLease = (
       "--browser-access-cdp-url must be an http:// local origin with an explicit port",
     );
   }
+  if (
+    expiresAt !== undefined && expiresAt.length > 0 &&
+    parseBrowserAccessExpiresAt(expiresAt) === undefined
+  ) {
+    throw new Error(
+      "--browser-access-expires-at must be a valid timestamp",
+    );
+  }
   return {
     type: HARNESS_BROWSER_ACCESS_LEASE_TYPE,
     leaseId,
     cdpUrl: normalizedCdpUrl,
     ...(owner !== undefined && owner.length > 0 ? { owner } : {}),
     ...(expiresAt !== undefined && expiresAt.length > 0 ? { expiresAt } : {}),
+    ...(profileMode !== undefined ? { profileMode } : {}),
+    ...(accountAccess !== undefined ? { accountAccess } : {}),
   };
 };
 

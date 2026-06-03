@@ -43,7 +43,7 @@ const envSchema = z.object({
   // `Boolean()`, which treats any non-empty string as truthy -- so setting an
   // env var to the string `"false"` would incorrectly enable the flag. The
   // other boolean env vars in this file have the same latent bug.
-  EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
+  EXPERIMENTAL_MODERN_CELL_REP: flagValue(),
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
   // Background Charm Service: default is public space "toolshed-system"
   //SERVICE_DID: z.string().default(

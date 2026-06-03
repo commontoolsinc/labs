@@ -47,7 +47,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 });
 // FIXTURE: computed-jsx-local-function
 // Verifies: computed() with a locally-defined function inside the callback is closure-extracted
-//   computed(() => { const format = ...; return <span>{format(count)}</span> }) → derive(captureSchema, resultSchema, { count }, ({ count }) => { ... })
+//   computed(() => { const format = ...; return <span>{format(count)}</span> }) → lift(({ count }) => { ... })({ count })
 //   The pattern param `count` is captured with asOpaque: true in the schema.
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");

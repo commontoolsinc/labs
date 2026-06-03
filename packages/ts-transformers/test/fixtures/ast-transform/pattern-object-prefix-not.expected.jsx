@@ -34,9 +34,9 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.done);
 // FIXTURE: pattern-object-prefix-not
 // Verifies: top-level non-JSX unary boolean negation in an object property is
-//   lowered after closure normalization into a direct derive wrapper.
+//   lowered after closure normalization into a direct lift-applied computation.
 //   return { hidden: !state.done }
-//   → return { hidden: derive(!state.done) }
+//   → return { hidden: lift(({ state }) => !state.done)({ state }) }
 export default pattern((state) => ({
     hidden: __cfLift_1({ state: {
             done: state.key("done")
