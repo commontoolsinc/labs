@@ -3828,10 +3828,23 @@ export class Runner {
       // below); we only borrow the resolved output link's coordinates as the
       // cause. A pattern node always writes through a write redirect, so the
       // absence of one is a bug (the legacy non-redirect variants are removed).
+      //
+      // Bind the output bindings first (as `instantiateRawNode` does), so the
+      // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
+      // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
+      // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
+      // the base result cell and collide on one shared child cell.
+      const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
+        this.runtime.cfc,
+        outputBindings,
+        argumentCellLink,
+        internalCellLink,
+        resultCellLink,
+      );
       const outputRedirect = firstResolvedOutputRedirect(
         this.runtime,
         tx,
-        outputBindings,
+        mappedOutputBindings,
         resultCell,
       );
       if (!outputRedirect) {
