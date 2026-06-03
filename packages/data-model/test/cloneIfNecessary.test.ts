@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cloneIfNecessary, type CloneOptions } from "../src/fabric-value.ts";
 import type { FabricValue } from "../src/fabric-value.ts";

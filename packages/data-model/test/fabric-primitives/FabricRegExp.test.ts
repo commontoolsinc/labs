@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
 import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
