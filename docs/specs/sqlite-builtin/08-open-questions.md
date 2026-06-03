@@ -69,20 +69,24 @@ during design are marked **[resolved]** with the decision.
    a behind db, truncate orphaned in-doubt writes for an ahead one. Rejected:
    per-commit checkpoint+fsync of both files (doesn't actually close the crash
    window and kills WAL throughput).
-8. **Connection contention.** `@db/sqlite` is a single synchronous connection
-   per `Database`. Long queries block the space. Do we need a separate read
-   connection (WAL readers don't block writers), a statement timeout, or a
-   query cost limit for v1?
+8. **[resolved — read pool]** Connection contention. `@db/sqlite` is a single
+   synchronous connection per `Database`, so a long read on the engine
+   connection blocked the space. **Resolved** by routing **all reads** —
+   cell-derived and injected on-disk — onto a separate path-keyed **read-only
+   connection pool** (`ReadConnectionPool`), unattached from the engine; only
+   writes use the engine connection (Section
+   [04](./04-server-execution-and-transactions.md#read-path-a-pooled-read-only-connection)).
+   A statement timeout against a single runaway read remains a worthwhile guard.
 8a. **[resolved — V1 cut] Attach limit & core-table shadowing (Option A).**
    - **Attach limit:** `@db/sqlite` exposes no `sqlite3_limit` binding, so
-     `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10). V1:
-     design within 10 with an **attach/detach LRU cache** — attach a pattern db
-     on demand, evict (`DETACH DATABASE`) the least-recently-used near the limit,
-     managed at **transaction boundaries** (attach before `BEGIN`, detach only
-     when idle). A commit almost always touches one pattern db (2 schemas), far
-     under the limit; reject/split a transaction that would span more at once.
-     A one-time startup **probe only logs** the real limit (no dependency on
-     headroom).
+     `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10).
+     **Update (read pool):** reads no longer attach at all — they run on the
+     read-only connection pool (Q8 above), so the attach limit is now a
+     *write-only* concern, and a commit touches **at most one** cell-db (the one
+     being written), attached before `BEGIN` and detached before the post-commit
+     await. The old LRU attach/detach *read* cache is removed; the limit is
+     effectively never approached. A one-time startup **probe only logs** the
+     real limit (no dependency on headroom).
    - **Core-table shadowing:** V1 ships **without** the core-table rename. Cheap
      mitigations now: the statement guard rejects schema-qualified references,
      `ATTACH`/`DETACH`/`PRAGMA`, and multiple statements; patterns may **not
@@ -242,3 +246,25 @@ during design are marked **[resolved]** with the decision.
     when a link column actually decodes to a different value — so rows with no
     link columns (or null values) are returned as-is on the reactive read path,
     avoiding the per-row spread.
+
+## Read pool follow-ups (deferred)
+
+> Risks carried forward from the read-pool work (Section
+> [04](./04-server-execution-and-transactions.md#read-path-a-pooled-read-only-connection)).
+> The pool is in place and correct for the current access pattern; these are
+> sizing/hardening items, not correctness gaps.
+
+26. **fd budget & pool sizing.** The pool caps open read connections with an LRU
+    (evict → `close()`). Pick a sensible default and a per-space ceiling well
+    under the OS file-descriptor budget as cell-db counts grow.
+27. **WAL everywhere.** Reads observe only *committed* state and each query is a
+    fresh read transaction, so WAL is **not** required today (pinned by a test).
+    WAL remains a future hardening for concurrent read-*during*-write; if adopted,
+    assess the `-wal`/`-shm` overhead and checkpointing for many small cell-dbs.
+28. **Pooled-reader staleness on migration.** An additive migration bumps the
+    schema cookie and the pooled reader reloads schema on next access; if a future
+    case is found where it doesn't, invalidate the reader (`evict(path)`) on a
+    known schema-version bump.
+29. **Disk-source path disappearing / becoming unreadable** between registration
+    and read — surface a clear error (today an open error from the pool) rather
+    than a generic failure.

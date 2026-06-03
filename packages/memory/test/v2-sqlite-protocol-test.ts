@@ -287,6 +287,40 @@ describe("sqlite protocol verbs (loopback)", () => {
     expect(r.rows).toEqual([{ note: "n" }]);
   });
 
+  it("surfaces a query against an UNDECLARED table (not masked as empty)", async () => {
+    const db = dbRef();
+    // Materialize the cell-db file (create the declared `messages` table).
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // A query against a table that is NOT in the declared schema is a real
+    // mistake (a typo here). The file exists and every declared table was
+    // created on the write, so "no such table: nope" must surface — it must NOT
+    // be swallowed into `[]` by the create-on-read fallback.
+    await expect(session.sqliteQuery(db, "SELECT * FROM nope")).rejects
+      .toThrow();
+  });
+
+  it("reads [] for a DECLARED table not yet materialized (schema evolved)", async () => {
+    const id = `of:evolve-read-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    // Write with v1 → the file exists, but only `messages` is materialized.
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // Evolve the declared schema (add `notes`) and READ it before any write
+    // creates it. `notes` IS declared, so it reads as a fresh, empty table — []
+    // — rather than erroring.
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        notes: table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    const r = await session.sqliteQuery(v2, "SELECT note FROM notes");
+    expect(r.rows).toEqual([]);
+  });
+
   it("a pooled reader sees a write committed after its connection opened", async () => {
     const db = dbRef();
     await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);

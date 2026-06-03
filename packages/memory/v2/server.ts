@@ -199,6 +199,18 @@ function hashToken(s: string): string {
   return `${(h >>> 0).toString(16).padStart(8, "0")}${s.length.toString(16)}`;
 }
 
+/** Extract the table name from a SQLite "no such table: <name>" error, or
+ *  undefined if the error is not that shape. Any schema qualifier (`main.t`) is
+ *  stripped to the bare table name so it can be matched against declared tables. */
+function missingTableName(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = /no such table:\s*([^\s]+)/i.exec(message);
+  if (match === null) return undefined;
+  const ref = match[1];
+  const dot = ref.lastIndexOf(".");
+  return dot === -1 ? ref : ref.slice(dot + 1);
+}
+
 const respondTypedError = <Result>(
   requestId: string,
   error: V2Error,
@@ -684,17 +696,30 @@ export class Server {
     assertReadOnly(sql);
     const engine = await this.openEngine(space);
     const path = this.#cellDbPath(engine, space, db.id);
-    let fileExists = true;
+    // A never-written cell-db has no file yet (its schema is created on the
+    // first write, via the attach path). Treat a missing file as an empty
+    // result — but ONLY a genuinely-absent file: any other stat failure
+    // (permissions, I/O) is a real error and must surface, not masquerade as [].
     try {
       Deno.statSync(path);
-    } catch {
-      fileExists = false;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return [];
+      throw error;
     }
-    if (!fileExists) return [];
     try {
       return this.#readPool.query(path, sql, params);
     } catch (error) {
-      if (/no such table/i.test(error instanceof Error ? error.message : "")) {
+      // The file exists (written at least once, so ensureTables created every
+      // table declared at that write). A "no such table" therefore means either:
+      //   - a DECLARED table not yet materialized (the schema evolved since the
+      //     last write; the next write creates it) → behaves like a fresh,
+      //     empty table → [].
+      //   - an UNDECLARED table (a typo or otherwise undeclared name) → a real
+      //     mistake → rethrow.
+      // Scoping to the declared schema preserves create-on-read semantics
+      // without masking genuine query/schema errors as empty results.
+      const missing = missingTableName(error);
+      if (missing !== undefined && db.tables?.[missing] !== undefined) {
         return [];
       }
       throw error;
