@@ -1,4 +1,4 @@
-import { decode } from "@commonfabric/utils/encoding";
+import { decode, encode } from "@commonfabric/utils/encoding";
 import { join } from "@std/path";
 import { expect } from "@std/expect/expect";
 
@@ -39,6 +39,7 @@ export function checkStderr(stderr: string[]) {
 async function runCliTask(
   task: "cli-no-pwd-override",
   command: string,
+  stdin?: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
   // Use a regex to split up spaces outside of quotes.
   const match = command.match(/(?:[^\s"]+|"[^"]*")+/g);
@@ -48,7 +49,7 @@ async function runCliTask(
   // Filter out quotes that are in strings
   const args = match.map((arg) => arg.replace(/"/g, ""));
 
-  const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
+  const child = new Deno.Command(Deno.execPath(), {
     cwd: join(import.meta.dirname!, ".."),
     args: [
       "task",
@@ -60,7 +61,20 @@ async function runCliTask(
       task,
       ...args,
     ],
-  }).output();
+    // `.output()` requires stdout/stderr to be piped; `.spawn()` would
+    // otherwise default them to "inherit".
+    stdout: "piped",
+    stderr: "piped",
+    stdin: stdin === undefined ? "null" : "piped",
+  }).spawn();
+
+  if (stdin !== undefined) {
+    const writer = child.stdin.getWriter();
+    await writer.write(encode(stdin));
+    await writer.close();
+  }
+
+  const { code, stdout, stderr } = await child.output();
   return {
     code,
     stdout: bytesToLines(stdout),
@@ -70,10 +84,12 @@ async function runCliTask(
 
 // Executes the `cf` command via CLI
 // `const { stdout, stderr, code } = cf("dev --no-run ./pattern.tsx")`
+// Pass `stdin` to feed the command's standard input.
 export async function cf(
   command: string,
+  stdin?: string,
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
-  return await runCliTask("cli-no-pwd-override", command);
+  return await runCliTask("cli-no-pwd-override", command, stdin);
 }
 
 export async function withEnv(
