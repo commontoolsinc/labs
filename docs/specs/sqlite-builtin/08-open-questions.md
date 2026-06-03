@@ -125,6 +125,10 @@ during design are marked **[resolved]** with the decision.
     This same read-modify-write also resolves the **multi-tab write mutex**: two
     concurrent `db.exec` commits conflict on the handle cell's revision and
     serialize (one retries) — for free, with no separate mutex primitive.
+    *Future hardening (not needed for the cell-derived case):* a server-driven
+    `markSpaceDirty(handle-id)` emitted when a folded `sqlite` op commits would be
+    a more robust signal than the value-`rev` bump, and is the natural mechanism
+    for the cross-space injected-handle case (Q12).
 11. **Finer invalidation.** Is coarse `reactOn: db` (whole-database) invalidation
     good enough for v1, or do we want table-level handle cells (dirtied per
     touched table) out of the box, parsed from the write SQL? Still open;
@@ -188,3 +192,13 @@ during design are marked **[resolved]** with the decision.
       does not add a separate space-constraint at decode time (which could also
       break legitimate cross-space links); closing this is part of wiring read
       policy through `getCellFromLink` for SQLite-sourced links.
+
+## Ergonomics / minor follow-ups
+
+19. **Friendlier client-side "≤1 cell-db per commit" error.** The server enforces
+    at most one cell-db per commit and rejects a second with a `ProtocolError`
+    (Section [04](./04-server-execution-and-transactions.md)). Two `db.exec` calls
+    to the *same* handle in one handler are fine; calls to *two different* dbs in
+    one handler trip the limit only at commit time. A client-side assertion in the
+    write seam (`recordSqliteWrite`) could surface this earlier with a clearer
+    message. Nicety, not a correctness issue.

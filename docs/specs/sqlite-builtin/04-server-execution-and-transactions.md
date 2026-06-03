@@ -237,5 +237,5 @@ Goal: transactions are **atomic across cells and the attached SQLite database**.
 
 > **As-built proof.** Atomic cells + the `sqlite` op in one commit is proven
 > engine → server → protocol → runner and end-to-end through `cf check` plus the
-> real server (`integration/sqlite-db-query-decode.test.ts`). See
-> [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md).
+> real server (`integration/sqlite-db-query-decode.test.ts`), with rollback and
+> two-connection isolation pinned in `packages/memory/test/v2-sqlite-*-test.ts`.

@@ -19,8 +19,7 @@ read).
 > distinct methods, and CFC can still gate them separately. The reactive
 > `sqliteExecute` built-in was removed entirely; `db.exec` is the sole write
 > path. A free `sqliteQuery<Row>({ db, sql, ... })` function still exists and is
-> equivalent to `db.query<Row>(sql, ...)`. (Full history: `plans/` and
-> [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md).)
+> equivalent to `db.query<Row>(sql, ...)`.
 
 The runtime's reactive I/O — `fetchData`, `generateText`, `streamData` — is
 expressed as built-ins registered in
@@ -276,6 +275,13 @@ single `sqlite` op (the `sqlite` op ordered last). On SQL failure the **whole
 commit aborts** — there is no result cell and no `pending`/`success`/`error`
 state to inspect (abort-only). It **throws** on an `undefined` param (which may be
 a value that isn't ready yet — pass a resolved value, or `null` for SQL NULL).
+
+Because `db.exec` returns `void`, there is **no `changes` / `lastInsertRowid`**
+(folding the write into the commit drops the per-call write result the old
+standalone RPC returned). A pattern that needs to reference an inserted row in a
+follow-up write must use a **deterministic id** (e.g. a `_cf_link` to a cell, or
+an explicit `id` column it computes) rather than reading back an auto-increment
+rowid.
 
 There is **no reactive `sqliteExecute` built-in** — it was removed; `db.exec` is
 the sole write path. DDL is owned by the database (Section "Schema ownership"),

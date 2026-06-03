@@ -19,7 +19,6 @@ Control) and the non-default database sources are deferred:
 > **`SqliteDb` cell variant** carrying `.query`/`.exec` methods, and removed the
 > reactive `sqliteExecute` built-in. These docs have been rewritten to the
 > as-built API; per-section "Spec evolution" notes flag where the design moved.
-> Full history lives in `plans/` and [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md).
 
 ## Overview
 

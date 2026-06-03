@@ -5,8 +5,7 @@ phase lists its goal, the files it touches (with the integration points already
 located in the codebase), the work, tests, and exit criteria. Phases are ordered
 to land a thin vertical slice early and defer the hardest/most-deferred pieces.
 
-**Status (as-built):** Phases 0–5 are done and tested (see
-[IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md)). The shipped API is the
+**Status (as-built):** Phases 0–5 are done and tested. The shipped API is the
 **`SqliteDb` cell variant** (kind `"sqlite"`) exposing `db.query<Row>` (reactive
 read) and `db.exec` (imperative, commit-atomic write) — **not** the standalone
 `sqliteQuery`/`sqliteExecute` built-ins this plan was originally written against.
@@ -14,27 +13,14 @@ The reactive `sqliteExecute` built-in was removed; `db.exec` folds the write int
 the caller's commit. **Phase 3 (reactivity)** is delivered via the in-commit
 `rev`-bump model: `db.exec` bumps the handle cell's `rev` in its own commit, which
 both drives `reactOn: db` re-query and serializes concurrent writers (the
-multi-tab write mutex) — no separate post-commit signal. **Phases 6–9 are
-deferred**: WAL crash detect/quarantine (6), on-disk `cf` source (7, next up),
-VM-file source (8, stub), CFC labels (9, follow-up). The shipped API surface
-(Section [01](./01-api.md)) supersedes the standalone-built-in framing in the
-phase descriptions below; read those for the workstream sequencing, not the exact
-call shapes. Items marked **[gated]** depend on an open question
-([08-open-questions.md](./08-open-questions.md)).
-
-## Detailed design plans (deep workstreams)
-
-The two hardest workstreams have focused, test-first design plans produced by
-dedicated investigation sessions (augmenting Phases 2/3/6 below):
-
-- **Reactivity** ([plans/reactivity.md](./plans/reactivity.md)) — `reactOn: db`
-  re-query. Key finding: the earlier "failure" was a test-isolation artifact
-  (deterministic per-`(space,id)` temp file accumulating rows), not a logic bug;
-  the client handle-bump works. Reinstate it with an isolated test.
-- **Atomic writes** ([plans/atomic-writes.md](./plans/atomic-writes.md)) — fold
-  the `sqlite` op into the cell commit (engine loop skip + server pre-attach +
-  client out-of-band channel + optimistic-apply skip), with an engine-layer
-  atomicity/rollback test first.
+multi-tab write mutex) — no separate post-commit signal. **Phase 7 (on-disk `cf`
+source) is done, read-only v1** (`cf piece link sqlite:<path> <piece>/<field>`;
+Section [03.3](./03-database-sources.md)). **Phases 6, 8, 9 are deferred**: WAL
+crash detect/quarantine (6), VM-file source (8, stub), CFC labels (9, follow-up).
+The shipped API surface (Section [01](./01-api.md)) supersedes the
+standalone-built-in framing in the phase descriptions below; read those for the
+workstream sequencing, not the exact call shapes. Items marked **[gated]** depend
+on an open question ([08-open-questions.md](./08-open-questions.md)).
 
 ## Milestones at a glance
 
