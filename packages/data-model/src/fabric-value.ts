@@ -30,7 +30,7 @@ export {
   shallowMutableClone,
 } from "./value-clone.ts";
 
-export { isFabricValue } from "./type-check.ts";
+export { isFabricValueLayer } from "./type-check.ts";
 
 export {
   fabricFromNativeValue,

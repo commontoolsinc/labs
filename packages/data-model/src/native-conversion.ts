@@ -5,7 +5,7 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { isFabricValue } from "./type-check.ts";
+import { isFabricValueLayer } from "./type-check.ts";
 import { FabricEpochNsec } from "./fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "./fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "./fabric-instances/FabricNativeWrapper.ts";
@@ -175,7 +175,7 @@ export function shallowFabricFromNativeValue(
       // Objects (or arrays/class instances) with a `toJSON()` method.
       // Call `toJSON()` and validate the result.
       const converted = (value as { toJSON: () => unknown }).toJSON();
-      if (!isFabricValue(converted)) {
+      if (!isFabricValueLayer(converted)) {
         throw new Error(
           `\`toJSON()\` on ${typeof value} returned something other than a fabric value`,
         );
@@ -221,7 +221,7 @@ export function shallowFabricFromNativeValue(
         case "function":
           if (hasToJSONMethod(value)) {
             const converted = value.toJSON();
-            if (!isFabricValue(converted)) {
+            if (!isFabricValueLayer(converted)) {
               throw new Error(
                 `\`toJSON()\` on function returned something other than a fabric value`,
               );
@@ -461,8 +461,9 @@ function rebuildFabricErrorDeep(
  * is, if the value is a `FabricValue`, a `FabricNativeObject`, or a deep tree
  * thereof.
  *
- * The distinction from `isFabricValue()`:
- * - `isFabricValue(x)`: "is x already a `FabricValue`?"
+ * The distinction from `isFabricValueLayer()`:
+ * - `isFabricValueLayer(x)`: "is x already a `FabricValue`?" but only a shallow
+ *   check.
  * - `isFabricCompatible(x)`: "could x be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?"
  *

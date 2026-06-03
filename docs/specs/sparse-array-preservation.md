@@ -231,8 +231,9 @@ the preferred entry point in runner code.
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/data-model/test/fabric-value.test.ts`** — `isFabricValue` accepts
-  sparse arrays; `fabricFromNativeValue` and `toDeepFabricValue` preserve holes.
+- **`packages/data-model/test/fabric-value.test.ts`** — `isFabricValueLayer()`
+  accepts sparse arrays; `fabricFromNativeValue` and `toDeepFabricValue`
+  preserve holes.
 - **`packages/runner/test/cell-core.test.ts`** — sparse-array writes through
   the full Cell write path (which lands in `applyMutablePathWrite`) preserve
   holes; the helper's `cloneForMutation` + leaf-mutation steps round-trip

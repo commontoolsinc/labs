@@ -242,9 +242,6 @@ function deepFreezeInProgress<T>(value: T, inProgress?: Set<object>): T {
 export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // TODO(@danfuzz): A function `isFabricValue()` should ultimately get
   // extracted from this function, which does just the recursive type check.
-  // Note that, as of this writing, the existing function with that name (a)
-  // only does a single layer check, and (b) is only ever exercised in unit
-  // tests, so it should be safe to replace it.
 
   switch (typeof value) {
     case "function": {

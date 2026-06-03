@@ -9,7 +9,7 @@ import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
-export function isFabricValue(
+export function isFabricValueLayer(
   value: unknown,
 ): value is FabricValueLayer {
   switch (typeof value) {
