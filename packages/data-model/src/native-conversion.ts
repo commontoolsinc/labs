@@ -5,12 +5,8 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
+import { isFabricValueLayer } from "./type-check.ts";
 import { FabricEpochNsec } from "./fabric-primitives/FabricEpochNsec.ts";
-import {
-  errorClassFromType,
-  isConvertibleNativeInstance,
-  UNSAFE_KEYS,
-} from "./native-instance-utils.ts";
 import { FabricError } from "./fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "./fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
@@ -19,10 +15,11 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { cloneHelper } from "./value-clone.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { FrozenSet } from "./frozen-builtins.ts";
 
 /**
- * Helper for `shallowFabricFromNativeValueModern()`, which rejects native
- * objects with extra enumerable properties.
+ * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
+ * with extra enumerable properties.
  */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
@@ -33,17 +30,65 @@ function rejectExtraProperties(value: object, typeName: string): void {
 }
 
 /**
- * Performs shallow conversion from JS values to `FabricValue`. Wraps `Error`
- * instances into `FabricError`; preserves `undefined`; optionally freezes
- * the result if it is an object or array. If the value is already a frozen
- * `FabricValue`, returns it as-is (identity optimization).
+ * Returns `true` if the value is a native JS object type that the fabric
+ * system knows how to wrap. These are the "wild-west" instances that get
+ * converted into `FabricNativeWrapper` subclasses, `FabricPrimitive` types,
+ * or `FabricInstance` types by the conversion layer.
+ *
+ * Arrays, plain objects, objects with `toJSON()`, and system-defined special
+ * primitives are recognized by `tagFromNativeValue()` but are NOT convertible
+ * native instances -- they have their own handling paths in the conversion
+ * layer.
+ */
+export function isConvertibleNativeInstance(value: object): boolean {
+  switch (tagFromNativeValue(value)) {
+    case NATIVE_TAGS.Error:
+    case NATIVE_TAGS.Map:
+    case NATIVE_TAGS.Set:
+    case NATIVE_TAGS.Date:
+    case NATIVE_TAGS.Uint8Array:
+    case NATIVE_TAGS.RegExp:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Keys that must never be copied to prevent prototype pollution. */
+export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
+  "__proto__",
+  "constructor",
+]);
+
+/** Map from Error subclass name to its constructor. */
+const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
+  ["TypeError", TypeError],
+  ["RangeError", RangeError],
+  ["SyntaxError", SyntaxError],
+  ["ReferenceError", ReferenceError],
+  ["URIError", URIError],
+  ["EvalError", EvalError],
+]);
+
+/**
+ * Helper for `FabricError.[RECONSTRUCT]()`, which returns the `Error`
+ * constructor for the given type string (e.g. `"TypeError"`). Falls back
+ * to the base `Error` constructor for unknown types.
+ */
+export function errorClassFromType(type: string): ErrorConstructor {
+  return ERROR_CLASS_BY_TYPE.get(type) ?? Error;
+}
+
+/**
+ * Performs shallow conversion from JS values to `FabricValue`. If the value is
+ * already a frozen `FabricValue`, returns it as-is (identity optimization).
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
  *   object or array. When `false`, wrapping and validation still occur but
  *   the result is left mutable.
  */
-export function shallowFabricFromNativeValueModern(
+export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
@@ -130,7 +175,7 @@ export function shallowFabricFromNativeValueModern(
       // Objects (or arrays/class instances) with a `toJSON()` method.
       // Call `toJSON()` and validate the result.
       const converted = (value as { toJSON: () => unknown }).toJSON();
-      if (!isFabricValueModern(converted)) {
+      if (!isFabricValueLayer(converted)) {
         throw new Error(
           `\`toJSON()\` on ${typeof value} returned something other than a fabric value`,
         );
@@ -176,7 +221,7 @@ export function shallowFabricFromNativeValueModern(
         case "function":
           if (hasToJSONMethod(value)) {
             const converted = value.toJSON();
-            if (!isFabricValueModern(converted)) {
+            if (!isFabricValueLayer(converted)) {
               throw new Error(
                 `\`toJSON()\` on function returned something other than a fabric value`,
               );
@@ -236,10 +281,8 @@ function hasToJSONMethod(
 const PROCESSING = Symbol("PROCESSING");
 
 /**
- * Performs recursive conversion from JS values to `FabricValue`. Single-pass:
- * wraps `Error` instances into `FabricError`, preserves `undefined`, and
- * deep-freezes each node as it's built (no separate freeze pass). If the
- * input is already a deep-frozen `FabricValue`, returns it as-is (identity
+ * Performs recursive conversion from JS values to `FabricValue`. If the input
+ * is already a deep-frozen `FabricValue`, returns it as-is (identity
  * optimization).
  *
  * @param value - The value to convert.
@@ -247,7 +290,7 @@ const PROCESSING = Symbol("PROCESSING");
  *   When `false`, wrapping and validation still occur but the result is
  *   left mutable.
  */
-export function fabricFromNativeValueModern(
+export function fabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValue {
@@ -256,7 +299,7 @@ export function fabricFromNativeValueModern(
   if (freeze && isDeepFrozenFabricValue(value)) {
     return value;
   }
-  return fabricFromNativeValueModernInternal(
+  return fabricFromNativeValueInternal(
     value,
     new Map(),
     freeze,
@@ -264,13 +307,10 @@ export function fabricFromNativeValueModern(
 }
 
 /**
- * Helper for `fabricFromNativeValueModern()`, which performs the recursive
- * conversion. Single-pass: checks, wraps, and optionally freezes each node as
- * it's built. By the time this returns, the whole tree is converted and (if
- * `freeze` is true) deep-frozen. Unlike the legacy version, this never returns
- * `OMIT` -- `undefined` values are preserved.
+ * Helper for `fabricFromNativeValue()`, which performs the recursive
+ * conversion.
  */
-function fabricFromNativeValueModernInternal(
+function fabricFromNativeValueInternal(
   original: unknown,
   converted: Map<object, FabricValue>,
   freeze: boolean,
@@ -294,7 +334,7 @@ function fabricFromNativeValueModernInternal(
   // the shallow converter should not freeze anything.
   let value: FabricValueLayer;
   try {
-    value = shallowFabricFromNativeValueModern(original, false);
+    value = shallowFabricFromNativeValue(original, false);
   } catch (e) {
     if (isOriginalRecord) {
       converted.delete(original);
@@ -345,7 +385,7 @@ function fabricFromNativeValueModernInternal(
         // This keeps the hole distinct from `undefined`.
         resultArray.length = i + 1;
       } else {
-        resultArray[i] = fabricFromNativeValueModernInternal(
+        resultArray[i] = fabricFromNativeValueInternal(
           value[i],
           converted,
           freeze,
@@ -361,7 +401,7 @@ function fabricFromNativeValueModernInternal(
     const proto = Object.getPrototypeOf(value);
     const obj = Object.create(proto) as Record<string, FabricValue>;
     for (const [key, val] of Object.entries(value)) {
-      obj[key] = fabricFromNativeValueModernInternal(
+      obj[key] = fabricFromNativeValueInternal(
         val,
         converted,
         freeze,
@@ -394,7 +434,7 @@ function rebuildFabricErrorDeep(
 ): FabricError {
   // Recursively convert `.cause` -- it could be a raw `Error`, `Map`, etc.
   const cause = shallow.cause !== undefined
-    ? fabricFromNativeValueModernInternal(shallow.cause, converted, freeze)
+    ? fabricFromNativeValueInternal(shallow.cause, converted, freeze)
     : undefined;
 
   // Recursively convert custom enumerable properties.
@@ -402,7 +442,7 @@ function rebuildFabricErrorDeep(
   for (const [key, value] of shallow.extraEntries()) {
     extras.push([
       key,
-      fabricFromNativeValueModernInternal(value, converted, freeze),
+      fabricFromNativeValueInternal(value, converted, freeze),
     ]);
   }
 
@@ -417,88 +457,28 @@ function rebuildFabricErrorDeep(
 }
 
 /**
- * Indicates whether the value is a fabric value, accepting `FabricInstance`
- * values, `undefined`, and arrays with `undefined` elements or sparse holes
- * -- in addition to the base fabric types (`null`, `boolean`, `number`,
- * `string`, plain objects, dense arrays).
+ * Returns `true` if `fabricFromNativeValue()` would succeed on the value, that
+ * is, if the value is a `FabricValue`, a `FabricNativeObject`, or a deep tree
+ * thereof.
  *
- * This function is a TypeScript type guard for `FabricValueLayer`.
- */
-export function isFabricValueModern(
-  value: unknown,
-): value is FabricValueLayer {
-  switch (typeof value) {
-    case "boolean":
-    case "string":
-    case "number":
-    case "bigint":
-    case "undefined": {
-      return true;
-    }
-
-    case "object": {
-      if (value === null) {
-        return true;
-      }
-      // `FabricSpecialObject` -- already a valid `FabricValue`.
-      if (value instanceof FabricSpecialObject) {
-        return true;
-      }
-      if (Array.isArray(value)) {
-        // Arrays with `undefined` elements and sparse holes are accepted, but
-        // not arrays with non-index properties.
-        return isArrayWithOnlyIndexProperties(value);
-      }
-      // Plain objects are accepted; class instances are not (except
-      // `FabricInstance`, handled above).
-      const proto = Object.getPrototypeOf(value);
-      return proto === null || proto === Object.prototype;
-    }
-
-    case "symbol": {
-      // Registry-interned symbols are valid fabric values; unique ones are not.
-      return Symbol.keyFor(value) !== undefined;
-    }
-
-    case "function":
-    default: {
-      return false;
-    }
-  }
-}
-
-//
-// `isFabricCompatible()`
-//
-// Deep check for fabric compatibility.
-//
-
-/**
- * Returns `true` if `fabricFromNativeValue()` would succeed on the value --
- * i.e., the value is a `FabricValue`, a `FabricNativeObject`, or a deep
- * tree thereof.
- *
- * The distinction from `isFabricValue()` / `isFabricValueModern()`:
- * - `isFabricValueModern(x)` -- "is x already a `FabricValue`?"
- * - `isFabricCompatible(x)` -- "could x be converted to a `FabricValue` via
+ * The distinction from `isFabricValueLayer()`:
+ * - `isFabricValueLayer(x)`: "is x already a `FabricValue`?" but only a shallow
+ *   check.
+ * - `isFabricCompatible(x)`: "could x be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?"
  *
  * `isFabricCompatible()` additionally accepts `FabricNativeObject` types and
- * objects/functions with `toJSON()` methods
- * that return fabric values. It checks recursively, so all nested values in
- * arrays and objects must also be fabric-compatible or convertible.
+ * objects/functions with `toJSON()` methods that return fabric values. It
+ * checks recursively, so all nested values in arrays and objects must also be
+ * fabric-compatible or convertible.
  *
  * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
  */
-export function isFabricCompatibleModern(
+export function isFabricCompatible(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
   return isFabricCompatibleInternal(value, new Set());
 }
-
-//
-// Unified clone: `cloneIfNecessary()`
-//
 
 function isFabricCompatibleInternal(
   value: unknown,
@@ -592,17 +572,15 @@ function isFabricCompatibleInternal(
 }
 
 /**
- * Recursively walks a `FabricValue` tree, unwrapping any
- * `FabricNativeWrapper` values to their underlying native types via
- * `toNativeValue()`. Non-native `FabricInstance` values (`Cell`, `Stream`,
- * `UnknownValue`, etc.) pass through as-is.
+ * Recursively walks a `FabricValue` tree, unwrapping any `FabricNativeWrapper`
+ * values to their underlying native types via `toNativeValue()`. Non-native
+ * `FabricInstance` values (e.g., `UnknownValue`) pass through as-is.
  *
- * The freeze-state contract: the output's freeze state ALWAYS matches `frozen`.
- * Arrays and objects are copied and frozen/unfrozen accordingly. For
- * `FabricError`, the inner `Error`'s `.cause` and custom properties are also
- * recursively unwrapped (since they may contain `FabricInstance` wrappers).
+ * The freeze-state contract: the output's freeze state matches `frozen`, except
+ * that instances of classes that are defined to always be frozen are in fact
+ * returned as frozen, no matter the value of `frozen`.
  */
-export function nativeFromFabricValueModern(
+export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
 ): FabricValue | FabricNativeObject {
@@ -628,7 +606,7 @@ export function nativeFromFabricValueModern(
       if (!(i in value)) {
         result.length = i + 1;
       } else {
-        result[i] = nativeFromFabricValueModern(
+        result[i] = nativeFromFabricValue(
           value[i],
           frozen,
         );
@@ -641,7 +619,7 @@ export function nativeFromFabricValueModern(
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!UNSAFE_KEYS.has(key)) {
-      result[key] = nativeFromFabricValueModern(val, frozen);
+      result[key] = nativeFromFabricValue(val, frozen);
     }
   }
   if (frozen) Object.freeze(result);
@@ -657,12 +635,14 @@ function deepUnwrapFabricError(fe: FabricError, frozen: boolean): Error {
   if (fe.stack !== undefined) copy.stack = fe.stack;
 
   if (fe.cause !== undefined) {
-    copy.cause = nativeFromFabricValueModern(fe.cause, frozen);
+    copy.cause = nativeFromFabricValue(fe.cause, frozen);
   }
 
   for (const [key, value] of fe.extraEntries()) {
-    (copy as unknown as Record<string, unknown>)[key] =
-      nativeFromFabricValueModern(value, frozen);
+    (copy as unknown as Record<string, unknown>)[key] = nativeFromFabricValue(
+      value,
+      frozen,
+    );
   }
 
   if (frozen) Object.freeze(copy);

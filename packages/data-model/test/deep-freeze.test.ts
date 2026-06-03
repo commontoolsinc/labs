@@ -364,7 +364,7 @@ describe("deep-freeze", () => {
   // Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
   // references), so cycle tests only apply to Arm 4 (plain-object / array
   // fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
-  // covered in `fabric-instances/native-instance-utils.test.ts`.
+  // covered in `fabric-instances/native-conversion.test.ts`.
   //
   // Termination assertion: a cycle without shared-`inProgress` threading would
   // manifest as `RangeError: Maximum call stack size exceeded` (a clean fast

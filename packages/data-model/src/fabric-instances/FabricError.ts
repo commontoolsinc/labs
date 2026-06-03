@@ -11,7 +11,7 @@ import { TAGS } from "../fabric-type-tags.ts";
 import { FrozenSet } from "../frozen-builtins.ts";
 import { EmptyReconstructionContext } from "../EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
-import { errorClassFromType, UNSAFE_KEYS } from "../native-instance-utils.ts";
+import { errorClassFromType, UNSAFE_KEYS } from "../native-conversion.ts";
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the
