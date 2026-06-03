@@ -79,17 +79,14 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * @returns `true` if the array has only numeric properties, `false` otherwise.
  */
 export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
-  const len = array.length;
   const keys = Object.keys(array);
 
-  // Quick check: more keys than length means there must be named properties.
-  if (keys.length > len) {
-    return false;
-  }
-
-  // Verify all keys are valid indices (non-negative integers < length).
-  return !keys.some((k) => {
-    const n = Number(k);
-    return !Number.isInteger(n) || n < 0 || n >= len;
-  });
+  // `Object.keys()` on an (ordinary) array yields all array-index keys first,
+  // followed by any non-index keys. So if an array has _any_ non-index keys,
+  // then _one_ of them is always the final key. This means the array is
+  // index-only exactly when it has no keys or its last key is an index. (This
+  // relies on ordinary-array key ordering; the input is always a real array,
+  // never a `Proxy` with a reordering `ownKeys` trap.)
+  return keys.length === 0 ||
+    isArrayIndexPropertyName(keys[keys.length - 1]);
 }

@@ -102,9 +102,27 @@ export function shallowFabricFromNativeValueModern(
       return new FabricBytes(value as Uint8Array);
     }
 
-    case NATIVE_TAGS.Array:
+    case NATIVE_TAGS.Array: {
+      // Arrays may only carry numeric index properties. An enumerable named
+      // property has no fabric representation, so reject it outright rather
+      // than silently dropping it ("death before confusion").
+      if (!isArrayWithOnlyIndexProperties(value as unknown[])) {
+        throw new Error(
+          "Cannot store array with enumerable named properties",
+        );
+      }
+      // Delegate frozenness handling to `cloneHelper()`.
+      return cloneHelper(
+        value as FabricValue,
+        freeze,
+        false,
+        false,
+        null,
+      ) as FabricValueLayer;
+    }
+
     case NATIVE_TAGS.Object:
-      // Arrays and plain objects: delegate frozenness handling to `cloneHelper()`.
+      // Plain objects: delegate frozenness handling to `cloneHelper()`.
       return cloneHelper(
         value as FabricValue,
         freeze,

@@ -332,6 +332,32 @@ describe("deep-freeze", () => {
     });
   });
 
+  describe("`isDeepFrozenFabricValue()` array structure validity", () => {
+    it("returns `false` for a frozen array with enumerable named properties", () => {
+      // An array carrying a named property has no fabric representation, so it
+      // is not a valid `FabricValue` even when fully frozen.
+      const arr = [1, 2, 3] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+      Object.freeze(arr);
+      expect(isDeepFrozenFabricValue(arr)).toBe(false);
+    });
+
+    it("returns `false` for a frozen array with named properties nested in a tree", () => {
+      const arr = [1, 2] as unknown[] & { extra?: number };
+      arr.extra = 42;
+      const tree = Object.freeze({ data: Object.freeze(arr) });
+      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+    });
+
+    it("returns `true` for a frozen sparse array (holes are not named properties)", () => {
+      const sparse: unknown[] = [];
+      sparse[0] = 1;
+      sparse[2] = 3; // hole at index 1
+      Object.freeze(sparse);
+      expect(isDeepFrozenFabricValue(sparse)).toBe(true);
+    });
+  });
+
   // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
   // 4-arm dispatch) and the analogous arms of `checkValue` inside
   // `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
