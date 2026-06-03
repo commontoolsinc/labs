@@ -262,9 +262,10 @@ during design are marked **[resolved]** with the decision.
     WAL remains a future hardening for concurrent read-*during*-write; if adopted,
     assess the `-wal`/`-shm` overhead and checkpointing for many small cell-dbs.
 28. **Pooled-reader staleness on migration.** An additive migration bumps the
-    schema cookie and the pooled reader reloads schema on next access; if a future
-    case is found where it doesn't, invalidate the reader (`evict(path)`) on a
-    known schema-version bump.
+    schema cookie and the pooled reader reloads schema on next access (SQLite
+    re-prepares against committed DDL). If a future case is found where it
+    doesn't, add an explicit drop-and-reopen of the pooled connection on a known
+    schema-version bump.
 29. **Disk-source path disappearing / becoming unreadable** between registration
     and read — surface a clear error (today an open error from the pool) rather
     than a generic failure.

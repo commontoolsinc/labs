@@ -34,6 +34,12 @@ export class ReadConnectionPool {
       return existing;
     }
     const db = new Database(path, { readonly: true });
+    // Match the engine connection's busy_timeout (engine.ts PRAGMAS). A pooled
+    // read uses a SEPARATE OS connection from the writer's engine connection, so
+    // a read that races a writer holding the file lock (another process over the
+    // same store, or an external writer to a `cf link`ed disk source) would hit
+    // an immediate SQLITE_BUSY at the default timeout of 0 — wait instead.
+    db.exec("PRAGMA busy_timeout = 5000");
     this.#byPath.set(path, db);
     if (this.#byPath.size > this.#max) {
       const oldest = this.#byPath.keys().next().value as string | undefined;
@@ -56,18 +62,6 @@ export class ReadConnectionPool {
     params?: SqliteParams,
   ): Row[] {
     return runQuery<Row>(this.#connection(path), sql, params);
-  }
-
-  /** Drop (and close) the pooled connection for a path — e.g. after a schema
-   *  migration on the writer, so the next read reopens with fresh schema. */
-  evict(path: string): void {
-    const db = this.#byPath.get(path);
-    if (db) {
-      this.#byPath.delete(path);
-      try {
-        db.close();
-      } catch { /* best-effort */ }
-    }
   }
 
   close(): void {

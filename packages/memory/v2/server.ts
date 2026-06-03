@@ -218,6 +218,21 @@ function missingTableName(error: unknown): string | undefined {
   return ref;
 }
 
+/** Whether `name` matches a declared table key, case-insensitively (SQLite
+ *  resolves table identifiers case-insensitively for ASCII). */
+function isDeclaredTable(
+  tables: Record<string, unknown> | undefined,
+  name: string,
+): boolean {
+  if (tables === undefined) return false;
+  if (Object.prototype.hasOwnProperty.call(tables, name)) return true;
+  const lowered = name.toLowerCase();
+  for (const key of Object.keys(tables)) {
+    if (key.toLowerCase() === lowered) return true;
+  }
+  return false;
+}
+
 const respondTypedError = <Result>(
   requestId: string,
   error: V2Error,
@@ -725,8 +740,12 @@ export class Server {
       //     mistake → rethrow.
       // Scoping to the declared schema preserves create-on-read semantics
       // without masking genuine query/schema errors as empty results.
+      // SQLite identifiers are case-insensitive (ASCII), so match the missing
+      // name against the declared keys case-insensitively — otherwise a table
+      // declared `Notes` but queried `notes` would rethrow before its first
+      // write yet succeed after (SQLite case-folds), flipping the contract.
       const missing = missingTableName(error);
-      if (missing !== undefined && db.tables?.[missing] !== undefined) {
+      if (missing !== undefined && isDeclaredTable(db.tables, missing)) {
         return [];
       }
       throw error;

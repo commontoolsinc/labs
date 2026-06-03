@@ -342,6 +342,28 @@ describe("sqlite protocol verbs (loopback)", () => {
     expect(r.rows).toEqual([]);
   });
 
+  it("reads [] for a declared-but-unmaterialized table queried in a different case", async () => {
+    // SQLite identifiers are case-insensitive: a table declared `Notes` is
+    // reachable as `notes`. Before it is materialized, reading `notes` must
+    // still resolve to the declared `Notes` and return [] (not rethrow) —
+    // otherwise the create-on-read contract would flip on write history.
+    const id = `of:case-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        Notes: table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    const r = await session.sqliteQuery(v2, "SELECT note FROM notes");
+    expect(r.rows).toEqual([]);
+  });
+
   it("a pooled reader sees a write committed after its connection opened", async () => {
     const db = dbRef();
     await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
