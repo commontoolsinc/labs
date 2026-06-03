@@ -30,8 +30,17 @@ export function isOpaqueRefType(
   // Look for the CELL_BRAND unique symbol on the type.
   const brand = getCellBrand(type, checker);
   if (brand !== undefined) {
-    // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly", "writeonly"
-    return ["opaque", "cell", "stream", "comparable", "readonly", "writeonly"]
+    // Valid cell brands: "opaque", "cell", "stream", "comparable", "readonly",
+    // "writeonly", "sqlite"
+    return [
+      "opaque",
+      "cell",
+      "stream",
+      "comparable",
+      "readonly",
+      "writeonly",
+      "sqlite",
+    ]
       .includes(brand);
   }
 

@@ -18,6 +18,10 @@ import {
   type SessionOpenResult,
   type SessionRevokedMessage,
   type SessionSync,
+  type SqliteDbRef,
+  type SqliteParamsWire,
+  type SqliteQueryResult,
+  type SqliteRegisterDiskSourceResult,
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
@@ -453,6 +457,48 @@ export class SpaceSession {
 
     this.noteResult(result.serverSeq);
     return result;
+  }
+
+  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  async sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    this.#assertOpen();
+    return await this.client.request<SqliteQueryResult>({
+      type: "sqlite.query",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      db,
+      sql,
+      params,
+    });
+  }
+
+  // No `sqliteExecute` write RPC: writes go through the commit fold (a `sqlite`
+  // op inside `transact`), applied atomically with cell ops — never a standalone
+  // non-atomic write request.
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
+   * this, server-side reads for `id` resolve against the on-disk file at `path`
+   * (attached read-only) instead of the cell-derived db; writes are rejected.
+   */
+  async registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    this.#assertOpen();
+    return await this.client.request<SqliteRegisterDiskSourceResult>({
+      type: "sqlite.register-disk-source",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      id,
+      path,
+    });
   }
 
   async listSchedulerActionSnapshots(

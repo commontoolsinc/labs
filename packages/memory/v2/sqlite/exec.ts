@@ -1,0 +1,133 @@
+// Engine-side SQLite execution: guarded query/write and additive DDL.
+// Runs server-side (this package owns the @db/sqlite Database). Statement safety
+// is enforced by the tokenizer-level guard; `_cf_link` encode/decode happens on
+// the client (runner) before/after these calls.
+
+import { type BindValue, Database } from "@db/sqlite";
+import { assertReadOnly, assertWriteSafe } from "./guard.ts";
+import { createTableSQL, type TableSchema } from "./schema.ts";
+
+// Reserved schema names that may never be used as a pattern-db attach alias.
+const RESERVED_ALIASES = new Set(["main", "temp"]);
+
+/** Derive a safe attach alias from an opaque db id (e.g. an `of:bafy…` entity
+ *  id). The `cf_` prefix guarantees a valid leading identifier char. */
+export function aliasForDbId(id: string): string {
+  return `cf_${id.replace(/[^A-Za-z0-9]/g, "_")}`;
+}
+
+/** Validate an attach alias: a plain SQL identifier, not a reserved schema. */
+export function assertSafeAlias(alias: string): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias) || RESERVED_ALIASES.has(alias)) {
+    throw new TypeError(`invalid attach alias: ${alias}`);
+  }
+}
+
+/**
+ * ATTACH a cell-derived database file under an internal alias.
+ *
+ * Must be called OUTSIDE any open transaction — SQLite rejects ATTACH/DETACH
+ * while a transaction is active. The commit-folded write path must therefore
+ * attach the db *before* `BEGIN`.
+ *
+ * Caller owns attach/detach pairing: re-attaching an in-use alias throws, and
+ * there is a connection-global limit (`SQLITE_MAX_ATTACHED`, default ~10) — an
+ * LRU attach/detach cache manages this (spec 08-open-questions Q8a).
+ */
+export function attachDatabase(
+  db: Database,
+  alias: string,
+  path: string,
+  options?: { readOnly?: boolean },
+): void {
+  assertSafeAlias(alias);
+  if (db.inTransaction) {
+    throw new Error("attachDatabase must be called outside a transaction");
+  }
+  // Path is bound as a parameter; the alias is a validated literal (it cannot be
+  // a bind parameter in ATTACH).
+  db.exec(`ATTACH DATABASE ? AS ${alias}`, path);
+  // SQLite's ATTACH has no per-attachment read-only flag (and `@db/sqlite`'s
+  // connection is not opened with SQLITE_OPEN_URI, so `file:…?mode=ro` ATTACH is
+  // rejected). For injected on-disk sources (Phase 7, read-only v1) the caller
+  // pairs this with `setQueryOnly(db, true)` for the duration of the op, which
+  // makes the whole connection reject writes. The flag documents intent and
+  // leaves room for a real per-attachment read-only path later.
+  void options?.readOnly;
+}
+
+/**
+ * Toggle connection-global read-only mode (`PRAGMA query_only`). Used to enforce
+ * read-only access to an injected on-disk source (Phase 7). Safe because the
+ * attach→op→detach window is synchronous (no interleaving on the shared
+ * single-threaded connection — see Server.#onCellDb). Issued directly here, not
+ * through the guarded run* paths, so the guard's PRAGMA ban does not apply.
+ */
+export function setQueryOnly(db: Database, on: boolean): void {
+  db.exec(`PRAGMA query_only = ${on ? "ON" : "OFF"}`);
+}
+
+/** DETACH a previously attached alias. Must be called outside a transaction and
+ *  only when the alias is not in use (SQLite throws otherwise). */
+export function detachDatabase(db: Database, alias: string): void {
+  assertSafeAlias(alias);
+  if (db.inTransaction) {
+    throw new Error("detachDatabase must be called outside a transaction");
+  }
+  db.exec(`DETACH DATABASE ${alias}`);
+}
+
+export type SqliteParams = readonly unknown[] | Record<string, unknown>;
+
+export interface WriteResult {
+  changes: number;
+  lastInsertRowid: number;
+}
+
+// @db/sqlite binds positional values as a rest list and named values as a single
+// record argument. Our values are already SQLite scalars (cf_link params are
+// pre-encoded to strings by the client), so the cast to BindValue is safe.
+function bindArgs(params?: SqliteParams): BindValue[] {
+  if (params === undefined) return [];
+  return (Array.isArray(params) ? [...params] : [params]) as BindValue[];
+}
+
+/** Run a single guarded read-only SELECT and return all rows. */
+export function runQuery<Row = Record<string, unknown>>(
+  db: Database,
+  sql: string,
+  params?: SqliteParams,
+): Row[] {
+  assertReadOnly(sql);
+  return db.prepare(sql).all(...bindArgs(params)) as Row[];
+}
+
+/** Run a single guarded INSERT/UPDATE/DELETE. */
+export function runWrite(
+  db: Database,
+  sql: string,
+  params?: SqliteParams,
+): WriteResult {
+  assertWriteSafe(sql);
+  const changes = db.prepare(sql).run(...bindArgs(params));
+  // `lastInsertRowId` is connection-global; correct here because the engine uses
+  // one synchronous connection per space (no interleaving between run and read).
+  return { changes, lastInsertRowid: db.lastInsertRowId };
+}
+
+/**
+ * Additive table reconciliation (Phase 2 V1): create missing tables. Destructive
+ * or ambiguous changes to existing tables are out of scope and intentionally not
+ * applied here; a future migration step handles them (refuse-by-default + opt-in
+ * callback — see spec 08-open-questions Q9).
+ */
+export function ensureTables(
+  db: Database,
+  tables: Record<string, TableSchema>,
+  alias?: string,
+): void {
+  if (alias !== undefined) assertSafeAlias(alias);
+  for (const [name, schema] of Object.entries(tables)) {
+    db.exec(createTableSQL(name, schema, alias));
+  }
+}

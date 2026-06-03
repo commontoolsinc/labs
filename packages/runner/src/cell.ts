@@ -15,6 +15,8 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { SqliteParamsWire } from "@commonfabric/memory/v2";
+import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -145,6 +147,7 @@ export type RawCellReadOptions = IReadOptions & {
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
+let sqliteQueryFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
@@ -376,6 +379,8 @@ const cellMethods = new Set<
   | "filterWithPattern"
   | "flatMap"
   | "flatMapWithPattern"
+  | "exec"
+  | "query"
 >([
   "get",
   "sample",
@@ -420,7 +425,104 @@ const cellMethods = new Set<
   "getAsOpaqueRefProxy",
   "setInitialValue",
   "setSelfRef",
+  "exec",
+  "query",
 ]);
+
+/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
+ *  used to map positional `_cf_link` params. Returns undefined when there is no
+ *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
+ *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
+ *  insert's VALUES tuple is NOT mistaken for a column list. */
+function parseSqliteInsertColumns(sql: string): string[] | undefined {
+  const m = sql.match(
+    /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
+  );
+  if (!m) return undefined;
+  return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
+}
+
+/**
+ * Encode SQLite bind params for the wire: a cell bound to a `_cf_link` column is
+ * encoded to an absolute sigil-link string; a cell bound to any other column
+ * throws; an `undefined` value throws (the pending-value guard — `null` is
+ * allowed for SQL NULL). Shared by `db.exec` (CellImpl) and the `sqliteQuery`
+ * builtin so the encode rules and the undefined guard cannot drift.
+ *
+ * Positional params are validated against the statement's explicit `INSERT`
+ * column list (cycled across multi-row `VALUES` tuples). When the target column
+ * of a positional `?` can't be determined (columnless INSERT, UPDATE, opaque
+ * SQL), a Cell binding cannot be verified to land in a `_cf_link` column, so it
+ * is REJECTED with an actionable error rather than blindly sigil-encoded (which
+ * would corrupt a non-link column). Use an explicit column list or named params
+ * (`:col`) to bind a Cell in those statements.
+ */
+export function encodeSqliteParams(
+  sql: string,
+  params?: ReadonlyArray<unknown> | Record<string, unknown>,
+): SqliteParamsWire | undefined {
+  if (params === undefined) return undefined;
+  const assertDefined = (value: unknown): void => {
+    if (value === undefined) {
+      throw new TypeError(
+        "sqlite: param is undefined (it may be a value that isn't ready yet); " +
+          "pass a resolved value, or null for SQL NULL",
+      );
+    }
+  };
+  // Recover a Cell from a value that is a Cell or carries a `toCell`
+  // back-pointer (matches encodeCfLinkValue/asCellOrUndefined on the read side,
+  // so db.exec and the sqliteQuery builtin agree on what counts as a bound cell).
+  const boundCell = (value: unknown): Cell<unknown> | undefined => {
+    if (isCell(value)) return value as Cell<unknown>;
+    if (value !== null && typeof value === "object") {
+      const fn = (value as { [toCell]?: unknown })[toCell];
+      if (typeof fn === "function") {
+        return (value as { [toCell]: () => Cell<unknown> })[toCell]();
+      }
+    }
+    return undefined;
+  };
+  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+    assertDefined(value);
+    const cell = boundCell(value);
+    if (cell) {
+      if (!isLinkCol) {
+        throw new TypeError("cells may only be bound to _cf_link columns");
+      }
+      return JSON.stringify(
+        createSigilLinkFromParsedLink(cell.getAsNormalizedFullLink(), {
+          includeSchema: false,
+        }),
+      );
+    }
+    return value;
+  };
+  if (Array.isArray(params)) {
+    const cols = parseSqliteInsertColumns(sql);
+    return params.map((v, i) => {
+      if (cols) {
+        // Cycle the column list across multi-row `VALUES (?),(?)` tuples.
+        return encodeOne(v, isCfLinkColumn(cols[i % cols.length] ?? ""));
+      }
+      assertDefined(v);
+      if (boundCell(v)) {
+        throw new TypeError(
+          "sqlite: a Cell parameter must bind to a _cf_link column, but the " +
+            "target column can't be determined from this statement. Use an " +
+            "explicit column list (INSERT INTO t (col) VALUES (?)) or named " +
+            "params (:col) so the binding can be verified.",
+        );
+      }
+      return v;
+    }) as SqliteParamsWire;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(params)) {
+    out[k] = encodeOne(v, isCfLinkColumn(k));
+  }
+  return out as SqliteParamsWire;
+}
 
 export function createCell<T>(
   runtime: Runtime,
@@ -837,6 +939,60 @@ export class CellImpl<T extends FabricValue>
         resolve(result);
       });
     });
+  }
+
+  /**
+   * SqliteDb write (`db.exec`): records a SQLite write op onto THIS cell's
+   * transaction so it commits ATOMICALLY with surrounding cell writes (one
+   * commit = cell ops + a `sqlite` op). On SQL failure the whole commit aborts.
+   * Only valid on a `"sqlite"`-kind cell and inside a transaction (e.g. a
+   * handler). Throws on an `undefined` param (it may be a value that isn't ready
+   * yet — pass a resolved value, or `null` for SQL NULL). See
+   * docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+   */
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void {
+    if (!this.tx) {
+      throw new Error(
+        ".exec() must be called within a transaction (e.g. inside a handler)",
+      );
+    }
+    if (!this.tx.recordSqliteWrite) {
+      throw new Error("storage transaction does not support sqlite writes");
+    }
+    // `"sqlite"` is a type-level kind (the public `SqliteDb` type restricts who
+    // can call `.exec`); at runtime we validate the actual handle value rather
+    // than `_kind`, since handler-input materialization doesn't always stamp the
+    // kind onto the delivered cell.
+    const handle = this.get() as
+      | { id?: unknown; tables?: unknown }
+      | undefined;
+    if (!handle || typeof handle.id !== "string") {
+      throw new TypeError(
+        ".exec() is only available on a SqliteDb cell (invalid database handle)",
+      );
+    }
+    this.tx.recordSqliteWrite(this.space, {
+      op: "sqlite",
+      db: {
+        id: handle.id,
+        tables: handle.tables as Record<string, unknown> | undefined,
+      },
+      sql,
+      params: encodeSqliteParams(sql, params),
+    });
+    // Bump a write counter on the DB handle cell in THIS SAME commit. Two
+    // effects, both intended:
+    //  - `reactOn: db` queries re-run after a write (the handle value changed).
+    //  - it serializes concurrent writers: each does a read-modify-write of
+    //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
+    //    revision (optimistic-concurrency mutex) and one retries.
+    const rev = ((handle as { rev?: unknown }).rev as number | undefined) ?? 0;
+    this.withTx(this.tx).set(
+      { ...(handle as Record<string, unknown>), rev: rev + 1 } as unknown as T,
+    );
   }
 
   set(
@@ -1628,6 +1784,10 @@ export class CellImpl<T extends FabricValue>
     boundTarget?: (...args: unknown[]) => unknown,
   ): OpaqueRef<T> {
     const self = this as unknown as Cell<T>;
+    // `query`/`exec` are SqliteDb-only methods whose names are also common data
+    // fields (e.g. wish's `query`). Only forward them as methods on a
+    // `"sqlite"`-kind cell; otherwise treat `.query`/`.exec` as data navigation.
+    const cellKind = this._kind;
     const proxy = new Proxy(boundTarget ?? this, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
@@ -1658,8 +1818,13 @@ export class CellImpl<T extends FabricValue>
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;
 
-          // Check if this is a method on the cell
-          if (cellMethods.has(prop as keyof ICell<T>)) {
+          // Check if this is a method on the cell. `query`/`exec` are gated to
+          // SqliteDb cells so they don't shadow same-named data fields.
+          const isSqliteOnlyMethod = prop === "query" || prop === "exec";
+          if (
+            cellMethods.has(prop as keyof ICell<T>) &&
+            (!isSqliteOnlyMethod || cellKind === "sqlite")
+          ) {
             return nestedCell.getAsOpaqueRefProxy(
               (self as unknown as Record<
                 string,
@@ -1682,6 +1847,42 @@ export class CellImpl<T extends FabricValue>
    * Map over an array cell, creating a new derived array.
    * Similar to Array.prototype.map but works with OpaqueRefs.
    */
+  /**
+   * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
+   * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
+   * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
+   * injected by the transformer (method-call lowering), not set here. Like
+   * `.map`, this is a build-time node constructor with no `_kind` guard: at
+   * pattern-build time `this` is an opaque builder ref (the `"sqlite"` kind only
+   * materializes at runtime via the asCell schema), and the public `SqliteDb`
+   * type already restricts who can call it. A wrong handle fails at runtime in
+   * `readDbRef`.
+   */
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
+    if (!sqliteQueryFactory) {
+      sqliteQueryFactory = createNodeFactory({
+        type: "ref",
+        implementation: "sqliteQuery",
+      });
+    }
+    return sqliteQueryFactory({
+      db: this,
+      sql,
+      params: options?.params,
+      reactOn: options?.reactOn,
+      // Forward the transformer-injected `<Row>` schema (lowered into the
+      // options object) to the node so the builtin can decode `_cf_link`
+      // columns. Read loosely — it is not part of the public options type.
+      rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
+    }) as OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }>;
+  }
+
   map<S>(
     fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,

@@ -266,14 +266,16 @@ class ScriptedServerModel {
     const touched = commit.operations.flatMap((operation) =>
       touchedWritesForOperation(operation)
     );
-    const revisions = commit.operations.map((operation, index) => ({
-      id: operation.id,
-      branch: "",
-      seq: this.serverSeq + 1,
-      opIndex: index,
-      commitSeq: this.serverSeq + 1,
-      op: operation.op,
-    }));
+    const revisions = commit.operations
+      .filter((operation) => operation.op !== "sqlite")
+      .map((operation, index) => ({
+        id: operation.id,
+        branch: "",
+        seq: this.serverSeq + 1,
+        opIndex: index,
+        commitSeq: this.serverSeq + 1,
+        op: operation.op,
+      }));
     const applied = {
       seq: ++this.serverSeq,
       branch: "",
@@ -281,6 +283,7 @@ class ScriptedServerModel {
     } as AppliedCommit;
 
     for (const operation of commit.operations) {
+      if (operation.op === "sqlite") continue;
       const next = applyOperation(
         operation,
         this.confirmed.get(operation.id as URI)?.value,
@@ -686,6 +689,7 @@ const readOverlapsWrite = (
 };
 
 const touchedWritesForOperation = (operation: Operation): TouchedWrite[] => {
+  if (operation.op === "sqlite") return []; // no entity writes
   if (operation.op !== "patch") {
     return [{ id: operation.id as URI, paths: [[]] }];
   }
@@ -713,6 +717,7 @@ const applyOperation = (
   operation: Operation,
   current: RootValue,
 ): RootValue => {
+  if (operation.op === "sqlite") return current; // not an entity write
   if (operation.op === "delete") {
     return undefined;
   }

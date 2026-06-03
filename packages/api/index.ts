@@ -184,7 +184,8 @@ export type CellKind =
   | "stream"
   | "comparable"
   | "readonly"
-  | "writeonly";
+  | "writeonly"
+  | "sqlite";
 
 export type CellScope = "space" | "user" | "session";
 export type SchemaScope = CellScope | "any";
@@ -1940,9 +1941,13 @@ export interface LiftFunction {
   ): ModuleFactory<StripCell<T>, StripCell<R>>;
 }
 
-// Helper type to make non-Cell and non-Stream properties readonly in handler state
+// Helper type to make non-Cell and non-Stream properties readonly in handler state.
+// Cell/Stream/SqliteDb are passed through whole (they are handle interfaces with
+// methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
+// to map over).
 export type HandlerState<T> = T extends Cell<any> ? T
   : T extends Stream<any> ? T
+  : T extends SqliteDb<any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
@@ -2068,6 +2073,86 @@ export type StreamDataFunction = <T>(
 export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
+
+// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+
+declare const __sqliteDb: unique symbol;
+/**
+ * Opaque database handle. Empty to pattern code; a cell reference to the runtime
+ * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
+ * / sqliteExecute / reactOn), never read it.
+ */
+export type SqliteDatabase = { readonly [__sqliteDb]: true };
+
+/** Imperative write on a SqliteDb handle: records a SQLite write onto the
+ *  current transaction so it commits atomically with surrounding cell writes
+ *  (see docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md). */
+export interface ISqliteExecutable {
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void;
+}
+
+/** Reactive read on a SqliteDb handle: builds a `sqliteQuery` node. `<Row>` is
+ *  lowered by the transformer to an injected result schema. */
+export interface ISqliteQueryable {
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+}
+
+/**
+ * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing the
+ * SQLite method surface (`.exec`/`.query`) instead of the general value-cell
+ * mutators. It reads back the handle ref and carries the `toCell` back-pointer,
+ * but is NOT writable (you can't `.set()` a DB handle).
+ */
+export interface ISqliteDb<T = SqliteDatabase>
+  extends IAnyCell<T>, IReadable<T>, ISqliteExecutable, ISqliteQueryable {}
+
+export interface SqliteDb<T = SqliteDatabase>
+  extends BrandedCell<T, "sqlite">, ISqliteDb<T> {}
+
+/** A map of table name -> one-row JSON Schema (see `table()`). */
+export type SqliteTableSchemas = Record<string, JSONSchema>;
+
+/** Non-default database source. Cell-derived (default) needs no source; on-disk
+ *  databases are injected as a pattern input, not selected here. */
+export type SqliteDatabaseSource = {
+  vm: OpaqueRef<unknown>;
+  path: string;
+};
+
+export type SqliteDatabaseFunction = (
+  options?: { tables?: SqliteTableSchemas },
+  source?: SqliteDatabaseSource,
+) => OpaqueRef<SqliteDb>;
+
+export type SqliteQueryParams = {
+  db: Opaque<SqliteDatabase | SqliteDb>;
+  sql: string;
+  params?: ReadonlyArray<unknown> | Record<string, unknown>;
+  reactOn?: unknown;
+};
+export type SqliteQueryFunction = <Row = Record<string, unknown>>(
+  params: Opaque<SqliteQueryParams>,
+) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+
+// Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
+// folds a `sqlite` op into the caller's commit (atomic with cell writes). There
+// is no standalone reactive sqliteExecute builder.
+
+/** Column spec for `table()`: a shorthand SQL type string or a column schema. */
+export type SqliteColumnSpec = string | JSONSchema;
+export type SqliteTableFunction = (
+  columns: Record<string, SqliteColumnSpec>,
+) => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
 
 export type WishTag = `/${string}` | `#${string}`;
 
@@ -2319,6 +2404,10 @@ export declare const fetchData: FetchDataFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const sqliteDatabase: SqliteDatabaseFunction;
+export declare const sqliteQuery: SqliteQueryFunction;
+export declare const table: SqliteTableFunction;
+export declare const cfLink: SqliteCfLinkFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;

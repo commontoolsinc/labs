@@ -86,7 +86,24 @@ export interface DeleteOperation {
   scope?: CellScope;
 }
 
-export type Operation = SetOperation | PatchOperation | DeleteOperation;
+/**
+ * A SQLite write folded into the commit, applied inside the same transaction as
+ * the cell ops (atomic). It is NOT an entity revision — it has no `id` and never
+ * enters the revision/head/snapshot/dirty machinery (see SqliteDbRef below /
+ * docs/specs/sqlite-builtin/plans/atomic-writes.md).
+ */
+export interface SqliteOperation {
+  op: "sqlite";
+  db: SqliteDbRef;
+  sql: string;
+  params?: SqliteParamsWire;
+}
+
+export type Operation =
+  | SetOperation
+  | PatchOperation
+  | DeleteOperation
+  | SqliteOperation;
 
 export interface ConfirmedRead {
   id: EntityId;
@@ -285,6 +302,57 @@ export interface GraphQueryRequest {
   query: GraphQuery;
 }
 
+// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+
+/** Wire form of SQLite bind parameters. */
+export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
+
+/** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
+ *  entity id) plus the declared table schemas (for additive create/migrate). */
+export interface SqliteDbRef {
+  id: string;
+  tables?: Record<string, unknown>;
+}
+
+export interface SqliteQueryRequest {
+  type: "sqlite.query";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  db: SqliteDbRef;
+  sql: string;
+  params?: SqliteParamsWire;
+}
+
+export interface SqliteQueryResult {
+  rows: unknown[];
+}
+
+// NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
+// fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the
+// engine) — never a standalone, non-atomic write RPC. See db.exec in the runner.
+
+/**
+ * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
+ * link <piece> <field> sqlite:<absPath>` issues this so the server attaches the
+ * given file (read-only) for the handle id instead of the cell-derived path. The
+ * descriptor is server-side state — it is NOT written into the handle cell value.
+ */
+export interface SqliteRegisterDiskSourceRequest {
+  type: "sqlite.register-disk-source";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  /** Handle cell id (content-derived from (serviceSpace, absPath); see cf). */
+  id: string;
+  /** Absolute path to the on-disk SQLite file. */
+  path: string;
+}
+
+export interface SqliteRegisterDiskSourceResult {
+  registered: true;
+}
+
 export interface WatchSetRequest {
   type: "session.watch.set";
   requestId: string;
@@ -392,6 +460,8 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | SqliteQueryRequest
+  | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
   | SchedulerSnapshotListRequest

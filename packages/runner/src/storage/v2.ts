@@ -27,6 +27,11 @@ import {
   type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
   type SessionSync,
+  type SqliteDbRef,
+  type SqliteOperation,
+  type SqliteParamsWire,
+  type SqliteQueryResult,
+  type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
@@ -856,6 +861,21 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.listSchedulerActionSnapshots(query);
   }
 
+  sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    return this.replica.sqliteQuery(db, sql, params);
+  }
+
+  registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    return this.replica.registerSqliteDiskSource(id, path);
+  }
+
   get(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.replica.getDocument(uri, scope);
   }
@@ -1022,6 +1042,23 @@ class SpaceReplica implements ISpaceReplica {
       await this.flushSchedulerObservationBatch();
     }
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  async sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    const { session } = await this.sessionHandle();
+    return await session.sqliteQuery(db, sql, params);
+  }
+
+  async registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    const { session } = await this.sessionHandle();
+    return await session.registerSqliteDiskSource(id, path);
   }
 
   async listSchedulerActionSnapshots(
@@ -1216,13 +1253,24 @@ class SpaceReplica implements ISpaceReplica {
           ),
     );
 
-    if (operations.length === 0 && schedulerObservation === undefined) {
+    const sqliteOps = transaction.sqliteOps ?? [];
+
+    if (
+      operations.length === 0 && schedulerObservation === undefined &&
+      sqliteOps.length === 0
+    ) {
       return { ok: {} };
     }
 
     return await withCommitTiming(
       ["commitNative", "commitOperations"],
-      () => this.commitOperations(operations, source, schedulerObservation),
+      () =>
+        this.commitOperations(
+          operations,
+          source,
+          schedulerObservation,
+          sqliteOps,
+        ),
     );
   }
 
@@ -1451,8 +1499,9 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
     schedulerObservation?: unknown,
+    sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    if (operations.length === 0) {
+    if (operations.length === 0 && sqliteOps.length === 0) {
       if (schedulerObservation === undefined) {
         return { ok: {} };
       }
@@ -1468,26 +1517,31 @@ class SpaceReplica implements ISpaceReplica {
       (): ClientCommit => ({
         localSeq,
         reads: this.buildReads(source, localSeq),
-        operations: operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
+        // Cell ops first, folded SQLite ops last (applied in array order by the
+        // engine; sqlite ops are not entity revisions and carry no id/scope).
+        operations: [
+          ...operations.map((operation) => {
+            switch (operation.op) {
+              case "delete":
+                return operation;
+              case "patch":
+                return {
+                  op: "patch" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  patches: operation.patches,
+                };
+              case "set":
+                return {
+                  op: "set" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  value: operation.value,
+                };
+            }
+          }),
+          ...sqliteOps,
+        ],
         ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
       }),
     );

@@ -35,6 +35,19 @@ describe("Schema: Cell types", () => {
     expect(users.asCell).toEqual(["cell"]);
   });
 
+  it('handles SqliteDb (kind "sqlite")', async () => {
+    const code = `
+      interface X { db: SqliteDb; }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "X");
+    const gen = createSchemaTransformerV2();
+    const result = asObjectSchema(gen.generateSchema(type, checker));
+    const db = result.properties?.db as Record<string, unknown>;
+    expect(db).toBeDefined();
+    expect(db.asCell).toEqual(["sqlite"]);
+    expect(result.required).toContain("db");
+  });
+
   it("handles Stream<Cell<number>>", async () => {
     const code = `
       interface X { value: Stream<Cell<number>>; }

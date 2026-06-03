@@ -13,6 +13,7 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerSnapshotListRequest,
@@ -24,6 +25,12 @@ import {
   type SessionOpenRequest,
   type SessionOpenResult,
   type SessionRevokedMessage,
+  type SqliteDbRef,
+  type SqliteParamsWire,
+  type SqliteQueryRequest,
+  type SqliteQueryResult,
+  type SqliteRegisterDiskSourceRequest,
+  type SqliteRegisterDiskSourceResult,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -34,6 +41,16 @@ import {
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
+import {
+  aliasForDbId,
+  attachDatabase,
+  detachDatabase,
+  ensureTables,
+  runQuery,
+  setQueryOnly,
+} from "./sqlite/exec.ts";
+import type { TableSchema } from "./sqlite/schema.ts";
+import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -67,6 +84,11 @@ const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
+
+// SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
+// to the folded-write path, which is parsed loosely as part of a `transact`).
+const MAX_SQLITE_SQL_LENGTH = 100_000;
+const MAX_SQLITE_TABLES = 256;
 
 // Memory v2 wire values may omit scope for default-space entries; storage and
 // watch keys need an explicit declared scope.
@@ -165,6 +187,17 @@ const toError = (name: string, message: string): V2Error => ({
   name,
   message,
 });
+
+/** Deterministic, collision-resistant-enough token for a filename component
+ *  (FNV-1a 32-bit + length). Used to derive cell-db file names from (space,id). */
+function hashToken(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${(h >>> 0).toString(16).padStart(8, "0")}${s.length.toString(16)}`;
+}
 
 const respondTypedError = <Result>(
   requestId: string,
@@ -375,6 +408,22 @@ class Connection {
         }
         this.send(await this.server.graphQuery(parsed));
         return;
+      case "sqlite.query":
+        if (
+          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+        ) {
+          return;
+        }
+        this.send(await this.server.sqliteQuery(parsed));
+        return;
+      case "sqlite.register-disk-source":
+        if (
+          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+        ) {
+          return;
+        }
+        this.send(await this.server.sqliteRegisterDiskSource(parsed));
+        return;
       case "session.watch.set":
         if (
           !this.requireSession(
@@ -480,6 +529,11 @@ export class Server {
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
   #store?: URL;
+  // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
+  // registered id is attached read-only from its descriptor path instead of the
+  // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
+  // docs/specs/sqlite-builtin/plans/on-disk-source.md).
+  #diskSources = new DiskSourceRegistry();
 
   constructor(
     readonly options: {
@@ -579,6 +633,294 @@ export class Server {
     );
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
+  }
+
+  /**
+   * Run `op` against a cell-derived SQLite database: ATTACH it (under an alias
+   * derived from the db id), additively create its declared tables, run `op`
+   * synchronously, then DETACH in `finally`.
+   *
+   * Attach-one-at-a-time (rather than keeping dbs attached) is deliberate: it
+   * guarantees a pattern's unqualified table names resolve to *this* db (SQLite
+   * resolves unqualified names against attached dbs in order, so multiple
+   * simultaneously-attached cell-dbs would alias each other), and it sidesteps
+   * the connection's `SQLITE_MAX_ATTACHED` limit. `op` MUST be synchronous: the
+   * attach→op→detach block must not `await` (the engine connection is shared and
+   * single-threaded; an await between attach and detach could interleave another
+   * op's attach and reintroduce the ambiguity). ATTACH/DETACH require no open
+   * transaction — true on this RPC path. File-backed cell-dbs persist across
+   * detach.
+   */
+  async #onCellDb<T>(
+    space: string,
+    db: SqliteDbRef,
+    op: (engine: Engine.Engine) => T,
+  ): Promise<T> {
+    const engine = await this.openEngine(space);
+    const alias = aliasForDbId(db.id);
+
+    // Phase 7: an injected on-disk source is attached READ-ONLY from its
+    // registered path instead of the cell-derived file, and we do NOT run
+    // ensureTables against it (v1 does not migrate external files). Read-only is
+    // enforced for the synchronous attach→op→detach window via PRAGMA query_only
+    // (the connection is single-threaded; `op` must not await — see below).
+    const disk = this.#diskSources.get(space, db.id);
+    if (disk) {
+      attachDatabase(engine.database, alias, disk.path, { readOnly: true });
+      setQueryOnly(engine.database, true);
+      try {
+        return op(engine); // synchronous — see doc comment
+      } finally {
+        setQueryOnly(engine.database, false);
+        detachDatabase(engine.database, alias);
+      }
+    }
+
+    attachDatabase(
+      engine.database,
+      alias,
+      this.#cellDbPath(engine, space, db.id),
+    );
+    try {
+      if (db.tables) {
+        ensureTables(
+          engine.database,
+          db.tables as Record<string, TableSchema>,
+          alias,
+        );
+      }
+      return op(engine); // synchronous — see doc comment
+    } finally {
+      detachDatabase(engine.database, alias);
+    }
+  }
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1) for
+   * `(space, id)`. After this, `#onCellDb` attaches the canonical `path`
+   * (read-only) for that `(space, id)` instead of the cell-derived db. The
+   * descriptor is server-side state — never the cell value.
+   *
+   * The path is validated here because it arrives over the wire (untrusted): it
+   * must be absolute and must exist, and is `realpath`-canonicalized and then
+   * rejected if it resolves INSIDE the engine's store directory OR names an
+   * internal cell-db file — otherwise a caller could point a handle at another
+   * space's (or a cell-derived) `.sqlite` file and read it cross-tenant.
+   * (Confining injected sources to an operator allowlist, and gating the verb to
+   * an operator capability rather than any session, awaits CFC labels —
+   * 08-open-questions Q18.)
+   */
+  async registerDiskSource(
+    space: string,
+    id: string,
+    path: string,
+  ): Promise<void> {
+    if (!Path.isAbsolute(path)) {
+      throw new Engine.ProtocolError(
+        `disk source path must be absolute: ${path}`,
+      );
+    }
+    let canonical: string;
+    try {
+      canonical = await Deno.realPath(path);
+    } catch {
+      throw new Engine.ProtocolError(`disk source path not found: ${path}`);
+    }
+    const engine = await this.openEngine(space);
+    if (engine.url.protocol === "file:") {
+      // Canonicalize the store dir too (not just the source path): `canonical`
+      // is realpath-resolved, so comparing it against a NON-canonical storeDir
+      // lets a symlinked store dir produce a `..`-prefixed relative path for a
+      // file that actually lives in the store — defeating the jail. With both
+      // sides canonical, containment also covers the `<space>.sqlite` store
+      // files (not just `cell-*`).
+      let storeDir = Path.dirname(Path.fromFileUrl(engine.url));
+      try {
+        storeDir = await Deno.realPath(storeDir);
+      } catch { /* dir may not exist yet; fall back to the raw path */ }
+      const rel = Path.relative(storeDir, canonical);
+      const insideStore = rel === "" ||
+        (!rel.startsWith("..") && !Path.isAbsolute(rel));
+      if (insideStore) {
+        throw new Engine.ProtocolError(
+          "disk source path may not resolve inside the store directory",
+        );
+      }
+    }
+    // Internal cell-db files (`cell-<tag>.sqlite` beside a file store's space db;
+    // `cf-cell-<tag>.sqlite` under TMPDIR for a memory store — see #cellDbPath)
+    // are never valid injected sources. Reject by name so a memory store (which
+    // has no on-disk store directory to jail against) can't be pointed at another
+    // space's cell-db sitting in TMPDIR.
+    if (/^(?:cf-)?cell-[^/]*\.sqlite$/i.test(Path.basename(canonical))) {
+      throw new Engine.ProtocolError(
+        "disk source path may not be an internal cell-db file",
+      );
+    }
+    this.#diskSources.register(space, id, { path: canonical });
+  }
+
+  /**
+   * Attach the cell-db(s) referenced by a commit's `sqlite` ops and create their
+   * tables, returning a dbId→alias map for `Engine.applyCommit`. Must run BEFORE
+   * applyCommit (ATTACH can't run in a transaction); the caller detaches after.
+   * Enforces ≤1 cell-db per commit so unqualified names stay unambiguous
+   * (decision 1.3.A in plans/atomic-writes.md).
+   */
+  #attachCommitSqliteDbs(
+    engine: Engine.Engine,
+    space: string,
+    operations: readonly Operation[],
+  ): Map<string, string> {
+    const map = new Map<string, string>();
+    const tablesById = new Map<string, Record<string, unknown> | undefined>();
+    for (const op of operations) {
+      if (op.op !== "sqlite") continue;
+      const id = op.db.id;
+      // Resource caps for the WRITE path. `sqlite.query` enforces these at parse
+      // time, but a folded `sqlite` op rides `transact` (whose commit is parsed
+      // loosely), so cap it here — before the guard tokenizes the statement and
+      // before ensureTables builds DDL — to bound CPU/DDL work on the shared,
+      // single-threaded per-space engine connection.
+      if (typeof op.sql === "string" && op.sql.length > MAX_SQLITE_SQL_LENGTH) {
+        throw new Engine.ProtocolError(
+          "sqlite statement exceeds the maximum length",
+        );
+      }
+      if (
+        op.db.tables &&
+        Object.keys(op.db.tables).length > MAX_SQLITE_TABLES
+      ) {
+        throw new Engine.ProtocolError("sqlite db declares too many tables");
+      }
+      // Phase 7: injected on-disk sources are read-only in v1 — a folded write to
+      // one is rejected before it can join the commit (Q13/Q14).
+      if (this.#diskSources.has(space, id)) {
+        throw new Engine.ProtocolError(
+          "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
+        );
+      }
+      if (map.has(id)) continue;
+      if (map.size >= 1) {
+        throw new Engine.ProtocolError(
+          "a commit may write to at most one sqlite database",
+        );
+      }
+      map.set(id, aliasForDbId(id));
+      tablesById.set(id, op.db.tables);
+    }
+    // Attach + create tables. If `ensureTables` throws (e.g. a malformed/hostile
+    // `db.tables` payload — DDL validation rejects it), DETACH everything
+    // attached so far before rethrowing. This helper runs BEFORE the caller's
+    // attach→commit→detach try/finally, and the engine connection is reused per
+    // space, so a leaked attachment would make later writes/queries for the same
+    // alias fail ("already in use") and corrupt unqualified name resolution.
+    const attached: string[] = [];
+    try {
+      for (const [id, alias] of map) {
+        attachDatabase(
+          engine.database,
+          alias,
+          this.#cellDbPath(engine, space, id),
+        );
+        attached.push(alias);
+        const tables = tablesById.get(id);
+        if (tables) {
+          ensureTables(
+            engine.database,
+            tables as Record<string, TableSchema>,
+            alias,
+          );
+        }
+      }
+    } catch (error) {
+      for (const alias of attached) {
+        try {
+          detachDatabase(engine.database, alias);
+        } catch { /* best-effort cleanup on the error path */ }
+      }
+      throw error;
+    }
+    return map;
+  }
+
+  /** Path for a cell-derived db file. Sibling of the space db for file stores;
+   *  a deterministic temp file for in-memory stores (so it survives the
+   *  connection, unlike an `:memory:` attach). The space + id are hashed into
+   *  the filename so distinct (space, id) pairs never collide. */
+  #cellDbPath(engine: Engine.Engine, space: string, id: string): string {
+    const tag = `${hashToken(space)}-${hashToken(id)}`;
+    if (engine.url.protocol === "file:") {
+      const dir = Path.dirname(Path.fromFileUrl(engine.url));
+      return Path.join(dir, `cell-${tag}.sqlite`);
+    }
+    return Path.join(Deno.env.get("TMPDIR") ?? "/tmp", `cf-cell-${tag}.sqlite`);
+  }
+
+  async sqliteQuery(
+    message: SqliteQueryRequest,
+  ): Promise<ResponseMessage<SqliteQueryResult>> {
+    if (this.#sessions.get(message.space, message.sessionId) === null) {
+      return respondTypedError<SqliteQueryResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    try {
+      const rows = await this.#onCellDb(
+        message.space,
+        message.db,
+        (engine) => runQuery(engine.database, message.sql, message.params),
+      );
+      return { type: "response", requestId: message.requestId, ok: { rows } };
+    } catch (error) {
+      return respondTypedError<SqliteQueryResult>(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "SqliteError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  // No `sqliteExecute` handler: there is no standalone SQLite write RPC. Writes
+  // arrive as a `sqlite` op inside a `transact` commit and are applied by the
+  // engine atomically with the cell ops (#attachCommitSqliteDbs + applyCommit) —
+  // which is also where an injected on-disk source's read-only rejection lives.
+  // `runWrite` remains the engine helper used by that commit-fold path.
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
+   * link <piece> <field> sqlite:<absPath>` issues this so subsequent reads for the
+   * handle id resolve against the on-disk file (attached read-only) instead of the
+   * cell-derived db. The descriptor is server-side state — never the cell value.
+   */
+  async sqliteRegisterDiskSource(
+    message: SqliteRegisterDiskSourceRequest,
+  ): Promise<ResponseMessage<SqliteRegisterDiskSourceResult>> {
+    if (this.#sessions.get(message.space, message.sessionId) === null) {
+      return respondTypedError<SqliteRegisterDiskSourceResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    try {
+      await this.registerDiskSource(message.space, message.id, message.path);
+    } catch (error) {
+      return respondTypedError<SqliteRegisterDiskSourceResult>(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "SqliteError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+    return {
+      type: "response",
+      requestId: message.requestId,
+      ok: { registered: true },
+    };
   }
 
   async openSession(
@@ -705,12 +1047,34 @@ export class Server {
           ),
         );
       }
-      const commit = Engine.applyCommit(engine, {
-        sessionId: message.sessionId,
-        space: message.space,
-        principal: session.principal,
-        commit: commitPayload,
-      });
+      // Fold-in SQLite writes: ATTACH their cell-db(s) BEFORE applyCommit (ATTACH
+      // cannot run inside a transaction); the engine executes them inside the
+      // commit txn (atomic with cell ops). Detach in finally.
+      const sqliteAttachments = this.#attachCommitSqliteDbs(
+        engine,
+        message.space,
+        commitPayload.operations,
+      );
+      let commit: Engine.AppliedCommit;
+      try {
+        commit = Engine.applyCommit(engine, {
+          sessionId: message.sessionId,
+          space: message.space,
+          principal: session.principal,
+          commit: commitPayload,
+          sqliteAttachments,
+        });
+      } finally {
+        // Detach BEFORE any await. `engine.database` is shared per space, so
+        // holding a cell-db attached across the post-commit await would let a
+        // concurrent connection's commit attach a SECOND cell-db — breaking the
+        // ≤1-attached invariant that unqualified-name resolution relies on
+        // (B1). `applyCommit` is synchronous and is the only step that needs the
+        // attachments.
+        for (const alias of sqliteAttachments.values()) {
+          detachDatabase(engine.database, alias);
+        }
+      }
       await this.runPostCommitSchedulerSideEffects(
         message.space,
         commit,
@@ -720,9 +1084,11 @@ export class Server {
       );
       this.markSpaceDirty(
         message.space,
-        message.commit.operations.map((operation) =>
-          toDirtyKey(operation.id, declaredScope(operation.scope))
-        ),
+        message.commit.operations
+          .filter((operation) => operation.op !== "sqlite")
+          .map((operation) =>
+            toDirtyKey(operation.id, declaredScope(operation.scope))
+          ),
         {
           sessionId: message.sessionId,
           seq: commit.seq,
@@ -1315,6 +1681,7 @@ export class Server {
   ): void {
     const ids = new Set<string>();
     for (const operation of commit.operations) {
+      if (operation.op === "sqlite") continue; // no entity id
       ids.add(toDirtyKey(operation.id, declaredScope(operation.scope)));
     }
     for (const read of commit.reads.confirmed) {
@@ -1713,6 +2080,58 @@ export const parseClientMessage = (
       sessionId: parsed.sessionId,
       query: parsed.query as unknown as GraphQueryRequest["query"],
     };
+  }
+
+  if (
+    parsed.type === "sqlite.query" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.sql === "string" &&
+    parsed.sql.length <= 100_000 &&
+    isRecord(parsed.db) &&
+    typeof parsed.db.id === "string" &&
+    parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
+    (parsed.db.tables === undefined ||
+      (isRecord(parsed.db.tables) &&
+        Object.keys(parsed.db.tables).length <= 256))
+  ) {
+    const db = {
+      id: parsed.db.id,
+      tables: isRecord(parsed.db.tables) ? parsed.db.tables : undefined,
+    };
+    const params = Array.isArray(parsed.params) || isRecord(parsed.params)
+      ? parsed.params as SqliteParamsWire
+      : undefined;
+    return {
+      type: parsed.type,
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      db,
+      sql: parsed.sql,
+      params,
+    } as SqliteQueryRequest;
+  }
+
+  if (
+    parsed.type === "sqlite.register-disk-source" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.id === "string" &&
+    parsed.id.length > 0 && parsed.id.length <= 256 &&
+    typeof parsed.path === "string" &&
+    parsed.path.length > 0 && parsed.path.length <= 4096
+  ) {
+    return {
+      type: "sqlite.register-disk-source",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      id: parsed.id,
+      path: parsed.path,
+    } as SqliteRegisterDiskSourceRequest;
   }
 
   if (

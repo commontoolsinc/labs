@@ -3744,6 +3744,100 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
       }
 
+      // sqliteQuery<Row>({ db, sql, ... }) - lowers the Row type argument to an
+      // injected `rowSchema` property (mirrors generate-object's `schema`). The
+      // runtime builtin composes `result.items = rowSchema`, so a consumer's
+      // schema carries `asCell` for Cell<> Row fields and `*_cf_link` result
+      // columns rehydrate to live Cells (see
+      // docs/specs/sqlite-builtin/plans/sqlite-query-row-lowering.md).
+      if (
+        callKind?.kind === "runtime-call" &&
+        callKind.exportName === "sqliteQuery"
+      ) {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        // Only the typed form is injectable. Untyped sqliteQuery(...) /
+        // db.query(...) must compile and lower to NO schema (runtime falls back
+        // to suffix/table detection).
+        if (!typeArgs || typeArgs.length !== 1) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        // Two call shapes inject `rowSchema` into the OPTIONS object:
+        //  - free function `sqliteQuery<Row>({ db, sql, ... })` → options is arg 0
+        //  - method `db.query<Row>(sql, { ... })`              → options is arg 1
+        const isMethod = ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === "query";
+        const optIdx = isMethod ? 1 : 0;
+        const optArg = args[optIdx];
+
+        // Idempotency: skip if a `rowSchema` property is already present.
+        if (
+          optArg && ts.isObjectLiteralExpression(optArg) &&
+          optArg.properties.some(
+            (p: ts.ObjectLiteralElementLike) =>
+              p.name && ts.isIdentifier(p.name) && p.name.text === "rowSchema",
+          )
+        ) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        const resolved = resolveInjectableSchemaType(
+          typeArgs[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => undefined,
+        );
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
+
+        if (schemaCall) {
+          let newOptions: ts.Expression;
+          if (optArg && ts.isObjectLiteralExpression(optArg)) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                ...optArg.properties,
+                factory.createPropertyAssignment("rowSchema", schemaCall),
+              ],
+              true,
+            );
+          } else if (optArg) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                factory.createSpreadAssignment(optArg),
+                factory.createPropertyAssignment("rowSchema", schemaCall),
+              ],
+              true,
+            );
+          } else {
+            newOptions = factory.createObjectLiteralExpression(
+              [factory.createPropertyAssignment("rowSchema", schemaCall)],
+              true,
+            );
+          }
+
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [
+              ...args.slice(0, optIdx),
+              newOptions,
+              ...args.slice(optIdx + 1),
+            ],
+          );
+          context.markSchemaInjected(updated);
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
       // Handler for when(condition, value) - prepends 3 schemas (condition, value, result)
       if (callKind?.kind === "when") {
         const args = node.arguments;

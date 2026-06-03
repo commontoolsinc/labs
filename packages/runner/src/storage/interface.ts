@@ -5,6 +5,11 @@ import type {
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerSnapshotListResult,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
@@ -232,6 +237,26 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   listSchedulerActionSnapshots?(
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
+
+  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  sqliteQuery?(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult>;
+
+  // No `sqliteExecute`: SQLite writes go through the commit fold
+  // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
+   * this, server-side reads for `id` resolve against the on-disk file at `path`
+   * (attached read-only) instead of the cell-derived db; writes are rejected.
+   */
+  registerSqliteDiskSource?(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult>;
 }
 
 /**
@@ -530,6 +555,16 @@ export interface IStorageTransaction {
    */
   setSchedulerObservation?(observation: unknown): void;
   getSchedulerObservation?(): unknown;
+
+  /**
+   * Optional: record a folded SQLite write onto this transaction so it commits
+   * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
+   * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
+   * write target (same write-isolation rules as a cell write) and throws if the
+   * tx is not writable. See
+   * docs/specs/sqlite-builtin/plans/sqlite-execute-commit-fold.md.
+   */
+  recordSqliteWrite?(space: MemorySpace, op: SqliteOperation): void;
 
   /**
    * Optional raw read observations recorded by this transaction.
@@ -1158,6 +1193,12 @@ export type NativeStorageCommitOperation =
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
   schedulerObservation?: unknown;
+  /**
+   * Folded SQLite write ops, applied in the same wire commit as `operations`
+   * (appended last). They are NOT entity revisions and stay out of the
+   * doc-pending / touched / notify machinery.
+   */
+  sqliteOps?: readonly SqliteOperation[];
 }
 
 export interface ITransaction {
