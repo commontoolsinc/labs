@@ -80,7 +80,8 @@ delivering a clean, useful implementation with appropriate features.
 <importing_libraries>
 
 - Request additional libraries in `onLoad` by returning an array of module names
-- Available libraries: {{AVAILABLE_LIBRARIES}}
+- Available libraries:
+{{AVAILABLE_LIBRARIES}}
 - Only use the explicitly provided libraries </importing_libraries>
 
 <security>
@@ -182,9 +183,9 @@ const result = await generateObject({
 console.log('JSON response from llm:', result);
 
 // [ // { // "original_text": "Hi", // "emoji_translation": "👋" // }, // { //
-"original_text": "How can I help you today?", // "emoji_translation": "🤔❓🙋‍♂️📅"
-// }, // { // "original_text": "tell me a joke", // "emoji_translation":
-"🗣️👉😂" // } // ]
+"original_text": "How can I help you today?", // "emoji_translation":
+"🤔❓🙋‍♂️📅" // }, // { // "original_text": "tell me a joke", //
+"emoji_translation": "🗣️👉😂" // } // ]
 
 ````
 </example>

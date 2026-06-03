@@ -10,54 +10,35 @@ where we can quickly prototype new backend HTTP services that power and support
 user-facing workflows. Additionally we will utilize Deno KV and Deno Queue to
 build a task queue for running background tasks.
 
-The reason we use a monolith is to centralize around a single CI flow, which
-produces a single binary artifact, which we can sign and distribute for running
-in several places. For example, this would be able to run locally, in the cloud,
-in private cloud enclave, or a raspberry pi.
+The reason we use a monolith is to centralize around a single CI flow, which produces a single binary artifact, which we can sign and distribute for running in several places. For example, this would be able to run locally, in the cloud, in private cloud enclave, or a raspberry pi.
 
-This provides an easy path for building a feature complete API that's easy to
-distribute, sign, and run in our confidential compute environments.
+This provides an easy path for building a feature complete API that's easy to distribute, sign, and run in our confidential compute environments.
 
 ## Philosophy
 
-We are a tiny crew. We don't have the luxury of time and resources, we need to
-quickly stub out new functionality in the service of creating a product that
-people love.
+We are a tiny crew. We don't have the luxury of time and resources, we need to quickly stub out new functionality in the service of creating a product that people love.
 
-Due to our constraints of needing to run inside of a secure private cloud
-enclave, and our need for remote attestation, we should lean-in to a few
-clarifying principals.
+Due to our constraints of needing to run inside of a secure private cloud enclave, and our need for remote attestation, we should lean-in to a few clarifying principals.
 
 ### Personal computing, not webscale computing
 
 Each user will have their own instance of Toolshed.
 
-That means we don't need to worry about web-scale tradeoffs. (ie scaling a task
-queue to >100k messages per second)
+That means we don't need to worry about web-scale tradeoffs. (ie scaling a task queue to >100k messages per second)
 
-Instead, we can optimize for individual-user-scale. (ie scaling a task queue to
-< 100 messages per second)
+Instead, we can optimize for individual-user-scale. (ie scaling a task queue to < 100 messages per second)
 
 ### Minimize complexity
 
-**Essential complexity** is inevitable, it is the essence of the problem you're
-trying to solve. **Accidental complexity** is what creeps in from all of the
-tech debt and decisions we make.
+**Essential complexity** is inevitable, it is the essence of the problem you're trying to solve. **Accidental complexity** is what creeps in from all of the tech debt and decisions we make.
 
-When introducing a new API endpoint to the Toolshed, try to encapsulate the
-minimum essential complexity into a simple easy to grok interface.
+When introducing a new API endpoint to the Toolshed, try to encapsulate the minimum essential complexity into a simple easy to grok interface.
 
-Avoid accidential complexity by keeping the implementation simple and shallow.
-By simple and shallow, I mean the implementation is better DAMP (descriptive and
-meaningful phrases) not DRY (don't repeat yourself).
+Avoid accidential complexity by keeping the implementation simple and shallow. By simple and shallow, I mean the implementation is better DAMP (descriptive and meaningful phrases) not DRY (don't repeat yourself).
 
-Don't be afraid to duplicate code, especially if it frees you from tracking
-yet-another-dependency.
+Don't be afraid to duplicate code, especially if it frees you from tracking yet-another-dependency.
 
-Practically speaking, I think this mostly means that shared code should be
-general purpose utility code (reading cookies, dealing with auth, accessing a
-data store, etc); but avoid importing code from other endpoints/services.
-Instead, just use HTTP to use the other services.
+Practically speaking, I think this mostly means that shared code should be general purpose utility code (reading cookies, dealing with auth, accessing a data store, etc); but avoid importing code from other endpoints/services. Instead, just use HTTP to use the other services.
 
 ### Product before protocol
 
@@ -149,12 +130,12 @@ We still have some unknowns around how, exactly, we want to deploy things into
 secure enclaves. This is a very handwavy collection of thoughts.
 
 One such option that's been talked about a lot is using kubernetes in
-conjunction with
-[Constellation from Edgeless](https://docs.edgeless.systems/constellation). The
-big downside with Constellation, is that we need to actually run our own
-kubernetes controlplane, we can't rely on AKS/EKS/GKE. This makes it
-significantly less attractive to me from a daily operations perspective, as it
-adds a large amount of complextiy and operational upkeep.
+conjunction with [Constellation from
+Edgeless](https://docs.edgeless.systems/constellation). The big downside with
+Constellation, is that we need to actually run our own kubernetes controlplane,
+we can't rely on AKS/EKS/GKE. This makes it significantly less attractive to me
+from a daily operations perspective, as it adds a large amount of complextiy and
+operational upkeep.
 
 Instead, I think we would be more well suited if we had some sort of custom
 controlplane that manages quickly spinning up, and monitoring instances of

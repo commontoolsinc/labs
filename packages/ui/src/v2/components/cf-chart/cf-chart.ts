@@ -20,7 +20,7 @@
  * @fires cf-click - Click with nearest data point
  * @fires cf-leave - Mouse leaves chart area
  */
-import { html, PropertyValues, svg } from "lit";
+import { html, svg, PropertyValues } from "lit";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
@@ -28,16 +28,16 @@ import { chartStyles } from "./styles.ts";
 import type {
   AxisConfig,
   AxisOption,
-  ChartPadding,
   MarkConfig,
   XScaleType,
   YScaleType,
+  ChartPadding,
 } from "./types.ts";
 import { MarkElement } from "./marks/base-mark.ts";
 import {
   collectAllMarkData,
-  type CollectedMarkData,
   createScales,
+  type CollectedMarkData,
   type XScale,
   type YScale,
 } from "./lib/scales.ts";
@@ -45,8 +45,8 @@ import { renderMark } from "./lib/render.ts";
 import { renderXAxis, renderYAxis } from "./lib/axes.ts";
 import {
   computeEventDetail,
-  type NearestResult,
   renderCrosshair,
+  type NearestResult,
 } from "./lib/interaction.ts";
 
 // Import mark elements to ensure they're registered
@@ -120,10 +120,7 @@ export class CFChart extends BaseElement {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.removeEventListener(
-      "mark-update",
-      this._onMarkUpdate as EventListener,
-    );
+    this.removeEventListener("mark-update", this._onMarkUpdate as EventListener);
     this._cleanup();
   }
 
@@ -135,9 +132,7 @@ export class CFChart extends BaseElement {
     }
 
     // Set up ResizeObserver
-    const container = this.shadowRoot?.querySelector(
-      ".chart-container",
-    ) as HTMLElement;
+    const container = this.shadowRoot?.querySelector(".chart-container") as HTMLElement;
     if (container) {
       this._resizeObserver = new ResizeObserver((entries) => {
         if (this._resizeTimeoutId !== null) {
@@ -172,14 +167,8 @@ export class CFChart extends BaseElement {
 
   override render() {
     const chartPadding = this._computePadding();
-    const plotWidth = Math.max(
-      0,
-      this._width - chartPadding.left - chartPadding.right,
-    );
-    const plotHeight = Math.max(
-      0,
-      this.height - chartPadding.top - chartPadding.bottom,
-    );
+    const plotWidth = Math.max(0, this._width - chartPadding.left - chartPadding.right);
+    const plotHeight = Math.max(0, this.height - chartPadding.top - chartPadding.bottom);
 
     // Collect mark data
     const configMarks = this._getConfigMarks();
@@ -190,22 +179,13 @@ export class CFChart extends BaseElement {
     let yScale: YScale | null = null;
     let xType: XScaleType = "linear";
 
-    if (
-      allMarks.some((m) => m.points.length > 0) && plotWidth > 0 &&
-      plotHeight > 0
-    ) {
-      const scales = createScales(
-        allMarks,
-        this._width,
-        this.height,
-        chartPadding,
-        {
-          xType: this.xType,
-          yType: this.yType,
-          xDomain: this.xDomain,
-          yDomain: this.yDomain,
-        },
-      );
+    if (allMarks.some((m) => m.points.length > 0) && plotWidth > 0 && plotHeight > 0) {
+      const scales = createScales(allMarks, this._width, this.height, chartPadding, {
+        xType: this.xType,
+        yType: this.yType,
+        xDomain: this.xDomain,
+        yDomain: this.yDomain,
+      });
       xScale = scales.xScale;
       yScale = scales.yScale;
       xType = scales.xType;
@@ -222,30 +202,22 @@ export class CFChart extends BaseElement {
         chartPadding,
         configMarks,
       )
-      : svg`
-
-      `;
+      : svg``;
 
     const tooltip = this._tooltipInfo
       ? this._renderTooltip(chartPadding)
-      : html`
-
-      `;
+      : html``;
 
     const w = this._width || "100%";
     const vw = this._width || 1;
 
     return html`
       <div class="chart-container" style="height: ${this.height}px;">
-        <svg
-          width="${w}"
-          height="${this.height}"
-          viewBox="0 0 ${vw} ${this.height}"
-        >
+        <svg width="${w}" height="${this.height}" viewBox="0 0 ${vw} ${this.height}">
           ${svgContent}
         </svg>
         ${tooltip}
-        <slot @slotchange="${this._onSlotChange}"></slot>
+        <slot @slotchange=${this._onSlotChange}></slot>
       </div>
     `;
   }
@@ -263,30 +235,19 @@ export class CFChart extends BaseElement {
     configMarks: readonly MarkConfig[],
   ) {
     const marks = this._renderAllMarks(
-      allMarks,
-      xScale,
-      yScale,
-      plotWidth,
-      plotHeight,
-      configMarks,
+      allMarks, xScale, yScale, plotWidth, plotHeight, configMarks,
     );
     const xAxisConfig = resolveAxisConfig(this.xAxis);
     const yAxisConfig = resolveAxisConfig(this.yAxis);
     const xAxisSvg = xAxisConfig
       ? renderXAxis(xScale, xType, plotWidth, plotHeight, xAxisConfig)
-      : svg`
-
-      `;
+      : svg``;
     const yAxisSvg = yAxisConfig
       ? renderYAxis(yScale, plotWidth, plotHeight, yAxisConfig)
-      : svg`
-
-      `;
+      : svg``;
     const crosshairSvg = this.crosshair && this._crosshairX !== null
       ? renderCrosshair(this._crosshairX, plotHeight)
-      : svg`
-
-      `;
+      : svg``;
 
     const onMove = (e: MouseEvent) =>
       this._handleMouseMove(e, allMarks, xScale, yScale, xType);
@@ -295,18 +256,7 @@ export class CFChart extends BaseElement {
     const tx = padding.left;
     const ty = padding.top;
 
-    return svg`
-      <g transform="translate(${tx}, ${ty})">
-        ${marks}${xAxisSvg}${yAxisSvg}${crosshairSvg}<rect
-          class="interaction-overlay"
-          width="${plotWidth}"
-          height="${plotHeight}"
-          @mousemove="${onMove}"
-          @click="${onClick}"
-          @mouseleave="${this._handleMouseLeave}"
-        />
-      </g>
-    `;
+    return svg`<g transform="translate(${tx}, ${ty})">${marks}${xAxisSvg}${yAxisSvg}${crosshairSvg}<rect class="interaction-overlay" width="${plotWidth}" height="${plotHeight}" @mousemove=${onMove} @click=${onClick} @mouseleave=${this._handleMouseLeave} /></g>`;
   }
 
   // === Mark rendering ===
@@ -335,24 +285,16 @@ export class CFChart extends BaseElement {
         config as MarkConfig | MarkElement,
       );
 
-      return svg`
-        <g class="mark-group" data-mark-index="${i}">${rendered}</g>
-      `;
+      return svg`<g class="mark-group" data-mark-index="${i}">${rendered}</g>`;
     });
 
-    return svg`
-      ${groups}
-    `;
+    return svg`${groups}`;
   }
 
   // === Tooltip rendering ===
 
   private _renderTooltip(padding: ChartPadding) {
-    if (!this._tooltipInfo) {
-      return html`
-
-      `;
-    }
+    if (!this._tooltipInfo) return html``;
 
     const { pixelX, pixelY, point, label } = this._tooltipInfo;
     const x = pixelX + padding.left;
@@ -364,13 +306,7 @@ export class CFChart extends BaseElement {
 
     return html`
       <div class="tooltip" style="left: ${x}px; top: ${y}px;">
-        ${label
-          ? html`
-            <span class="tooltip-label">${label}:</span>
-          `
-          : html`
-
-          `}
+        ${label ? html`<span class="tooltip-label">${label}:</span>` : html``}
         <span>${yVal}</span>
       </div>
     `;
@@ -391,12 +327,7 @@ export class CFChart extends BaseElement {
     const plotY = e.clientY - rect.top;
 
     const { detail, nearest } = computeEventDetail(
-      plotX,
-      plotY,
-      allMarks,
-      xScale,
-      yScale,
-      xType,
+      plotX, plotY, allMarks, xScale, yScale, xType,
     );
 
     if (this.crosshair && nearest) {
@@ -420,12 +351,7 @@ export class CFChart extends BaseElement {
     const plotY = e.clientY - rect.top;
 
     const { detail } = computeEventDetail(
-      plotX,
-      plotY,
-      allMarks,
-      xScale,
-      yScale,
-      xType,
+      plotX, plotY, allMarks, xScale, yScale, xType,
     );
 
     this.emit("cf-click", detail);

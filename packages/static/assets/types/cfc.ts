@@ -108,21 +108,20 @@ export type CfcPromptSlotRunManifest = CfcAtomObject & {
 };
 
 export type CfcPromptSlotInfluenceAtom<Role extends string = string> =
-  & CfcAtomObject
-  & {
-    readonly type: typeof CFC_ATOM_TYPE.PromptSlotInfluence;
-    readonly version: 1;
-    readonly role: Role;
-    readonly kernelName: string;
-    readonly surface: string;
-    readonly subject?: string;
-    readonly eventId?: string;
-    readonly valueDigest?: string;
-    readonly slotDigest?: string;
-    readonly snapshotDigest?: string;
-    readonly targetPath?: string;
-    readonly runManifest?: CfcPromptSlotRunManifest;
-  };
+  CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.PromptSlotInfluence;
+  readonly version: 1;
+  readonly role: Role;
+  readonly kernelName: string;
+  readonly surface: string;
+  readonly subject?: string;
+  readonly eventId?: string;
+  readonly valueDigest?: string;
+  readonly slotDigest?: string;
+  readonly snapshotDigest?: string;
+  readonly targetPath?: string;
+  readonly runManifest?: CfcPromptSlotRunManifest;
+};
 
 export declare const cfcAtom: {
   readonly resource: (
