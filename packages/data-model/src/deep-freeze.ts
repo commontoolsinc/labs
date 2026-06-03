@@ -6,6 +6,7 @@ import {
   IS_DEEP_FROZEN,
 } from "./interface.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -295,6 +296,8 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
       // instance is guaranteed to implement it.
       return item[IS_DEEP_FROZEN]((v) => checkValue(v));
     } else if (Array.isArray(item)) {
+      // Arrays with enumerable named properties have no fabric representation.
+      if (!isArrayWithOnlyIndexProperties(item)) return false;
       for (let i = 0; i <= item.length; i++) {
         if (i in item && !checkValue(item[i])) return false;
       }

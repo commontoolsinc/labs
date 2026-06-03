@@ -1129,6 +1129,17 @@ describe("fabric-value", () => {
           "Cannot store array with enumerable named properties",
         );
       });
+
+      it("throws even for an already-frozen array with named properties", () => {
+        // Such an array is not a valid `FabricValue`, so it must not slip
+        // through the deep-frozen identity short-circuit.
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        Object.freeze(arr);
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
     });
 
     // `-0`, `NaN`, `+Infinity`, and `-Infinity` are valid `FabricValue`
