@@ -29,6 +29,9 @@ const ONE_PIXEL_PNG = decodeBase64(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
 );
 
+const syntheticTmpProjectPath = (...segments: string[]): string =>
+  join(Deno.realPathSync("/tmp"), "project", ...segments);
+
 const createIoBuffers = (): {
   io: CfHarnessCliIO;
   stdout: string[];
@@ -134,8 +137,49 @@ Deno.test("parseCfHarnessCliArgs rejects image attachments outside the workspace
         },
       ),
     Error,
-    "--image paths must stay within the workspace",
+    "--image must stay within the workspace or a host mount",
   );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts image attachments from a host mount", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mounted = await Deno.makeTempDir();
+  const launcherCwd = await Deno.makeTempDir();
+  const imagePath = join(mounted, "capture.png");
+  await Deno.writeFile(imagePath, ONE_PIXEL_PNG);
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=file-cabinet,source=${mounted},target=/file-cabinet,mode=readonly`,
+      "--image",
+      imagePath,
+      "--prompt",
+      "Describe the image",
+    ],
+    {
+      cwd: launcherCwd,
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.hostMounts, [{
+    name: "file-cabinet",
+    hostPath: await Deno.realPath(mounted),
+    sandboxPath: "/file-cabinet",
+    mode: "readonly",
+  }]);
+  assertEquals(parsed.imageAttachments.length, 1);
+  assertEquals(
+    parsed.imageAttachments[0].hostPath,
+    await Deno.realPath(imagePath),
+  );
+  assertEquals(parsed.imageAttachments[0].mediaType, "image/png");
 });
 
 Deno.test("parseCfHarnessCliArgs rejects image symlinks that resolve outside the workspace", async () => {
@@ -163,7 +207,7 @@ Deno.test("parseCfHarnessCliArgs rejects image symlinks that resolve outside the
         },
       ),
     Error,
-    "--image paths must stay within the workspace",
+    "--image must stay within the workspace or a host mount",
   );
 });
 
@@ -348,7 +392,10 @@ Deno.test({
       if ("help" in parsed) {
         throw new Error("expected config result");
       }
-      assertEquals(parsed.skillsRoot, join(workspace, "labs", "skills"));
+      assertEquals(
+        parsed.skillsRoot,
+        await Deno.realPath(join(workspace, "labs", "skills")),
+      );
       assertEquals(parsed.skillsRootSandboxPath, "/workspace/labs/skills");
       assertEquals(parsed.skillNames, ["pattern-dev", "cf"]);
       assertEquals(parsed.skillCatalogEnabled, false);
@@ -617,7 +664,7 @@ Deno.test("parseCfHarnessCliArgs supports structured result validation flags", a
   }
   assertEquals(
     parsed.structuredResult?.path,
-    "/tmp/project/results/capture.results.json",
+    syntheticTmpProjectPath("results", "capture.results.json"),
   );
   assertEquals(
     parsed.structuredResult?.sandboxPath,
@@ -2260,7 +2307,7 @@ Deno.test("runCfHarnessCli validates a top-level structured result sidecar", asy
       io,
       env: {},
       readTextFile: (path) => {
-        assertEquals(path, "/tmp/project/capture.results.json");
+        assertEquals(path, syntheticTmpProjectPath("capture.results.json"));
         return Promise.resolve(JSON.stringify({ ok: true, status: "done" }));
       },
       writeTextFile: (path, text) => {
@@ -2319,7 +2366,7 @@ Deno.test("runCfHarnessCli validates a top-level structured result sidecar", asy
   assertEquals(batchResult.structured_result.status, "valid");
   assertEquals(
     batchResult.structured_result.result_path,
-    "/tmp/project/capture.results.json",
+    syntheticTmpProjectPath("capture.results.json"),
   );
   assertEquals(
     batchResult.structured_result.schema_digest.startsWith("sha256:"),
@@ -2403,7 +2450,7 @@ Deno.test("runCfHarnessCli exits nonzero when top-level structured result is inv
     type: "cf-harness.structured-result-validation",
     status: "invalid",
     schema_digest: batchResult.structured_result.schema_digest,
-    result_path: "/tmp/project/capture.results.json",
+    result_path: syntheticTmpProjectPath("capture.results.json"),
     validation_error: "structured result did not match the schema",
   });
   assertEquals(
@@ -3002,6 +3049,171 @@ Deno.test("parseCfHarnessCliArgs rejects empty fabric-mount value", async () => 
   );
 });
 
+Deno.test("parseCfHarnessCliArgs parses explicit host mounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=file-cabinet,source=${mountRoot},target=/file-cabinet,mode=writable`,
+      "--cwd",
+      mountRoot,
+      "--prompt",
+      "hi",
+    ],
+    { cwd: workspace, env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.hostMounts, [{
+    name: "file-cabinet",
+    hostPath: await Deno.realPath(mountRoot),
+    sandboxPath: "/file-cabinet",
+    mode: "writable",
+  }]);
+  assertEquals(parsed.cwd, "/file-cabinet");
+});
+
+Deno.test("parseCfHarnessCliArgs rejects structured result paths in readonly host mounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--host-mount",
+          `name=docs,source=${mountRoot},target=/docs,mode=readonly`,
+          "--structured-result-path",
+          join(mountRoot, "result.json"),
+          "--structured-result-schema",
+          '{"type":"object"}',
+          "--prompt",
+          "hi",
+        ],
+        { cwd: workspace, env: {} },
+      ),
+    Error,
+    "--structured-result-path must be inside a writable host mount",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs allows structured result paths in writable host mounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=file-cabinet,source=${mountRoot},target=/file-cabinet,mode=writable`,
+      "--structured-result-path",
+      join(mountRoot, "result.json"),
+      "--structured-result-schema",
+      '{"type":"object"}',
+      "--prompt",
+      "hi",
+    ],
+    { cwd: workspace, env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(
+    parsed.structuredResult?.path,
+    join(await Deno.realPath(mountRoot), "result.json"),
+  );
+  assertEquals(
+    parsed.structuredResult?.sandboxPath,
+    "/file-cabinet/result.json",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs uses the most specific overlapping host mount", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+  const nestedRoot = join(mountRoot, "nested");
+  await Deno.mkdir(nestedRoot);
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=outer,source=${mountRoot},target=/outer,mode=readonly`,
+      "--host-mount",
+      `name=inner,source=${nestedRoot},target=/inner,mode=writable`,
+      "--structured-result-path",
+      join(nestedRoot, "result.json"),
+      "--structured-result-schema",
+      '{"type":"object"}',
+      "--prompt",
+      "hi",
+    ],
+    { cwd: workspace, env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(
+    parsed.structuredResult?.path,
+    join(await Deno.realPath(nestedRoot), "result.json"),
+  );
+  assertEquals(parsed.structuredResult?.sandboxPath, "/inner/result.json");
+});
+
+Deno.test("parseCfHarnessCliArgs rejects missing paths under symlink parents outside allowed roots", async () => {
+  const workspace = await Deno.makeTempDir();
+  const outside = await Deno.makeTempDir();
+  const linkedOutside = join(workspace, "linked-outside");
+  await Deno.symlink(outside, linkedOutside, { type: "dir" });
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--structured-result-path",
+          join(linkedOutside, "missing-result.json"),
+          "--structured-result-schema",
+          '{"type":"object"}',
+          "--prompt",
+          "hi",
+        ],
+        { cwd: workspace, env: {} },
+      ),
+    Error,
+    "--structured-result-path must stay within the workspace or a host mount",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects invalid host mount specs", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--host-mount",
+          `name=bad name,source=${mountRoot},target=/data`,
+          "--prompt",
+          "hi",
+        ],
+        { cwd: workspace, env: {} },
+      ),
+    Error,
+    "--host-mount name must start",
+  );
+});
+
 Deno.test("buildCfHarnessOperatorSystemPrompt includes fabric mount guidance", () => {
   const prompt = buildCfHarnessOperatorSystemPrompt({
     workspace: "/tmp/project",
@@ -3022,6 +3234,24 @@ Deno.test("buildCfHarnessOperatorSystemPrompt omits fabric guidance without moun
     systemPrompt: undefined,
   });
   assertEquals(prompt.includes("mounted at"), false);
+});
+
+Deno.test("buildCfHarnessOperatorSystemPrompt includes host mount guidance", () => {
+  const prompt = buildCfHarnessOperatorSystemPrompt({
+    workspace: "/tmp/project",
+    systemPrompt: undefined,
+    hostMounts: [{
+      name: "file-cabinet",
+      hostPath: "/host/File Cabinet",
+      sandboxPath: "/file-cabinet",
+      mode: "writable",
+    }],
+  });
+
+  assertEquals(
+    prompt.includes("/file-cabinet: writable (file-cabinet)"),
+    true,
+  );
 });
 
 Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", async () => {
@@ -3086,6 +3316,80 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   assertEquals(
     runPromptOptions?.systemPrompt?.includes(
       "A Common Fabric space is mounted at /fabric",
+    ),
+    true,
+  );
+});
+
+Deno.test("runCfHarnessCli threads host-mount into engine additionalMounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+  const { io, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      workspace,
+      "--prompt",
+      "Browse mounted files",
+      "--host-mount",
+      `name=file-cabinet,source=${mountRoot},target=/file-cabinet,mode=writable`,
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: (options) => {
+            runPromptOptions = options;
+            return Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Done.",
+                transcript: [
+                  { role: "user", content: "Browse mounted files" },
+                  { role: "assistant", content: "Done." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-host-mount",
+                  status: "completed",
+                  createdAt: "2026-04-30T00:00:00.000Z",
+                  updatedAt: "2026-04-30T00:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
+          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  const engine = createdOptions?.engine as CfHarnessEngine | undefined;
+  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  assertEquals(mounts?.[1], {
+    kind: "host-bind",
+    name: "file-cabinet",
+    hostPath: await Deno.realPath(mountRoot),
+    sandboxPath: "/file-cabinet",
+    readOnly: false,
+    mode: "writable",
+  });
+  assertEquals(
+    runPromptOptions?.systemPrompt?.includes(
+      "/file-cabinet: writable (file-cabinet)",
     ),
     true,
   );

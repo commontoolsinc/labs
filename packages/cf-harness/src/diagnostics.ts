@@ -85,8 +85,11 @@ export interface HarnessFabricWriteGovernanceSnapshot {
 export interface HarnessCfcMountSnapshot {
   kind: SandboxRuntimeMountKind;
   status: HarnessCfcMountStatus;
+  name?: string;
+  hostPath?: string;
   sandboxPath: string;
   readOnly?: boolean;
+  mode?: "readonly" | "writable";
   writeGovernance?: HarnessFabricWriteGovernanceSnapshot;
 }
 
@@ -103,6 +106,7 @@ export interface HarnessCfcCapabilitySnapshot {
   mounts: {
     workspace: HarnessCfcMountSnapshot;
     fabric: HarnessCfcMountSnapshot;
+    hostBinds: readonly HarnessCfcMountSnapshot[];
   };
   protectedXattrs: {
     expectedSandboxVisible: false;
@@ -305,6 +309,12 @@ const findMountDescription = (
 ): SandboxRuntimeMountDescription | undefined =>
   mounts?.find((mount) => mount.kind === kind);
 
+const findMountDescriptions = (
+  mounts: readonly SandboxRuntimeMountDescription[] | undefined,
+  kind: SandboxRuntimeMountKind,
+): readonly SandboxRuntimeMountDescription[] =>
+  mounts?.filter((mount) => mount.kind === kind) ?? [];
+
 const createCfcMountSnapshots = (
   sandboxDescription: SandboxRuntimeDescription,
   mode: CfcEnforcementMode,
@@ -321,6 +331,9 @@ const createCfcMountSnapshots = (
     workspace: {
       kind: "workspace",
       status: "configured",
+      ...(workspaceMount?.hostPath !== undefined
+        ? { hostPath: workspaceMount.hostPath }
+        : {}),
       sandboxPath: workspaceMount?.sandboxPath ??
         sandboxDescription.cfc?.workspaceMountPath ??
         sandboxDescription.defaultWorkingDirectory,
@@ -330,6 +343,9 @@ const createCfcMountSnapshots = (
       ? {
         kind: "fabric-fuse",
         status: "configured",
+        ...(fabricMount.hostPath !== undefined
+          ? { hostPath: fabricMount.hostPath }
+          : {}),
         sandboxPath: fabricMount.sandboxPath,
         readOnly: fabricMount.readOnly,
         writeGovernance: createFabricWriteGovernance({
@@ -348,6 +364,18 @@ const createCfcMountSnapshots = (
           delegatedToCfc: false,
         },
       },
+    hostBinds: findMountDescriptions(
+      sandboxDescription.cfc?.mounts,
+      "host-bind",
+    ).map((mount) => ({
+      kind: "host-bind" as const,
+      status: "configured" as const,
+      ...(mount.name !== undefined ? { name: mount.name } : {}),
+      ...(mount.hostPath !== undefined ? { hostPath: mount.hostPath } : {}),
+      sandboxPath: mount.sandboxPath,
+      readOnly: mount.readOnly,
+      mode: mount.readOnly ? "readonly" as const : "writable" as const,
+    })),
   };
 };
 

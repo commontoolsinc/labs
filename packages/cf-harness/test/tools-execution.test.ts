@@ -228,6 +228,9 @@ const createContext = (
         ? workspaceHostPath
         : `${workspaceHostPath}${sandboxPath.slice("/workspace".length)}`;
     },
+    resolveHostRootPath(_path: string) {
+      return workspaceHostPath;
+    },
     isHostPathWithinWorkspace(path: string) {
       return Promise.resolve(
         path === workspaceHostPath ||
