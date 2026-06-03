@@ -681,7 +681,9 @@ export class Engine extends EventTarget implements Harness {
         // reload-stable source locations functions now carry (lockstep).
         [
           ...collectVerifiedLoadSources(id, jsScript, files),
-          ...this.canonicalVerifiedSources(id, files).map(normalizeVerifiedSource),
+          ...this.canonicalVerifiedSources(id, files).map(
+            normalizeVerifiedSource,
+          ),
         ],
       );
       const isolate = runtime.getIsolate(loadId);
