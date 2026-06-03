@@ -17,6 +17,10 @@
 ./scripts/check-local-dev.sh          # Health check both servers
 ```
 
+`start-local-dev.sh` validates required commands before launching anything and
+waits for both servers to return HTTP 200 before reporting success. Set
+`LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in seconds.
+
 **URLs:**
 | What | URL |
 |------|-----|
