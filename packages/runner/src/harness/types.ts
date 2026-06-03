@@ -4,7 +4,10 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
-import type { CompiledModuleGraph } from "../sandbox/module-record-compiler.ts";
+import type {
+  CachedCompiledModule,
+  CompiledModuleGraph,
+} from "../sandbox/module-record-compiler.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 
 export type HarnessedFunction = (input: any) => void;
@@ -148,6 +151,21 @@ export interface Harness extends EventTarget {
     mainSpecifier: string,
     files: Source[],
   ): EvaluateResult;
+
+  // Warm load: build + verify + evaluate a pattern directly from cached compiled
+  // modules (by content identity) — no TS source, no resolve, no recompile.
+  evaluateCachedModules?(
+    modules: readonly CachedCompiledModule[],
+    entryIdentity: string,
+    options?: { sourceFiles?: Source[] },
+  ): Promise<EvaluateResult>;
+
+  // Cold recovery: recompile cacheable modules from the stored (already-resolved,
+  // inject-transformed) source set — e.g. after a runtimeVersion bump.
+  compileResolvedToRecordGraph?(
+    resolvedFiles: Source[],
+    entryFilename: string,
+  ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's
   // configuration.
