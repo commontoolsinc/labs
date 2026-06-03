@@ -221,28 +221,24 @@ during design are marked **[resolved]** with the decision.
     injected `sqlite:` path on a memory store may therefore name an arbitrary
     readable host `.sqlite`. Accepted under the v1 cf-trusted-operator model
     (Q18); close it with the operator path-allowlist when CFC authz lands.
-22. **`provider.sqliteQuery!` non-null assertion.** The reactive `sqliteQuery`
-    builtin calls `provider.sqliteQuery!(…)` inside its post-commit flush, but the
-    method is optional on `IStorageProvider`. A provider that doesn't implement it
-    (a test double / alternate deployment) throws *inside the async flush*,
-    stranding the result cell at `{ pending: true }`. Surface a clear
-    "provider does not support sqlite" error at issue time instead.
-23. **Folded write isn't alias-qualified.** `applySqliteOperation` resolves the
-    attach alias only to assert it is present, then runs the raw unqualified SQL;
-    correctness rests on the ≤1-cell-db-per-commit invariant plus the core-table
-    denylist (so an unqualified name can't shadow `main`). Either qualify the
-    statement with the alias or drop the dead binding and document the coupling,
-    so a future reader doesn't assume qualification that isn't happening.
-24. **Codec / factory duplication.** `encodeSqliteParams` (cell.ts) inlines the
-    cell→sigil encoding that `encodeCfLinkValue` (cf-link.ts) owns — and misses
-    its `toCell` back-pointer handling, so `db.exec` and the `sqliteQuery` builtin
-    can diverge on a bound back-pointer value; `decodeCfLinkValue` re-implements
-    `parseCfLinkToSigil`'s parse prologue; and `cell.ts` rebuilds the `sqliteQuery`
-    node factory that `builder/built-in.ts` already exports. Consolidate (the
-    cell.ts ↔ cf-link.ts import cycle blocks the obvious direction — resolve via a
-    cycle-free helper module). The write and read codecs MUST stay byte-identical.
-25. **`decodeRowLinkColumns` copies every row.** It shallow-copies all N result
-    rows (`{ ...row }`) on every reactive re-run even when only the few `asCell`
-    link columns change. On a `reactOn: db` query that re-runs on each write, that
-    is N×R field copies per re-query; copy lazily (only when a value actually
-    decodes) or mutate the link keys in place.
+22. **[resolved]** `provider.sqliteQuery!` non-null assertion in the reactive
+    builtin's flush — the missing-method case now throws a clear
+    "provider does not support sqlite queries" error (caught by the flush and
+    surfaced on the result cell as `error`, not left pending).
+23. **[resolved]** Folded write alias clarity — `applySqliteOperation` now asserts
+    the attachment with `.has()` (no dead `alias` binding) and documents that the
+    unqualified statement relies on the ≤1-cell-db invariant + core-table guard,
+    not on alias qualification.
+24. **Codec / factory duplication (partly open).** The `toCell` divergence is
+    **fixed**: `encodeSqliteParams` now recovers a bound cell from a `toCell`
+    back-pointer too, matching the read side. Still open: `encodeSqliteParams`
+    inlines the cell→sigil encoding `encodeCfLinkValue` owns, `decodeCfLinkValue`
+    re-implements `parseCfLinkToSigil`'s prologue, and `cell.ts` rebuilds the
+    `sqliteQuery` node factory `builder/built-in.ts` exports. Consolidating these
+    is blocked by the cell.ts ↔ cf-link.ts import cycle (both need `isCell`);
+    resolve via a cycle-free helper module. The write/read codecs MUST stay
+    byte-identical until then.
+25. **[resolved]** `decodeRowLinkColumns` now copies a result row lazily — only
+    when a link column actually decodes to a different value — so rows with no
+    link columns (or null values) are returned as-is on the reactive read path,
+    avoiding the per-row spread.

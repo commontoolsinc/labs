@@ -100,18 +100,25 @@ function decodeRowLinkColumns(
   if (cols.length === 0) return rows as unknown[];
   return rows.map((row) => {
     if (!row || typeof row !== "object") return row;
-    const out: Record<string, unknown> = {
-      ...(row as Record<string, unknown>),
-    };
+    const r = row as Record<string, unknown>;
+    // Copy lazily: only allocate a new row object once a link column actually
+    // decodes to a different value. Rows with no link columns (or only
+    // null/non-link values) are returned as-is — no per-row spread on the
+    // reactive read path.
+    let out: Record<string, unknown> | undefined;
     for (const c of cols) {
-      if (!(c in out)) continue;
+      if (!(c in r)) continue;
+      let decoded: unknown;
       try {
-        out[c] = parseCfLinkToSigil(out[c]);
+        decoded = parseCfLinkToSigil(r[c]);
       } catch {
-        // Leave a non-link value untouched.
+        continue; // Leave a non-link value untouched.
       }
+      if (decoded === r[c]) continue; // e.g. null -> null: nothing to change.
+      out ??= { ...r };
+      out[c] = decoded;
     }
-    return out;
+    return out ?? row;
   });
 }
 
@@ -220,7 +227,13 @@ export function sqliteQuery(
       async flush() {
         const provider = runtime.storageManager.open(space);
         try {
-          const res = await provider.sqliteQuery!(db, sql, params);
+          if (!provider.sqliteQuery) {
+            throw new Error(
+              "sqlite: storage provider does not support queries " +
+                "(sqliteQuery unavailable)",
+            );
+          }
+          const res = await provider.sqliteQuery(db, sql, params);
           // Decode asCell-marked `_cf_link` columns from sigil STRINGS to sigil
           // OBJECTS so a typed consumer's asCell schema rehydrates them to live
           // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.

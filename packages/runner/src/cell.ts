@@ -470,14 +470,28 @@ export function encodeSqliteParams(
       );
     }
   };
+  // Recover a Cell from a value that is a Cell or carries a `toCell`
+  // back-pointer (matches encodeCfLinkValue/asCellOrUndefined on the read side,
+  // so db.exec and the sqliteQuery builtin agree on what counts as a bound cell).
+  const boundCell = (value: unknown): Cell<unknown> | undefined => {
+    if (isCell(value)) return value as Cell<unknown>;
+    if (value !== null && typeof value === "object") {
+      const fn = (value as { [toCell]?: unknown })[toCell];
+      if (typeof fn === "function") {
+        return (value as { [toCell]: () => Cell<unknown> })[toCell]();
+      }
+    }
+    return undefined;
+  };
   const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
     assertDefined(value);
-    if (isCell(value)) {
+    const cell = boundCell(value);
+    if (cell) {
       if (!isLinkCol) {
         throw new TypeError("cells may only be bound to _cf_link columns");
       }
       return JSON.stringify(
-        createSigilLinkFromParsedLink(value.getAsNormalizedFullLink(), {
+        createSigilLinkFromParsedLink(cell.getAsNormalizedFullLink(), {
           includeSchema: false,
         }),
       );
@@ -492,7 +506,7 @@ export function encodeSqliteParams(
         return encodeOne(v, isCfLinkColumn(cols[i % cols.length] ?? ""));
       }
       assertDefined(v);
-      if (isCell(v)) {
+      if (boundCell(v)) {
         throw new TypeError(
           "sqlite: a Cell parameter must bind to a _cf_link column, but the " +
             "target column can't be determined from this statement. Use an " +

@@ -3267,8 +3267,12 @@ const applySqliteOperation = (
   op: SqliteOperation,
   attachments: ReadonlyMap<string, string> | undefined,
 ): void => {
-  const alias = attachments?.get(op.db.id);
-  if (alias === undefined) {
+  // The server attaches exactly one cell-db (under an alias) before applyCommit;
+  // assert it's present, then run the statement UNQUALIFIED. Unqualified table
+  // names resolve to that single attached db — the ≤1-cell-db-per-commit rule
+  // (#attachCommitSqliteDbs) plus the core-table guard prevent ambiguity, so the
+  // alias is not used to qualify the SQL here (only the presence matters).
+  if (!attachments?.has(op.db.id)) {
     throw new ProtocolError(
       `sqlite op for db ${op.db.id} has no attachment (server must attach before applyCommit)`,
     );
