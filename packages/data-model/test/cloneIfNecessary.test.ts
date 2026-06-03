@@ -629,8 +629,6 @@ describe("cloneIfNecessary", () => {
   ];
 
   describe("`cloneIfNecessary()`: subclass coverage matrix", () => {
-    beforeEach(() => setDataModelConfig(modernMode));
-
     for (const c of subclassCases) {
       describe(c.name, () => {
         for (const inputFrozen of [false, true]) {
