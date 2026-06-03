@@ -82,14 +82,14 @@ export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
   const len = array.length;
   const keys = Object.keys(array);
 
-  // Quick check: more keys than length means there must be named properties.
+  // Quick check: more keys than length means there must be named properties
+  // (canonical index keys are a subset of `0..len-1`).
   if (keys.length > len) {
     return false;
   }
 
-  // Verify all keys are valid indices (non-negative integers < length).
-  return !keys.some((k) => {
-    const n = Number(k);
-    return !Number.isInteger(n) || n < 0 || n >= len;
-  });
+  // Every key must be a syntactically valid array index. `Number(k)` would
+  // wrongly accept named keys whose numeric coercion lands in range -- e.g.
+  // `"01"`, `" 1"`, `"1.0"`, `"1e1"`, `"-0"`, and `""` (which coerces to `0`).
+  return keys.every(isArrayIndexPropertyName);
 }

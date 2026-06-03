@@ -126,5 +126,21 @@ describe("arrays", () => {
       sparse.foo = "bar";
       expect(isArrayWithOnlyIndexProperties(sparse)).toBe(false);
     });
+
+    describe("returns `false` for non-canonical index-shaped named keys", () => {
+      // These keys are named properties, not array indices, but each has a
+      // `Number(key)` that is an in-range non-negative integer -- so a naive
+      // numeric coercion would misclassify the array as index-only.
+      for (const key of ["01", " 1", "1.0", "1e1", "-0", ""]) {
+        it(`rejects the named key ${JSON.stringify(key)}`, () => {
+          // A roomy all-holes array, so the named key sits below `length` and
+          // doesn't trip the `keys.length > length` quick check.
+          const arr: unknown[] = [];
+          arr.length = 1000;
+          (arr as unknown as Record<string, unknown>)[key] = "x";
+          expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+        });
+      }
+    });
   });
 });
