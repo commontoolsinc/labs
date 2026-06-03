@@ -6,7 +6,7 @@
 
 ## Why this exists
 
-We keep adding skills, and a skill is loaded into an agent's context on every
+When we add a skill, that skill is loaded into an agent's context on every
 invocation: it competes with the actual task for attention, and it shapes how
 the agent thinks before it has looked at anything. That is real leverage and a
 real failure mode. A skill can **augment** an agent (supply what it cannot know)
