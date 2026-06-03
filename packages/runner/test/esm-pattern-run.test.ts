@@ -77,6 +77,53 @@ describe("Pattern run via esmModuleLoader", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 6 });
   });
 
+  it("runs a pattern through a named re-export barrel (`export { x } from`)", async () => {
+    // CT-1661: a barrel that re-exports a sibling's binding compiles to a `var
+    // ... = require(...)` preamble plus a live getter. Under the ESM loader this
+    // previously failed SES verification at runtime ("Top-level mutable bindings
+    // are not allowed") even though `cf check` (AMD path) passed. The re-export
+    // must now both verify AND resolve the live binding correctly end-to-end.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/sibling.ts",
+          contents: "export const factor = (x:number)=>x*3;",
+        },
+        {
+          name: "/barrel.ts",
+          contents: "export { factor } from './sibling.ts';",
+        },
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { pattern, lift } from 'commonfabric';",
+            "import { factor } from './barrel.ts';",
+            "const tripled = lift((x:number)=>factor(x));",
+            "export default pattern<{ value: number }>(({ value }) => {",
+            "  return { result: tripled(value) };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    expect(Object.isFrozen(compiled)).toBe(true);
+
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "esm re-export barrel run",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, compiled, { value: 5 }, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await result.pull();
+    expect(result.getAsQueryResult()).toEqual({ result: 15 });
+  });
+
   it("composes a frozen sub-pattern imported from another module", async () => {
     // The sub-pattern is exported from /sub.tsx (and hardened at the module
     // boundary), then imported and instantiated INSIDE the parent pattern. This

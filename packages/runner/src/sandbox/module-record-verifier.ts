@@ -43,9 +43,19 @@ const EMPTY_BINDING_SET: ReadonlySet<string> = new Set<string>();
 //   const util_ts_1 = require("./util.ts");
 //   const cf_1 = __importDefault(require("commonfabric"));
 //   const ns_1 = __importStar(require("./ns.ts"));
-// Captures the local binding name and the imported specifier.
+//   var sibling_ts_1 = require("./sibling.ts");
+// Captures the local binding name and the imported specifier. Both `const` and
+// `var` are accepted: TypeScript's CommonJS emit declares the module reference
+// for a *re-export* (`export { x } from "./m"`) with `var` (hoisted ahead of the
+// live `Object.defineProperty(exports, …, { get })` getter) while plain imports
+// use `const`. The AMD verifier accepts the re-export form (imports arrive as
+// `define` factory params), so accepting `var` here keeps the ESM verdict in
+// parity — barrel re-exports load instead of failing SES at runtime (CT-1661).
+// A `var` binding is no less safe than `const`: any later reassignment is a bare
+// top-level assignment statement, which `classifyModuleItems` rejects as
+// unsupported executable code.
 const REQUIRE_IMPORT = new RegExp(
-  "^const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" +
+  "^(?:const|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" +
     "(?:__importDefault|__importStar)?\\s*\\(?\\s*" +
     "require\\(\\s*[\"']([^\"']+)[\"']\\s*\\)\\s*\\)?\\s*;?$",
 );

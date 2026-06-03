@@ -47,6 +47,15 @@ const ACCEPT: Case[] = [
       `const inner_1 = require("./inner.ts");\nObject.defineProperty(exports, "x", { enumerable: true, get: function () { return inner_1.x; } });`,
   },
   {
+    // CT-1661: `export { x } from "./m"` emits the module reference as `var`
+    // (hoisted ahead of the getter), not `const`. AMD accepts re-exports
+    // (imports are factory params); the ESM import-preamble must accept the
+    // `var` form too, or the same source diverges between the two verifiers.
+    name: "named reexport getter from a var require preamble",
+    body:
+      `var inner_1 = require("./inner.ts");\nObject.defineProperty(exports, "x", { enumerable: true, get: function () { return inner_1.x; } });`,
+  },
+  {
     name: "ambient safe global inside a builder callback",
     body: `${IMPORT}\nexports.v = (0, cf_1.pattern)((s) => fetch(s.url));`,
   },
