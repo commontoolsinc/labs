@@ -849,6 +849,23 @@ export class Runner {
     // Set the pattern in the resultCell as well
     resultCell.withTx(tx).setMetaRaw("pattern", getSigilLink(patternId));
 
+    // Also record the content-addressed {identity, symbol} reference when the
+    // pattern's entry identity is known (ESM cache path). On reload this lets
+    // the runtime load straight from the compiled cache by identity — no TS
+    // source pulled, no meta-cell roundtrip — falling back to the patternId
+    // load when the by-identity load is unavailable. See loadPatternByIdentity.
+    // The ref carries the authoritative export symbol (recorded at compile/load
+    // time); we never recompute it from `pattern`'s program here, since a
+    // source-free reloaded pattern only has a stub program (mainExport
+    // "default"), which would clobber a non-"default" export name.
+    const entryRef = this.runtime.patternManager.getPatternEntryRef(pattern);
+    if (entryRef) {
+      resultCell.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
+      });
+    }
+
     this.updateResultProjection(tx, pattern, resultCell.withTx(tx), {
       preserveName: previousPatternId === patternId,
     });
@@ -1234,10 +1251,21 @@ export class Runner {
   ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
-      return this.runtime.patternManager.loadPattern(
-        patternId,
-        rootCell.space,
-      )
+      // Prefer the content-addressed {identity, symbol} reference when present:
+      // it loads straight from the compiled cache (no TS source, no meta-cell
+      // roundtrip). Fall back to the patternId load (which handles cold
+      // recovery from the stored source) when by-identity is unavailable.
+      const identityRef = getPatternIdentityRef(rootCell);
+      const pm = this.runtime.patternManager;
+      const loadPromise = identityRef
+        ? pm.loadPatternByIdentityAs(
+          patternId,
+          identityRef.identity,
+          identityRef.symbol,
+          rootCell.space,
+        ).then((byId) => byId ?? pm.loadPattern(patternId, rootCell.space))
+        : pm.loadPattern(patternId, rootCell.space);
+      return loadPromise
         .then((loaded) => {
           if (loaded) {
             return this.doStart(rootCell, seenCells);
@@ -3804,4 +3832,25 @@ function getTxDebugActionId(
  */
 function getPatternId(resultCell: Cell<unknown>): URI | undefined {
   return getMetaLink(resultCell, "pattern")?.id;
+}
+
+/**
+ * Read the content-addressed {identity, symbol} pattern reference from a result
+ * cell, if one was recorded at setup (ESM cache path). Lets the reload path
+ * load the pattern straight from the compiled cache by identity. Returns
+ * undefined for legacy result cells that only carry the patternId link.
+ */
+function getPatternIdentityRef(
+  resultCell: Cell<unknown>,
+): { identity: string; symbol: string } | undefined {
+  const raw = resultCell.getMetaRaw("patternIdentity", {
+    meta: ignoreReadForScheduling,
+  });
+  if (
+    isRecord(raw) && typeof raw.identity === "string" &&
+    typeof raw.symbol === "string"
+  ) {
+    return { identity: raw.identity, symbol: raw.symbol };
+  }
+  return undefined;
 }
