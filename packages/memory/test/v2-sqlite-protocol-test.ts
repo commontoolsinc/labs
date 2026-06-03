@@ -264,4 +264,122 @@ describe("sqlite protocol verbs (loopback)", () => {
     );
     expect(r.rows).toEqual([{ n: 2 }]);
   });
+
+  it("re-runs ensureTables when the declared schema adds a table", async () => {
+    const id = `of:ensure-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // Evolve the declaration: add a NEW table. The (space,id,schema) key changes,
+    // so ensureTables must re-run and create `notes` (it isn't skipped by the
+    // first-write cache) — otherwise this write would fail "no such table".
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        notes: table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    await seedRows(v2, "INSERT INTO notes (note) VALUES (?)", ["n"]);
+    const r = await session.sqliteQuery(v2, "SELECT note FROM notes");
+    expect(r.rows).toEqual([{ note: "n" }]);
+  });
+
+  it("surfaces a query against an UNDECLARED table (not masked as empty)", async () => {
+    const db = dbRef();
+    // Materialize the cell-db file (create the declared `messages` table).
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // A query against a table that is NOT in the declared schema is a real
+    // mistake (a typo here). The file exists and every declared table was
+    // created on the write, so "no such table: nope" must surface — it must NOT
+    // be swallowed into `[]` by the create-on-read fallback.
+    await expect(session.sqliteQuery(db, "SELECT * FROM nope")).rejects
+      .toThrow();
+  });
+
+  it("reads [] for a DECLARED table not yet materialized (schema evolved)", async () => {
+    const id = `of:evolve-read-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    // Write with v1 → the file exists, but only `messages` is materialized.
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // Evolve the declared schema (add `notes`) and READ it before any write
+    // creates it. `notes` IS declared, so it reads as a fresh, empty table — []
+    // — rather than erroring.
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        notes: table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    const r = await session.sqliteQuery(v2, "SELECT note FROM notes");
+    expect(r.rows).toEqual([]);
+  });
+
+  it("reads [] for a declared-but-unmaterialized table whose name has a space", async () => {
+    // Guards against the "no such table" parser truncating at whitespace: a
+    // quoted table name with a space (`"my notes"`) must be matched whole
+    // against the declared schema, so reading it before any write yields [].
+    const id = `of:spaced-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        "my notes": table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    const r = await session.sqliteQuery(v2, 'SELECT note FROM "my notes"');
+    expect(r.rows).toEqual([]);
+  });
+
+  it("reads [] for a declared-but-unmaterialized table queried in a different case", async () => {
+    // SQLite identifiers are case-insensitive: a table declared `Notes` is
+    // reachable as `notes`. Before it is materialized, reading `notes` must
+    // still resolve to the declared `Notes` and return [] (not rethrow) —
+    // otherwise the create-on-read contract would flip on write history.
+    const id = `of:case-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        Notes: table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    const r = await session.sqliteQuery(v2, "SELECT note FROM notes");
+    expect(r.rows).toEqual([]);
+  });
+
+  it("a pooled reader sees a write committed after its connection opened", async () => {
+    const db = dbRef();
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // First read opens + caches the pooled read-only connection (sees 1 row).
+    expect(
+      (await session.sqliteQuery(db, "SELECT count(*) AS n FROM messages"))
+        .rows,
+    ).toEqual([{ n: 1 }]);
+    // A second write lands via the separate engine-attach commit path.
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["b"]);
+    // The REUSED pooled connection must observe the newly-committed row (each
+    // query is a fresh read transaction — no WAL required for this sequential
+    // write-then-read pattern).
+    expect(
+      (await session.sqliteQuery(db, "SELECT count(*) AS n FROM messages"))
+        .rows,
+    ).toEqual([{ n: 2 }]);
+  });
 });

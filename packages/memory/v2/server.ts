@@ -46,11 +46,11 @@ import {
   attachDatabase,
   detachDatabase,
   ensureTables,
-  runQuery,
-  setQueryOnly,
 } from "./sqlite/exec.ts";
+import { assertReadOnly } from "./sqlite/guard.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
+import { ReadConnectionPool } from "./sqlite/read-pool.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -197,6 +197,45 @@ function hashToken(s: string): string {
     h = Math.imul(h, 0x01000193);
   }
   return `${(h >>> 0).toString(16).padStart(8, "0")}${s.length.toString(16)}`;
+}
+
+/** Extract the table name from a SQLite "no such table: <name>" error, or
+ *  undefined if the error is not that shape. SQLite reports the *unquoted* name,
+ *  which may itself contain spaces or dots (e.g. `CREATE TABLE "my notes"`), so
+ *  we take the whole remainder of the message. Only a real `main.`/`temp.`
+ *  schema prefix is stripped — a bare table literally named `a.b` is preserved,
+ *  so the result matches a declared-table key exactly. */
+function missingTableName(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = /no such table:\s*(.+)$/i.exec(message);
+  if (match === null) return undefined;
+  const ref = match[1].trim();
+  const dot = ref.indexOf(".");
+  if (dot !== -1) {
+    const schema = ref.slice(0, dot).toLowerCase();
+    if (schema === "main" || schema === "temp") return ref.slice(dot + 1);
+  }
+  return ref;
+}
+
+/** Whether `name` matches a declared table key, using the SAME case-folding
+ *  SQLite uses to resolve table identifiers: **ASCII-only** (A–Z ↔ a–z). A
+ *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
+ *  `ü` as distinct tables, so folding them together here would mask a genuine
+ *  "no such table" error as an empty result. */
+function isDeclaredTable(
+  tables: Record<string, unknown> | undefined,
+  name: string,
+): boolean {
+  if (tables === undefined) return false;
+  if (Object.prototype.hasOwnProperty.call(tables, name)) return true;
+  const asciiFold = (value: string): string =>
+    value.replace(/[A-Z]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 32));
+  const lowered = asciiFold(name);
+  for (const key of Object.keys(tables)) {
+    if (asciiFold(key) === lowered) return true;
+  }
+  return false;
 }
 
 const respondTypedError = <Result>(
@@ -534,6 +573,28 @@ export class Server {
   // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
   // docs/specs/sqlite-builtin/plans/on-disk-source.md).
   #diskSources = new DiskSourceRegistry();
+  // Pooled read-only connections (keyed by canonical file path) for SQLite
+  // reads — injected on-disk sources and cell-derived dbs alike run here,
+  // unattached, instead of attach/detach-per-op on the engine connection.
+  #readPool = new ReadConnectionPool();
+  // Schemas already created on the write path, keyed by `(space, id, schema)`.
+  // `ensureTables` (additive `CREATE TABLE IF NOT EXISTS` per declared table)
+  // runs only the first time a given schema is seen for a cell-db, not on every
+  // write. Bounded LRU; a miss (eviction / restart) just re-runs ensureTables,
+  // which is idempotent. Keyed by the full schema JSON so a changed declaration
+  // re-ensures (additive migration) with no hash-collision risk.
+  #ensuredSchemas = new Map<string, true>();
+  #ensuredSchemasMax = 4096;
+
+  #recordSchemaEnsured(key: string): void {
+    this.#ensuredSchemas.set(key, true);
+    if (this.#ensuredSchemas.size > this.#ensuredSchemasMax) {
+      const oldest = this.#ensuredSchemas.keys().next().value as
+        | string
+        | undefined;
+      if (oldest !== undefined) this.#ensuredSchemas.delete(oldest);
+    }
+  }
 
   constructor(
     readonly options: {
@@ -578,6 +639,7 @@ export class Server {
     }
     this.#engines.clear();
     this.#connections.clear();
+    this.#readPool.close();
   }
 
   /**
@@ -636,70 +698,70 @@ export class Server {
   }
 
   /**
-   * Run `op` against a cell-derived SQLite database: ATTACH it (under an alias
-   * derived from the db id), additively create its declared tables, run `op`
-   * synchronously, then DETACH in `finally`.
+   * Read a cell-derived database on a pooled read-only connection — unattached,
+   * like injected on-disk sources. (Writes still ATTACH to the engine connection
+   * in `#attachCommitSqliteDbs` for commit atomicity.)
    *
-   * Attach-one-at-a-time (rather than keeping dbs attached) is deliberate: it
-   * guarantees a pattern's unqualified table names resolve to *this* db (SQLite
-   * resolves unqualified names against attached dbs in order, so multiple
-   * simultaneously-attached cell-dbs would alias each other), and it sidesteps
-   * the connection's `SQLITE_MAX_ATTACHED` limit. `op` MUST be synchronous: the
-   * attach→op→detach block must not `await` (the engine connection is shared and
-   * single-threaded; an await between attach and detach could interleave another
-   * op's attach and reintroduce the ambiguity). ATTACH/DETACH require no open
-   * transaction — true on this RPC path. File-backed cell-dbs persist across
-   * detach.
+   * A cell-db file is created lazily by the first WRITE (its ATTACH), and that
+   * write's `ensureTables` creates the declared tables. So a read can find:
+   *   - no file yet (never written) → no rows;
+   *   - a file without the queried table (e.g. a newly-declared table not yet
+   *     created by a write) → no rows.
+   * Both map to an empty result, preserving the previous "read a fresh cell-db
+   * returns []" contract without the read needing to create anything.
    */
-  async #onCellDb<T>(
+  async #readCellDb(
     space: string,
     db: SqliteDbRef,
-    op: (engine: Engine.Engine) => T,
-  ): Promise<T> {
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<unknown[]> {
+    // Apply the statement guard BEFORE the file-existence short-circuit, so a
+    // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
+    // multi-statement) is refused even against a never-written cell-db rather
+    // than silently returning [].
+    assertReadOnly(sql);
     const engine = await this.openEngine(space);
-    const alias = aliasForDbId(db.id);
-
-    // Phase 7: an injected on-disk source is attached READ-ONLY from its
-    // registered path instead of the cell-derived file, and we do NOT run
-    // ensureTables against it (v1 does not migrate external files). Read-only is
-    // enforced for the synchronous attach→op→detach window via PRAGMA query_only
-    // (the connection is single-threaded; `op` must not await — see below).
-    const disk = this.#diskSources.get(space, db.id);
-    if (disk) {
-      attachDatabase(engine.database, alias, disk.path, { readOnly: true });
-      setQueryOnly(engine.database, true);
-      try {
-        return op(engine); // synchronous — see doc comment
-      } finally {
-        setQueryOnly(engine.database, false);
-        detachDatabase(engine.database, alias);
-      }
-    }
-
-    attachDatabase(
-      engine.database,
-      alias,
-      this.#cellDbPath(engine, space, db.id),
-    );
+    const path = this.#cellDbPath(engine, space, db.id);
+    // A never-written cell-db has no file yet (its schema is created on the
+    // first write, via the attach path). Treat a missing file as an empty
+    // result — but ONLY a genuinely-absent file: any other stat failure
+    // (permissions, I/O) is a real error and must surface, not masquerade as [].
     try {
-      if (db.tables) {
-        ensureTables(
-          engine.database,
-          db.tables as Record<string, TableSchema>,
-          alias,
-        );
+      Deno.statSync(path);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return [];
+      throw error;
+    }
+    try {
+      return this.#readPool.query(path, sql, params);
+    } catch (error) {
+      // The file exists (written at least once, so ensureTables created every
+      // table declared at that write). A "no such table" therefore means either:
+      //   - a DECLARED table not yet materialized (the schema evolved since the
+      //     last write; the next write creates it) → behaves like a fresh,
+      //     empty table → [].
+      //   - an UNDECLARED table (a typo or otherwise undeclared name) → a real
+      //     mistake → rethrow.
+      // Scoping to the declared schema preserves create-on-read semantics
+      // without masking genuine query/schema errors as empty results.
+      // SQLite identifiers are case-insensitive (ASCII), so match the missing
+      // name against the declared keys case-insensitively — otherwise a table
+      // declared `Notes` but queried `notes` would rethrow before its first
+      // write yet succeed after (SQLite case-folds), flipping the contract.
+      const missing = missingTableName(error);
+      if (missing !== undefined && isDeclaredTable(db.tables, missing)) {
+        return [];
       }
-      return op(engine); // synchronous — see doc comment
-    } finally {
-      detachDatabase(engine.database, alias);
+      throw error;
     }
   }
 
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1) for
-   * `(space, id)`. After this, `#onCellDb` attaches the canonical `path`
-   * (read-only) for that `(space, id)` instead of the cell-derived db. The
-   * descriptor is server-side state — never the cell value.
+   * `(space, id)`. After this, `sqliteQuery` reads the canonical `path` on the
+   * read pool (read-only) for that `(space, id)` instead of the cell-derived db.
+   * The descriptor is server-side state — never the cell value.
    *
    * The path is validated here because it arrives over the wire (untrusted): it
    * must be absolute and must exist, and is `realpath`-canonicalized and then
@@ -826,11 +888,17 @@ export class Server {
         attached.push(alias);
         const tables = tablesById.get(id);
         if (tables) {
-          ensureTables(
-            engine.database,
-            tables as Record<string, TableSchema>,
-            alias,
-          );
+          // Run ensureTables only the first time this (space, id, schema) is
+          // seen; record AFTER it succeeds so a throw re-ensures next time.
+          const key = `${space}\0${id}\0${JSON.stringify(tables)}`;
+          if (!this.#ensuredSchemas.has(key)) {
+            ensureTables(
+              engine.database,
+              tables as Record<string, TableSchema>,
+              alias,
+            );
+            this.#recordSchemaEnsured(key);
+          }
         }
       }
     } catch (error) {
@@ -867,11 +935,19 @@ export class Server {
       );
     }
     try {
-      const rows = await this.#onCellDb(
-        message.space,
-        message.db,
-        (engine) => runQuery(engine.database, message.sql, message.params),
-      );
+      // All reads run unattached on a pooled read-only connection (no ATTACH,
+      // real read-only, each file its own `main` namespace). The only
+      // per-source difference is path resolution: an injected on-disk source's
+      // registered path, else the cell-derived path.
+      const disk = this.#diskSources.get(message.space, message.db.id);
+      const rows = disk
+        ? this.#readPool.query(disk.path, message.sql, message.params)
+        : await this.#readCellDb(
+          message.space,
+          message.db,
+          message.sql,
+          message.params,
+        );
       return { type: "response", requestId: message.requestId, ok: { rows } };
     } catch (error) {
       return respondTypedError<SqliteQueryResult>(

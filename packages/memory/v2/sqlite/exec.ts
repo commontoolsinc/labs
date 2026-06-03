@@ -38,33 +38,17 @@ export function attachDatabase(
   db: Database,
   alias: string,
   path: string,
-  options?: { readOnly?: boolean },
 ): void {
   assertSafeAlias(alias);
   if (db.inTransaction) {
     throw new Error("attachDatabase must be called outside a transaction");
   }
   // Path is bound as a parameter; the alias is a validated literal (it cannot be
-  // a bind parameter in ATTACH).
+  // a bind parameter in ATTACH). Only the cell-derived WRITE path attaches here
+  // (read-write, folded into the commit). Reads — cell-derived and injected
+  // on-disk — run unattached on the read pool (ReadConnectionPool), which opens
+  // each file `readonly`; that is where read-only enforcement now lives.
   db.exec(`ATTACH DATABASE ? AS ${alias}`, path);
-  // SQLite's ATTACH has no per-attachment read-only flag (and `@db/sqlite`'s
-  // connection is not opened with SQLITE_OPEN_URI, so `file:…?mode=ro` ATTACH is
-  // rejected). For injected on-disk sources (Phase 7, read-only v1) the caller
-  // pairs this with `setQueryOnly(db, true)` for the duration of the op, which
-  // makes the whole connection reject writes. The flag documents intent and
-  // leaves room for a real per-attachment read-only path later.
-  void options?.readOnly;
-}
-
-/**
- * Toggle connection-global read-only mode (`PRAGMA query_only`). Used to enforce
- * read-only access to an injected on-disk source (Phase 7). Safe because the
- * attach→op→detach window is synchronous (no interleaving on the shared
- * single-threaded connection — see Server.#onCellDb). Issued directly here, not
- * through the guarded run* paths, so the guard's PRAGMA ban does not apply.
- */
-export function setQueryOnly(db: Database, on: boolean): void {
-  db.exec(`PRAGMA query_only = ${on ? "ON" : "OFF"}`);
 }
 
 /** DETACH a previously attached alias. Must be called outside a transaction and

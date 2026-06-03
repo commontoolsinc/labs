@@ -17,8 +17,11 @@ and `session.watch.*`.
   authorized via UCAN on session open.
 - Cell-derived SQLite databases (Section [03](./03-database-sources.md)) are
   **one sibling file per database** in the same storage directory (Q6 → Option
-  A) and are **ATTACHed** to `engine.database` so SQL statements against them
-  share the engine's connection and transactions.
+  A). **Writes** are **ATTACHed** to `engine.database` so the folded `sqlite` op
+  rides the same commit transaction as the cell ops. **Reads** — cell-derived
+  *and* injected on-disk — run on a separate **read-only pooled connection** for
+  the file, never attached to the engine connection (see
+  [Read path: a pooled read-only connection](#read-path-a-pooled-read-only-connection)).
 
 Because we ride the same connection, queries inherit the session's existing
 authorization; no new auth surface is added in v1. (CFC will later refine *what*
@@ -32,9 +35,15 @@ needs a full SQL parser:
 
 - **File boundary = namespace.** SQLite's only namespace primitive is the
   attached-database alias, so one file per cell-derived db *is* the namespace.
-  We ATTACH only the handle's own db for a given statement/commit; an unqualified
-  `messages` resolves to it (SQLite resolves `main → temp → attached-in-order`),
-  with **no identifier rewriting**.
+  On the **read** path the file is opened on its own connection, so its schema is
+  plain `main` and an unqualified `messages` resolves to it with no core store to
+  shadow. On the **write** path we ATTACH only the handle's own db for that
+  commit; an unqualified `messages` resolves to it (SQLite resolves
+  `main → temp → attached-in-order`), with **no identifier rewriting**. Because
+  reads no longer attach, **the only thing ever attached is the single cell-db
+  being written** (≤1 per commit) — so two cell-dbs are never attached at once,
+  and unqualified resolution can't be ambiguous between cell-dbs. Qualification
+  drops to defense-in-depth rather than a correctness prerequisite.
 - **Core-table rename flag.** To remove the risk that an unqualified pattern name
   shadows/leaks a core table (`commit`, `revision`, `head`, `snapshot`,
   `branch`, `scheduler_*`, `blob_store`), rename the engine's core tables to
@@ -50,13 +59,95 @@ needs a full SQL parser:
   `sqlite3_set_authorizer` ourselves via Deno FFI against the `unsafeHandle`
   pointer — defense-in-depth, not required for v1.)
 
-**Attach/detach cache.** `@db/sqlite` exposes no `sqlite3_limit` binding, so
-`SQLITE_LIMIT_ATTACHED` stays at the compiled default (≈10). An **LRU
-attach/detach cache** attaches a db on demand and `DETACH`es the least-recently-
-used near the limit. Manage it at **transaction boundaries** (ATTACH before
-`BEGIN`; DETACH only when idle — a db in use / inside a transaction cannot be
-detached). A single commit almost always touches one pattern db (2 schemas),
-far under the limit; a transaction that would span more is rejected or split.
+**Attach limit (write path only).** `@db/sqlite` exposes no `sqlite3_limit`
+binding, so `SQLITE_LIMIT_ATTACHED` stays at the compiled default (≈10). Only
+**writes** attach, and a single commit touches **at most one** cell-db, so the
+limit is effectively never approached. The cell-db is attached before `BEGIN`
+and **detached before the post-commit await** (the B1 fix) so the
+≤1-attached-at-a-time invariant holds even across concurrent commits to
+different cell-dbs on the shared per-space connection. (Reads no longer attach,
+so the old LRU attach/detach *read* cache is gone — see the read path below.)
+
+## Read path: a pooled read-only connection
+
+> As-built (follow-up to PR #3776). Supersedes the original "attach the cell-db
+> for every read and write, then detach" model, resolves the read-side of
+> [08-open-questions.md](./08-open-questions.md) Q8 (connection contention), and
+> removes the read-attach churn behind Q8a — only writes attach now.
+
+**All reads — cell-derived and injected on-disk — run on a dedicated read-only
+connection opened directly on the db file, never attached to the space engine.**
+Only **writes** attach to the engine (required: the folded `sqlite` op must ride
+the same commit transaction as the cell ops, and SQLite has no cross-connection
+atomicity). The motivation: a single read primitive that does not have to treat
+cell-derived and on-disk sources differently, with no per-read ATTACH +
+schema-cookie churn on the engine connection and no reliance on a connection-
+global `query_only` window for read-only enforcement.
+
+The only per-source difference is **path resolution**, not execution:
+
+- **cell-derived**: `#cellDbPath(engine, space, db.id)`.
+- **on-disk (injected)**: the `DiskSourceRegistry` descriptor path for
+  `(space, db.id)`.
+
+Execution is identical: open/reuse a read-only connection for that path, apply
+the statement guard, run the `SELECT`, return rows.
+
+### The connection pool (`ReadConnectionPool`)
+
+[`packages/memory/v2/sqlite/read-pool.ts`](../../../packages/memory/v2/sqlite/read-pool.ts):
+
+- Keyed by **canonical file path**; opened **read-only** (`new Database(path, {
+  readonly: true })`). This is **real per-connection read-only** — replacing the
+  `query_only` window — and gives each file its own `main` namespace, so a read
+  can never reach a core/cell table by name.
+- **LRU** with a cap well under the OS file-descriptor budget; evict → `close()`.
+- The statement guard still applies on every `query`, so a read can't use its
+  connection to `ATTACH`/`PRAGMA` to another file.
+- Closed with the server (`Server.close()` → `#readPool.close()`).
+
+### Create-on-read semantics (cell-dbs)
+
+A never-written cell-db has **no file** yet — its schema is created on the first
+*write* (the attach path runs `ensureTables`). A read-only connection cannot
+`CREATE TABLE`, so `#readCellDb` preserves the "fresh cell-db reads `[]`"
+contract without writing:
+
+1. **Missing file → `[]`** (NotFound only; any other `stat` failure surfaces, so
+   a permissions/I/O error is never masked as an empty result).
+2. **"no such table" for a DECLARED table → `[]`.** Once the file exists,
+   `ensureTables` has created every table declared at that write; a "no such
+   table" therefore means either a declared table not yet materialized (the
+   schema evolved since the last write — behaves like a fresh, empty table) or
+   an **undeclared** table (a typo / mistake). The fallback is scoped to the
+   declared schema (`db.tables`): declared → `[]`, undeclared → **rethrow**, so
+   genuine query/schema errors are not silently swallowed.
+
+On-disk sources never hit this — their external schema already exists and we
+never migrate them.
+
+### Read-after-write visibility (cell-dbs)
+
+A cell-db now has a pooled read connection *and* the write-via-attach. **WAL is
+not required** for our access pattern: reads observe only *committed* state
+(read-after-write *within* a transaction is unsupported — see
+[Ordering within a commit](#ordering-within-a-commit)), writes serialize on the
+engine connection, and each query is a *fresh* read transaction (`.all()`), so a
+reused pooled connection observes writes committed after it opened (pinned by a
+test in `v2-sqlite-protocol-test.ts`). WAL remains a future hardening for
+concurrent read-*during*-write, not a correctness prerequisite.
+
+An additive schema migration on the write connection bumps the schema cookie;
+the pooled reader reloads schema on its next access automatically.
+
+### `ensureTables` only on the first write
+
+Independently of the pool, `ensureTables` (a `CREATE TABLE IF NOT EXISTS` per
+declared table) runs only on the **first write** per `(space, id, schema-JSON)`,
+gated by a bounded LRU `#ensuredSchemas` set keyed by the declared `db.tables`.
+A changed declaration → new key → re-ensure (additive migration). This removes
+the per-write N-DDL cost; reads run no DDL at all. (A restart re-ensures once,
+idempotently.)
 
 ## Protocol extension
 
@@ -89,14 +180,20 @@ Server handling (mirrors `Server.transact` / `Server.queryGraph`):
 
 1. Route the new `type` in `Connection.receiveOrdered`, guarded by
    `requireSession`.
-2. `const engine = await this.openEngine(space)`.
-3. ATTACH the db file via the attach/detach cache (above) if not already
-   attached.
-4. **Apply the statement guard** (above): single `SELECT`/read-only CTE; reject
+2. **Apply the statement guard** (above): single `SELECT`/read-only CTE; reject
    DML/DDL, schema-qualified references, `PRAGMA`/`ATTACH`/`DETACH`, and multiple
-   statements, with a `read-only-violation` / `guard-violation` error.
-5. `engine.database.prepare(sql).all(params)` → rows.
-6. Reply with `{ type: "response", requestId, ok: { rows } }`.
+   statements, with a `read-only-violation` / `guard-violation` error. The guard
+   runs **before** any file/short-circuit so a rejected statement is refused even
+   against a never-written cell-db.
+3. Resolve the db ref to its on-disk file **path**: an injected on-disk source's
+   registered path (`DiskSourceRegistry`), else the cell-db path
+   (`#cellDbPath(engine, space, db.id)`).
+4. Run the query on the **read pool** (`ReadConnectionPool.query(path, sql,
+   params)`) — a path-keyed, read-only connection (see below). Cell-db
+   create-on-read semantics are preserved by the pool caller (`#readCellDb`):
+   a missing file → `[]`, a "no such table" for a **declared** table → `[]`,
+   anything else → surface the error.
+5. Reply with `{ type: "response", requestId, ok: { rows } }`.
 
 `_cf_link` decoding (Section [02](./02-cf-link-encoding.md)) happens **on the
 client** after the rows return, because reconstructing a `Cell` needs the
@@ -222,10 +319,12 @@ Goal: transactions are **atomic across cells and the attached SQLite database**.
 
 ## Concurrency
 
-- The engine connection is single-threaded/synchronous; `sqlite.query` reads and
-  `transact`-folded writes serialize on it like all other engine work. Long
-  queries therefore block the space; v1 should guard with a statement timeout
-  and (later) consider a read replica or a separate read connection in WAL mode.
+- `transact`-folded **writes** serialize on the single-threaded/synchronous
+  engine connection like all other engine work. **Reads no longer run on the
+  engine connection** — they run on the read pool's per-path read-only
+  connections (see [Read path](#read-path-a-pooled-read-only-connection)), so a
+  long query no longer blocks the space's writes. (A statement timeout remains a
+  worthwhile guard against a single runaway read.)
 - Multi-tab / multi-client coordination for the *write* side is inherited from
   the existing commit model (seq-based validation, optimistic local commit,
   server confirmation), so no new mutex is needed for writes. Concretely, because
