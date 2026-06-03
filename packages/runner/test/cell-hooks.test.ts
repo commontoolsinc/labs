@@ -7,10 +7,6 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
 import { isCell } from "../src/cell.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
 import { toCell } from "../src/back-to-cell.ts";
@@ -708,77 +704,61 @@ describe("toCell and toOpaqueRef hooks", () => {
       expect(isCell(deepCell)).toBe(true);
       expect(deepCell.get().value).toBe(42);
     });
-
-    // Cycle-handling test moved to a separate parameterized `describe`
-    // below so it can be pinned to both `modernDataModel` flag states.
   });
 });
 
-// Run cycle-handling under both `modernDataModel` flag states explicitly.
-// Modeled on `packages/data-model/test/clone-if-necessary.test.ts`. The flag
-// is set in `beforeEach` BEFORE constructing the `Runtime`, so the runtime
-// captures the correct value (the `Runtime` constructor snapshots
-// `getDataModelConfig()` at construction time).
 describe("toCell and toOpaqueRef hooks: circular references", () => {
-  for (const modernMode of [false, true]) {
-    const label = modernMode ? "modern" : "legacy";
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
 
-    describe(`(${label})`, () => {
-      let runtime: Runtime;
-      let storageManager: ReturnType<typeof StorageManager.emulate>;
-      let tx: IExtendedStorageTransaction;
-
-      beforeEach(() => {
-        setDataModelConfig(modernMode);
-        storageManager = StorageManager.emulate({ as: signer });
-        runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-        });
-        tx = runtime.edit();
-      });
-
-      afterEach(async () => {
-        await tx.commit();
-        await runtime?.dispose();
-        await storageManager?.close();
-        resetDataModelConfig();
-      });
-
-      it("should handle circular references gracefully", () => {
-        const schema = {
-          $ref: "#/$defs/Root",
-          $defs: {
-            Root: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                self: { $ref: "#/$defs/Root" },
-              },
-            },
-          },
-        } as const satisfies JSONSchema;
-
-        const c = runtime.getCell<any>(
-          space,
-          "hook-edge-circular",
-          schema,
-          tx,
-        );
-
-        const data: any = { name: "circular" };
-        data.self = data;
-        c.set(data);
-
-        const result = c.get();
-        expect(toCell in result).toBe(true);
-        expect(result.name).toBe("circular");
-        // With circular references, the self reference points back to the
-        // same data.
-        expect(result.self.name).toBe("circular");
-        // Can navigate infinitely.
-        expect(result.self.self.name).toBe("circular");
-      });
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
     });
-  }
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should handle circular references gracefully", () => {
+    const schema = {
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            self: { $ref: "#/$defs/Root" },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const c = runtime.getCell<any>(
+      space,
+      "hook-edge-circular",
+      schema,
+      tx,
+    );
+
+    const data: any = { name: "circular" };
+    data.self = data;
+    c.set(data);
+
+    const result = c.get();
+    expect(toCell in result).toBe(true);
+    expect(result.name).toBe("circular");
+    // With circular references, the self reference points back to the
+    // same data.
+    expect(result.self.name).toBe("circular");
+    // Can navigate infinitely.
+    expect(result.self.self.name).toBe("circular");
+  });
 });

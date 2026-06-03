@@ -196,9 +196,7 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * members of the union instead, not routed through that arm. Some native types
  * are converted to fabric primitives during conversion.
  *
- * `undefined` is preserved when the `modernDataModel` flag is ON. When the
- * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
- * object properties are omitted -- matching legacy behavior.
+ * `undefined` is preserved.
  *
  * `symbol` values are restricted at runtime to **registry-interned** symbols
  * -- those for which `Symbol.keyFor(s)` returns a string. These are

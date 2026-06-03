@@ -13,6 +13,10 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
+  getModernCellRepConfig,
+  resetModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
+import {
   getPersistentSchedulerStateConfig,
   resetPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
@@ -27,6 +31,7 @@ const signer = await Identity.fromPassphrase("test experimental");
  */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
+    resetModernCellRepConfig();
     resetDataModelConfig();
     resetPersistentSchedulerStateConfig();
   });
@@ -39,7 +44,6 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: false,
-          modernDataModel: false,
           // Explicit so the assertion is deterministic regardless of the
           // CF_ESM_MODULE_LOADER env (e.g. during the flag-on cross-check).
           esmModuleLoader: false,
@@ -47,7 +51,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
-        modernDataModel: false,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
         esmModuleLoader: false,
@@ -63,13 +66,11 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
-          modernDataModel: true,
           esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
-        modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
         esmModuleLoader: false,
@@ -84,13 +85,11 @@ describe("ExperimentalOptions", () => {
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          modernDataModel: true,
           esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
-        modernDataModel: true,
         persistentSchedulerState: false,
         schedulerHistoricalMightWrite: undefined,
         esmModuleLoader: false,
@@ -309,18 +308,18 @@ describe("ExperimentalOptions", () => {
   });
 
   describe("Runtime sets and resets global config", () => {
-    it("constructing Runtime with modernDataModel sets global config", async () => {
+    it("constructing Runtime with modernCellRep sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          modernDataModel: true,
+          modernCellRep: true,
           esmModuleLoader: false, // explicit: deterministic regardless of env
         },
       });
 
-      expect(getDataModelConfig()).toBe(true);
+      expect(getModernCellRepConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
@@ -347,10 +346,10 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { modernDataModel: false },
+        experimental: { modernCellRep: false },
       });
 
-      expect(getDataModelConfig()).toBe(false);
+      expect(getModernCellRepConfig()).toBe(false);
 
       await runtime.dispose();
       await sm.close();
@@ -361,32 +360,32 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: { modernDataModel: true },
+        experimental: { modernCellRep: true },
       });
 
-      expect(getDataModelConfig()).toBe(true);
+      expect(getModernCellRepConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
     });
 
     it("disposing Runtime resets global config to the default", async () => {
-      const initial = getDataModelConfig();
+      const initial = getModernCellRepConfig();
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          modernDataModel: !initial,
+          modernCellRep: !initial,
         },
       });
 
-      expect(getDataModelConfig()).toBe(!initial);
+      expect(getModernCellRepConfig()).toBe(!initial);
 
       await runtime.dispose();
       await sm.close();
 
-      expect(getDataModelConfig()).toBe(initial);
+      expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(false);
     });
   });

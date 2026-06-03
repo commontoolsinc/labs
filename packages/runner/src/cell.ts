@@ -1428,14 +1428,11 @@ export class CellImpl<T extends FabricValue>
    * Proxy wrapping). By default returns a deep-frozen `FabricValue`
    * snapshot; pass `{ frozen: false }` for a mutable deep copy.
    *
-   * **Frozenness contract:** Defaults to `{ frozen: true }` regardless
-   * of the data-model flag, returning a deep-frozen `FabricValue`
-   * snapshot via `cloneIfNecessary()`. Under `modernDataModel: true`
-   * the underlying storage already holds a deep-frozen tree, so the
-   * clone is typically a no-op. Under `modernDataModel: false` (legacy)
-   * the snapshot is freshly frozen at read time. The `{ frozen: false }`
-   * variant returns a fresh mutable deep copy and never aliases storage
-   * state.
+   * **Frozenness contract:** Defaults to `{ frozen: true }`, returning a
+   * deep-frozen `FabricValue` snapshot via `cloneIfNecessary()`. The underlying
+   * storage already holds a deep-frozen tree, so the clone is typically a
+   * no-op. The `{ frozen: false }` variant returns a fresh mutable deep copy
+   * and never aliases storage state.
    */
   getRaw(options?: RawCellReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
@@ -2240,17 +2237,13 @@ function validateStaticData(value: unknown): void {
  * This ensures that mutable arrays only consist of links to documents, at least
  * when written to only via .set, .update and .push above.
  *
- * **Frozenness contract (modern data model only):** This function sits at
- * the write boundary into runner/memory storage. Under
- * `modernDataModel: true`, the returned tree is always a valid
- * deep-frozen `FabricValue`: the shallow fabric conversion freezes the
- * sub-trees it visits, and the function freezes the freshly-built
- * top-level container before returning. If the input is already a
- * deep-frozen valid `FabricValue`, the shallow conversion returns it
- * as-is and reference identity is preserved end-to-end. Under
- * `modernDataModel: false` (legacy), no freezing happens here at all
- * and the legacy "preserve identity when there's nothing to do"
- * optimization applies regardless of input frozenness.
+ * **Frozenness contract:** This function sits at the write boundary into
+ * runner/memory storage. The returned tree is always a valid deep-frozen
+ * `FabricValue`: the shallow fabric conversion freezes the sub-trees it visits,
+ * and the function freezes the freshly-built top-level container before
+ * returning. If the input is already a deep-frozen valid `FabricValue`, the
+ * shallow conversion returns it as-is and reference identity is preserved
+ * end-to-end.
  *
  * TODO(seefeld): When an array has default entries and is rewritten as [...old,
  * new], this will still break, because the previous entries will point back to
