@@ -4,12 +4,23 @@ import {
   fabricFromNativeValue,
   isFabricCompatible,
   isFabricValue,
+  nativeFromFabricValue,
   shallowFabricFromNativeValue,
 } from "../src/fabric-value.ts";
+import type { FabricValue } from "../src/fabric-value.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
 import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
+
+/**
+ * Helper for the round-trip tests, which encodes a value to fabric form via
+ * `fabricFromNativeValue()` and decodes it back to native form via
+ * `nativeFromFabricValue()`.
+ */
+function roundTrip(value: FabricValue): FabricValue {
+  return nativeFromFabricValue(fabricFromNativeValue(value));
+}
 
 describe("fabric-value", () => {
   describe("isFabricValue", () => {
@@ -732,6 +743,53 @@ describe("fabric-value", () => {
         expect(result[2]).toBe(3);
         expect("name" in result).toBe(false);
       });
+    });
+  });
+
+  describe("nativeFromFabricValue", () => {
+    it("round-trips primitives", () => {
+      expect(roundTrip(42 as FabricValue)).toBe(42);
+      expect(roundTrip("hello" as FabricValue)).toBe("hello");
+      expect(roundTrip(null)).toBe(null);
+      expect(roundTrip(true as FabricValue)).toBe(true);
+    });
+
+    it("round-trips `undefined`", () => {
+      expect(roundTrip(undefined)).toBe(undefined);
+    });
+
+    it("round-trips `bigint`", () => {
+      expect(roundTrip(42n as FabricValue)).toBe(42n);
+    });
+
+    it("round-trips plain objects", () => {
+      const value = { a: 1, b: "two" } as FabricValue;
+      expect(roundTrip(value)).toEqual({ a: 1, b: "two" });
+    });
+
+    it("round-trips arrays", () => {
+      const value = [1, "two", null] as FabricValue;
+      expect(roundTrip(value)).toEqual([1, "two", null]);
+    });
+
+    it("round-trips nested structure (including `bigint` and `undefined`)", () => {
+      const value = {
+        name: "test",
+        count: 42n,
+        missing: undefined,
+      } as FabricValue;
+      const result = roundTrip(value) as Record<string, unknown>;
+      expect(result.name).toBe("test");
+      expect(result.count).toBe(42n);
+      expect(result.missing).toBe(undefined);
+    });
+
+    it("unwraps a `FabricError` back to a native `Error`", () => {
+      const error = new Error("test error");
+      const stored = fabricFromNativeValue(error as unknown as FabricValue);
+      const restored = nativeFromFabricValue(stored);
+      expect(restored).toBeInstanceOf(Error);
+      expect((restored as Error).message).toBe("test error");
     });
   });
 
