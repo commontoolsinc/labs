@@ -83,15 +83,43 @@ describe("ESM compile via content-addressed cell cache", () => {
     // Cold compile (miss): evaluates correctly and triggers write-back.
     const cold = await pm.compilePattern(PROGRAM, { space, tx });
     expect(await run(cold, 3)).toEqual({ result: 6 });
-    expect(pm.getCompileCacheStats()).toEqual({ hits: 0, misses: 1 });
+    expect(pm.getCompileCacheStats()).toEqual({
+      hits: 0,
+      misses: 1,
+      byIdentityHits: 0,
+    });
 
     // Wait for the fire-and-forget write-back to commit.
     await pm.flushCompileCacheWrites();
 
     // Warm compile (hit): served from the cache, still evaluates correctly.
     const warm = await pm.compilePattern(PROGRAM, { space, tx });
-    expect(pm.getCompileCacheStats()).toEqual({ hits: 1, misses: 1 });
+    expect(pm.getCompileCacheStats()).toEqual({
+      hits: 1,
+      misses: 1,
+      byIdentityHits: 0,
+    });
     expect(await run(warm, 5)).toEqual({ result: 10 });
+  });
+
+  it("warm load BY IDENTITY skips resolve+compile entirely", async () => {
+    const pm = runtime.patternManager;
+    // Cold compile to populate the cache + learn the entry identity.
+    await pm.compilePattern(PROGRAM, { space, tx });
+    await pm.flushCompileCacheWrites();
+    const { entryIdentity } = await (runtime.harness as Engine)
+      .compileToRecordGraph(PROGRAM);
+
+    // Load again WITH the known entry identity → resolve-free fast path.
+    const warm = await pm.compilePattern(PROGRAM, {
+      space,
+      tx,
+      knownEntryIdentity: entryIdentity,
+    });
+    const stats = pm.getCompileCacheStats();
+    expect(stats.byIdentityHits).toBe(1);
+    expect(stats.misses).toBe(1); // only the initial cold compile
+    expect(await run(warm, 6)).toEqual({ result: 12 });
   });
 
   it("warm hit reuses the cached body across a fresh runtime (cross-session)", async () => {
@@ -108,7 +136,11 @@ describe("ESM compile via content-addressed cell cache", () => {
     try {
       const pm2 = runtime2.patternManager;
       const warm = await pm2.compilePattern(PROGRAM, { space, tx: tx2 });
-      expect(pm2.getCompileCacheStats()).toEqual({ hits: 1, misses: 0 });
+      expect(pm2.getCompileCacheStats()).toEqual({
+        hits: 1,
+        misses: 0,
+        byIdentityHits: 0,
+      });
       // The cache-served pattern is a real, frozen pattern.
       expect(typeof warm).toBe("function");
     } finally {
@@ -130,7 +162,11 @@ describe("ESM compile via content-addressed cell cache", () => {
       const compiled = await pm.compilePattern(PROGRAM, { space, tx: dtx });
       await pm.flushCompileCacheWrites();
       // Cache path is skipped entirely → no hit/miss bookkeeping.
-      expect(pm.getCompileCacheStats()).toEqual({ hits: 0, misses: 0 });
+      expect(pm.getCompileCacheStats()).toEqual({
+        hits: 0,
+        misses: 0,
+        byIdentityHits: 0,
+      });
       expect(typeof compiled).toBe("function");
     } finally {
       await dtx.commit();
@@ -266,6 +302,7 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
       expect(rt2.patternManager.getCompileCacheStats()).toEqual({
         hits: 1,
         misses: 0,
+        byIdentityHits: 0,
       });
       await tx2.commit();
     } finally {

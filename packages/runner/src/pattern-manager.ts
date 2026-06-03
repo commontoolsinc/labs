@@ -24,10 +24,12 @@ import type {
   EvaluateResult,
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
+import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
   loadCompiledClosure,
+  ROOT_LINK_SPECIFIER,
   writeCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
@@ -89,15 +91,26 @@ export class PatternManager {
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
   // ESM content-addressed compile-cache instrumentation.
-  private esmCacheStats = { hits: 0, misses: 0 };
+  private esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
   // In-flight compiled-cache write-backs (fire-and-forget); awaited by
   // flushCompileCacheWrites() for graceful shutdown / deterministic tests.
   private compileCacheWrites = new Set<Promise<unknown>>();
 
   constructor(readonly runtime: Runtime) {}
 
-  /** Hit/miss counts for the ESM content-addressed compile cache. */
-  getCompileCacheStats(): { hits: number; misses: number } {
+  /**
+   * Counters for the ESM content-addressed compile cache:
+   * - `byIdentityHits`: warm loads served directly by entry identity (no
+   *   resolve, no compile — the fast path);
+   * - `hits`: warm loads that still resolved but reused cached bodies (skipped
+   *   only the TS compile);
+   * - `misses`: cold compiles (also written back).
+   */
+  getCompileCacheStats(): {
+    hits: number;
+    misses: number;
+    byIdentityHits: number;
+  } {
     return { ...this.esmCacheStats };
   }
 
@@ -469,7 +482,14 @@ export class PatternManager {
 
   async compilePattern(
     input: string | RuntimeProgram,
-    cacheCtx?: { space: MemorySpace; tx?: IExtendedStorageTransaction },
+    cacheCtx?: {
+      space: MemorySpace;
+      tx?: IExtendedStorageTransaction;
+      // When the entry module's content identity is already known (e.g. stored
+      // in pattern metadata from a prior compile), the ESM cache path loads the
+      // compiled closure by identity and skips resolve + compile entirely.
+      knownEntryIdentity?: string;
+    },
   ): Promise<Pattern> {
     let program: RuntimeProgram;
     if (typeof input === "string") {
@@ -537,7 +557,11 @@ export class PatternManager {
    */
   private async compileViaCellCache(
     program: RuntimeProgram,
-    cacheCtx: { space: MemorySpace; tx?: IExtendedStorageTransaction },
+    cacheCtx: {
+      space: MemorySpace;
+      tx?: IExtendedStorageTransaction;
+      knownEntryIdentity?: string;
+    },
   ): Promise<Pattern> {
     const harness = this.runtime.harness;
     const { space } = cacheCtx;
@@ -546,6 +570,26 @@ export class PatternManager {
       runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
       compilerDid,
     };
+
+    // Fast path — warm load BY IDENTITY: if the entry's content identity is
+    // already known (stored from a prior compile), load the compiled closure
+    // directly and build+evaluate from it, skipping `resolve` and `compile`
+    // entirely. Falls through to the compile path on any miss/incompleteness
+    // (evaluateCachedModules re-verifies the graph, so an incomplete closure
+    // throws and we recompile).
+    if (cacheCtx.knownEntryIdentity) {
+      const byIdentity = await this.tryWarmLoadByIdentity(
+        cacheCtx.knownEntryIdentity,
+        space,
+        cacheOpts,
+        program,
+      );
+      if (byIdentity) {
+        this.esmCacheStats.byIdentityHits++;
+        return byIdentity;
+      }
+    }
+
     // Read the cache on a dedicated, owned transaction (used read-only — the
     // load path only reads, and it is aborted below, never committed) so
     // cache-cell reads never enter the caller's transaction (whose commit must
@@ -622,6 +666,69 @@ export class PatternManager {
     }
 
     return this.patternFromEvaluation(result, program);
+  }
+
+  /**
+   * Resolve-free warm load: fetch the integrity-valid compiled closure for
+   * `entryIdentity` and build + evaluate the pattern directly from those cached
+   * bodies (no `resolve`, no `compile`). Returns the pattern, or `undefined`
+   * if the closure is absent/incomplete/invalid (caller then recompiles).
+   */
+  private async tryWarmLoadByIdentity(
+    entryIdentity: string,
+    space: MemorySpace,
+    cacheOpts: { runtimeVersion: string; compilerDid: string },
+    program: RuntimeProgram,
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
+    const readTx = this.runtime.edit();
+    let closure;
+    try {
+      const readStart = performance.now();
+      closure = await loadCompiledClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        cacheOpts,
+        readTx,
+      );
+      logger.time(readStart, "compile-cache", "read-by-identity");
+    } finally {
+      readTx.abort?.("compile-cache by-identity read complete");
+    }
+    if (!closure.has(entryIdentity)) return undefined;
+
+    const cachedModules: CachedCompiledModule[] = [...closure].map(
+      ([identity, doc]) => ({
+        identity,
+        filename: doc.filename,
+        code: doc.code,
+        ...(doc.sourceMap !== undefined
+          ? { sourceMap: doc.sourceMap as never }
+          : {}),
+        // Drop the synthetic entry→root links (cfc.ts etc.); only real
+        // require/export-* edges resolve module records.
+        imports: doc.imports
+          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
+      }),
+    );
+
+    try {
+      const result = await harness.evaluateCachedModules!(
+        cachedModules,
+        entryIdentity,
+        { sourceFiles: program.files },
+      );
+      return this.patternFromEvaluation(result, program);
+    } catch (error) {
+      // Incomplete/invalid cached closure — fall back to recompile.
+      logger.warn("compile-cache-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        String(error),
+      ]);
+      return undefined;
+    }
   }
 
   /**
