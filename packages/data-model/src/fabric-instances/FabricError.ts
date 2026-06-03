@@ -106,11 +106,11 @@ export class FabricError extends FabricNativeWrapper<Error> {
   #nativeFrozen: Error | undefined;
 
   /**
-   * Constructs from a `FabricErrorState` record. All state values must
-   * already be in `FabricValue` form -- the conversion layer
-   * (`fabric-value-modern.ts`) is responsible for ensuring this when
-   * constructing from a native `Error`. Use `FabricError.fromNativeError()`
-   * for shallow conversion from a native `Error`.
+   * Constructs from a `FabricErrorState` record. All state values must already
+   * be in `FabricValue` form -- the conversion layer is responsible for
+   * ensuring this when constructing from a native `Error`. Use
+   * `FabricError.fromNativeError()` for shallow conversion from a native
+   * `Error`.
    */
   constructor(state: FabricErrorState) {
     super();
