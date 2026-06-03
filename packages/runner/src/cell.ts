@@ -2512,7 +2512,8 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   // Primitives need no further processing. Cache the conversion when it
-  // changed the value (e.g. `-0 → 0`) so callers see consistent results.
+  // produced a different value (e.g. an object whose `toJSON()` returns a
+  // primitive) so callers see consistent results.
   if (!isRecord(converted)) {
     if (converted !== value) seen.set(value, converted);
     return converted as T;
