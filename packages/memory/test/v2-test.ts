@@ -1,10 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
 import {
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
@@ -115,10 +111,8 @@ describe("memory v2 source links", () => {
 describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
     resetModernCellRepConfig();
-    resetDataModelConfig();
     resetPersistentSchedulerStateConfig();
     setModernCellRepConfig(false);
-    setDataModelConfig(false);
     setPersistentSchedulerStateConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
@@ -127,7 +121,6 @@ describe("memory v2 flags", () => {
     });
 
     setModernCellRepConfig(true);
-    setDataModelConfig(true);
     setPersistentSchedulerStateConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
@@ -136,7 +129,6 @@ describe("memory v2 flags", () => {
     });
 
     resetModernCellRepConfig();
-    resetDataModelConfig();
     resetPersistentSchedulerStateConfig();
   });
 
@@ -199,10 +191,6 @@ describe("parseMemoryProtocolFlags", () => {
 // ---------------------------------------------------------------------------
 
 describe("memory v2 boundary decode", () => {
-  afterEach(() => {
-    resetDataModelConfig();
-  });
-
   it("returns deeply-frozen plain JSON trees", () => {
     const decoded = decodeMemoryBoundary<{
       value: {
