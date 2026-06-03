@@ -203,7 +203,7 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * portable across realms and processes via their registry key. Unique
  * symbols (`Symbol(desc)`) are not portable and are rejected at the fabric
  * boundary. TypeScript's `symbol` type cannot distinguish the two, so the
- * gate is a runtime one. Note also that the modern fabric-value path
+ * gate is a runtime one. Note also that the fabric-value path
  * separately rejects all symbols at the entrance (relaxation deferred to a
  * follow-up); the type union admits `symbol` so the lower layers (hashing,
  * JSON encoding) can be written and tested ahead of that gate change.
@@ -258,8 +258,9 @@ export type FabricValueLayer =
  * inside `FabricValue`.
  *
  * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to fabric form via their `toJSON()` method. This is a legacy
- * conversion path but is included here so the `isFabricCompatible()` type predicate
+ * convertible to fabric form via their `toJSON()` method. This is a
+ * `toJSON()`-based conversion path, included here so the
+ * `isFabricCompatible()` type predicate
  * (`value is FabricValue | FabricNativeObject`) remains sound.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)

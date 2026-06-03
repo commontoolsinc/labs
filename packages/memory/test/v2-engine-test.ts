@@ -1594,7 +1594,7 @@ Deno.test("memory v2 engine rejects branch reads before createdSeq", async () =>
   }
 });
 
-Deno.test("memory v2 engine persists rich patch values at the storage boundary", async () => {
+Deno.test("memory v2 engine persists fabric patch values at the storage boundary", async () => {
   const { engine, path } = await createEngine();
 
   try {

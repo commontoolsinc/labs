@@ -59,7 +59,7 @@ describe("Blob Routes", () => {
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
-  it("accepts blob upload encoding without ambient data model flags", async () => {
+  it("accepts blob upload encoding with an explicit codec", async () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-explicit-codec",
     );

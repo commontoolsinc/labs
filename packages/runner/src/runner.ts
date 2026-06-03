@@ -819,11 +819,11 @@ export class Runner {
       meta: ignoreReadForScheduling,
     });
     // `fabricFromNativeValue()` below rebuilds a fresh tree from `internal`
-    // without mutating its inputs (true on both the modern and legacy paths),
-    // and `internal` isn't used after that. So the operands can be merged by
-    // reference: no defensive deep copy of `defaults` / `pattern.initial`, and
-    // no mutable (`frozen: false`) read of `previousInternal`, is needed --
-    // `Object.assign` only reads their top-level keys.
+    // without mutating its inputs, and `internal` isn't used after that. So the
+    // operands can be merged by reference: no defensive deep copy of `defaults`
+    // / `pattern.initial`, and no mutable (`frozen: false`) read of
+    // `previousInternal`, is needed -- `Object.assign` only reads their
+    // top-level keys.
     const internal = Object.assign(
       {},
       (defaults as unknown as { internal?: FabricValue })?.internal,

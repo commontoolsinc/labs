@@ -2803,8 +2803,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         schema: itemSchema,
       };
       this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-      // Sparse array holes are densified to `null` at the storage boundary in
-      // legacy JSON mode. When the item schema expects cells/streams, or the
+      // Sparse array holes are densified to `null` at the storage boundary.
+      // When the item schema expects cells/streams, or the
       // schema rejects both `null` and `undefined`, treat that committed `null`
       // as a missing slot so array consumers still see hole semantics.
       if (

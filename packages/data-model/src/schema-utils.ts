@@ -121,8 +121,7 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
  *   mutate nested properties.
  *
  * Note: do not use this on proxy-wrapped schemas from the runtime — those
- * sites should continue using `JSON.parse(JSON.stringify(...))` until the
- * modern data-model flag graduates.
+ * sites continue using `JSON.parse(JSON.stringify(...))`.
  */
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
