@@ -40,9 +40,6 @@ describe("frozen-object safety contracts", () => {
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        experimental: {
-          modernDataModel: true,
-        },
       });
     });
 

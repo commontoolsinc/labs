@@ -254,15 +254,12 @@ export interface IAnyCell<T> {}
 /**
  * Readable cells provide a view onto stored data.
  *
- * **Frozenness contract (modern data model only):** `get()` and `sample()`
+ * **Frozenness contract:** `get()` and `sample()`
  * return a JS Proxy over the stored value. Writes through the proxy are
- * rejected with a "read-only" runtime error under both flag states (this
- * is independent of the data-model flag — the proxy itself enforces
- * non-mutation). Under `modernDataModel: true`, the underlying stored
+ * rejected with a "read-only" runtime error. The underlying stored
  * data is additionally a deep-frozen `FabricValue` tree, so callers that
  * escape the proxy (e.g. via `getRaw()`) see frozen data without an
- * extra clone. Under `modernDataModel: false` (legacy), only the proxy
- * trap protects against mutation; the underlying data may be unfrozen.
+ * extra clone.
  *
  * Note: `Object.isFrozen(proxy)` reports `false` regardless of the
  * underlying state — that's a property of how JS Proxy reports
@@ -310,14 +307,11 @@ export interface IMetaCell {
 /**
  * Writable cells can update their value.
  *
- * **Frozenness contract (modern data model only):** Values passed into
- * `set()`, `update()`, and `push()` flow through a write-boundary
- * normalization step that — under `modernDataModel: true` — shallowly
- * freezes any plain unfrozen Object/Array levels it visits. Inputs that
- * are already deep-frozen valid `FabricValue` trees are accepted
- * identity-preservingly with no further cloning. Under
- * `modernDataModel: false` (legacy), no freezing happens at the write
- * boundary; storage handles its own frozenness invariants on commit.
+ * **Frozenness contract:** Values passed into `set()`, `update()`, and `push()`
+ * flow through a write-boundary normalization step that shallowly freezes any
+ * plain unfrozen Object/Array levels it visits. Inputs that are already
+ * deep-frozen valid `FabricValue` trees are accepted identity-preservingly with
+ * no further cloning.
  */
 export interface IWritable<T, C extends AnyBrandedCell<any>> {
   /**

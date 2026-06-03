@@ -150,9 +150,6 @@ describe("Blob Routes", () => {
           as: identity,
           address: new URL("/api/storage/memory", base),
         }),
-        experimental: {
-          modernDataModel: true,
-        },
       });
 
       try {

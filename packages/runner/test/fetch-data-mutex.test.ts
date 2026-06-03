@@ -465,64 +465,12 @@ describe("fetch-data mutex mechanism", () => {
     };
   };
 
-  it("should handle fetch errors gracefully (legacy)", async () => {
+  it("should handle fetch errors gracefully", async () => {
     error404Fetch();
     const sm = StorageManager.emulate({ as: signer });
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: false },
-    });
-    const localTx = rt.edit();
-    const { commonfabric } = createTrustedBuilder(rt);
-    const fetchData = commonfabric.byRef("fetchData");
-    const testPattern = commonfabric.pattern<{ url: string }>(
-      ({ url }) => fetchData({ url, mode: "json" }),
-    );
-
-    const resultCell = rt.getCell(
-      space,
-      "error-test-legacy",
-      undefined,
-      localTx,
-    );
-    const result = rt.run(
-      localTx,
-      testPattern,
-      { url: "/api/error" },
-      resultCell,
-    );
-    localTx.commit();
-
-    await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    const data = (await result.pull()) as {
-      error?: unknown;
-      pending?: boolean;
-    };
-
-    // Legacy path: error is the `@Error` wrapper.
-    expect(data.error).toBeDefined();
-    expect(data.error).toHaveProperty("@Error");
-    const errorInfo =
-      (data.error as { "@Error": Record<string, unknown> })["@Error"];
-    expect(errorInfo.name).toBe("Error");
-    expect(errorInfo.message).toMatch(/HTTP 404/);
-    expect(data.pending).toBe(false);
-
-    await localTx.commit();
-    await rt.dispose();
-    await sm.close();
-  });
-
-  it("should handle fetch errors gracefully (modern)", async () => {
-    error404Fetch();
-    const sm = StorageManager.emulate({ as: signer });
-    const rt = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-      experimental: { modernDataModel: true },
     });
     const localTx = rt.edit();
     const { commonfabric } = createTrustedBuilder(rt);

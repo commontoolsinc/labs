@@ -126,13 +126,11 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
  * `unshift`, etc.) route through the same write-boundary normalization
  * as `Cell.set()` / `Cell.push()`.
  *
- * **Frozenness contract (modern data model only):** Values handed to
- * the write-side array mutators flow through `recursivelyAddIDIfNeeded`
- * and so inherit its modern-mode contract: plain unfrozen Object/Array
- * inputs get shallowly frozen at each visited level; already-deep-
- * frozen valid `FabricValue` inputs are accepted identity-preservingly.
- * Under `modernDataModel: false` (legacy), no freezing happens at the
- * write boundary.
+ * **Frozenness contract:** Values handed to the write-side array mutators flow
+ * through `recursivelyAddIDIfNeeded()` and so inherit its modern-mode contract:
+ * plain unfrozen Object/Array inputs get shallowly frozen at each visited
+ * level; already-deep- frozen valid `FabricValue` inputs are accepted
+ * identity-preservingly.
  */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
