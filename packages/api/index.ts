@@ -2146,6 +2146,17 @@ type IsEmptyTuple<T> = T extends readonly unknown[]
 // still present for RequireDefaults<> detection. (The lone `Default<[]>` form —
 // no sibling array — is not used in practice; the docs always pair it as
 // `T[] | Default<[]>`.)
+//
+// Why ONLY the empty tuple, and not all tuples: a non-empty literal-tuple default
+// in a union (e.g. `string[] | Default<["seed"]>`) also narrows parameter-position
+// methods — but to the literal element type, which is a legible error, not the
+// confusing `never`. More importantly, the empty tuple is the unique tuple that
+// can never be a legitimate *standalone* field type, so dropping its plain arm is
+// unconditionally safe. Generalizing to all tuples would collapse a standalone
+// tuple default like `Default<[string, number], ["a", 0]>` to `never` (the lone
+// branded arm strips away), breaking that contract. Authors who want an array
+// field with an empty-ish/seed default and a precise element type should use the
+// two-arg form `Default<string[], []>` (T = the array, not the tuple).
 export type Default<T, V extends T = T> = IsEmptyTuple<T> extends true
   ? T & DefaultMarker<T>
   :
