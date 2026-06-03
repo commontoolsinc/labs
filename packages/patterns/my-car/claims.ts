@@ -3,7 +3,13 @@
 // with plain `deno test` (main.tsx imports `commonfabric`'s compile-only symbols
 // like NAME/UI, which only resolve under the cf transformer).
 
-import { normalizeVehicle, Vehicle } from "../vehicles.ts";
+import {
+  modelsForMake,
+  normalizeVehicle,
+  Vehicle,
+  VEHICLE_COLORS,
+  VEHICLE_MAKES,
+} from "../vehicles.ts";
 
 // The single producer<->consumer contract token. Consumers discover a user's
 // car via wish({ query: `#${CAR_TAG}`, scope: ["profile"] }); MyCar publishes it
@@ -50,3 +56,49 @@ export const filterOutPlate = (
     !(claim.vehicle.plateId === plateId &&
       claim.vehicle.plateState === plateState)
   );
+
+// Structured result of LLM plate/vehicle extraction from a photo (same shape as
+// lot-watch's PlateExtraction so the recipe is reused verbatim).
+export interface PlateExtraction {
+  description: string; // color + make + model in plain words; "" if unclear
+  plateNumber: string; // characters only; "" if not legible
+  plateState: string; // 2-letter US state; "" if not visible
+  confidence: "high" | "medium" | "low";
+}
+
+export interface VehicleDraft {
+  plateId: string;
+  plateState: string;
+  color: string;
+  make: string;
+  model: string;
+}
+
+// Find the first catalog entry mentioned in a free-text description (the LLM
+// returns description as plain words like "white Toyota Corolla"). Case-
+// insensitive substring match; skips the "Other" catch-all.
+const firstMentioned = (
+  text: string,
+  options: readonly string[],
+): string => {
+  const lower = text.toLowerCase();
+  return options.find((opt) =>
+    opt && opt !== "Other" && lower.includes(opt.toLowerCase())
+  ) ?? "";
+};
+
+// Map an LLM extraction onto editable Vehicle draft fields. Plate/state pass
+// through (normalization happens later in buildSelfClaim); color/make/model are
+// best-effort parsed from the free-text description and clamped to the catalog
+// by normalizeVehicle. The user reviews/corrects before saving (EF1).
+export const extractionToDraft = (e: PlateExtraction): VehicleDraft => {
+  const make = firstMentioned(e.description, VEHICLE_MAKES);
+  const model = make ? firstMentioned(e.description, modelsForMake(make)) : "";
+  return {
+    plateId: e.plateNumber,
+    plateState: e.plateState,
+    color: firstMentioned(e.description, VEHICLE_COLORS),
+    make,
+    model,
+  };
+};

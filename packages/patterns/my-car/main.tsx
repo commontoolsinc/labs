@@ -1,7 +1,10 @@
 import {
+  action,
   Cfc,
   computed,
+  generateObject,
   handler,
+  ImageData,
   NAME,
   pattern,
   RepresentsCurrentUser,
@@ -12,12 +15,31 @@ import {
   WriteAuthorizedBy,
 } from "commonfabric";
 import { formatVehicle, Vehicle } from "../vehicles.ts";
-import { buildSelfClaim, filterOutPlate, VehicleClaim } from "./claims.ts";
+import {
+  buildSelfClaim,
+  extractionToDraft,
+  filterOutPlate,
+  PlateExtraction,
+  VehicleClaim,
+} from "./claims.ts";
 
 // Re-export the pure contract surface so consumers can import everything from
 // the pattern entrypoint (the canonical wish token lives in claims.ts).
 export { buildSelfClaim, CAR_TAG, filterOutPlate } from "./claims.ts";
-export type { ShareLevel, VehicleClaim } from "./claims.ts";
+export type { PlateExtraction, ShareLevel, VehicleClaim } from "./claims.ts";
+
+type ImageUploadEvent = {
+  detail?: { images?: ImageData[]; allImages?: ImageData[] };
+};
+
+// Module-scope handler: stash the captured photo in the per-session draft.
+const onPhotoCaptured = handler<
+  ImageUploadEvent,
+  { draftImage: Writable<ImageData | null> }
+>(({ detail }, { draftImage }) => {
+  const img = (detail?.allImages ?? detail?.images ?? [])[0] ?? null;
+  draftImage.set(img);
+});
 
 // Trusted-surface markers, mirroring profile-home.tsx. Owner-protected writes
 // must originate from this surface.
@@ -120,6 +142,57 @@ export default pattern<MyCarInput, MyCarOutput>(() => {
 
   const claimCount = computed(() => selfClaims.get().length);
 
+  // Per-session photo draft. `includeData` gives it both a blob `url` and inline
+  // `data`; we only ever read it transiently for the LLM (no durable image).
+  const draftImage = new Writable.perSession<ImageData | null>(null);
+
+  // Reuse lot-watch's photo → structured plate/vehicle extraction recipe.
+  const extraction = generateObject<PlateExtraction>({
+    system:
+      "You are reading a photo of a car so its owner can register it. Extract " +
+      "the vehicle description (color + make + model in plain words), the " +
+      "license plate characters, and the 2-letter US state if visible. The " +
+      "photo may be rotated. If a field is not legible, return an empty " +
+      "string — do not guess.",
+    prompt: computed(() => {
+      const img = draftImage.get();
+      const image = img?.data ?? img?.url;
+      if (!image) return [];
+      return [
+        { type: "image" as const, image },
+        {
+          type: "text" as const,
+          text:
+            "Extract description, plateNumber (characters only, no spaces or " +
+            "dashes), plateState (2-letter), and your confidence.",
+        },
+      ];
+    }),
+    schema: {
+      type: "object",
+      properties: {
+        description: { type: "string" },
+        plateNumber: { type: "string" },
+        plateState: { type: "string" },
+        confidence: { type: "string", enum: ["high", "medium", "low"] },
+      },
+    },
+    model: "anthropic:claude-sonnet-4-5",
+  });
+
+  // Copy the extraction into the editable draft fields (read at click time; the
+  // user reviews/corrects before saving, EF1). normalizeVehicle clamps on save.
+  const applyExtraction = action(() => {
+    const r = extraction.result;
+    if (!r) return;
+    const filled = extractionToDraft(r);
+    plate.set(filled.plateId);
+    stateField.set(filled.plateState);
+    color.set(filled.color);
+    make.set(filled.make);
+    model.set(filled.model);
+  });
+
   return {
     [NAME]: "My Car",
     selfClaims,
@@ -139,6 +212,52 @@ export default pattern<MyCarInput, MyCarOutput>(() => {
         <cf-vstack gap="4" style={{ padding: "16px", maxWidth: "640px" }}>
           <cf-vstack gap="2">
             <strong>Add a car</strong>
+
+            <cf-image-input
+              capture="environment"
+              includeData
+              showPreview={false}
+              buttonText="📸 Take a picture of your car"
+              oncf-change={onPhotoCaptured({ draftImage })}
+            />
+            {extraction.pending
+              ? (
+                <span style={{ fontSize: "0.875rem" }}>
+                  Reading your plate…
+                </span>
+              )
+              : extraction.error
+              ? (
+                <span style={{ fontSize: "0.875rem", color: "#991b1b" }}>
+                  Couldn't read it — type it in below.
+                </span>
+              )
+              : extraction.result
+              ? (
+                <cf-card style="border-left: 3px solid #6366f1;">
+                  <cf-vstack gap="1">
+                    <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>
+                      ✨ AI read
+                    </span>
+                    <span style={{ fontSize: "0.875rem" }}>
+                      {extraction.result?.description}
+                    </span>
+                    <span style={{ fontFamily: "monospace" }}>
+                      {extraction.result?.plateNumber}{" "}
+                      {extraction.result?.plateState}
+                    </span>
+                    <cf-button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => applyExtraction.send()}
+                    >
+                      ↻ Use AI's reading
+                    </cf-button>
+                  </cf-vstack>
+                </cf-card>
+              )
+              : null}
+
             <cf-input
               data-ui-action={TRUSTED_MY_CAR_ACTION}
               $value={plate}

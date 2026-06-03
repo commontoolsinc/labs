@@ -16,6 +16,7 @@ import { expect } from "@std/expect";
 import {
   buildSelfClaim,
   CAR_TAG,
+  extractionToDraft,
   filterOutPlate,
   VehicleClaim,
 } from "./claims.ts";
@@ -112,6 +113,46 @@ describe("MyCar filterOutPlate", () => {
   it("matches on state too — same plateId in a different state is kept", () => {
     const out = filterOutPlate(claims, "7ABC123", "NV");
     expect(out.length).toBe(2);
+  });
+});
+
+describe("MyCar extractionToDraft", () => {
+  it("parses color/make/model out of the free-text description", () => {
+    const draft = extractionToDraft({
+      description: "white Toyota Corolla",
+      plateNumber: "8XYZ999",
+      plateState: "CA",
+      confidence: "high",
+    });
+    expect(draft.color).toBe("White");
+    expect(draft.make).toBe("Toyota");
+    expect(draft.model).toBe("Corolla");
+    expect(draft.plateId).toBe("8XYZ999");
+    expect(draft.plateState).toBe("CA");
+  });
+
+  it("only keeps a model that belongs to the matched make", () => {
+    // "Outback" is a Subaru model, not a Honda model.
+    const draft = extractionToDraft({
+      description: "blue Honda Outback",
+      plateNumber: "ABC123",
+      plateState: "",
+      confidence: "low",
+    });
+    expect(draft.make).toBe("Honda");
+    expect(draft.model).toBe("");
+  });
+
+  it("leaves fields blank when the description has no catalog match", () => {
+    const draft = extractionToDraft({
+      description: "a vehicle",
+      plateNumber: "",
+      plateState: "",
+      confidence: "low",
+    });
+    expect(draft.color).toBe("");
+    expect(draft.make).toBe("");
+    expect(draft.model).toBe("");
   });
 });
 
