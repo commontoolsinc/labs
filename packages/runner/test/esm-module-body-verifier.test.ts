@@ -79,6 +79,21 @@ describe("verifyCompiledModuleBody", () => {
     );
   });
 
+  it("rejects a `var` require of a trusted runtime module", () => {
+    // CT-1661 follow-up (Codex P1): the `var` relaxation must not extend to
+    // trusted runtime bindings. A `var` binding is mutable at runtime (only a
+    // `const` throws on reassignment), and the verifier does not inspect trusted
+    // builder-callback bodies — so a `var cf = require("commonfabric")` could be
+    // reassigned to attacker code from inside a callback yet still pass
+    // trusted-builder classification. Runtime imports must stay `const`.
+    const body = `var cf = require("commonfabric");\n` +
+      `const v = (0, cf.pattern)((s) => { cf = globalThis; return s; });\n` +
+      `exports.v = v;`;
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).toThrow(
+      /mutable bindings/,
+    );
+  });
+
   it("rejects reassignment of a var import binding", () => {
     // Safety guard for the `var` relaxation: accepting `var x = require(...)`
     // relies on any later reassignment being independently rejected. A bare

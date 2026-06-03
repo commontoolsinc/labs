@@ -136,6 +136,14 @@ const REJECT: Case[] = [
     reject: /.*/,
   },
   {
+    // CT-1661: the `var` re-export relaxation must not extend to trusted runtime
+    // bindings — `var` is mutable at runtime, so a runtime require must be
+    // `const`. Mirrors `const` accept "named reexport getter from a var require".
+    name: "var require of a trusted runtime module",
+    body: `var cf = require("commonfabric");\nexports.cf = cf;`,
+    reject: /mutable/i,
+  },
+  {
     name: "bare side-effect import of a disallowed specifier",
     body: `require("node:child_process");\nexports.x = 1;`,
     reject: /.*/,
