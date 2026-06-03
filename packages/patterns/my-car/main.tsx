@@ -14,7 +14,7 @@ import {
   Writable,
   WriteAuthorizedBy,
 } from "commonfabric";
-import { formatVehicle, Vehicle } from "../vehicles.ts";
+import { formatVehicle } from "../vehicles.ts";
 import {
   buildSelfClaim,
   extractionToDraft,
