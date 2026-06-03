@@ -12,6 +12,40 @@ import { handler, computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    show: boolean;
+}, boolean>({
+    type: "object",
+    properties: {
+        show: {
+            type: "boolean"
+        }
+    },
+    required: ["show"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ show }) => show);
+const __cfLift_2 = __cfHelpers.lift<{
+    value: string | null;
+}, string | null>({
+    type: "object",
+    properties: {
+        value: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "null"
+                }]
+        }
+    },
+    required: ["value"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "null"
+        }]
+} as const satisfies __cfHelpers.JSONSchema, ({ value }) => value);
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
 //   computed(() => show) && <span> → when(computed(() => show), <span>)
@@ -105,19 +139,7 @@ const MyHandler = handler({
     },
     required: ["show"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, { show }) => {
-    return <div>{__cfHelpers.lift<{
-        show: boolean;
-    }, boolean>({
-        type: "object",
-        properties: {
-            show: {
-                type: "boolean"
-            }
-        },
-        required: ["show"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ show }) => show)({ show: show }) && <span>Content</span>}</div>;
+    return <div>{__cfLift_1({ show: show }) && <span>Content</span>}</div>;
 });
 // Test: || with JSX inside handler callback should transform to unless()
 const MyHandler2 = handler({
@@ -211,27 +233,7 @@ const MyHandler2 = handler({
     },
     required: ["value"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, { value }) => {
-    return <div>{__cfHelpers.lift<{
-        value: string | null;
-    }, string | null>({
-        type: "object",
-        properties: {
-            value: {
-                anyOf: [{
-                        type: "string"
-                    }, {
-                        type: "null"
-                    }]
-            }
-        },
-        required: ["value"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "null"
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, ({ value }) => value)({ value: value }) || <span>Fallback</span>}</div>;
+    return <div>{__cfLift_2({ value: value }) || <span>Fallback</span>}</div>;
 });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

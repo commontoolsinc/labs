@@ -11,6 +11,28 @@ import { Cell, pattern, toSchema, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    cell: {
+        value: __cfHelpers.Cell<number>;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        cell: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["cell"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value.get() * 2);
 interface State {
     value: Cell<number>;
 }
@@ -33,28 +55,7 @@ const model = __cfHelpers.__cf_data({
 //   toSchema<State>({default: ...}) → schema with "default" key preserved
 //   bare `cell.value.get() * 2` → auto-wraps, capturing cell.key("value") into lift(inputSchema, outputSchema, fn)
 export default pattern((cell) => {
-    const doubled = __cfHelpers.lift<{
-        cell: {
-            value: __cfHelpers.Cell<number>;
-        };
-    }, number>({
-        type: "object",
-        properties: {
-            cell: {
-                type: "object",
-                properties: {
-                    value: {
-                        type: "number",
-                        asCell: ["readonly"]
-                    }
-                },
-                required: ["value"]
-            }
-        },
-        required: ["cell"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value.get() * 2)({ cell: {
+    const doubled = __cfLift_1({ cell: {
             value: cell.key("value")
         } }).for("doubled", true);
     return {

@@ -11,6 +11,28 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: __cfHelpers.Cell<string[]>;
+    index: __cfHelpers.Cell<number>;
+}, string | undefined>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["readonly"]
+        },
+        index: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items", "index"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()]);
 // FIXTURE: reactive-array-element-access-schema
 // Verifies: reactive array element access preserves `string | undefined` in the
 // emitted result schema.
@@ -25,28 +47,7 @@ export default pattern((_state) => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("index", true);
     return {
-        [UI]: <div>{__cfHelpers.lift<{
-            items: __cfHelpers.Cell<string[]>;
-            index: __cfHelpers.Cell<number>;
-        }, string | undefined>({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    },
-                    asCell: ["readonly"]
-                },
-                index: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["items", "index"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()])({
+        [UI]: <div>{__cfLift_1({
             items: items,
             index: index
         })}</div>,

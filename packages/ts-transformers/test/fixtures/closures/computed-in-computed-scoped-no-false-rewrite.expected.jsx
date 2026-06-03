@@ -11,6 +11,15 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift(false, () => ({ bar: 1 }));
+const __cfLift_2 = __cfHelpers.lift(false, () => {
+    const condition = 1 > 0;
+    if (condition) {
+        const config = __cfLift_1().for("config", true);
+        return config.key("bar");
+    }
+    return config.bar;
+});
 const config = __cfHelpers.__cf_data({ bar: "module-level" });
 // FIXTURE: computed-in-computed-scoped-no-false-rewrite
 // Verifies: a block-scoped computed() result named `config` does NOT cause
@@ -20,14 +29,7 @@ const config = __cfHelpers.__cf_data({ bar: "module-level" });
 // Context: The pre-scan collects opaque roots by name; it must not leak
 //   across lexical scopes and incorrectly rewrite unrelated same-named accesses.
 export default pattern(() => {
-    const outer = __cfHelpers.lift(false, () => {
-        const condition = 1 > 0;
-        if (condition) {
-            const config = __cfHelpers.lift(false, () => ({ bar: 1 }))().for("config", true);
-            return config.key("bar");
-        }
-        return config.bar;
-    })().for("outer", true);
+    const outer = __cfLift_2().for("outer", true);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "string"]

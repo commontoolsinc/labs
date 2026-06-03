@@ -11,6 +11,101 @@ import { computed, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, Item[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["name", "value"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["name", "value"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value));
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        items: {
+            length: number;
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: any;
+}, boolean>({
+    type: "object",
+    properties: {
+        state: true
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.recentEvents.length === 0);
 interface TagEvent {
     label: string;
 }
@@ -39,92 +134,10 @@ export default pattern((state) => {
     const showList = new Writable(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
-    const sorted = __cfHelpers.lift<{
-        state: {
-            items: Item[];
-        };
-    }, Item[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Item"
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    value: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "value"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Item"
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    value: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "value"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value))({ state: {
+    const sorted = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("sorted", true);
-    const count = __cfHelpers.lift<{
-        state: {
-            items: {
-                length: number;
-            };
-        };
-    }, number>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "object",
-                        properties: {
-                            length: {
-                                type: "number"
-                            }
-                        },
-                        required: ["length"]
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length)({ state: {
+    const count = __cfLift_2({ state: {
             items: {
                 length: state.key("items", "length")
             }
@@ -157,17 +170,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: any;
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: true
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.recentEvents.length === 0)({ state: state }), <span>No events yet</span>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ state: state }), <span>No events yet</span>, <div>
               {state.key("recentEvents").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const event = __cf_pattern_input.key("element");
                 const idx = __cf_pattern_input.key("index");

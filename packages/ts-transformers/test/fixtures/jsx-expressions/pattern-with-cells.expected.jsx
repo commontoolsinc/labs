@@ -11,6 +11,48 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    cell: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        cell: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["cell"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value + 1);
+const __cfLift_2 = __cfHelpers.lift<{
+    cell: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        cell: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["cell"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value * 2);
 // FIXTURE: pattern-with-cells
 // Verifies: pattern input property access is transformed to .key() and arithmetic to a lift-applied computation
 //   cell.value       → cell.key("value")
@@ -20,50 +62,10 @@ export default pattern((cell) => {
     return {
         [UI]: (<div>
         <p>Current value: {cell.key("value")}</p>
-        <p>Next value: {__cfHelpers.lift<{
-            cell: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                cell: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["cell"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value + 1)({ cell: {
+        <p>Next value: {__cfLift_1({ cell: {
                 value: cell.key("value")
             } })}</p>
-        <p>Double: {__cfHelpers.lift<{
-            cell: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                cell: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["cell"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value * 2)({ cell: {
+        <p>Double: {__cfLift_2({ cell: {
                 value: cell.key("value")
             } })}</p>
       </div>),

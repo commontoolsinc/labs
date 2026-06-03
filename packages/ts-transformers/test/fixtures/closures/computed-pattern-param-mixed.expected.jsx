@@ -11,6 +11,45 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    config: {
+        base: number;
+        multiplier: number;
+    };
+    offset: number;
+    threshold: __cfHelpers.ReadonlyCell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        config: {
+            type: "object",
+            properties: {
+                base: {
+                    type: "number"
+                },
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["base", "multiplier"]
+        },
+        offset: {
+            type: "number"
+        },
+        threshold: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["value", "config", "offset", "threshold"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get());
 // FIXTURE: computed-pattern-param-mixed
 // Verifies: computed() capturing a mix of cells, pattern params, and plain locals
 //   computed(() => (value.get() + config.base + offset) * config.multiplier + threshold.get()) → lift(...)({ value, config: { base, multiplier }, offset, threshold })
@@ -28,45 +67,7 @@ export default pattern((config: {
     const threshold = new Writable(15, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("threshold", true); // cell local
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        config: {
-            base: number;
-            multiplier: number;
-        };
-        offset: number;
-        threshold: __cfHelpers.ReadonlyCell<number>;
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            config: {
-                type: "object",
-                properties: {
-                    base: {
-                        type: "number"
-                    },
-                    multiplier: {
-                        type: "number"
-                    }
-                },
-                required: ["base", "multiplier"]
-            },
-            offset: {
-                type: "number"
-            },
-            threshold: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["value", "config", "offset", "threshold"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get())({
+    const result = __cfLift_1({
         value: value,
         config: {
             base: config.key("base"),

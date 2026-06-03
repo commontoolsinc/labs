@@ -11,6 +11,23 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: __cfHelpers.Cell<string[]>;
+}, number>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length);
 // FIXTURE: logical-or-unless
 // Verifies: || with JSX fallback on right side is transformed to unless()
 //   items.get().length || <span>List is empty</span> → unless(lift(...)(...length), <span>List is empty</span>)
@@ -38,23 +55,7 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: __cfHelpers.Cell<string[]>;
-        }, number>({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["items"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length)({ items: items }), <span>List is empty</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ items: items }), <span>List is empty</span>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

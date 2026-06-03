@@ -11,6 +11,37 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    config: { multiplier: number; divisor: number; };
+    key: string;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        config: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number"
+                },
+                divisor: {
+                    type: "number"
+                }
+            },
+            required: ["multiplier", "divisor"]
+        },
+        key: {
+            type: "string"
+        }
+    },
+    required: ["value", "config", "key"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, config, key }) => value.get() * config[key]);
 // FIXTURE: computed-property-result
 // Verifies: computed property access with a dynamic key captures both the object and the key
 //   computed(() => expr) → lift(schema, schema)({ value, config, key })
@@ -21,37 +52,7 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const config = { multiplier: 2, divisor: 5 };
     const key = "multiplier";
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        config: { multiplier: number; divisor: number; };
-        key: string;
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            config: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number"
-                    },
-                    divisor: {
-                        type: "number"
-                    }
-                },
-                required: ["multiplier", "divisor"]
-            },
-            key: {
-                type: "string"
-            }
-        },
-        required: ["value", "config", "key"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, config, key }) => value.get() * config[key])({
+    const result = __cfLift_1({
         value: value,
         config: config,
         key: key

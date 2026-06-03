@@ -20,6 +20,37 @@ import { Cell, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: __cfHelpers.ReadonlyCell<Item[]>;
+}, number>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                value: {
+                    type: "string"
+                }
+            },
+            required: ["id", "value"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().map((item) => item.value).length);
 interface Item {
     id: number;
     value: string;
@@ -31,37 +62,7 @@ interface Item {
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     // items is a captured cell; .get() yields a plain array, so .map() stays plain.
-    const count = __cfHelpers.lift<{
-        items: __cfHelpers.ReadonlyCell<Item[]>;
-    }, number>({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                },
-                asCell: ["readonly"]
-            }
-        },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "number"
-                    },
-                    value: {
-                        type: "string"
-                    }
-                },
-                required: ["id", "value"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().map((item) => item.value).length)({ items: items }).for("count", true);
+    const count = __cfLift_1({ items: items }).for("count", true);
     return { count };
 }, {
     type: "object",

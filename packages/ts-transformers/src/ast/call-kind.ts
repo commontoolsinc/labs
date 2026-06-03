@@ -83,6 +83,15 @@ const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
 export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
+/**
+ * Prefix for the module-scope const a hoisted `lift(...)` call is bound to
+ * (CT-1644, Phase 2 of derive→lift→selfcontained). The whole lift call —
+ * schemas + callback — is hoisted to `const __cfLift_N = __cfHelpers.lift(...)`
+ * and the original site becomes `__cfLift_N(captures)`. Distinct from
+ * `SYNTHETIC_MODULE_CALLBACK_PREFIX` (which names a hoisted *callback*, the
+ * CT-1585 mechanic that no longer applies to lift).
+ */
+export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
 
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 
@@ -1505,6 +1514,34 @@ function resolveBuilderExpressionKind(
       const result = { kind: "builder", builderName: fallbackName } as const;
       cache?.set(expression, result);
       return result;
+    }
+  }
+
+  // Hoisted-lift fallback (CT-1644): a `lift(...)` call hoisted to a
+  // module-scope const leaves a synthetic `__cfLift_N(captures)` site whose
+  // callee identifier the checker can't resolve to its const initializer
+  // (synthetic nodes have no symbol). `LiftHoistingTransformer` records the
+  // hoisted inner `lift(...)` call as the identifier's original node; resolve
+  // the builder kind through it so the application still reads as lift-applied.
+  // Gated on `followFactoryResults` (matches the applied-call recognition path)
+  // and on the `__cfLift` prefix (so only our hoisted sites take this path),
+  // and only consulted after symbol/name resolution has failed.
+  if (
+    options.followFactoryResults &&
+    ts.isIdentifier(target) &&
+    target.text.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX)
+  ) {
+    const original = ts.getOriginalNode(target);
+    if (original !== target && ts.isCallExpression(original)) {
+      const kind = resolveBuilderExpressionKind(
+        original.expression,
+        checker,
+        seen,
+        options,
+      );
+      if (kind) {
+        return kind;
+      }
     }
   }
 

@@ -18,6 +18,101 @@ import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    path: __cfHelpers.Cell<string[]>;
+}, readonly string[]>({
+    type: "object",
+    properties: {
+        path: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["path"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get());
+const __cfLift_2 = __cfHelpers.lift<{
+    unsorted: Entry[];
+}, Entry[]>({
+    type: "object",
+    properties: {
+        unsorted: {
+            $ref: "#/$defs/AnonymousType_1"
+        }
+    },
+    required: ["unsorted"],
+    $defs: {
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
+        },
+        Entry: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                },
+                type: {
+                    "enum": ["file", "folder"]
+                },
+                children: {
+                    $ref: "#/$defs/AnonymousType_1"
+                },
+                contentType: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name", "type"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    $ref: "#/$defs/AnonymousType_1",
+    $defs: {
+        AnonymousType_1: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
+        },
+        Entry: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                },
+                type: {
+                    "enum": ["file", "folder"]
+                },
+                children: {
+                    $ref: "#/$defs/AnonymousType_1"
+                },
+                contentType: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name", "type"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => {
+    if (a.type === b.type)
+        return 0;
+    return a.type === "file" ? -1 : 1;
+}));
 interface Entry {
     id: string;
     name: string;
@@ -27,7 +122,7 @@ interface Entry {
 }
 function findChildren(tree: readonly Entry[], path: readonly string[]): readonly Entry[] {
     let current: readonly Entry[] = tree;
-    for (const name of path) {
+    for (const name of Array.isArray(path) ? path : []) {
         const folder = current.find((entry: Entry) => entry.name === name && entry.type === "folder");
         if (!folder || !folder.children)
             return [];
@@ -98,16 +193,19 @@ export default pattern((__cf_pattern_input) => {
                         "enum": ["file", "folder"]
                     },
                     children: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Entry"
-                        }
+                        $ref: "#/$defs/AnonymousType_1"
                     },
                     contentType: {
                         type: "string"
                     }
                 },
                 required: ["id", "name", "type"]
+            },
+            AnonymousType_1: {
+                type: "array",
+                items: {
+                    $ref: "#/$defs/Entry"
+                }
             }
         }
     } as const satisfies __cfHelpers.JSONSchema, {
@@ -198,102 +296,9 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    path: __cfHelpers.Cell<string[]>;
-                }, readonly string[]>({
-                    type: "object",
-                    properties: {
-                        path: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asCell: ["readonly"]
-                        }
-                    },
-                    required: ["path"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get())({ path: path }), [])).for("p", true) as string[];
+                } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ path: path }), [])).for("p", true) as string[];
                 const unsorted = findChildren(tree, p) as Entry[];
-                const items = __cfHelpers.lift<{
-                    unsorted: Entry[];
-                }, Entry[]>({
-                    type: "object",
-                    properties: {
-                        unsorted: {
-                            $ref: "#/$defs/AnonymousType_1"
-                        }
-                    },
-                    required: ["unsorted"],
-                    $defs: {
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
-                        },
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                },
-                                name: {
-                                    type: "string"
-                                },
-                                type: {
-                                    "enum": ["file", "folder"]
-                                },
-                                children: {
-                                    $ref: "#/$defs/AnonymousType_1"
-                                },
-                                contentType: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "name", "type"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    $ref: "#/$defs/AnonymousType_1",
-                    $defs: {
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
-                        },
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                },
-                                name: {
-                                    type: "string"
-                                },
-                                type: {
-                                    "enum": ["file", "folder"]
-                                },
-                                children: {
-                                    $ref: "#/$defs/AnonymousType_1"
-                                },
-                                contentType: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "name", "type"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => {
-                    if (a.type === b.type)
-                        return 0;
-                    return a.type === "file" ? -1 : 1;
-                }))({ unsorted: unsorted }).for("items", true);
+                const items = __cfLift_2({ unsorted: unsorted }).for("items", true);
                 return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const item = __cf_pattern_input.key("element");
                     const handleNavigateInto = __cf_pattern_input.key("params", "handleNavigateInto");

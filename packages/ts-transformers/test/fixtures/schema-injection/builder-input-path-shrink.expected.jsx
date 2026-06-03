@@ -11,6 +11,7 @@ import { action, computed, handler, lift, pattern, type Writable } from "commonf
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift(false, () => deriveInput.key("foo").get());
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
 // including explicit type arguments and interprocedural helper calls.
@@ -32,7 +33,7 @@ const deriveInput = __cfHelpers.__cf_data({} as Writable<{
     foo: string;
     bar: string;
 }>);
-const computedObserved = __cfHelpers.__cf_data(__cfHelpers.lift(false, () => deriveInput.key("foo").get())().for("computedObserved", true));
+const computedObserved = __cfHelpers.__cf_data(__cfLift_1().for("computedObserved", true));
 const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

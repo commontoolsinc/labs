@@ -11,6 +11,237 @@ import { ifElse, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 10);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        score: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                score: {
+                    type: "number"
+                }
+            },
+            required: ["score"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 90);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        score: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                score: {
+                    type: "number"
+                }
+            },
+            required: ["score"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 80);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 0);
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 1);
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        userType: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                userType: {
+                    type: "string"
+                }
+            },
+            required: ["userType"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "admin");
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        userType: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                userType: {
+                    type: "string"
+                }
+            },
+            required: ["userType"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "user");
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0);
+const __cfLift_9 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count < 10);
+const __cfLift_10 = __cfHelpers.lift<{
+    state: {
+        score: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                score: {
+                    type: "number"
+                }
+            },
+            required: ["score"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score > 100);
+const __cfLift_11 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 5);
 interface State {
     isActive: boolean;
     count: number;
@@ -56,27 +287,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["High", "Low"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 10)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ state: {
                 count: state.key("count")
             } }), "High", "Low")}</span>
         <span>{__cfHelpers.ifElse({
@@ -87,27 +298,7 @@ export default pattern((state) => {
             "enum": ["B", "C"]
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["B", "C", "A"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                score: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        score: {
-                            type: "number"
-                        }
-                    },
-                    required: ["score"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 90)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ state: {
                 score: state.key("score")
             } }), "A", __cfHelpers.ifElse({
             type: "boolean"
@@ -117,27 +308,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["B", "C"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                score: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        score: {
-                            type: "number"
-                        }
-                    },
-                    required: ["score"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 80)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ state: {
                 score: state.key("score")
             } }), "B", "C"))}</span>
         <span>
@@ -149,27 +320,7 @@ export default pattern((state) => {
             "enum": ["Single", "Multiple"]
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Single", "Multiple", "Empty"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 0)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_4({ state: {
                 count: state.key("count")
             } }), "Empty", __cfHelpers.ifElse({
             type: "boolean"
@@ -179,27 +330,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Single", "Multiple"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 1)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({ state: {
                 count: state.key("count")
             } }), "Single", "Multiple"))}
         </span>
@@ -233,27 +364,7 @@ export default pattern((state) => {
             "enum": ["User", "Guest"]
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["User", "Guest", "Admin"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                userType: string;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        userType: {
-                            type: "string"
-                        }
-                    },
-                    required: ["userType"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "admin")({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_6({ state: {
                 userType: state.key("userType")
             } }), "Admin", __cfHelpers.ifElse({
             type: "boolean"
@@ -263,27 +374,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["User", "Guest"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                userType: string;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        userType: {
-                            type: "string"
-                        }
-                    },
-                    required: ["userType"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "user")({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_7({ state: {
                 userType: state.key("userType")
             } }), "User", "Guest"))}
         </span>
@@ -321,49 +412,9 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_8({ state: {
                 count: state.key("count")
-            } }), __cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count < 10)({ state: {
+            } }), __cfLift_9({ state: {
                 count: state.key("count")
             } })), "In Range", "Out of Range")}
         </span>
@@ -382,27 +433,7 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfHelpers.lift<{
-            state: {
-                score: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        score: {
-                            type: "number"
-                        }
-                    },
-                    required: ["score"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score > 100)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfLift_10({ state: {
                 score: state.key("score")
             } })), "Premium Features", "Basic Features")}
         </span>
@@ -434,27 +465,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 5)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_11({ state: {
                 count: state.key("count")
             } }), <ul>
             <li>Many items: {state.key("count")}</li>

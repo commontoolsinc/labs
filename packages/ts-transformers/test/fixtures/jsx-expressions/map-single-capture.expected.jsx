@@ -11,6 +11,23 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    people: __cfHelpers.Cell<{ id: string; name: string; }[]>;
+}, boolean>({
+    type: "object",
+    properties: {
+        people: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["people"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length > 0);
 // FIXTURE: map-single-capture
 // Verifies: .map() with length guard is transformed to when() + mapWithPattern()
 //   people.get().length > 0 && <ul>{people.map((person, index) => <li>)}</ul>
@@ -50,23 +67,7 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            people: __cfHelpers.Cell<{ id: string; name: string; }[]>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                people: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["people"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length > 0)({ people: people }), <ul>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ people: people }), <ul>
             {people.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const person = __cf_pattern_input.key("element");
                 const index = __cf_pattern_input.key("index");

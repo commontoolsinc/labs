@@ -11,6 +11,43 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        prefix: string;
+        suffix: string;
+    };
+    item: {
+        name: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                prefix: {
+                    type: "string"
+                },
+                suffix: {
+                    type: "string"
+                }
+            },
+            required: ["prefix", "suffix"]
+        },
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["state", "item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`);
 interface Item {
     id: number;
     name: string;
@@ -32,43 +69,7 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const item = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
-                return (<div>{__cfHelpers.lift<{
-                    state: {
-                        prefix: string;
-                        suffix: string;
-                    };
-                    item: {
-                        name: string;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                prefix: {
-                                    type: "string"
-                                },
-                                suffix: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["prefix", "suffix"]
-                        },
-                        item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["state", "item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)({
+                return (<div>{__cfLift_1({
                     state: {
                         prefix: state.key("prefix"),
                         suffix: state.key("suffix")

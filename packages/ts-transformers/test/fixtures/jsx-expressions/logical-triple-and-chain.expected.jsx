@@ -11,6 +11,49 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
+}, boolean>({
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                active: {
+                    type: "boolean"
+                },
+                verified: {
+                    type: "boolean"
+                }
+            },
+            required: ["active", "verified"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().active && user.get().verified);
+const __cfLift_2 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
+}, string>({
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name);
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or lower the entire chain to a lift-applied computation
 // FIXTURE: logical-triple-and-chain
@@ -53,48 +96,7 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        active: {
-                            type: "boolean"
-                        },
-                        verified: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["active", "verified"],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().active && user.get().verified)({ user: user }), <span>Welcome, {__cfHelpers.lift<{
-            user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
-        }, string>({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name)({ user: user })}!</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ user: user }), <span>Welcome, {__cfLift_2({ user: user })}!</span>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

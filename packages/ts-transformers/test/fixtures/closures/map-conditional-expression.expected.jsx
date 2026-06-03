@@ -11,6 +11,72 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        threshold: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["threshold"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price > state.threshold);
+const __cfLift_2 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        discount: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 - state.discount));
 interface Item {
     id: number;
     price: number;
@@ -41,78 +107,14 @@ export default pattern((state) => {
                     type: "number"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        threshold: number;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                threshold: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["threshold"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price > state.threshold)({
+                } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
                     item: {
                         price: item.key("price")
                     },
                     state: {
                         threshold: state.key("threshold")
                     }
-                }), __cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        discount: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 - state.discount))({
+                }), __cfLift_2({
                     item: {
                         price: item.key("price")
                     },

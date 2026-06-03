@@ -11,6 +11,19 @@ import { computed, pattern, UI, VNode, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    result: any;
+    prompt: string;
+}, any>({
+    type: "object",
+    properties: {
+        result: true,
+        prompt: {
+            type: "string"
+        }
+    },
+    required: ["result", "prompt"]
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ result, prompt }) => result?.title || prompt || "Untitled");
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;
 // FIXTURE: pattern-any-result-override
@@ -22,19 +35,7 @@ declare function fetchAny(): any;
 export const TypedFromAny = pattern((__cf_pattern_input) => {
     const prompt = __cf_pattern_input.key("prompt");
     const result = fetchAny();
-    return __cfHelpers.lift<{
-        result: any;
-        prompt: string;
-    }, any>({
-        type: "object",
-        properties: {
-            result: true,
-            prompt: {
-                type: "string"
-            }
-        },
-        required: ["result", "prompt"]
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ result, prompt }) => result?.title || prompt || "Untitled")({
+    return __cfLift_1({
         result: result,
         prompt: prompt
     });

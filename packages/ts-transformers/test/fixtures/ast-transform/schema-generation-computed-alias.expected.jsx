@@ -11,6 +11,9 @@ import { computed as computedAlias } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift(false, (): AliasResult => ({
+    length: state.text.length,
+}));
 type AliasInput = {
     text: string;
 };
@@ -22,9 +25,7 @@ declare const state: AliasInput;
 // Verifies: a reactive builder imported under an alias still gets schema injection
 //   computedAlias((): AliasResult => ...) → captures `state` and lowers to lift(inputSchema, outputSchema, ...)
 // Context: Uses `import { computed as computedAlias }` to test aliased import tracking
-export const textLength = __cfHelpers.__cf_data(__cfHelpers.lift(false, (): AliasResult => ({
-    length: state.text.length,
-}))().for("textLength", true));
+export const textLength = __cfHelpers.__cf_data(__cfLift_1().for("textLength", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

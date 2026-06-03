@@ -24,7 +24,81 @@ import { pattern, UI, type VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ entry, prefix }) => (entry as Entry).name === prefix);
+const __cfLift_1 = __cfHelpers.lift<{
+    entry: {
+        name: string;
+    };
+    prefix: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        prefix: {
+            type: "string"
+        }
+    },
+    required: ["entry", "prefix"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => (entry).name === prefix);
+const __cfLift_2 = __cfHelpers.lift<{
+    entry: {
+        name: string;
+    };
+    prefix: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        prefix: {
+            type: "string"
+        }
+    },
+    required: ["entry", "prefix"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => entry!.name === prefix);
+const __cfLift_3 = __cfHelpers.lift<{
+    entry: {
+        name: string;
+    };
+    prefix: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        prefix: {
+            type: "string"
+        }
+    },
+    required: ["entry", "prefix"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => (entry as Entry).name === prefix);
 type Entry = {
     name: string;
 };
@@ -44,93 +118,21 @@ export default pattern((__cf_pattern_input) => {
                 const entry = __cf_pattern_input.key("element");
                 const prefix = __cf_pattern_input.key("params", "prefix");
                 // Parenthesized: (entry).name
-                const a = __cfHelpers.lift<{
-                    entry: {
-                        name: string;
-                    };
-                    prefix: string;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        },
-                        prefix: {
-                            type: "string"
-                        }
-                    },
-                    required: ["entry", "prefix"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => (entry).name === prefix)({
+                const a = __cfLift_1({
                     entry: {
                         name: entry.key("name")
                     },
                     prefix: prefix
                 }).for("a", true);
                 // Non-null asserted: entry!.name
-                const b = __cfHelpers.lift<{
-                    entry: {
-                        name: string;
-                    };
-                    prefix: string;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        },
-                        prefix: {
-                            type: "string"
-                        }
-                    },
-                    required: ["entry", "prefix"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => entry!.name === prefix)({
+                const b = __cfLift_2({
                     entry: {
                         name: entry.key("name")
                     },
                     prefix: prefix
                 }).for("b", true);
                 // 'as' asserted: (entry as Entry).name
-                const c = __cfHelpers.lift<{
-                    entry: {
-                        name: string;
-                    };
-                    prefix: string;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        },
-                        prefix: {
-                            type: "string"
-                        }
-                    },
-                    required: ["entry", "prefix"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+                const c = __cfLift_3({
                     entry: {
                         name: entry.key("name")
                     },

@@ -17,6 +17,27 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    meta: {
+        kind: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        meta: {
+            type: "object",
+            properties: {
+                kind: {
+                    type: "string"
+                }
+            },
+            required: ["kind"]
+        }
+    },
+    required: ["meta"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ meta }) => meta.kind === "folder");
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -35,27 +56,7 @@ export default pattern((__cf_pattern_input) => {
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
                 const meta = { kind: file.key("type") };
-                const isFolder = __cfHelpers.lift<{
-                    meta: {
-                        kind: string;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        meta: {
-                            type: "object",
-                            properties: {
-                                kind: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["kind"]
-                        }
-                    },
-                    required: ["meta"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ meta }) => meta.kind === "folder")({ meta: {
+                const isFolder = __cfLift_1({ meta: {
                         kind: meta.kind
                     } }).for("isFolder", true);
                 return <span>{__cfHelpers.ifElse({

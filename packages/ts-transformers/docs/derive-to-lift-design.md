@@ -1,12 +1,21 @@
-# `derive` → `lift` → sandboxable: design
+# `derive` → `lift` → `selfcontained`: design
+
+<!-- The third phase's marker was called "sandboxable" in early drafts; the
+final name is "selfcontained" (Berni, 2026-05-21). Some historical sections
+below still read "sandboxable" as a concept word — they describe the same thing. -->
 
 _Status: Phase 1 complete in CT-1615 (lift-applied form
 `__cfHelpers.lift(cb)(input)`). Registry-architecture follow-up landed in PR
 #3707 (registries consolidated into `CrossStageState`). No-input form switch
 landed in PR #3709 (`computed`-origin lifts now emit `lift(false, fn)()` instead
-of the `lift(...)({})` stopgap). Still outstanding: removing the runtime
-`derive` export (deferred — not dead; see follow-ups below). Phases 2 & 3
-designed at high level; details deferred._
+of the `lift(...)({})` stopgap). **Phase 2 complete in CT-1644**
+(`LiftHoistingTransformer` hoists every lift call to a module-scope
+`const __cfLift_N = __cfHelpers.lift(...)`, after SchemaInjection; subsumes lift
+from the CT-1585 callback hoister). `derive` has since been fully retired from
+both the transformer (CT-1643) and the runtime export (CT-1624). **Phase 3
+(`selfcontained` marker) is now the active phase** — its design below is current
+and its open questions are mostly resolved (see the Phase 3 section and
+tracker)._
 
 ## Motivation
 
@@ -20,11 +29,11 @@ transient sandbox without breaking).
 The plan is three sequential phases. Each lands as its own PR after the prior
 one is merged.
 
-| Phase | What changes                                                                                                                                                                | Who benefits                                                                                                                                  |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Rewrite every `derive` call (user-authored + transformer-synthesized) into a `lift` call, in place.                                                                         | Establishes a single canonical builder for reactive lifted-function computations. Tooling no longer needs to special-case `derive` vs `lift`. |
-| 2     | Hoist every `lift` call (the whole call, not just its callback) to module scope. The body becomes `__cfLift_N(closureInputObject)`.                                         | Every reactive computation is named and addressable. Sandboxing/serialization decisions can be made per-lift.                                 |
-| 3     | Inject a `__cfHelpers.sandboxable(...)` wrapper _only on lifts that don't close over any user-authored module-scoped variables_ (and meet a few other gates — see Phase 3). | Runtime can safely move sandboxable lifts across sandbox boundaries.                                                                          |
+| Phase | What changes                                                                                                                                                                                          | Who benefits                                                                                                                                  |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Rewrite every `derive` call (user-authored + transformer-synthesized) into a `lift` call, in place.                                                                                                   | Establishes a single canonical builder for reactive lifted-function computations. Tooling no longer needs to special-case `derive` vs `lift`. |
+| 2     | Hoist every `lift` call (the whole call, not just its callback) to module scope. The body becomes `__cfLift_N(closureInputObject)`.                                                                   | Every reactive computation is named and addressable. Sandboxing/serialization decisions can be made per-lift.                                 |
+| 3     | Wrap each qualifying lift's arguments in `__cfHelpers.selfcontained(...)` _only on lifts that don't close over any user-authored module-scoped variables_ (and meet a few other gates — see Phase 3). | Runtime can safely move selfcontained lifts across sandbox boundaries.                                                                        |
 
 After all three phases land for `lift`, the same pattern extends to `handler`
 (which `action` lowers into) and to `pattern` (including transformer-synthesized
@@ -232,46 +241,83 @@ Note three changes from the existing CT-1585 hoist:
    callbacks; now we have a builder-specific hoist and can use a
    builder-specific prefix.
 
-### Open questions for Phase 2
+### Open questions for Phase 2 — RESOLVED (CT-1644)
 
-- **Where in the pipeline?** Likely after `SchemaInjectionTransformer` (so the
-  hoisted `lift(...)` call has its schemas baked in). But determine empirically
-  — the CT-1585 hoist had to go before SchemaInjection because of
-  `getBuilderCallbackIndices` arg-position assumptions; Phase 2 has different
-  constraints since we're hoisting the _call_, not the callback.
-- **Interaction with the existing CT-1585 hoist.** Once Phase 2 lands for
-  `lift`, the existing CT-1585 hoist still handles `pattern`, `handler`,
-  `patternTool` (and previously `derive`, which is gone post-Phase-1). Phase 2's
-  lift-specific hoist might subsume or coexist with it.
-- **Naming collision.** If a source file already has a top-level
-  `const __cfLift_5 = ...`, the per-file counter still produces a unique name
-  (the source file's user-authored identifiers are visible at the time we
-  synthesize the name). But verify.
-- **`createUniqueName` trap.** Use the same explicit-counter +
-  `createIdentifier` approach that CT-1585 commit 3 introduced. Don't use
-  `factory.createUniqueName` — `.text` only carries the bare prefix at synthesis
-  time.
+- **Where in the pipeline?** **After `SchemaInjectionTransformer`, before
+  SchemaGenerator. Verified empirically 2026-06-02.** A spike initially
+  suggested hoisting _before_ injection was viable (injection reached the
+  relocated const), but a fixture audit found it silently truncated the
+  argSchema in nested / multi-capture lifts: SchemaInjection derives the
+  argument schema from the _applied captures object_ (`call.arguments[0]` of the
+  outer application), which hoisting-before severs from the lift — the
+  callback's parameter type alone does not recover all captures. Hoisting
+  _after_ injection bakes the complete schema into the still-applied
+  `lift(argSchema, resSchema, cb)(captures)` first, so the relocation is
+  schema-transparent. (Map-element `$ref` schemas regressed the same way under
+  hoist-before and are likewise fixed by hoist-after.) See
+  `session_outputs/2026-06-02_lift-hoist-phase2/02-ordering-correction.md`.
+- **Interaction with the existing CT-1585 hoist.** **Subsume, verified.** Phase
+  2 owns lift hoisting: `lift` is removed from CT-1585's
+  `HOISTABLE_BUILDER_NAMES` and the lift-applied branch in `resolveHoistTarget`
+  is disabled. Coexistence produced a double-hoist that TDZ-crashed at module
+  load (`Cannot access
+  '__cfModuleCallback_1' before initialization` — Phase
+  2's lift const hoisted above CT-1585's callback const). CT-1585 still owns
+  `pattern`/`handler`/ `patternTool`; both coexist correctly in one file (e.g.
+  `patternTool` callback stays `__cfModuleCallback_N` while sibling lifts become
+  `__cfLift_N`). When `pattern`/`handler` get whole-call hoisting they fold into
+  `LiftHoistingTransformer`.
+- **Naming collision.** Names come from a per-file counter plus
+  `factory.createIdentifier("__cfLift_" + n)`. The `__cfLift` prefix is added to
+  `isTransformerInjectedIdentifier` so that a `__cfLift_N` reference appearing
+  inside another hoisted callback is not miscounted as a user module-scope use.
+- **Call-site recognition.** The synthetic `__cfLift_N(captures)` identifier has
+  no checker symbol, so its identity is carried on the node:
+  `ts.setOriginalNode(name, innerCall)` plus a `getOriginalNode` fallback in
+  `resolveBuilderExpressionKind`. This lets `detectCallKind` still classify the
+  application as lift-applied, so `ReactiveVariableForTransformer` continues to
+  attach the `.for(...)` tail.
+- **`createUniqueName` trap.** Avoided — explicit counter + `createIdentifier`,
+  per CT-1585 commit 3.
 
-## Phase 3: sandboxable marker (sketch)
+### Inputs to Phase 3 (selfcontained)
+
+After CT-1644, every reactive lift is a module-scope
+`const __cfLift_N = __cfHelpers.lift(argSchema, resSchema, cb)` with the
+callback inline — the exact substrate Phase 3 wraps as
+`__cfHelpers.lift(__cfHelpers.selfcontained(...))`. The sandboxability predicate
+is CT-1585's `analyzeCallbackForHoisting` machinery (the `localNames` pre-pass,
+`isTransformerInjectedIdentifier`, the ambient-globals exclusion), now
+repurposed from a _hoist gate_ to a _selfcontained gate_ applied to each
+`__cfLift_N`'s inline callback body.
+
+## Phase 3: selfcontained marker (sketch)
+
+_(The marker was called `sandboxable` in early drafts; Berni picked
+`selfcontained` 2026-05-21. Same concept — this section uses the final name.)_
 
 After Phase 2: every reactive lift-style computation is a module-scope
 `const __cfLift_N = __cfHelpers.lift(...)`. Phase 3 inspects each `__cfLift_N`'s
-callback body and, for the ones that meet the sandboxable conditions, wraps the
-`__cfHelpers.lift(...)` call in `__cfHelpers.sandboxable(...)`:
+callback body and, for the ones that meet the selfcontained conditions, wraps
+the lift's arguments in `__cfHelpers.selfcontained(...)`:
 
 ```ts
 const __cfLift_N = __cfHelpers.lift(
-  __cfHelpers.sandboxable({ inputSchema }, { outputSchema }, ({ x }) => x + 1),
+  __cfHelpers.selfcontained(
+    { inputSchema },
+    { outputSchema },
+    ({ x }) => x + 1,
+  ),
 );
 ```
 
 Note: the wrapper is _inside_ the `lift(...)` call's argument list —
-`__cfHelpers.lift(__cfHelpers.sandboxable(args))` — not wrapping the lift
+`__cfHelpers.lift(__cfHelpers.selfcontained(args))` — not wrapping the lift
 itself. (Berni's preference.)
 
-### Sandboxable conditions (initial proposal, subject to confirmation with Berni)
+### Selfcontained conditions (initial proposal, subject to confirmation with Berni)
 
-A `__cfLift_N` is sandboxable if its callback body:
+A `__cfLift_N` is selfcontained if its callback body:
 
 1. Closes over **zero** user-authored module-scope variables. References to
    user-authored module-level functions, constants, classes, etc. disqualify it.
@@ -287,9 +333,10 @@ A `__cfLift_N` is sandboxable if its callback body:
    - Transformer-injected helpers (`__cfHelpers.*`, `__cfHardenFn*`) — these are
      part of the sandbox bootstrapping by definition.
    - Ambient globals (`console`, `Math`, `JSON`, `Object`, `Array`, etc. —
-     declarations in `lib.*.d.ts`). Open question: are non-deterministic globals
-     (`Date.now()`, `Math.random()`, `console.log()`) OK for sandboxable? Berni
-     to confirm.
+     declarations in `lib.*.d.ts`). Non-deterministic globals (`Date.now()`,
+     `Math.random()`, `console.log()`) are **OK** (Berni 2026-05-21) — they
+     resolve to injected scaffolding (`safeDateNow`, `unsecureRandom`, the
+     console hook), so they don't disqualify a body.
 
 The detection logic should reuse the building blocks from CT-1585's hoister:
 
@@ -301,33 +348,52 @@ The detection logic should reuse the building blocks from CT-1585's hoister:
 
 ### Open questions for Phase 3
 
-- **Naming.** `sandboxable` is the placeholder. Final name TBD with TL.
-- **What does the runtime do with `sandboxable`?** This doc focuses on the
-  transformer; runtime semantics are out of scope. But knowing the runtime
-  contract matters for choosing which conditions to gate on.
-- **The "addressable" goal.** Berni mentioned the goal of being able to point to
-  the concrete source of any computation. The Phase 2 hoist gives us the
-  module-scope const as a named addressable site. Is that enough, or do we also
-  need stable cross-version identity (e.g., a content hash, a stable path)?
-  Berni to clarify.
+- **Naming.** ~~`sandboxable` is the placeholder.~~ **Resolved (Berni
+  2026-05-21): `selfcontained`.** The wrapper helper is
+  `__cfHelpers.selfcontained(...)`.
+- **The "addressable" goal.** **Resolved (Berni 2026-05-21):** the addressable
+  identity is `<bundlehash>/<filename>/<symbol>` (or a hash of the selfcontained
+  function / inline). The Phase 2 module-scope const gives the `<symbol>` part;
+  Phase 3 / the runtime supply the rest. Not blocking the transformer marker.
+- **Non-deterministic globals in selfcontained bodies.** **Resolved (Berni
+  2026-05-21): allowed.** `console.log`, `safeDateNow`, `unsecureRandom` are all
+  fine — they're injected, so they count as transformer/sandbox scaffolding, not
+  disqualifying captures.
+- **Selfcontained gate conditions.** Still wants a final confirm from Berni that
+  "zero user-authored module-scope variables + zero enclosing-scope captures
+  outside the input object + only globals + transformer scaffolding + own
+  params" is the right gate (see the conditions list above and the tracker
+  entry).
+- **What does the runtime do with `selfcontained`?** Out of scope for the
+  transformer, but the runtime contract (how a `selfcontained`-wrapped lift is
+  moved across a sandbox boundary) informs which conditions are load-bearing. No
+  runtime-side doc exists yet — worth writing alongside the Phase 3 runtime
+  work.
+
+(See the "Open questions tracker" at the end of this doc for the dated
+resolutions.)
 
 ## Glossary of the building blocks in the existing code
 
-For the Phase 1 implementer's quick reference. All paths relative to
-`packages/ts-transformers/`.
+Quick reference, **current as of Phase 2 (CT-1644) landing**. All paths relative
+to `packages/ts-transformers/`. (`derive` has been fully retired from the
+transformer — CT-1643 — and from the runtime export — CT-1624; entries below
+reflect the post-derive state.)
 
-| Concept                                        | Where it lives                                                                                                                                     | Notes                                                                                                                                 |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Pipeline stage order                           | `src/cf-pipeline.ts:33-108`                                                                                                                        | `CFC_TRANSFORMER_STAGE_SPECS` — central registry.                                                                                     |
-| `ClosureTransformer`                           | `src/closures/transformer.ts`                                                                                                                      | Stage 5 (after JsxExpressionSiteRouter, ComputedTransformer). The main reactive lowering.                                             |
-| `ComputedTransformer`                          | `src/computed/transformer.ts` (pre-Phase-1); `LiftLoweringTransformer` at `src/lift/transformer.ts` (post-Phase-1)                                 | Lowers `computed(...)` calls. Pre-Phase-1: emitted `derive`. Post-Phase-1: also lowers user-source `derive(...)`, emits lift-applied. |
-| `createDeriveCall`                             | `src/transformers/builtins/derive.ts:186` (pre-Phase-1); `createLiftAppliedCall` at `src/transformers/builtins/lift-applied.ts` (post-Phase-1)     | The factory for synthesized lift-style helper calls. Post-Phase-1: emits the lift-applied form (`lift(cb)(input)`).                   |
-| `BuilderCallbackHoistingTransformer` (CT-1585) | `src/transformers/builder-callback-hoisting.ts` + `src/closures/module-scope-callback-hoisting.ts`                                                 | The current hoister. Phase 2 will likely supersede part of this for `lift`.                                                           |
-| `detectCallKind` / `callKind === "derive"`     | `src/ast/call-kind.ts`                                                                                                                             | Centralized call classifier. Phase 1 will reduce its surface.                                                                         |
-| `SchemaInjectionTransformer`                   | `src/transformers/schema-injection.ts`                                                                                                             | Injects input/output schemas. Has separate code paths for `derive` and `lift` today (lines ~2905 and ~3036).                          |
-| `getSyntheticModuleCallbackInitializer`        | `src/transformers/schema-injection.ts:2335`                                                                                                        | Resolves `__cfModuleCallback_N` identifier references to their source initializers. Phase 2 needs to handle `__cfLift_N` similarly.   |
-| Pattern-test runtime                           | `tasks/integration.ts:191 runPatternTests`                                                                                                         | How CI runs `deno task cf test --root packages/patterns ...`. Useful for validating runtime behavior post-Phase-1.                    |
-| Existing CT-1585 regression test               | `test/closures/module-scope-helper-hoisting.test.ts` + `test/fixtures/closures/hoisted-handler-preserves-capture-schemas.{input.tsx,expected.jsx}` | Reference shape for new test fixtures.                                                                                                |
+| Concept                                        | Where it lives                                                                                     | Notes                                                                                                                                                                  |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pipeline stage order                           | `src/cf-pipeline.ts` (`CFC_TRANSFORMER_STAGE_SPECS`)                                               | The 19-stage registry. Authoritative; pinned by `test/pipeline-regressions.test.ts`.                                                                                   |
+| `LiftLoweringTransformer`                      | `src/lift/transformer.ts`                                                                          | Stage 6. Lowers `computed(...)` (and formerly user `derive(...)`) to the lift-applied form. (Was `ComputedTransformer` pre-Phase-1.)                                   |
+| `ClosureTransformer`                           | `src/closures/transformer.ts`                                                                      | Stage 7. The main reactive lowering; extracts captures into the lift input object.                                                                                     |
+| `createLiftAppliedCall`                        | `src/transformers/builtins/lift-applied.ts`                                                        | Factory for synthesized lift-style helper calls; emits the lift-applied form `lift<In,Out>(cb)(input)`. (Was `createDeriveCall`, now removed.)                         |
+| `BuilderCallbackHoistingTransformer` (CT-1585) | `src/transformers/builder-callback-hoisting.ts` + `src/closures/module-scope-callback-hoisting.ts` | Stage 12. Hoists `handler`/`pattern`/`patternTool` callbacks closing only over module scope. As of CT-1644 it no longer touches `lift` (see below).                    |
+| `LiftHoistingTransformer` (CT-1644)            | `src/transformers/lift-hoisting.ts`                                                                | Stage 14 (after SchemaInjection). Hoists each whole `lift(...)` call to a module-scope `const __cfLift_N`; the call site becomes `__cfLift_N(captures)`.               |
+| `detectCallKind` (`kind === "lift-applied"`)   | `src/ast/call-kind.ts`                                                                             | Centralized call classifier. The `__cfLift` prefix + `setOriginalNode` recognition fallback (CT-1644) live here. The `derive` branch is gone (CT-1643).                |
+| `SchemaInjectionTransformer`                   | `src/transformers/schema-injection.ts`                                                             | Stage 13. Injects input/output schemas into the lift-applied call. Derives the arg schema from the **applied captures object** (the reason CT-1644 hoists _after_ it). |
+| `analyzeCallbackForHoisting`                   | `src/closures/module-scope-callback-hoisting.ts`                                                   | CT-1585's structural body analysis (`localNames` pre-pass, `isTransformerInjectedIdentifier`, ambient-global exclusion). **Phase 3's selfcontained gate reuses this.** |
+| Pattern-test runtime                           | `tasks/integration.ts` (`runPatternTests`)                                                         | How CI runs `deno task cf test --root packages/patterns ...`. Use to validate runtime behavior of hoisted/selfcontained lifts.                                         |
+| SES bundle verifier (lift)                     | `packages/runner/src/sandbox/compiled-bundle-verifier.ts` (`callbackIndexesForBuilder`)            | Verifies trusted-builder calls in compiled bundles. CT-1644 taught it the 2-arg `lift(false, fn)` form now that hoisted lifts reach it at module scope.                |
+| Existing CT-1585 regression test               | `test/closures/module-scope-helper-hoisting.test.ts`                                               | Reference shape for hoist test fixtures (updated for the CT-1644 lift-hoist shape).                                                                                    |
 
 ## Past lessons worth carrying forward
 
@@ -359,12 +425,15 @@ have to rediscover:
 
 ## Filing tickets
 
-- File a Linear ticket for Phase 1 with this design doc linked. Title
-  suggestion: "Phase 1: rewrite `derive` calls to `lift` in-place".
-- Phase 2 and Phase 3 tickets can be filed once Phase 1 lands and any updates to
-  this doc are made.
-- Track the open clarifications (Berni questions) in the ticket so they don't
-  get lost.
+- **Phase 1: CT-1615** (Done) — rewrite `derive` calls to the lift-applied form.
+- **Phase 2: CT-1644** — hoist every lift call to module scope.
+- **Phase 3: CT-1654** — wrap selfcontained lifts with
+  `__cfHelpers.selfcontained(...)`. Note: blocked on a `selfcontained` runtime
+  helper that does not exist yet (no `packages/runner` impl, no `__cfHelpers`
+  export) — the ticket tracks that as a prerequisite sub-task.
+- Adjacent / fed-from-this-work: CT-1643 + CT-1624 (`derive` retirement, Done),
+  CT-1625 (lift type-surface duplication), CT-1634 (direct-`lift(fn)` schema
+  gap), CT-1652 (dead `derive` case in the SES bundle verifier).
 
 ## Open questions tracker
 

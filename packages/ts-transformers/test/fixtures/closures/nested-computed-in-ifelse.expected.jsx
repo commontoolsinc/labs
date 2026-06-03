@@ -22,6 +22,53 @@ import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    secondToggle: __cfHelpers.ReadonlyCell<boolean>;
+}, { background: string; }>({
+    type: "object",
+    properties: {
+        secondToggle: {
+            type: "boolean",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["secondToggle"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        background: {
+            type: "string"
+        }
+    },
+    required: ["background"]
+} as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
+    const val = secondToggle.get();
+    return { background: val ? "green" : "red" };
+});
+const __cfLift_2 = __cfHelpers.lift<{
+    secondToggle: __cfHelpers.ReadonlyCell<boolean>;
+}, { background: string; }>({
+    type: "object",
+    properties: {
+        secondToggle: {
+            type: "boolean",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["secondToggle"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        background: {
+            type: "string"
+        }
+    },
+    required: ["background"]
+} as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
+    // This .get() should NOT be wrapped in an extra lift-applied computation
+    const val = secondToggle.get();
+    return { background: val ? "green" : "red" };
+});
 // FIXTURE: nested-computed-in-ifelse
 // Verifies: computed() inside ifElse branches transforms to the lift-applied form without double-wrapping .get()
 //   computed(() => { secondToggle.get(); ... }) → lift(({ secondToggle }) => { secondToggle.get(); ... })({ secondToggle })
@@ -39,29 +86,7 @@ export default pattern(() => {
     return {
         [UI]: (<div>
         {/* Case A: Top-level computed - always worked */}
-        <div style={__cfHelpers.lift<{
-                secondToggle: __cfHelpers.ReadonlyCell<boolean>;
-            }, { background: string; }>({
-                type: "object",
-                properties: {
-                    secondToggle: {
-                        type: "boolean",
-                        asCell: ["readonly"]
-                    }
-                },
-                required: ["secondToggle"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    background: {
-                        type: "string"
-                    }
-                },
-                required: ["background"]
-            } as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
-                const val = secondToggle.get();
-                return { background: val ? "green" : "red" };
-            })({ secondToggle: secondToggle })}>Case A</div>
+        <div style={__cfLift_1({ secondToggle: secondToggle })}>Case A</div>
 
         {/* Case B: Computed inside ifElse - this was the bug */}
         {ifElse({
@@ -77,30 +102,7 @@ export default pattern(() => {
                         type: "object",
                         properties: {}
                     }]
-            } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, showOuter, <div style={__cfHelpers.lift<{
-                    secondToggle: __cfHelpers.ReadonlyCell<boolean>;
-                }, { background: string; }>({
-                    type: "object",
-                    properties: {
-                        secondToggle: {
-                            type: "boolean",
-                            asCell: ["readonly"]
-                        }
-                    },
-                    required: ["secondToggle"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "object",
-                    properties: {
-                        background: {
-                            type: "string"
-                        }
-                    },
-                    required: ["background"]
-                } as const satisfies __cfHelpers.JSONSchema, ({ secondToggle }) => {
-                    // This .get() should NOT be wrapped in an extra lift-applied computation
-                    const val = secondToggle.get();
-                    return { background: val ? "green" : "red" };
-                })({ secondToggle: secondToggle })}>Case B</div>, <div>Hidden</div>)}
+            } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, showOuter, <div style={__cfLift_2({ secondToggle: secondToggle })}>Case B</div>, <div>Hidden</div>)}
       </div>),
     };
 }, {

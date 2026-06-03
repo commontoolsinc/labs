@@ -17,6 +17,48 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    file: {
+        type: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        file: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string"
+                }
+            },
+            required: ["type"]
+        }
+    },
+    required: ["file"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.type === "folder");
+const __cfLift_2 = __cfHelpers.lift<{
+    file: {
+        contentType: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        file: {
+            type: "object",
+            properties: {
+                contentType: {
+                    type: "string"
+                }
+            },
+            required: ["contentType"]
+        }
+    },
+    required: ["file"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.contentType !== "binary");
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -35,27 +77,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
-                const isFolder = __cfHelpers.lift<{
-                    file: {
-                        type: string;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        file: {
-                            type: "object",
-                            properties: {
-                                type: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["type"]
-                        }
-                    },
-                    required: ["file"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.type === "folder")({ file: {
+                const isFolder = __cfLift_1({ file: {
                         type: file.key("type")
                     } }).for("isFolder", true);
                 const isOpenable = __cfHelpers.unless({
@@ -64,27 +86,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfHelpers.lift<{
-                    file: {
-                        contentType: string;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        file: {
-                            type: "object",
-                            properties: {
-                                contentType: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["contentType"]
-                        }
-                    },
-                    required: ["file"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ file }) => file.contentType !== "binary")({ file: {
+                } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfLift_2({ file: {
                         contentType: file.key("contentType")
                     } }).for(["isOpenable", 4], true)).for("isOpenable", true);
                 return <span>{__cfHelpers.ifElse({

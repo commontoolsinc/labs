@@ -11,7 +11,32 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ item }) => identity(item.toUpperCase()));
+const __cfLift_1 = __cfHelpers.lift<{
+    item: string;
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "string"
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.toUpperCase());
+const __cfLift_2 = __cfHelpers.lift<{
+    item: string;
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "string"
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item }) => identity(item.toUpperCase()));
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-receiver-method-roots
 // Verifies: receiver-method roots inside pattern-owned map callbacks lower reactively
@@ -23,19 +48,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
       {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
-            return <span>{__cfHelpers.lift<{
-                item: string;
-            }, string>({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "string"
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.toUpperCase())({ item: item })}</span>;
+            return <span>{__cfLift_1({ item: item })}</span>;
         }, {
             type: "object",
             properties: {
@@ -67,19 +80,7 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema), {})}
       {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
-            return <span>{__cfHelpers.lift<{
-                item: string;
-            }, string>({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "string"
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ item: item })}</span>;
+            return <span>{__cfLift_2({ item: item })}</span>;
         }, {
             type: "object",
             properties: {

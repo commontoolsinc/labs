@@ -11,7 +11,48 @@ import { NAME, pattern, str } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ cell }) => format(cell.value));
+const __cfLift_1 = __cfHelpers.lift<{
+    cell: {
+        value: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        cell: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["cell"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => format(cell.value));
+const __cfLift_2 = __cfHelpers.lift<{
+    cell: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        cell: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["cell"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value + 1);
 interface PatternState {
     value: number;
 }
@@ -33,49 +74,9 @@ __cfHardenFn(format);
 //   call-expressions were never classified as lowerable expression sites.
 export default pattern((cell) => {
     return {
-        [NAME]: str `bare ${cell.key("value")} call ${__cfHelpers.lift<{
-            cell: {
-                value: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                cell: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["cell"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ cell: {
+        [NAME]: str `bare ${cell.key("value")} call ${__cfLift_1({ cell: {
                 value: cell.key("value")
-            } })} math ${__cfHelpers.lift<{
-            cell: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                cell: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["cell"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value + 1)({ cell: {
+            } })} math ${__cfLift_2({ cell: {
                 value: cell.key("value")
             } })}`,
         value: cell.key("value"),

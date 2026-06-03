@@ -11,7 +11,23 @@ import { cell, computed, pattern, patternTool, type PatternToolResult } from "co
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ value, offset }) => {
+const __cfLift_1 = __cfHelpers.lift<{
+    value: number;
+    offset: number;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        offset: {
+            type: "number"
+        }
+    },
+    required: ["value", "offset"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, offset }) => {
     return value * multiplier.get() + offset;
 });
 const multiplier = __cfHelpers.__cf_data(cell(2, {
@@ -41,23 +57,7 @@ export default pattern(() => {
         offset: number;
         multiplier: __cfHelpers.Cell<number>;
     }) => {
-        return __cfHelpers.lift<{
-            value: number;
-            offset: number;
-        }, number>({
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                },
-                offset: {
-                    type: "number"
-                }
-            },
-            required: ["value", "offset"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+        return __cfLift_1({
             value: value,
             offset: offset
         });

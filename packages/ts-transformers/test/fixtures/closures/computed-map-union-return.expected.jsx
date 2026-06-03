@@ -11,6 +11,89 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        messages: Message[];
+    };
+}, string | null>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                messages: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Message"
+                    }
+                }
+            },
+            required: ["messages"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Message: {
+            type: "object",
+            properties: {
+                role: {
+                    "enum": ["user", "assistant"]
+                },
+                content: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/ContentPart"
+                            }
+                        }]
+                }
+            },
+            required: ["role", "content"]
+        },
+        ContentPart: {
+            type: "object",
+            properties: {
+                type: {
+                    "enum": ["text", "image"]
+                },
+                text: {
+                    type: "string"
+                },
+                image: {
+                    type: "string"
+                }
+            },
+            required: ["type"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "null"
+        }]
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => {
+    const messages = state.messages;
+    if (!messages || messages.length === 0)
+        return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i]!;
+        if (msg.role === "assistant") {
+            // This map call inside the computed callback was the key issue
+            const content = typeof msg.content === "string"
+                ? msg.content
+                : msg.content.map((part) => {
+                    if (part.type === "text")
+                        return part.text || "";
+                    return "";
+                }).join("");
+            return content;
+        }
+    }
+    return null;
+});
 interface ContentPart {
     type: "text" | "image";
     text?: string;
@@ -33,89 +116,7 @@ export default pattern((state) => {
     // The callback becomes synthetic during transformation, which previously
     // caused type inference to fail, resulting in a 'true' schema instead of
     // the correct union type schema.
-    const latestMessage = __cfHelpers.lift<{
-        state: {
-            messages: Message[];
-        };
-    }, string | null>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    messages: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Message"
-                        }
-                    }
-                },
-                required: ["messages"]
-            }
-        },
-        required: ["state"],
-        $defs: {
-            Message: {
-                type: "object",
-                properties: {
-                    role: {
-                        "enum": ["user", "assistant"]
-                    },
-                    content: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/ContentPart"
-                                }
-                            }]
-                    }
-                },
-                required: ["role", "content"]
-            },
-            ContentPart: {
-                type: "object",
-                properties: {
-                    type: {
-                        "enum": ["text", "image"]
-                    },
-                    text: {
-                        type: "string"
-                    },
-                    image: {
-                        type: "string"
-                    }
-                },
-                required: ["type"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "null"
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => {
-        const messages = state.messages;
-        if (!messages || messages.length === 0)
-            return null;
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i]!;
-            if (msg.role === "assistant") {
-                // This map call inside the computed callback was the key issue
-                const content = typeof msg.content === "string"
-                    ? msg.content
-                    : msg.content.map((part) => {
-                        if (part.type === "text")
-                            return part.text || "";
-                        return "";
-                    }).join("");
-                return content;
-            }
-        }
-        return null;
-    })({ state: {
+    const latestMessage = __cfLift_1({ state: {
             messages: state.key("messages")
         } }).for("latestMessage", true);
     return {

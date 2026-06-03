@@ -11,6 +11,23 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    prefix: string;
+    count: number;
+}, string>({
+    type: "object",
+    properties: {
+        prefix: {
+            type: "string"
+        },
+        count: {
+            type: "number"
+        }
+    },
+    required: ["prefix", "count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ prefix, count }) => ((value: number) => prefix + value)(count));
 // FIXTURE: parameterized-inline-call-root
 // Verifies: helper-owned parameterized inline-function call roots lower as a
 // shared post-closure lift-applied computation around the whole call, not as a lift-applied computation inside the
@@ -21,23 +38,7 @@ export default pattern((__cf_pattern_input) => {
     const prefix = __cf_pattern_input.key("prefix");
     const count = __cf_pattern_input.key("count");
     return ({
-        [UI]: <div>{__cfHelpers.lift<{
-            prefix: string;
-            count: number;
-        }, string>({
-            type: "object",
-            properties: {
-                prefix: {
-                    type: "string"
-                },
-                count: {
-                    type: "number"
-                }
-            },
-            required: ["prefix", "count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ prefix, count }) => ((value: number) => prefix + value)(count))({
+        [UI]: <div>{__cfLift_1({
             prefix: prefix,
             count: count
         })}</div>,

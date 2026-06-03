@@ -11,7 +11,72 @@ import { ifElse, pattern, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ name }) => identity(name.trim()));
+const __cfLift_1 = __cfHelpers.lift<{
+    name: string;
+}, string>({
+    type: "object",
+    properties: {
+        name: {
+            type: "string"
+        }
+    },
+    required: ["name"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ name }) => identity(name.trim()));
+const __cfLift_2 = __cfHelpers.lift<{
+    count: number;
+}, number>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1);
+const __cfLift_3 = __cfHelpers.lift<{
+    cell: __cfHelpers.Writable<number>;
+}, number>({
+    type: "object",
+    properties: {
+        cell: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["cell"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.get());
+const __cfLift_4 = __cfHelpers.lift<{
+    name: string;
+}, string>({
+    type: "object",
+    properties: {
+        name: {
+            type: "string"
+        }
+    },
+    required: ["name"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim());
+const __cfLift_5 = __cfHelpers.lift<{
+    name: string;
+}, string>({
+    type: "object",
+    properties: {
+        name: {
+            type: "string"
+        }
+    },
+    required: ["name"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim());
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
@@ -25,19 +90,7 @@ export default pattern((__cf_pattern_input) => {
     const show = __cf_pattern_input.key("show");
     const name = __cf_pattern_input.key("name");
     const cell = __cf_pattern_input.key("cell");
-    const upper = __cfHelpers.lift<{
-        name: string;
-    }, string>({
-        type: "object",
-        properties: {
-            name: {
-                type: "string"
-            }
-        },
-        required: ["name"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ name: name }).for("upper", true);
+    const upper = __cfLift_1({ name: name }).for("upper", true);
     return {
         value: ifElse({
             type: "boolean"
@@ -47,19 +100,7 @@ export default pattern((__cf_pattern_input) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
-            count: number;
-        }, number>({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                }
-            },
-            required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1)({ count: count }), 0).for(["__patternResult", "value"], true),
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfLift_2({ count: count }), 0).for(["__patternResult", "value"], true),
         cellValue: ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -68,20 +109,7 @@ export default pattern((__cf_pattern_input) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
-            cell: __cfHelpers.Writable<number>;
-        }, number>({
-            type: "object",
-            properties: {
-                cell: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["cell"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.get())({ cell: cell }), 0).for(["__patternResult", "cellValue"], true),
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfLift_3({ cell: cell }), 0).for(["__patternResult", "cellValue"], true),
         trimmed: ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -90,33 +118,9 @@ export default pattern((__cf_pattern_input) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
-            name: string;
-        }, string>({
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                }
-            },
-            required: ["name"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim())({ name: name }), "fallback").for(["__patternResult", "trimmed"], true),
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfLift_4({ name: name }), "fallback").for(["__patternResult", "trimmed"], true),
         upper,
-        upperDirect: __cfHelpers.lift<{
-            name: string;
-        }, string>({
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                }
-            },
-            required: ["name"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim())({ name: name }).for(["__patternResult", "upperDirect"], true)
+        upperDirect: __cfLift_5({ name: name }).for(["__patternResult", "upperDirect"], true)
     };
 }, {
     type: "object",

@@ -11,6 +11,174 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        editingPersonName: string | null;
+    };
+    personName: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                editingPersonName: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "null"
+                        }]
+                }
+            },
+            required: ["editingPersonName"]
+        },
+        personName: {
+            type: "string"
+        }
+    },
+    required: ["state", "personName"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.editingPersonName === personName);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        removePersonConfirmTarget: string | null;
+    };
+    personName: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                removePersonConfirmTarget: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "null"
+                        }]
+                }
+            },
+            required: ["removePersonConfirmTarget"]
+        },
+        personName: {
+            type: "string"
+        }
+    },
+    required: ["state", "personName"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.removePersonConfirmTarget === personName);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        spots: {
+            spotNumber: string;
+            label?: string | undefined;
+            active: boolean;
+        }[];
+    };
+}, { label: string; value: string; }[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                spots: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            spotNumber: {
+                                type: "string"
+                            },
+                            label: {
+                                type: "string"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["spotNumber", "active"]
+                    }
+                }
+            },
+            required: ["spots"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "object",
+        properties: {
+            label: {
+                type: "string"
+            },
+            value: {
+                type: "string"
+            }
+        },
+        required: ["label", "value"]
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.spots
+    .filter((s) => s.active)
+    .map((s) => ({
+    label: "#" + s.spotNumber + (s.label ? " - " + s.label : ""),
+    value: s.spotNumber,
+})));
+const __cfLift_4 = __cfHelpers.lift<{
+    activeSpotOpts: {
+        length: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        activeSpotOpts: {
+            type: "object",
+            properties: {
+                length: {
+                    type: "number"
+                }
+            },
+            required: ["length"]
+        }
+    },
+    required: ["activeSpotOpts"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ activeSpotOpts }) => activeSpotOpts.length > 0);
+const __cfLift_5 = __cfHelpers.lift<{
+    spotPreferences: string[];
+}, boolean>({
+    type: "object",
+    properties: {
+        spotPreferences: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["spotPreferences"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0);
+const __cfLift_6 = __cfHelpers.lift<{
+    spotPreferences: string[];
+}, string>({
+    type: "object",
+    properties: {
+        spotPreferences: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
+    },
+    required: ["spotPreferences"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "));
 interface Spot {
     active: boolean;
     spotNumber: string;
@@ -45,131 +213,19 @@ export default pattern((state) => {
                 const person = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
                 const personName = person.key("name"), email = person.key("email"), commuteMode = person.key("commuteMode"), priorityRank = person.key("priorityRank"), defaultSpot = person.key("defaultSpot"), spotPreferences = person.key("spotPreferences"), isFirst = person.key("isFirst"), isLast = person.key("isLast");
-                const isEditing = __cfHelpers.lift<{
-                    state: {
-                        editingPersonName: string | null;
-                    };
-                    personName: string;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                editingPersonName: {
-                                    anyOf: [{
-                                            type: "string"
-                                        }, {
-                                            type: "null"
-                                        }]
-                                }
-                            },
-                            required: ["editingPersonName"]
-                        },
-                        personName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["state", "personName"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.editingPersonName === personName)({
+                const isEditing = __cfLift_1({
                     state: {
                         editingPersonName: state.key("editingPersonName")
                     },
                     personName: personName
                 }).for("isEditing", true);
-                const isRemoveConfirm = __cfHelpers.lift<{
-                    state: {
-                        removePersonConfirmTarget: string | null;
-                    };
-                    personName: string;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                removePersonConfirmTarget: {
-                                    anyOf: [{
-                                            type: "string"
-                                        }, {
-                                            type: "null"
-                                        }]
-                                }
-                            },
-                            required: ["removePersonConfirmTarget"]
-                        },
-                        personName: {
-                            type: "string"
-                        }
-                    },
-                    required: ["state", "personName"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.removePersonConfirmTarget === personName)({
+                const isRemoveConfirm = __cfLift_2({
                     state: {
                         removePersonConfirmTarget: state.key("removePersonConfirmTarget")
                     },
                     personName: personName
                 }).for("isRemoveConfirm", true);
-                const activeSpotOpts = __cfHelpers.lift<{
-                    state: {
-                        spots: {
-                            spotNumber: string;
-                            label?: string | undefined;
-                            active: boolean;
-                        }[];
-                    };
-                }, { label: string; value: string; }[]>({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                spots: {
-                                    type: "array",
-                                    items: {
-                                        type: "object",
-                                        properties: {
-                                            spotNumber: {
-                                                type: "string"
-                                            },
-                                            label: {
-                                                type: "string"
-                                            },
-                                            active: {
-                                                type: "boolean"
-                                            }
-                                        },
-                                        required: ["spotNumber", "active"]
-                                    }
-                                }
-                            },
-                            required: ["spots"]
-                        }
-                    },
-                    required: ["state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        type: "object",
-                        properties: {
-                            label: {
-                                type: "string"
-                            },
-                            value: {
-                                type: "string"
-                            }
-                        },
-                        required: ["label", "value"]
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.spots
-                    .filter((s) => s.active)
-                    .map((s) => ({
-                    label: "#" + s.spotNumber + (s.label ? " - " + s.label : ""),
-                    value: s.spotNumber,
-                })))({ state: {
+                const activeSpotOpts = __cfLift_3({ state: {
                         spots: state.key("spots")
                     } }).for("activeSpotOpts", true);
                 return (<section>
@@ -278,27 +334,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    activeSpotOpts: {
-                        length: number;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        activeSpotOpts: {
-                            type: "object",
-                            properties: {
-                                length: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["length"]
-                        }
-                    },
-                    required: ["activeSpotOpts"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ activeSpotOpts }) => activeSpotOpts.length > 0)({ activeSpotOpts: {
+                } as const satisfies __cfHelpers.JSONSchema, __cfLift_4({ activeSpotOpts: {
                         length: activeSpotOpts.key("length")
                     } }), <span>spots</span>, null)}
               {__cfHelpers.ifElse({
@@ -317,38 +353,8 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    spotPreferences: string[];
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        spotPreferences: {
-                            type: "array",
-                            items: {
-                                type: "unknown"
-                            }
-                        }
-                    },
-                    required: ["spotPreferences"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0)({ spotPreferences: spotPreferences }), <span>
-                    Prefers: {__cfHelpers.lift<{
-                    spotPreferences: string[];
-                }, string>({
-                    type: "object",
-                    properties: {
-                        spotPreferences: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["spotPreferences"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))({ spotPreferences: spotPreferences })}
+                } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({ spotPreferences: spotPreferences }), <span>
+                    Prefers: {__cfLift_6({ spotPreferences: spotPreferences })}
                   </span>, null)}
             </section>);
             }, {

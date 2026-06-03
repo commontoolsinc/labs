@@ -11,6 +11,114 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ name: string; age: number; }>;
+}, string | false>({
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "boolean",
+            "enum": [false]
+        }]
+} as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && user.get().name));
+const __cfLift_2 = __cfHelpers.lift<{
+    defaultMessage: __cfHelpers.Cell<string>;
+}, string>({
+    type: "object",
+    properties: {
+        defaultMessage: {
+            type: "string",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["defaultMessage"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ defaultMessage }) => defaultMessage.get());
+const __cfLift_3 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ name: string; age: number; }>;
+}, boolean>({
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                age: {
+                    type: "number"
+                }
+            },
+            required: ["age"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age > 18);
+const __cfLift_4 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ name: string; age: number; }>;
+}, string>({
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name);
+const __cfLift_5 = __cfHelpers.lift<{
+    user: __cfHelpers.Cell<{ name: string; age: number; }>;
+}, string | false>({
+    type: "object",
+    properties: {
+        user: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                age: {
+                    type: "number"
+                }
+            },
+            required: ["name", "age"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["user"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "boolean",
+            "enum": [false]
+        }]
+} as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
+    (user.get().age > 0 && `Age: ${user.get().age}`));
 // Tests mixed && and || operators: (a && b) || c
 // The && should use when, the || should use unless
 // FIXTURE: logical-mixed-and-or
@@ -46,44 +154,7 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: __cfHelpers.Cell<{ name: string; age: number; }>;
-        }, string | false>({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean",
-                    "enum": [false]
-                }]
-        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && user.get().name))({ user: user }), __cfHelpers.lift<{
-            defaultMessage: __cfHelpers.Cell<string>;
-        }, string>({
-            type: "object",
-            properties: {
-                defaultMessage: {
-                    type: "string",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["defaultMessage"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ defaultMessage }) => defaultMessage.get())({ defaultMessage: defaultMessage }))}</span>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ user: user }), __cfLift_2({ defaultMessage: defaultMessage }))}</span>
 
         {/* condition && (value || fallback) pattern */}
         <span>{__cfHelpers.when({
@@ -92,51 +163,13 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: __cfHelpers.Cell<{ name: string; age: number; }>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        age: {
-                            type: "number"
-                        }
-                    },
-                    required: ["age"],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age > 18)({ user: user }), __cfHelpers.unless({
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ user: user }), __cfHelpers.unless({
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: __cfHelpers.Cell<{ name: string; age: number; }>;
-        }, string>({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name)({ user: user }), "Anonymous Adult"))}</span>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_4({ user: user }), "Anonymous Adult"))}</span>
 
         {/* Complex: (a && b) || (c && d) */}
         <span>
@@ -146,35 +179,7 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: __cfHelpers.Cell<{ name: string; age: number; }>;
-        }, string | false>({
-            type: "object",
-            properties: {
-                user: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        age: {
-                            type: "number"
-                        }
-                    },
-                    required: ["name", "age"],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["user"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean",
-                    "enum": [false]
-                }]
-        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
-            (user.get().age > 0 && `Age: ${user.get().age}`))({ user: user }), "Unknown user")}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({ user: user }), "Unknown user")}
         </span>
       </div>),
     };

@@ -11,6 +11,31 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    numbers: __cfHelpers.ReadonlyCell<number[]>;
+    multiplier: __cfHelpers.ReadonlyCell<number>;
+}, number[]>({
+    type: "object",
+    properties: {
+        numbers: {
+            type: "array",
+            items: {
+                type: "number"
+            },
+            asCell: ["readonly"]
+        },
+        multiplier: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["numbers", "multiplier"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.get().map((n) => n * multiplier.get()));
 // FIXTURE: computed-nested-callback
 // Verifies: capture extraction works with a nested .map() over a captured cell's array value
 //   computed(() => numbers.get().map(n => n * multiplier.get())) → lift(...)({ numbers, multiplier })
@@ -27,31 +52,7 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Nested callback - the inner array map runs on the unwrapped plain array
-    const result = __cfHelpers.lift<{
-        numbers: __cfHelpers.ReadonlyCell<number[]>;
-        multiplier: __cfHelpers.ReadonlyCell<number>;
-    }, number[]>({
-        type: "object",
-        properties: {
-            numbers: {
-                type: "array",
-                items: {
-                    type: "number"
-                },
-                asCell: ["readonly"]
-            },
-            multiplier: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["numbers", "multiplier"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "number"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.get().map((n) => n * multiplier.get()))({
+    const result = __cfLift_1({
         numbers: numbers,
         multiplier: multiplier
     }).for("result", true);

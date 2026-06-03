@@ -11,6 +11,24 @@ import { Cell, ifElse, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    messageCount: number;
+    dismissedIndex: __cfHelpers.ReadonlyCell<number>;
+}, boolean>({
+    type: "object",
+    properties: {
+        messageCount: {
+            type: "number"
+        },
+        dismissedIndex: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["messageCount", "dismissedIndex"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ showHistory, messageCount, dismissedIndex }) => showHistory && messageCount !== dismissedIndex.get());
 // Reproduction of bug: .get() called on Cell inside ifElse predicate
 // The transformer wraps predicates in a lift-applied computation, which unwraps Cells,
 // but fails to remove the .get() calls
@@ -36,24 +54,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            messageCount: number;
-            dismissedIndex: __cfHelpers.ReadonlyCell<number>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                messageCount: {
-                    type: "number"
-                },
-                dismissedIndex: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["messageCount", "dismissedIndex"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ showHistory, messageCount, dismissedIndex }) => showHistory && messageCount !== dismissedIndex.get())({
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
             showHistory: showHistory,
             messageCount: messageCount,
             dismissedIndex: dismissedIndex

@@ -11,6 +11,42 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    point: __cfHelpers.ReadonlyCell<Point>;
+    multiplier: __cfHelpers.ReadonlyCell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        point: {
+            $ref: "#/$defs/Point",
+            asCell: ["readonly"]
+        },
+        multiplier: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["point", "multiplier"],
+    $defs: {
+        Point: {
+            type: "object",
+            properties: {
+                x: {
+                    type: "number"
+                },
+                y: {
+                    type: "number"
+                }
+            },
+            required: ["x", "y"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ point, multiplier }) => {
+    const { x, y } = point.get();
+    return (x + y) * multiplier.get();
+});
 interface Point {
     x: number;
     y: number;
@@ -36,42 +72,7 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Destructuring requires .get() first since the captured cell is not unwrapped
-    const result = __cfHelpers.lift<{
-        point: __cfHelpers.ReadonlyCell<Point>;
-        multiplier: __cfHelpers.ReadonlyCell<number>;
-    }, number>({
-        type: "object",
-        properties: {
-            point: {
-                $ref: "#/$defs/Point",
-                asCell: ["readonly"]
-            },
-            multiplier: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["point", "multiplier"],
-        $defs: {
-            Point: {
-                type: "object",
-                properties: {
-                    x: {
-                        type: "number"
-                    },
-                    y: {
-                        type: "number"
-                    }
-                },
-                required: ["x", "y"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ point, multiplier }) => {
-        const { x, y } = point.get();
-        return (x + y) * multiplier.get();
-    })({
+    const result = __cfLift_1({
         point: point,
         multiplier: multiplier
     }).for("result", true);

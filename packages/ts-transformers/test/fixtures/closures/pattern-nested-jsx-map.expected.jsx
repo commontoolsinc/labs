@@ -22,6 +22,48 @@ import { Cell, computed, Default, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: __cfHelpers.ReadonlyCell<unknown[]>;
+}, boolean>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0);
+const __cfLift_2 = __cfHelpers.lift<{
+    i: number;
+    item: {
+        selectedIndex: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        i: {
+            type: "number"
+        },
+        item: {
+            type: "object",
+            properties: {
+                selectedIndex: {
+                    type: "number"
+                }
+            },
+            required: ["selectedIndex"]
+        }
+    },
+    required: ["i", "item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ i, item }) => i === item.selectedIndex);
 interface Tag {
     name: string;
 }
@@ -45,23 +87,7 @@ interface PatternInput {
 //   both the outer and inner levels.
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    const hasItems = __cfHelpers.lift<{
-        items: __cfHelpers.ReadonlyCell<unknown[]>;
-    }, boolean>({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    type: "unknown"
-                },
-                asCell: ["readonly"]
-            }
-        },
-        required: ["items"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0)({ items: items }).for("hasItems", true);
+    const hasItems = __cfLift_1({ items: items }).for("hasItems", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({
@@ -100,31 +126,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["", "* "]
-                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                        i: number;
-                        item: {
-                            selectedIndex: number;
-                        };
-                    }, boolean>({
-                        type: "object",
-                        properties: {
-                            i: {
-                                type: "number"
-                            },
-                            item: {
-                                type: "object",
-                                properties: {
-                                    selectedIndex: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["selectedIndex"]
-                            }
-                        },
-                        required: ["i", "item"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, ({ i, item }) => i === item.selectedIndex)({
+                    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({
                         i: i,
                         item: {
                             selectedIndex: item.key("selectedIndex")

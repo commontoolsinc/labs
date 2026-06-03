@@ -11,9 +11,118 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ row }) => identity(row.done ? "Done" : "Pending"));
-const __cfModuleCallback_2 = __cfHardenFn(({ row }) => identity(row.done ? "Done" : "Pending"));
-const __cfModuleCallback_3 = __cfHardenFn(({ row }) => identity(row.done ? "Done" : "Pending"));
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, Item[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items);
+const __cfLift_2 = __cfHelpers.lift<{
+    row: {
+        done: boolean;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        row: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    },
+    required: ["row"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ row }) => identity(row.done ? "Done" : "Pending"));
+const __cfLift_3 = __cfHelpers.lift<{
+    row: {
+        done: boolean;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        row: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    },
+    required: ["row"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ row }) => identity(row.done ? "Done" : "Pending"));
+const __cfLift_4 = __cfHelpers.lift<{
+    row: {
+        done: boolean;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        row: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    },
+    required: ["row"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ row }) => identity(row.done ? "Done" : "Pending"));
 const identity = __cfHardenFn((value: string) => value);
 interface Item {
     done: boolean;
@@ -32,104 +141,16 @@ interface State {
 //   row => identity(row.done ? "Done" : "Pending")
 //   → row => lift(({ row }) => identity(row.done ? "Done" : "Pending"))(...)
 export default pattern((state) => {
-    const rows = __cfHelpers.lift<{
-        state: {
-            items: Item[];
-        };
-    }, Item[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Item"
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Item"
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items)({ state: {
+    const rows = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("rows", true);
     const views = rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const row = __cf_pattern_input.key("element");
         return ({
-            value: __cfHelpers.lift<{
-                row: {
-                    done: boolean;
-                };
-            }, string>({
-                type: "object",
-                properties: {
-                    row: {
-                        type: "object",
-                        properties: {
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["done"]
-                    }
-                },
-                required: ["row"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ row: {
+            value: __cfLift_2({ row: {
                     done: row.key("done")
                 } }),
-            list: [__cfHelpers.lift<{
-                    row: {
-                        done: boolean;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        row: {
-                            type: "object",
-                            properties: {
-                                done: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["done"]
-                        }
-                    },
-                    required: ["row"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({ row: {
+            list: [__cfLift_3({ row: {
                         done: row.key("done")
                     } })],
         });
@@ -169,27 +190,7 @@ export default pattern((state) => {
     } as const satisfies __cfHelpers.JSONSchema), {}).for("views", true);
     const labels = rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const row = __cf_pattern_input.key("element");
-        return __cfHelpers.lift<{
-            row: {
-                done: boolean;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                row: {
-                    type: "object",
-                    properties: {
-                        done: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["done"]
-                }
-            },
-            required: ["row"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_3)({ row: {
+        return __cfLift_4({ row: {
                 done: row.key("done")
             } });
     }, {

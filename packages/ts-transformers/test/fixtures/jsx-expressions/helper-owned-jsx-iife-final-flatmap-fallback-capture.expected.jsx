@@ -15,7 +15,76 @@ import { pattern, UI, VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ entries, prefix }) => visibleEntries(entries, prefix));
+const __cfLift_1 = __cfHelpers.lift<{
+    entries: Entry[];
+    prefix: string;
+}, Entry[]>({
+    type: "object",
+    properties: {
+        entries: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            }
+        },
+        prefix: {
+            type: "string"
+        }
+    },
+    required: ["entries", "prefix"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Entry"
+    },
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ entries, prefix }) => visibleEntries(entries, prefix));
+const __cfLift_2 = __cfHelpers.lift<{
+    entry: {
+        name: string;
+    };
+    labelPrefix: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        labelPrefix: {
+            type: "string"
+        }
+    },
+    required: ["entry", "labelPrefix"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(labelPrefix));
 interface Entry {
     name: string;
 }
@@ -70,51 +139,7 @@ export default pattern((__cf_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    entries: Entry[];
-                    prefix: string;
-                }, Entry[]>({
-                    type: "object",
-                    properties: {
-                        entries: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
-                        },
-                        prefix: {
-                            type: "string"
-                        }
-                    },
-                    required: ["entries", "prefix"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    },
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+                } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
                     entries: entries,
                     prefix: prefix
                 }).for(["visible", 3], true), []).for("visible", true);
@@ -136,31 +161,7 @@ export default pattern((__cf_pattern_input) => {
                         items: {
                             type: "string"
                         }
-                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                        entry: {
-                            name: string;
-                        };
-                        labelPrefix: string;
-                    }, boolean>({
-                        type: "object",
-                        properties: {
-                            entry: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            },
-                            labelPrefix: {
-                                type: "string"
-                            }
-                        },
-                        required: ["entry", "labelPrefix"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(labelPrefix))({
+                    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({
                         entry: {
                             name: entry.key("name")
                         },

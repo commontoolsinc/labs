@@ -11,6 +11,28 @@ import { computed, pattern, patternTool, type PatternToolResult } from "commonfa
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    query: string;
+    content: string;
+}, string[]>({
+    type: "object",
+    properties: {
+        query: {
+            type: "string"
+        },
+        content: {
+            type: "string"
+        }
+    },
+    required: ["query", "content"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
+    return content.split("\n").filter((c: string) => c.includes(query));
+});
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };
@@ -26,28 +48,7 @@ export default pattern(() => {
         query: string;
         content: string;
     }) => {
-        return __cfHelpers.lift<{
-            query: string;
-            content: string;
-        }, string[]>({
-            type: "object",
-            properties: {
-                query: {
-                    type: "string"
-                },
-                content: {
-                    type: "string"
-                }
-            },
-            required: ["query", "content"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        } as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
-            return content.split("\n").filter((c: string) => c.includes(query));
-        })({
+        return __cfLift_1({
             content: content,
             query: query
         });

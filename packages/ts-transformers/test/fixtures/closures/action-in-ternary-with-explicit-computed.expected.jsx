@@ -18,6 +18,52 @@ import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    card: {
+        description: string;
+    };
+    startEditing: __cfHelpers.Stream<void>;
+}, import("commonfabric").JSXElement>({
+    type: "object",
+    properties: {
+        card: {
+            type: "object",
+            properties: {
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["description"]
+        },
+        startEditing: {
+            asCell: ["stream", "opaque"]
+        }
+    },
+    required: ["card", "startEditing"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ card, startEditing }) => (<div>
+                <span>{card.description}</span>
+                <cf-button onClick={startEditing}>Edit</cf-button>
+              </div>));
 interface Card {
     title: string;
     description: string;
@@ -73,52 +119,7 @@ export default pattern((__cf_pattern_input) => {
             <span>{card.key("title")}</span>
             {/* Explicit computed() wrapping JSX that references the action */}
             {/* The action must be captured in the lift-applied computation created for this computed */}
-            {__cfHelpers.lift<{
-                card: {
-                    description: string;
-                };
-                startEditing: __cfHelpers.Stream<void>;
-            }, import("commonfabric").JSXElement>({
-                type: "object",
-                properties: {
-                    card: {
-                        type: "object",
-                        properties: {
-                            description: {
-                                type: "string"
-                            }
-                        },
-                        required: ["description"]
-                    },
-                    startEditing: {
-                        asCell: ["stream", "opaque"]
-                    }
-                },
-                required: ["card", "startEditing"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, ({ card, startEditing }) => (<div>
-                <span>{card.description}</span>
-                <cf-button onClick={startEditing}>Edit</cf-button>
-              </div>))({
+            {__cfLift_1({
                 card: {
                     description: card.key("description")
                 },

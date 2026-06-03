@@ -11,6 +11,35 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        tagCounts: Record<string, number>;
+    };
+    tag: string;
+}, number | undefined>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                tagCounts: {
+                    type: "object",
+                    properties: {},
+                    additionalProperties: {
+                        type: "number"
+                    }
+                }
+            },
+            required: ["tagCounts"]
+        },
+        tag: {
+            type: "string"
+        }
+    },
+    required: ["state", "tag"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ state, tag }) => state.tagCounts[tag]);
 interface State {
     sortedTags: string[];
     tagCounts: Record<string, number>;
@@ -27,35 +56,7 @@ export default pattern((state) => {
                 const tag = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<span>
-            {tag}: {__cfHelpers.lift<{
-                    state: {
-                        tagCounts: Record<string, number>;
-                    };
-                    tag: string;
-                }, number | undefined>({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                tagCounts: {
-                                    type: "object",
-                                    properties: {},
-                                    additionalProperties: {
-                                        type: "number"
-                                    }
-                                }
-                            },
-                            required: ["tagCounts"]
-                        },
-                        tag: {
-                            type: "string"
-                        }
-                    },
-                    required: ["state", "tag"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: ["number", "undefined"]
-                } as const satisfies __cfHelpers.JSONSchema, ({ state, tag }) => state.tagCounts[tag])({
+            {tag}: {__cfLift_1({
                     state: {
                         tagCounts: state.key("tagCounts")
                     },

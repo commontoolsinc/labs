@@ -11,6 +11,31 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    index: number;
+    state: {
+        offset: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        index: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                offset: {
+                    type: "number"
+                }
+            },
+            required: ["offset"]
+        }
+    },
+    required: ["index", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ index, state }) => index + state.offset);
 interface Item {
     id: number;
     name: string;
@@ -33,31 +58,7 @@ export default pattern((state) => {
                 const index = __cf_pattern_input.key("index");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<div>
-            Item #{__cfHelpers.lift<{
-                    index: number;
-                    state: {
-                        offset: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                offset: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["offset"]
-                        }
-                    },
-                    required: ["index", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ index, state }) => index + state.offset)({
+            Item #{__cfLift_1({
                     index: index,
                     state: {
                         offset: state.key("offset")

@@ -11,6 +11,71 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, Item[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items);
+const __cfLift_2 = __cfHelpers.lift<{
+    view: string[];
+}, string | undefined>({
+    type: "object",
+    properties: {
+        view: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
+    },
+    required: ["view"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ view }) => view[0]);
 interface Item {
     done: boolean;
 }
@@ -23,55 +88,7 @@ interface State {
 //   const view = [row.done ? "Done" : "Pending"]
 //   → const view = [ifElse(row.done, "Done", "Pending")]
 export default pattern((state) => {
-    const rows = __cfHelpers.lift<{
-        state: {
-            items: Item[];
-        };
-    }, Item[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Item"
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Item"
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items)({ state: {
+    const rows = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("rows", true);
     return {
@@ -87,22 +104,7 @@ export default pattern((state) => {
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["Done", "Pending"]
                     } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for(["view", 0], true)];
-                return <span>{__cfHelpers.lift<{
-                    view: string[];
-                }, string | undefined>({
-                    type: "object",
-                    properties: {
-                        view: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["view"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: ["string", "undefined"]
-                } as const satisfies __cfHelpers.JSONSchema, ({ view }) => view[0])({ view: view })}</span>;
+                return <span>{__cfLift_2({ view: view })}</span>;
             }, {
                 type: "object",
                 properties: {

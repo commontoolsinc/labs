@@ -19,6 +19,65 @@ import { Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        isEditing: __cfHelpers.ReadonlyCell<boolean>;
+    };
+}, import("commonfabric").JSXElement>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                isEditing: {
+                    type: "boolean",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["isEditing"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                isEditing: {
+                    type: "boolean",
+                    asCell: ["writeonly"]
+                }
+            },
+            required: ["isEditing"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.isEditing.set(true))({
+    state: {
+        isEditing: state.isEditing
+    }
+})}>Edit</cf-button>));
 interface Card {
     title: string;
     description: string;
@@ -56,65 +115,7 @@ export default pattern((state) => {
             <span>{state.key("card", "title")}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the lift-applied computation */}
-            {__cfHelpers.lift<{
-                state: {
-                    isEditing: __cfHelpers.ReadonlyCell<boolean>;
-                };
-            }, import("commonfabric").JSXElement>({
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            isEditing: {
-                                type: "boolean",
-                                asCell: ["readonly"]
-                            }
-                        },
-                        required: ["isEditing"]
-                    }
-                },
-                required: ["state"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            isEditing: {
-                                type: "boolean",
-                                asCell: ["writeonly"]
-                            }
-                        },
-                        required: ["isEditing"]
-                    }
-                },
-                required: ["state"]
-            } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.isEditing.set(true))({
-                state: {
-                    isEditing: state.isEditing
-                }
-            })}>Edit</cf-button>))({ state: {
+            {__cfLift_1({ state: {
                     isEditing: state.key("isEditing")
                 } })}
           </div>)}

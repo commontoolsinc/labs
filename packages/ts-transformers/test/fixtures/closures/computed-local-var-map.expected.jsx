@@ -18,6 +18,98 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: {
+        price: number;
+    }[];
+}, Item[]>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    price: {
+                        type: "number"
+                    }
+                },
+                required: ["price"]
+            }
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["name", "price"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.filter((i) => i.price > 100));
+const __cfLift_2 = __cfHelpers.lift<{
+    filtered: {
+        name: string;
+    }[];
+}, import("commonfabric").JSXElement[]>({
+    type: "object",
+    properties: {
+        filtered: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    }
+                },
+                required: ["name"]
+            }
+        }
+    },
+    required: ["filtered"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/JSXElement"
+    },
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ filtered }) => {
+    const localVar = filtered;
+    return localVar.map((item) => <li>{item.name}</li>);
+});
 interface Item {
     name: string;
     price: number;
@@ -30,100 +122,10 @@ interface Item {
 //   This is a negative test for reactive .map() detection on local aliases.
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    const filtered = __cfHelpers.lift<{
-        items: {
-            price: number;
-        }[];
-    }, Item[]>({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    type: "object",
-                    properties: {
-                        price: {
-                            type: "number"
-                        }
-                    },
-                    required: ["price"]
-                }
-            }
-        },
-        required: ["items"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Item"
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "price"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.filter((i) => i.price > 100))({ items: items }).for("filtered", true);
+    const filtered = __cfLift_1({ items: items }).for("filtered", true);
     return {
         [UI]: (<div>
-        {__cfHelpers.lift<{
-                filtered: {
-                    name: string;
-                }[];
-            }, import("commonfabric").JSXElement[]>({
-                type: "object",
-                properties: {
-                    filtered: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                },
-                required: ["filtered"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/JSXElement"
-                },
-                $defs: {
-                    JSXElement: {
-                        anyOf: [{
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }, {
-                                $ref: "#/$defs/UIRenderable"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }]
-                    },
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, ({ filtered }) => {
-                const localVar = filtered;
-                return localVar.map((item) => <li>{item.name}</li>);
-            })({ filtered: filtered })}
+        {__cfLift_2({ filtered: filtered })}
       </div>),
     };
 }, {

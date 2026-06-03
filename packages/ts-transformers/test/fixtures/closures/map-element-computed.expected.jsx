@@ -11,6 +11,27 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        name: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.name.toUpperCase());
 interface Item {
     id: number;
     name: string;
@@ -32,27 +53,7 @@ export default pattern((state) => {
                 const item = __cf_pattern_input.key("element");
                 const index = __cf_pattern_input.key("index");
                 return (<div>
-            Item #{index}: {__cfHelpers.lift<{
-                    item: {
-                        name: string;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.name.toUpperCase())({ item: {
+            Item #{index}: {__cfLift_1({ item: {
                         name: item.key("name")
                     } })}
           </div>);

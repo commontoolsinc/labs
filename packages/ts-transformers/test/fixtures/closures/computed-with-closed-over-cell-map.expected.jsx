@@ -11,6 +11,57 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    numbers: __cfHelpers.ReadonlyCell<number[]>;
+    multiplier: __cfHelpers.ReadonlyCell<number>;
+}, number[]>({
+    type: "object",
+    properties: {
+        numbers: {
+            type: "array",
+            items: {
+                type: "number"
+            },
+            asCell: ["readonly"]
+        },
+        multiplier: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["numbers", "multiplier"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+    const n = __cf_pattern_input.key("element");
+    const multiplier = __cf_pattern_input.key("params", "multiplier");
+    return n * multiplier.get();
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema), {
+    multiplier: multiplier
+}));
 // FIXTURE: computed-with-closed-over-cell-map
 // Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
 //   computed(() => numbers.map(n => n * multiplier.get())) → lift(({ numbers, multiplier }) => numbers.mapWithPattern(pattern(fn, ...), { multiplier }))({ numbers, multiplier })
@@ -31,57 +82,7 @@ export default pattern(() => {
     // The computed gets transformed to the lift-applied form lift(() => numbers.map(...))({})
     // Inside a lift-applied computation, .map on a closed-over Cell should STILL be transformed to mapWithPattern
     // because Cells need the pattern-based mapping even when unwrapped
-    const doubled = __cfHelpers.lift<{
-        numbers: __cfHelpers.ReadonlyCell<number[]>;
-        multiplier: __cfHelpers.ReadonlyCell<number>;
-    }, number[]>({
-        type: "object",
-        properties: {
-            numbers: {
-                type: "array",
-                items: {
-                    type: "number"
-                },
-                asCell: ["readonly"]
-            },
-            multiplier: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["numbers", "multiplier"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "number"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const n = __cf_pattern_input.key("element");
-        const multiplier = __cf_pattern_input.key("params", "multiplier");
-        return n * multiplier.get();
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number",
-                        asCell: ["readonly"]
-                    }
-                },
-                required: ["multiplier"]
-            }
-        },
-        required: ["element", "params"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema), {
-        multiplier: multiplier
-    }))({
+    const doubled = __cfLift_1({
         numbers: numbers,
         multiplier: multiplier
     }).for("doubled", true);

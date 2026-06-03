@@ -11,6 +11,24 @@ import { Cell, computed, handler, NAME, pattern, str, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    values: unknown[];
+}, void>({
+    type: "object",
+    properties: {
+        values: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["values"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    asCell: ["opaque"]
+} as const satisfies __cfHelpers.JSONSchema, ({ values }) => {
+    console.log("values#", values?.length);
+});
 const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -37,24 +55,7 @@ const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
 // Context: Destructured pattern parameter; combines array map transform with computed and handler schemas
 export default pattern((__cf_pattern_input) => {
     const values = __cf_pattern_input.key("values");
-    __cfHelpers.lift<{
-        values: unknown[];
-    }, void>({
-        type: "object",
-        properties: {
-            values: {
-                type: "array",
-                items: {
-                    type: "unknown"
-                }
-            }
-        },
-        required: ["values"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        asCell: ["opaque"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ values }) => {
-        console.log("values#", values?.length);
-    })({ values: values });
+    __cfLift_1({ values: values });
     return {
         [NAME]: str `Simple Value: ${values.key("length")}`,
         [UI]: (<div>
