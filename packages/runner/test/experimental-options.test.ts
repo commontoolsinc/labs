@@ -12,7 +12,10 @@ import {
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { getModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
+import {
+  getModernCellRepConfig,
+  resetModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import {
   getPersistentSchedulerStateConfig,
   resetPersistentSchedulerStateConfig,
@@ -28,6 +31,7 @@ const signer = await Identity.fromPassphrase("test experimental");
  */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
+    resetModernCellRepConfig();
     resetDataModelConfig();
     resetPersistentSchedulerStateConfig();
   });
