@@ -10,6 +10,7 @@ import type {
   SqliteOperation,
   SqliteParamsWire,
   SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
@@ -251,6 +252,16 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
     sql: string,
     params?: SqliteParamsWire,
   ): Promise<SqliteExecuteResult>;
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
+   * this, server-side reads for `id` resolve against the on-disk file at `path`
+   * (attached read-only) instead of the cell-derived db; writes are rejected.
+   */
+  registerSqliteDiskSource?(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult>;
 }
 
 /**

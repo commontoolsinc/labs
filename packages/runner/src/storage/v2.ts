@@ -32,6 +32,7 @@ import {
   type SqliteOperation,
   type SqliteParamsWire,
   type SqliteQueryResult,
+  type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
@@ -877,6 +878,13 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.sqliteExecute(db, sql, params);
   }
 
+  registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    return this.replica.registerSqliteDiskSource(id, path);
+  }
+
   get(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.replica.getDocument(uri, scope);
   }
@@ -1061,6 +1069,14 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteExecuteResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteExecute(db, sql, params);
+  }
+
+  async registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    const { session } = await this.sessionHandle();
+    return await session.registerSqliteDiskSource(id, path);
   }
 
   async listSchedulerActionSnapshots(
