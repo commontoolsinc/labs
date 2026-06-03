@@ -2,10 +2,7 @@
 // source parse + deterministic handle-id derivation.
 
 import { assertEquals, assertThrows } from "@std/assert";
-import {
-  deriveDiskHandleId,
-  parseSqliteSource,
-} from "../lib/sqlite-source.ts";
+import { deriveDiskHandleId, parseSqliteSource } from "../lib/sqlite-source.ts";
 
 const SPACE = "did:key:z6MkSpaceA";
 const SPACE_B = "did:key:z6MkSpaceB";

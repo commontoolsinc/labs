@@ -149,7 +149,10 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
       ),
     ).rejects.toThrow();
     // The on-disk file is unchanged.
-    const r = await session.sqliteQuery(dbRef(), "SELECT count(*) AS n FROM lookup");
+    const r = await session.sqliteQuery(
+      dbRef(),
+      "SELECT count(*) AS n FROM lookup",
+    );
     expect(r.rows).toEqual([{ n: 2 }]);
   });
 });

@@ -25,7 +25,9 @@ export function parseSqliteSource(ref: string): SqliteDiskSource | null {
   if (!ref.startsWith(SQLITE_SCHEME)) return null;
   const path = ref.slice(SQLITE_SCHEME.length);
   if (path.length === 0) {
-    throw new Error(`sqlite: source is missing a path (expected sqlite:/abs/path.db)`);
+    throw new Error(
+      `sqlite: source is missing a path (expected sqlite:/abs/path.db)`,
+    );
   }
   if (!path.startsWith("/")) {
     throw new Error(
