@@ -750,8 +750,8 @@ export function normalizeAndDiff(
     ];
   }
 
-  // Convert the (top level of) the value to something JSON-encodable if not
-  // already JSON-encodable, or throw if it's neither already valid nor
+  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
+  // if it isn't already, or throw if it's neither already valid nor
   // convertible.
   const fabricValue = shallowFabricFromNativeValue(newValue);
   if (fabricValue !== newValue) {
