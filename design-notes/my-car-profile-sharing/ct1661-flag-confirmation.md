@@ -11,9 +11,10 @@ ESM is "not turned on yet," why did it occur? Does CT-1661 require
 loader is enabled — either via `experimental: { esmModuleLoader: true }` OR via
 the `CF_ESM_MODULE_LOADER=1`/`true` env var (both flip the same code path; see
 `esm-loader-config.ts` `readEnvDefault`). Under today's default (loader off, env
-unset) it does not trigger; the program compiles and runs correctly. It was surfaced only because the test
-`packages/runner/test/wish-profile-car.test.ts` (modeled on
-`esm-pattern-run.test.ts`) sets `experimental: { esmModuleLoader: true }`.
+unset) it does not trigger; the program compiles and runs correctly. It was
+surfaced only because the test `packages/runner/test/wish-profile-car.test.ts`
+(modeled on `esm-pattern-run.test.ts`) sets
+`experimental: { esmModuleLoader: true }`.
 
 ## Per-config empirical outcomes
 
