@@ -11,8 +11,8 @@ import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(false, () => total * 2);
 declare const total: number;
+const __cfLift_1 = __cfHelpers.lift(false, () => total * 2);
 // FIXTURE: schema-generation-computed-untyped
 // Verifies: a reactive builder with no generic type args infers schemas from captured values
 //   computed(() => total * 2) → captures `total` ({ type: "number" }) and infers output from the body

@@ -11,6 +11,37 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface User {
+    name: string;
+    age: number;
+    active: boolean;
+    profile: {
+        bio: string;
+        location: string;
+        settings: {
+            theme: string;
+            notifications: boolean;
+        };
+    };
+}
+interface Config {
+    theme: {
+        primaryColor: string;
+        secondaryColor: string;
+        fontSize: number;
+    };
+    features: {
+        darkMode: boolean;
+        beta: boolean;
+    };
+}
+interface State {
+    user: User;
+    config: Config;
+    items: string[];
+    index: number;
+    numbers: number[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         user: {
@@ -301,37 +332,6 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.fontSize + 2);
-interface User {
-    name: string;
-    age: number;
-    active: boolean;
-    profile: {
-        bio: string;
-        location: string;
-        settings: {
-            theme: string;
-            notifications: boolean;
-        };
-    };
-}
-interface Config {
-    theme: {
-        primaryColor: string;
-        secondaryColor: string;
-        fontSize: number;
-    };
-    features: {
-        darkMode: boolean;
-        beta: boolean;
-    };
-}
-interface State {
-    user: User;
-    config: Config;
-    items: string[];
-    index: number;
-    numbers: number[];
-}
 // FIXTURE: jsx-property-access
 // Verifies: nested property access chains in JSX are converted to .key() or wrapped in a lift-applied computation
 //   state.user.name                → state.key("user", "name")  (simple access, no lift)

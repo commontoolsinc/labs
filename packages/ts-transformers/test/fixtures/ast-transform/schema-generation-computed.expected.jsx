@@ -11,9 +11,6 @@ import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(false, (): DeriveResult => ({
-    doubled: source.count * 2,
-}));
 type DeriveInput = {
     count: number;
 };
@@ -21,6 +18,9 @@ type DeriveResult = {
     doubled: number;
 };
 declare const source: DeriveInput;
+const __cfLift_1 = __cfHelpers.lift(false, (): DeriveResult => ({
+    doubled: source.count * 2,
+}));
 // FIXTURE: schema-generation-computed
 // Verifies: computed() closure-extracts a captured value into a lift() with input
 // (capture) and output schemas generated from type info

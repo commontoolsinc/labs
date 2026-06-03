@@ -28,6 +28,48 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length > 0);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const person = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return (<li key={index}>{person.key("name")}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-single-capture
 // Verifies: .map() with length guard is transformed to when() + mapWithPattern()
 //   people.get().length > 0 && <ul>{people.map((person, index) => <li>)}</ul>
@@ -68,48 +110,7 @@ export default pattern((_state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ people: people }), <ul>
-            {people.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const person = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                return (<li key={index}>{person.key("name")}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+            {people.mapWithPattern(__cfPattern_1, {})}
           </ul>)}
       </div>),
     };

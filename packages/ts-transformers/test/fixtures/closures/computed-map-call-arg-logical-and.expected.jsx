@@ -11,6 +11,13 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const identity = __cfHardenFn((x: unknown) => x);
+interface Item {
+    done: boolean;
+}
+interface State {
+    items: Item[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -81,13 +88,52 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, ({ row }) => identity(row.done && "Done"));
-const identity = __cfHardenFn((x: unknown) => x);
-interface Item {
-    done: boolean;
-}
-interface State {
-    items: Item[];
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    const label = __cfLift_2({ row: {
+            done: row.key("done")
+        } }).for("label", true);
+    return <span>{label}</span>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-call-arg-logical-and
 // Verifies: callback-local ordinary call roots within a computed-array .map()
 //   callback whole-wrap as callback-local lift-applied computations rather than
@@ -100,53 +146,8 @@ export default pattern((state) => {
         } }).for("rows", true);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const row = __cf_pattern_input.key("element");
-                const label = __cfLift_2({ row: {
-                        done: row.key("done")
-                    } }).for("label", true);
-                return <span>{label}</span>;
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["done"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+        {rows.mapWithPattern(__cfPattern_1, {})}
+      </div>),
     };
 }, {
     type: "object",

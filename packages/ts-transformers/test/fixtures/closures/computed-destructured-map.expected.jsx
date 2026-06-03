@@ -18,6 +18,10 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    name: string;
+    done: boolean;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     items: {
         done: boolean;
@@ -137,10 +141,6 @@ const __cfLift_2 = __cfHelpers.lift<{
     const { tasks } = result;
     return tasks.map((task) => <li>{task.name}</li>);
 });
-interface Item {
-    name: string;
-    done: boolean;
-}
 // FIXTURE: computed-destructured-map
 // Verifies: .map() on a destructured property of a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => { const { tasks } = result; return tasks.map(fn) }) → lift(({ result }) => { const { tasks } = result; return tasks.map(fn) })(...)

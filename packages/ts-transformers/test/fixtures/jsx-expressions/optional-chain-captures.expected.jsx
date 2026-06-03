@@ -11,6 +11,17 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    maybe?: {
+        value: number;
+    };
+}
+interface State {
+    maybe?: {
+        value: number;
+    };
+    items: Item[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     item: {
         maybe?: { value: number; } | undefined;
@@ -37,17 +48,56 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.maybe?.value ?? 0);
-interface Item {
-    maybe?: {
-        value: number;
-    };
-}
-interface State {
-    maybe?: {
-        value: number;
-    };
-    items: Item[];
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return (<span>{__cfLift_1({ item: {
+            maybe: item.key("maybe")
+        } })}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                maybe: {
+                    type: "object",
+                    properties: {
+                        value: {
+                            type: "number"
+                        }
+                    },
+                    required: ["value"]
+                }
+            }
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: optional-chain-captures
 // Verifies: optional chaining (?.) in JSX is resolved to .key() or wrapped in a lift-applied computation
 //   state.maybe?.value         → state.key("maybe", "value")
@@ -57,56 +107,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <span>{state.key("maybe", "value")}</span>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                return (<span>{__cfLift_1({ item: {
-                        maybe: item.key("maybe")
-                    } })}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            maybe: {
-                                type: "object",
-                                properties: {
-                                    value: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["value"]
-                            }
-                        }
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {state.key("items").mapWithPattern(__cfPattern_1, {})}
       </div>),
     };
 }, {

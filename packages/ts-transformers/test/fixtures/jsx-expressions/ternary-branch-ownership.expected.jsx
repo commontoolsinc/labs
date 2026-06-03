@@ -11,6 +11,22 @@ import { computed, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface TagEvent {
+    label: string;
+}
+interface Item {
+    name: string;
+    value: number;
+}
+type State = {
+    user: {
+        settings: {
+            notifications: boolean;
+        };
+    };
+    recentEvents: TagEvent[];
+    items: Item[];
+};
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -106,22 +122,55 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.recentEvents.length === 0);
-interface TagEvent {
-    label: string;
-}
-interface Item {
-    name: string;
-    value: number;
-}
-type State = {
-    user: {
-        settings: {
-            notifications: boolean;
-        };
-    };
-    recentEvents: TagEvent[];
-    items: Item[];
-};
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const event = __cf_pattern_input.key("element");
+    const idx = __cf_pattern_input.key("index");
+    return (<cf-hstack key={idx} gap="2">
+                  <span>{event.key("label")}</span>
+                </cf-hstack>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/TagEvent"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        TagEvent: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: ternary-branch-ownership
 // Verifies: ternary branches preserve the right ownership mode for lowered work
 //   state.user.settings.notifications ? "enabled" : "disabled"
@@ -171,55 +220,7 @@ export default pattern((state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ state: state }), <span>No events yet</span>, <div>
-              {state.key("recentEvents").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const event = __cf_pattern_input.key("element");
-                const idx = __cf_pattern_input.key("index");
-                return (<cf-hstack key={idx} gap="2">
-                  <span>{event.key("label")}</span>
-                </cf-hstack>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/TagEvent"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    TagEvent: {
-                        type: "object",
-                        properties: {
-                            label: {
-                                type: "string"
-                            }
-                        },
-                        required: ["label"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+              {state.key("recentEvents").mapWithPattern(__cfPattern_1, {})}
             </div>)}
         {__cfHelpers.ifElse({
             type: "boolean",

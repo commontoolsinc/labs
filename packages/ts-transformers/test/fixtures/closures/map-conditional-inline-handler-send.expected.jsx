@@ -11,6 +11,53 @@ import { Cell, handler, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    id: string;
+    label: string;
+}
+interface VoteEvent {
+    id: string;
+    step: "single" | "double";
+}
+interface State {
+    items: Item[];
+    canVote: boolean;
+    votes: VoteEvent[];
+}
+const castVote = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        votes: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/VoteEvent"
+            },
+            asCell: ["cell"]
+        }
+    },
+    required: ["votes"],
+    $defs: {
+        VoteEvent: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                step: {
+                    "enum": ["single", "double"]
+                }
+            },
+            required: ["id", "step"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, (_event, { votes }) => {
+    votes.set([
+        ...votes.get(),
+        { id: "module", step: "single" },
+    ]);
+});
 const __cfLift_1 = __cfHelpers.lift<{
     castVote: __cfHelpers.HandlerFactory<{ votes: __cfHelpers.Cell<VoteEvent[]>; }, unknown>;
     state: {
@@ -88,53 +135,96 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     id: item.id,
     step: "single",
 }));
-interface Item {
-    id: string;
-    label: string;
-}
-interface VoteEvent {
-    id: string;
-    step: "single" | "double";
-}
-interface State {
-    items: Item[];
-    canVote: boolean;
-    votes: VoteEvent[];
-}
-const castVote = handler({
-    type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    const boundCastVote = __cf_pattern_input.key("params", "boundCastVote");
+    return (<div>
+              {__cfHelpers.when({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "boolean"
+            }, {}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, state.key("canVote"), <button type="button" onClick={__cfHandler_1({
+        boundCastVote: boundCastVote,
+        item: {
+            id: item.key("id")
+        }
+    })}>
+                  {item.key("label")}
+                </button>)}
+            </div>);
+}, {
     type: "object",
     properties: {
-        votes: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/VoteEvent"
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        canVote: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["canVote"]
+                },
+                boundCastVote: {
+                    type: "unknown",
+                    asCell: ["stream"]
+                }
             },
-            asCell: ["cell"]
+            required: ["state", "boundCastVote"]
         }
     },
-    required: ["votes"],
+    required: ["element", "params"],
     $defs: {
-        VoteEvent: {
+        Item: {
             type: "object",
             properties: {
                 id: {
                     type: "string"
                 },
-                step: {
-                    "enum": ["single", "double"]
+                label: {
+                    type: "string"
                 }
             },
-            required: ["id", "step"]
+            required: ["id", "label"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, (_event, { votes }) => {
-    votes.set([
-        ...votes.get(),
-        { id: "module", step: "single" },
-    ]);
-});
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-conditional-inline-handler-send
 // Verifies: inline onClick handlers inside conditional JSX branches retain
 // imperative handler semantics when nested in reactive map callbacks.
@@ -151,96 +241,7 @@ export default pattern((state) => {
     }).for({ stream: "boundCastVote" }, true);
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                const boundCastVote = __cf_pattern_input.key("params", "boundCastVote");
-                return (<div>
-              {__cfHelpers.when({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "boolean"
-                        }, {}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, state.key("canVote"), <button type="button" onClick={__cfHandler_1({
-                    boundCastVote: boundCastVote,
-                    item: {
-                        id: item.key("id")
-                    }
-                })}>
-                  {item.key("label")}
-                </button>)}
-            </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    canVote: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["canVote"]
-                            },
-                            boundCastVote: {
-                                type: "unknown",
-                                asCell: ["stream"]
-                            }
-                        },
-                        required: ["state", "boundCastVote"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "string"
-                            },
-                            label: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "label"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     canVote: state.key("canVote")
                 },

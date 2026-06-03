@@ -11,6 +11,15 @@ import { computed, pattern, patternTool, type PatternToolResult, Writable } from
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const multiplier = __cfHelpers.__cf_data(new Writable(2, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
+const prefix = __cfHelpers.__cf_data(new Writable("Result: ", {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema).for("prefix", true));
+type Output = {
+    tool: PatternToolResult<Record<string, never>>;
+};
 const __cfLift_1 = __cfHelpers.lift<{
     value: number;
 }, string>({
@@ -26,15 +35,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ value }) => {
     return prefix.get() + String(value * multiplier.get());
 });
-const multiplier = __cfHelpers.__cf_data(new Writable(2, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
-const prefix = __cfHelpers.__cf_data(new Writable("Result: ", {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema).for("prefix", true));
-type Output = {
-    tool: PatternToolResult<Record<string, never>>;
-};
 // FIXTURE: patternTool-multiple-captures
 // Verifies: patternTool with no explicit extraParams auto-captures multiple module-scoped reactive vars
 //   patternTool(fn) → patternTool(fn, { prefix, multiplier })

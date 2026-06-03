@@ -11,6 +11,18 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    wishes: [
+        {
+            id: string;
+            status: string;
+        },
+        {
+            id: string;
+            status: string;
+        }
+    ];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         wishes: [{ id: string; status: string; }, { id: string; status: string; }];
@@ -155,18 +167,6 @@ const __cfLift_4 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.entries(state.wishes[1]));
-interface State {
-    wishes: [
-        {
-            id: string;
-            status: string;
-        },
-        {
-            id: string;
-            status: string;
-        }
-    ];
-}
 // FIXTURE: non-jsx-wildcard-traversal-call-roots
 // Verifies: wildcard traversal calls lower as whole call roots outside JSX
 export default pattern((state) => ({

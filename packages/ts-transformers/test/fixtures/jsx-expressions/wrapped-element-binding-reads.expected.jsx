@@ -24,6 +24,16 @@ import { pattern, UI, type VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+type Entry = {
+    name: string;
+};
+interface Input {
+    entries: Entry[];
+    prefix: string;
+}
+interface Output {
+    [UI]: VNode;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     entry: {
         name: string;
@@ -99,98 +109,89 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ entry, prefix }) => (entry as Entry).name === prefix);
-type Entry = {
-    name: string;
-};
-interface Input {
-    entries: Entry[];
-    prefix: string;
-}
-interface Output {
-    [UI]: VNode;
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    const prefix = __cf_pattern_input.key("params", "prefix");
+    // Parenthesized: (entry).name
+    const a = __cfLift_1({
+        entry: {
+            name: entry.key("name")
+        },
+        prefix: prefix
+    }).for("a", true);
+    // Non-null asserted: entry!.name
+    const b = __cfLift_2({
+        entry: {
+            name: entry.key("name")
+        },
+        prefix: prefix
+    }).for("b", true);
+    // 'as' asserted: (entry as Entry).name
+    const c = __cfLift_3({
+        entry: {
+            name: entry.key("name")
+        },
+        prefix: prefix
+    }).for("c", true);
+    return (<span data-a={a} data-b={b} data-c={c}>{entry.key("name")}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        },
+        params: {
+            type: "object",
+            properties: {
+                prefix: {
+                    type: "string"
+                }
+            },
+            required: ["prefix"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const prefix = __cf_pattern_input.key("prefix");
     return ({
         [UI]: (<div>
-      {entries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const entry = __cf_pattern_input.key("element");
-                const prefix = __cf_pattern_input.key("params", "prefix");
-                // Parenthesized: (entry).name
-                const a = __cfLift_1({
-                    entry: {
-                        name: entry.key("name")
-                    },
-                    prefix: prefix
-                }).for("a", true);
-                // Non-null asserted: entry!.name
-                const b = __cfLift_2({
-                    entry: {
-                        name: entry.key("name")
-                    },
-                    prefix: prefix
-                }).for("b", true);
-                // 'as' asserted: (entry as Entry).name
-                const c = __cfLift_3({
-                    entry: {
-                        name: entry.key("name")
-                    },
-                    prefix: prefix
-                }).for("c", true);
-                return (<span data-a={a} data-b={b} data-c={c}>{entry.key("name")}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Entry"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            prefix: {
-                                type: "string"
-                            }
-                        },
-                        required: ["prefix"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Entry: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+      {entries.mapWithPattern(__cfPattern_1, {
                 prefix: prefix
             })}
-    </div>)
+    </div>),
     });
 }, {
     type: "object",

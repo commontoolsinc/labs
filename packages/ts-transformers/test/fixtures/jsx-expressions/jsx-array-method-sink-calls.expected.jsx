@@ -11,6 +11,11 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    items: number[];
+    threshold: number;
+    factor: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: number[];
@@ -128,11 +133,6 @@ const __cfLift_4 = __cfHelpers.lift<{
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
     .trim());
-interface State {
-    items: number[];
-    threshold: number;
-    factor: number;
-}
 // FIXTURE: jsx-array-method-sink-calls
 // Verifies: direct JSX sink receiver-methods over structural array-method chains can use the shared post-closure path
 //   state.items.filter(fn).join(", ")                        → shared post-closure lift-applied computation over the sink call

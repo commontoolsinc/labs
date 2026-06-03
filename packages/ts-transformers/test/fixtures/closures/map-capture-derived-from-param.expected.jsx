@@ -11,6 +11,12 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    items: number[];
+    settings: {
+        multiplier: number;
+    };
+}
 const __cfLift_1 = __cfHelpers.lift<{
     item: number;
     settings: {
@@ -36,12 +42,59 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ item, settings }) => item * settings.multiplier);
-interface State {
-    items: number[];
-    settings: {
-        multiplier: number;
-    };
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const settings = __cf_pattern_input.key("params", "settings");
+    return (<span>{__cfLift_1({
+        item: item,
+        settings: {
+            multiplier: settings.key("multiplier")
+        }
+    })}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                settings: {
+                    type: "object",
+                    properties: {
+                        multiplier: {
+                            type: "number"
+                        }
+                    },
+                    required: ["multiplier"]
+                }
+            },
+            required: ["settings"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-capture-derived-from-param
 // Verifies: variable derived from state (const settings = state.settings) is captured correctly
 //   .map(fn) → .mapWithPattern(pattern(...), { settings: { multiplier: settings.key("multiplier") } })
@@ -50,59 +103,7 @@ export default pattern((state) => {
     const settings = state.key("settings");
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const settings = __cf_pattern_input.key("params", "settings");
-                return (<span>{__cfLift_1({
-                    item: item,
-                    settings: {
-                        multiplier: settings.key("multiplier")
-                    }
-                })}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            settings: {
-                                type: "object",
-                                properties: {
-                                    multiplier: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["multiplier"]
-                            }
-                        },
-                        required: ["settings"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 settings: {
                     multiplier: settings.key("multiplier")
                 }

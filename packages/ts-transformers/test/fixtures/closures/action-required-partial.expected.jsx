@@ -11,6 +11,12 @@ import { Cell, pattern, action } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface BaseState {
+    a?: Cell<string>;
+    b: Cell<number>;
+}
+// Required<BaseState> should make 'a' required in the schema
+type ReqState = Required<BaseState>;
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -31,12 +37,6 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["b"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => b.set(42));
-interface BaseState {
-    a?: Cell<string>;
-    b: Cell<number>;
-}
-// Required<BaseState> should make 'a' required in the schema
-type ReqState = Required<BaseState>;
 // FIXTURE: action-required-partial
 // Verifies: Required<BaseState> makes originally-optional properties required in capture schemas
 //   action(() => a.set("hello")) → handler(false, { a: { type: "string", asCell, required } }, ...)({ a })

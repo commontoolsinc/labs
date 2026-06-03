@@ -11,6 +11,11 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    counter: {
+        value: number;
+    };
+}
 const __cfLift_1 = __cfHelpers.lift<{
     value: __cfHelpers.ReadonlyCell<number>;
     state: {
@@ -45,11 +50,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ value, state }) => value.get() + state.counter.value);
-interface State {
-    counter: {
-        value: number;
-    };
-}
 // FIXTURE: computed-method-call-capture
 // Verifies: a deep property access on a captured object is restructured into a nested capture object
 //   computed(() => value.get() + state.counter.value) → lift(...)({ value, state: { counter: { value } } })

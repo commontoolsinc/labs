@@ -11,6 +11,9 @@ import { computed, pattern, patternTool, type PatternToolResult } from "commonfa
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+type Output = {
+    tool: PatternToolResult<Record<string, never>>;
+};
 const __cfLift_1 = __cfHelpers.lift<{
     query: string;
     content: string;
@@ -33,9 +36,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
     return content.split("\n").filter((c: string) => c.includes(query));
 });
-type Output = {
-    tool: PatternToolResult<Record<string, never>>;
-};
 // No external captures - should not be transformed by PatternToolStrategy
 // FIXTURE: patternTool-no-captures
 // Verifies: patternTool with no external captures leaves extraParams empty

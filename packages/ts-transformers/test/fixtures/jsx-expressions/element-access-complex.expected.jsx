@@ -11,6 +11,26 @@ import { ifElse, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    matrix: number[][];
+    row: number;
+    col: number;
+    items: string[];
+    arr: number[];
+    a: number;
+    b: number;
+    indices: number[];
+    nested: {
+        arrays: string[][];
+        index: number;
+    };
+    users: Array<{
+        name: string;
+        scores: number[];
+    }>;
+    selectedUser: number;
+    selectedScore: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         matrix: number[][];
@@ -581,26 +601,6 @@ const __cfLift_18 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.arr[0]! + state.arr[1]! + state.arr[2]!);
-interface State {
-    matrix: number[][];
-    row: number;
-    col: number;
-    items: string[];
-    arr: number[];
-    a: number;
-    b: number;
-    indices: number[];
-    nested: {
-        arrays: string[][];
-        index: number;
-    };
-    users: Array<{
-        name: string;
-        scores: number[];
-    }>;
-    selectedUser: number;
-    selectedScore: number;
-}
 // FIXTURE: element-access-complex
 // Verifies: complex element-access patterns (nested, computed, chained, conditional) are wrapped in a lift-applied computation
 //   state.matrix[state.row]![state.col]         → lift(...)({ matrix, row, col })

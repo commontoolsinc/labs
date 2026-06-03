@@ -4,6 +4,7 @@ import {
   SYNTHETIC_HANDLER_HOIST_PREFIX,
   SYNTHETIC_LIFT_HOIST_PREFIX,
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
+  SYNTHETIC_PATTERN_HOIST_PREFIX,
 } from "../ast/call-kind.ts";
 import {
   isDeclaredWithinFunction,
@@ -13,17 +14,19 @@ import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
-// `lift` and `handler` are intentionally absent. As of CT-1644 (Phase 2 of
-// derive→lift→selfcontained) `LiftHoistingTransformer` hoists the entire
-// `lift(...)` call to a module-scope const; CT-1655 extends that to the
-// `handler(...)` call. Hoisting the *callback* here too would double-hoist:
-// the two consts reference each other out of declaration order, a TDZ
-// ReferenceError at module load. This hoister keeps the builders whose
-// whole-call hoist hasn't landed yet (`pattern`/`patternTool`); when they get
-// the same treatment they move to LiftHoistingTransformer and this set empties
-// out, at which point this hoister can be deleted.
+// `lift`, `handler`, and `pattern` are intentionally absent. The whole-call
+// hoisting stage (`BuilderCallHoistingTransformer`) hoists the entire builder call to
+// a module-scope const: `lift` (CT-1644), then `handler` and `pattern`
+// (CT-1655). Hoisting the *callback* here too would double-hoist — the two
+// consts reference each other out of declaration order, a TDZ ReferenceError at
+// module load (observed directly: `const __cfPattern_1 = pattern(__cfModuleCallback_1, …)`
+// declared before `const __cfModuleCallback_1 = …`). Only `patternTool` remains:
+// its whole-call hoist is deferred because its per-instance captures thread
+// through the call's own second argument (unlike `pattern`, whose captures live
+// in the enclosing `mapWithPattern` params), so relocating the whole call to
+// module scope is not obviously capture-safe. When `patternTool` is resolved
+// this set empties and this hoister can be deleted.
 const HOISTABLE_BUILDER_NAMES = new Set([
-  "pattern",
   "patternTool",
 ]);
 
@@ -52,24 +55,26 @@ const HOISTABLE_BUILDER_NAMES = new Set([
  *     count as "uses module-scoped references" and incorrectly promote
  *     the outer callback to hoistable. The exclusion keeps the inner
  *     and outer hoist decisions independent.
- *   - `__cfLift` / `__cfHandler` (prefixes): the whole-call hoisting stage's
- *     output (`LiftHoistingTransformer`, CT-1644 lift / CT-1655 handler). A
- *     hoisted `lift(...)` / `handler(...)` call leaves a `__cfLift_N(captures)`
- *     / `__cfHandler_N(captures)` reference at its original site. If that site
- *     sits inside a callback this hoister analyzes (e.g. a pattern callback),
- *     the reference must not count as a user-authored module-scoped reference
- *     — same independence rationale as `__cfModuleCallback` above. (Today the
- *     hoisting stage runs *after* this one, so these references don't yet exist
- *     when this hoister analyzes; the exclusion is kept symmetric with the hoist
- *     prefixes so it stays correct as the unified phase converges and is robust
- *     to any future re-ordering.)
+ *   - `__cfLift` / `__cfHandler` / `__cfPattern` (prefixes): the whole-call
+ *     hoisting stage's output (`BuilderCallHoistingTransformer`, CT-1644 lift /
+ *     CT-1655 handler + pattern). A hoisted `lift(...)` / `handler(...)` /
+ *     `pattern(...)` call leaves a `__cfLift_N(captures)` /
+ *     `__cfHandler_N(captures)` / `__cfPattern_N` reference at its original
+ *     site. If that site sits inside a callback this hoister analyzes (e.g. a
+ *     patternTool callback), the reference must not count as a user-authored
+ *     module-scoped reference — same independence rationale as
+ *     `__cfModuleCallback` above. (Today the hoisting stage runs *after* this
+ *     one, so these references don't yet exist when this hoister analyzes; the
+ *     exclusion is kept symmetric with the hoist prefixes so it stays correct
+ *     as the unified phase converges and is robust to any future re-ordering.)
  */
 function isTransformerInjectedIdentifier(text: string): boolean {
   return text === CF_HELPERS_IDENTIFIER ||
     text.startsWith(FUNCTION_HARDENING_HELPER_NAME) ||
     text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX) ||
     text.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX) ||
-    text.startsWith(SYNTHETIC_HANDLER_HOIST_PREFIX);
+    text.startsWith(SYNTHETIC_HANDLER_HOIST_PREFIX) ||
+    text.startsWith(SYNTHETIC_PATTERN_HOIST_PREFIX);
 }
 
 export function hoistModuleScopedBuilderCallbacks(
@@ -263,7 +268,7 @@ function resolveHoistTarget(
 
   // Lift-applied shape (`__cfHelpers.lift(...)(input)`): the outer call's
   // callee is itself a call expression. As of CT-1644 this hoister no longer
-  // touches lift — `LiftHoistingTransformer` (which runs after SchemaInjection)
+  // touches lift — `BuilderCallHoistingTransformer` (which runs after SchemaInjection)
   // hoists the WHOLE lift call to module scope, callback inline. Hoisting the
   // callback here as well would double-hoist into a TDZ at module load. Refuse
   // all applied-call shapes.

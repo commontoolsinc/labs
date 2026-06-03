@@ -11,6 +11,14 @@ import { ifElse, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    isActive: boolean;
+    count: number;
+    userType: string;
+    score: number;
+    hasPermission: boolean;
+    isPremium: boolean;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -242,14 +250,6 @@ const __cfLift_11 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 5);
-interface State {
-    isActive: boolean;
-    count: number;
-    userType: string;
-    score: number;
-    hasPermission: boolean;
-    isPremium: boolean;
-}
 // FIXTURE: jsx-conditional-rendering-no-name
 // Verifies: same conditional rendering transforms work when pattern has no NAME export
 //   cond ? a : b             → ifElse(schema..., cond, a, b)

@@ -11,6 +11,14 @@ import { cell, computed, pattern, patternTool, type PatternToolResult } from "co
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const content = __cfHelpers.__cf_data(cell("Hello world\nGoodbye world", {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema).for("content", true));
+type Output = {
+    grepTool: PatternToolResult<{
+        content: string;
+    }>;
+};
 const __cfLift_1 = __cfHelpers.lift<{
     query: string;
     content: string;
@@ -33,14 +41,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
     return content.split("\n").filter((c: string) => c.includes(query));
 });
-const content = __cfHelpers.__cf_data(cell("Hello world\nGoodbye world", {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema).for("content", true));
-type Output = {
-    grepTool: PatternToolResult<{
-        content: string;
-    }>;
-};
 // FIXTURE: patternTool-basic-capture
 // Verifies: patternTool captures a module-scoped cell as an extraParam
 //   patternTool(fn, { content }) → patternTool(fn, { content }) (content passed through)

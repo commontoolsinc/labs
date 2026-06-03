@@ -11,6 +11,10 @@ import { Default, NAME, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface PatternState {
+    count: Default<number, 0>;
+    label: Default<string, "">;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -32,10 +36,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0);
-interface PatternState {
-    count: Default<number, 0>;
-    label: Default<string, "">;
-}
 // FIXTURE: builder-conditional
 // Verifies: ternary in JSX is transformed to ifElse() with a lift-applied condition
 //   state.count > 0 ? <p>A</p> : <p>B</p> → __cfHelpers.ifElse(...schemas, lift(...)({...}), <p>A</p>, <p>B</p>)

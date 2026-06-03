@@ -18,6 +18,23 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Message {
+    author: string;
+    body: string;
+}
+interface Input {
+    name: Writable<Default<string, "">>;
+    selectedRoom: Writable<Default<{
+        messages: Message[];
+    }, {
+        messages: [
+        ];
+    }>>;
+}
+interface Output {
+    [UI]: VNode;
+}
+const senderName = __cfHardenFn((name?: string) => name?.trim() || "Anonymous");
 const __cfLift_1 = __cfHelpers.lift<{
     selectedRoom: __cfHelpers.ReadonlyCell<Default<{
         messages: Message[];
@@ -128,117 +145,101 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ message }) => message.author === "Alice");
-interface Message {
-    author: string;
-    body: string;
-}
-interface Input {
-    name: Writable<Default<string, "">>;
-    selectedRoom: Writable<Default<{
-        messages: Message[];
-    }, {
-        messages: [
-        ];
-    }>>;
-}
-interface Output {
-    [UI]: VNode;
-}
-const senderName = __cfHardenFn((name?: string) => name?.trim() || "Anonymous");
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const message = __cf_pattern_input.key("element");
+    const name = __cf_pattern_input.key("params", "name");
+    const isMine = __cfLift_2({
+        message: {
+            author: message.key("author")
+        },
+        name: name
+    }).for("isMine", true);
+    const isKnownAuthor = __cfLift_3({ message: {
+            author: message.key("author")
+        } }).for("isKnownAuthor", true);
+    return (<div data-author-kind={__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        "enum": ["known", "other"]
+    } as const satisfies __cfHelpers.JSONSchema, isKnownAuthor, "known", "other")} style={{ justifyContent: __cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            "enum": ["flex-end", "flex-start"]
+        } as const satisfies __cfHelpers.JSONSchema, isMine, "flex-end", "flex-start") }}>
+              {message.key("author")}
+              {message.key("body")}
+            </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Message"
+        },
+        params: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string",
+                    "default": "",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Message: {
+            type: "object",
+            properties: {
+                author: {
+                    type: "string"
+                },
+                body: {
+                    type: "string"
+                }
+            },
+            required: ["author", "body"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const name = __cf_pattern_input.key("name");
     const selectedRoom = __cf_pattern_input.key("selectedRoom");
     return {
         [UI]: (<div>
-        {__cfLift_1({ selectedRoom: selectedRoom }).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const message = __cf_pattern_input.key("element");
-            const name = __cf_pattern_input.key("params", "name");
-            const isMine = __cfLift_2({
-                message: {
-                    author: message.key("author")
-                },
-                name: name
-            }).for("isMine", true);
-            const isKnownAuthor = __cfLift_3({ message: {
-                    author: message.key("author")
-                } }).for("isKnownAuthor", true);
-            return (<div data-author-kind={__cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                "enum": ["known", "other"]
-            } as const satisfies __cfHelpers.JSONSchema, isKnownAuthor, "known", "other")} style={{ justifyContent: __cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    "enum": ["flex-end", "flex-start"]
-                } as const satisfies __cfHelpers.JSONSchema, isMine, "flex-end", "flex-start") }}>
-              {message.key("author")}
-              {message.key("body")}
-            </div>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Message"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string",
-                            "default": "",
-                            asCell: ["readonly"]
-                        }
-                    },
-                    required: ["name"]
-                }
-            },
-            required: ["element", "params"],
-            $defs: {
-                Message: {
-                    type: "object",
-                    properties: {
-                        author: {
-                            type: "string"
-                        },
-                        body: {
-                            type: "string"
-                        }
-                    },
-                    required: ["author", "body"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {
+        {__cfLift_1({ selectedRoom: selectedRoom }).mapWithPattern(__cfPattern_1, {
             name: name
         })}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",

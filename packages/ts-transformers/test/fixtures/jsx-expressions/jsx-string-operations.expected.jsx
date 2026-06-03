@@ -11,6 +11,13 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    firstName: string;
+    lastName: string;
+    title: string;
+    message: string;
+    count: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         title: string;
@@ -295,13 +302,6 @@ const __cfLift_12 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => "Count: " + state.count);
-interface State {
-    firstName: string;
-    lastName: string;
-    title: string;
-    message: string;
-    count: number;
-}
 // FIXTURE: jsx-string-operations
 // Verifies: string concatenation, template literals, and string methods in JSX are wrapped in a lift-applied computation
 //   state.title + ": " + state.firstName → lift(...)({ title, firstName })

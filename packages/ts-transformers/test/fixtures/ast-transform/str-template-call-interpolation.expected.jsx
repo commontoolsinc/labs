@@ -11,6 +11,13 @@ import { NAME, pattern, str } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface PatternState {
+    value: number;
+}
+function format(n: number): string {
+    return `#${n}`;
+}
+__cfHardenFn(format);
 const __cfLift_1 = __cfHelpers.lift<{
     cell: {
         value: number;
@@ -53,13 +60,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value + 1);
-interface PatternState {
-    value: number;
-}
-function format(n: number): string {
-    return `#${n}`;
-}
-__cfHardenFn(format);
 // FIXTURE: str-template-call-interpolation
 // Verifies: reactive lowering of expressions interpolated into a str`` tagged template.
 //   The str runtime lifts its interpolation over the values it receives, so any value

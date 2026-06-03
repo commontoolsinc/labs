@@ -21,6 +21,19 @@ import { Cell, computed, Default, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Tag {
+    name: string;
+    active: boolean;
+}
+interface Item {
+    label: string;
+    tags: Tag[];
+}
+interface PatternInput {
+    items?: Cell<Default<Item[], [
+    ]>>;
+    showInactive?: Default<boolean, false>;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.ReadonlyCell<unknown[]>;
 }, boolean>({
@@ -67,19 +80,174 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.tags.length > 0);
-interface Tag {
-    name: string;
-    active: boolean;
-}
-interface Item {
-    label: string;
-    tags: Tag[];
-}
-interface PatternInput {
-    items?: Cell<Default<Item[], [
-    ]>>;
-    showInactive?: Default<boolean, false>;
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const tag = __cf_pattern_input.key("element");
+    const showInactive = __cf_pattern_input.key("params", "showInactive");
+    return (<li>
+                    {/* This ternary should be transformed to ifElse */}
+                    {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, tag.key("active"), tag.key("name"), __cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, showInactive, `(${tag.key("name")})`, ""))}
+                  </li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Tag"
+        },
+        params: {
+            type: "object",
+            properties: {
+                showInactive: {
+                    type: "boolean",
+                    "default": false
+                }
+            },
+            required: ["showInactive"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Tag: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["name", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const showInactive = __cf_pattern_input.key("params", "showInactive");
+    return (<div>
+              {/* Ternary in outer map, outside inner map - should also be ifElse */}
+              <strong>{__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ item: {
+            tags: {
+                length: item.key("tags", "length")
+            }
+        } }), item.key("label"), "No tags")}</strong>
+              <ul>
+                {item.key("tags").mapWithPattern(__cfPattern_1, {
+            showInactive: showInactive
+        })}
+              </ul>
+            </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                showInactive: {
+                    type: "boolean",
+                    "default": false
+                }
+            },
+            required: ["showInactive"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                tags: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Tag"
+                    }
+                }
+            },
+            required: ["label", "tags"]
+        },
+        Tag: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["name", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-ternary-inside-nested-map
 // Verifies: ternaries inside nested .map() callbacks are transformed to ifElse
 //   outer ternary → ifElse(hasItems, items.mapWithPattern(...), <p>No items</p>)
@@ -111,173 +279,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const item = __cf_pattern_input.key("element");
-            const showInactive = __cf_pattern_input.key("params", "showInactive");
-            return (<div>
-              {/* Ternary in outer map, outside inner map - should also be ifElse */}
-              <strong>{__cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ item: {
-                    tags: {
-                        length: item.key("tags", "length")
-                    }
-                } }), item.key("label"), "No tags")}</strong>
-              <ul>
-                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const tag = __cf_pattern_input.key("element");
-                    const showInactive = __cf_pattern_input.key("params", "showInactive");
-                    return (<li>
-                    {/* This ternary should be transformed to ifElse */}
-                    {__cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, tag.key("active"), tag.key("name"), __cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, showInactive, `(${tag.key("name")})`, ""))}
-                  </li>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Tag"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                showInactive: {
-                                    type: "boolean",
-                                    "default": false
-                                }
-                            },
-                            required: ["showInactive"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Tag: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                },
-                                active: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["name", "active"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
-                    showInactive: showInactive
-                })}
-              </ul>
-            </div>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        showInactive: {
-                            type: "boolean",
-                            "default": false
-                        }
-                    },
-                    required: ["showInactive"]
-                }
-            },
-            required: ["element", "params"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Tag"
-                            }
-                        }
-                    },
-                    required: ["label", "tags"]
-                },
-                Tag: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["name", "active"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {
+        } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfPattern_2, {
             showInactive: showInactive
         }), <p>No items</p>)}
       </div>),

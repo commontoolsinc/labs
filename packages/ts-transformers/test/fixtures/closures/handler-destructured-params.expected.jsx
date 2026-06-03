@@ -11,6 +11,10 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    selectedValue: Cell<string>;
+    lastItems: Cell<string>;
+}
 const __cfHandler_1 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -59,10 +63,6 @@ const __cfHandler_1 = __cfHelpers.handler({
     state.selectedValue.set(value);
     state.lastItems.set(items.map(i => i.label).join(", "));
 });
-interface State {
-    selectedValue: Cell<string>;
-    lastItems: Cell<string>;
-}
 // FIXTURE: handler-destructured-params
 // Verifies: destructured event parameter in inline handler is preserved and schema-typed
 //   onct-change={({ detail: { value, items } }) => ...} → handler(event schema with detail.value + detail.items, capture schema, ({ detail: { value, items } }, { state }) => ...)({ state })

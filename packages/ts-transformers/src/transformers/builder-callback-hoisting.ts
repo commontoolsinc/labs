@@ -3,15 +3,22 @@ import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { hoistModuleScopedBuilderCallbacks } from "../closures/module-scope-callback-hoisting.ts";
 
 /**
- * Hoist builder callbacks (handler/pattern/patternTool) whose body closes
- * only over module-level symbols. The hoisted form becomes
- * `const __cfModuleCallback_N = ...` at module scope, replacing the inline
- * callback at the call site with a reference to the new name.
+ * Hoist builder callbacks whose body closes only over module-level symbols.
+ * The hoisted form becomes `const __cfModuleCallback_N = ...` at module scope,
+ * replacing the inline callback at the call site with a reference to the new
+ * name.
  *
- * `lift` is NOT handled here: as of CT-1644 `LiftHoistingTransformer` (which
- * runs after SchemaInjection) hoists the whole `lift(...)` call to module scope
- * with its callback inline. When `handler` and `pattern` get the same
- * whole-call treatment, this stage folds into that one unified hoisting phase.
+ * Only `patternTool` is handled here now. `lift` (CT-1644), `handler`, and
+ * `pattern` (CT-1655) get their WHOLE call hoisted by
+ * `BuilderCallHoistingTransformer` (which runs after SchemaInjection) with the
+ * callback inline; hoisting the callback here too would double-hoist into a
+ * module-load TDZ, so they are removed from this stage's set. `patternTool`
+ * remains because its per-instance captures thread through the call's own
+ * second argument (unlike `pattern`, whose captures live in the enclosing
+ * `mapWithPattern` params), so relocating its whole call is not obviously
+ * capture-safe — pending follow-up. When `patternTool` is resolved this stage
+ * empties and can be deleted, leaving `BuilderCallHoistingTransformer` as the
+ * sole module-scope hoisting phase.
  *
  * This stage runs after `PatternCallbackLoweringTransformer` so that
  * pattern callbacks have their in-place lowerings (the

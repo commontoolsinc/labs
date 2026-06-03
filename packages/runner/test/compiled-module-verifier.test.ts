@@ -107,6 +107,33 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts a hoisted pattern(...) call at module scope", () => {
+    // CT-1655: extends whole-call hoisting to `pattern`. A reactive map lowers
+    // to `receiver.mapWithPattern(pattern(cb, inSchema, outSchema), { params })`;
+    // the bare `pattern(...)` (the first mapWithPattern argument) is hoisted to a
+    // module-scope const `__cfPattern_N = pattern(...)` with the callback inline,
+    // and the call site reads `mapWithPattern(__cfPattern_N, { params })`. The
+    // verifier must accept this trusted-builder call at module scope and verify
+    // its callback (index 0) there.
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfPattern_1 = (0, commonfabric_1.pattern)((__cf_pattern_input) => {
+      const item = __cf_pattern_input.key("element");
+      return item.key("name");
+    }, false, false);
+    exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
+      names: __cf_pattern_input.key("items").mapWithPattern(__cfPattern_1, {}),
+    }));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts a previously parsed compiled bundle", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

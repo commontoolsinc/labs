@@ -21,6 +21,10 @@ import { computed, NAME, pattern, UI, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Charm {
+    id: string;
+    name: string;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     allCharms: {
         length: number;
@@ -63,10 +67,52 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ allCharms }) => allCharms.length);
-interface Charm {
-    id: string;
-    name: string;
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const charm = __cf_pattern_input.key("element");
+    return (<li>{charm.key("name")}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Charm"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Charm: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-array-length
 // Verifies: computed(() => expr) with .length access on an OpaqueRef<T[]> is closure-extracted
 //   computed(() => allCharms.length) → lift(({ allCharms }) => allCharms.length)({ allCharms: { length: allCharms.length } })
@@ -111,52 +157,7 @@ export default pattern(() => {
                 length: allCharms.key("length")
             } })}</span>
         <ul>
-          {allCharms.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const charm = __cf_pattern_input.key("element");
-                return (<li>{charm.key("name")}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Charm"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Charm: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "string"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+          {allCharms.mapWithPattern(__cfPattern_1, {})}
         </ul>
       </div>),
     };

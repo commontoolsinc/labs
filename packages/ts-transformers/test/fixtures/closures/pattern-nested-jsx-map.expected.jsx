@@ -22,6 +22,18 @@ import { Cell, computed, Default, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Tag {
+    name: string;
+}
+interface Item {
+    label: string;
+    tags: Tag[];
+    selectedIndex: number;
+}
+interface PatternInput {
+    items?: Cell<Default<Item[], [
+    ]>>;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.ReadonlyCell<unknown[]>;
 }, boolean>({
@@ -64,18 +76,155 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ i, item }) => i === item.selectedIndex);
-interface Tag {
-    name: string;
-}
-interface Item {
-    label: string;
-    tags: Tag[];
-    selectedIndex: number;
-}
-interface PatternInput {
-    items?: Cell<Default<Item[], [
-    ]>>;
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const tag = __cf_pattern_input.key("element");
+    const i = __cf_pattern_input.key("index");
+    const item = __cf_pattern_input.key("params", "item");
+    return (<li>
+                    {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        "enum": ["", "* "]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({
+        i: i,
+        item: {
+            selectedIndex: item.key("selectedIndex")
+        }
+    }), "* ", "")}
+                    {tag.key("name")}
+                  </li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Tag"
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                item: {
+                    type: "object",
+                    properties: {
+                        selectedIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["selectedIndex"]
+                }
+            },
+            required: ["item"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Tag: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return (<div>
+              <strong>{item.key("label")}</strong>
+              <ul>
+                {item.key("tags").mapWithPattern(__cfPattern_1, {
+            item: {
+                selectedIndex: item.key("selectedIndex")
+            }
+        })}
+              </ul>
+            </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                tags: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Tag"
+                    }
+                },
+                selectedIndex: {
+                    type: "number"
+                }
+            },
+            required: ["label", "tags", "selectedIndex"]
+        },
+        Tag: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-nested-jsx-map
 // Verifies: nested .map() calls in JSX both become mapWithPattern, including inside ifElse
 //   items.map((item) => ...) → items.mapWithPattern(pattern(...))
@@ -108,154 +257,7 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const item = __cf_pattern_input.key("element");
-            return (<div>
-              <strong>{item.key("label")}</strong>
-              <ul>
-                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const tag = __cf_pattern_input.key("element");
-                    const i = __cf_pattern_input.key("index");
-                    const item = __cf_pattern_input.key("params", "item");
-                    return (<li>
-                    {__cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        "enum": ["", "* "]
-                    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({
-                        i: i,
-                        item: {
-                            selectedIndex: item.key("selectedIndex")
-                        }
-                    }), "* ", "")}
-                    {tag.key("name")}
-                  </li>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Tag"
-                        },
-                        index: {
-                            type: "number"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                item: {
-                                    type: "object",
-                                    properties: {
-                                        selectedIndex: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["selectedIndex"]
-                                }
-                            },
-                            required: ["item"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Tag: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
-                    item: {
-                        selectedIndex: item.key("selectedIndex")
-                    }
-                })}
-              </ul>
-            </div>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["element"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Tag"
-                            }
-                        },
-                        selectedIndex: {
-                            type: "number"
-                        }
-                    },
-                    required: ["label", "tags", "selectedIndex"]
-                },
-                Tag: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {}), <p>No items</p>)}
+        } as const satisfies __cfHelpers.JSONSchema, hasItems, items.mapWithPattern(__cfPattern_2, {}), <p>No items</p>)}
       </div>),
     };
 }, {

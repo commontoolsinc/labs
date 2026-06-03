@@ -16,6 +16,59 @@ interface State {
         name: string;
     }>;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const selected = __cf_pattern_input.key("params", "selected");
+    return (<span>{item.key("name")} {selected}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                selected: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "null"
+                        }],
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["selected"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-capture-writable-of
 // Verifies: new Writable() variable closed over in .map() is captured with asCell annotation
 //   .map(fn) → .mapWithPattern(pattern(...), { selected: selected })
@@ -30,59 +83,7 @@ export default pattern((state) => {
     } as const satisfies __cfHelpers.JSONSchema).for("selected", true);
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const selected = __cf_pattern_input.key("params", "selected");
-                return (<span>{item.key("name")} {selected}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            selected: {
-                                anyOf: [{
-                                        type: "string"
-                                    }, {
-                                        type: "null"
-                                    }],
-                                asCell: ["readonly"]
-                            }
-                        },
-                        required: ["selected"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 selected: selected
             })}
       </div>),

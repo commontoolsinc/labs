@@ -27,6 +27,57 @@ import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commonf
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Comment {
+    id: string;
+    text: string;
+    flagged: boolean;
+    reactions: string[];
+}
+interface Thread {
+    id: string;
+    title: string;
+    muted: boolean;
+    comments: Comment[];
+}
+// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
+const jumpToComment = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        selectedCommentId: {
+            type: ["string", "undefined"]
+        },
+        threadId: {
+            type: "string"
+        },
+        commentId: {
+            type: "string"
+        },
+        lane: {
+            type: "string"
+        },
+        outerIndex: {
+            type: "number"
+        },
+        innerIndex: {
+            type: "number"
+        }
+    },
+    required: ["selectedCommentId", "threadId", "commentId", "lane", "outerIndex", "innerIndex"]
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
+// [TRANSFORM] lift: input and output schemas injected
+const passthroughLabels = lift({
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, (labels: string[]) => labels);
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         threads: Thread[];
@@ -284,6 +335,91 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state, comment }) => `${state.lane}:${comment.id}`);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const comment = __cf_pattern_input.key("element");
+    const reboundIndex = __cf_pattern_input.key("index");
+    const outerIndex = __cf_pattern_input.params.outerIndex;
+    const state = __cf_pattern_input.key("params", "state");
+    return (<aside>
+              {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({
+        reboundIndex: reboundIndex,
+        outerIndex: outerIndex
+    }), __cfLift_4({
+        state: {
+            lane: state.key("lane")
+        },
+        comment: {
+            id: comment.key("id")
+        }
+    }), comment.key("text"))}
+            </aside>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                text: {
+                    type: "string"
+                }
+            },
+            required: ["id", "text"]
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                outerIndex: {
+                    type: "number"
+                },
+                state: {
+                    type: "object",
+                    properties: {
+                        lane: {
+                            type: "string"
+                        }
+                    },
+                    required: ["lane"]
+                }
+            },
+            required: ["outerIndex", "state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     edgeIndex: number;
     outerIndex: number;
@@ -326,6 +462,80 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state, edge }) => `${state.lane}:${edge}`);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const edge = __cf_pattern_input.key("element");
+    const edgeIndex = __cf_pattern_input.key("index");
+    const outerIndex = __cf_pattern_input.params.outerIndex;
+    const state = __cf_pattern_input.key("params", "state");
+    return (<small>
+              {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({
+        edgeIndex: edgeIndex,
+        outerIndex: outerIndex
+    }), __cfLift_6({
+        state: {
+            lane: state.key("lane")
+        },
+        edge: edge
+    }), edge)}
+            </small>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                outerIndex: {
+                    type: "number"
+                },
+                state: {
+                    type: "object",
+                    properties: {
+                        lane: {
+                            type: "string"
+                        }
+                    },
+                    required: ["lane"]
+                }
+            },
+            required: ["outerIndex", "state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     visibleThreads: {
         thread: {
@@ -489,91 +699,7 @@ visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
             </div>))}
           {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested computed() — reactive even inside outer computed */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {reboundComments.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const comment = __cf_pattern_input.key("element");
-            const reboundIndex = __cf_pattern_input.key("index");
-            const outerIndex = __cf_pattern_input.params.outerIndex;
-            const state = __cf_pattern_input.key("params", "state");
-            return (<aside>
-              {__cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({
-                reboundIndex: reboundIndex,
-                outerIndex: outerIndex
-            }), __cfLift_4({
-                state: {
-                    lane: state.key("lane")
-                },
-                comment: {
-                    id: comment.key("id")
-                }
-            }), comment.key("text"))}
-            </aside>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "string"
-                        },
-                        text: {
-                            type: "string"
-                        }
-                    },
-                    required: ["id", "text"]
-                },
-                index: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        outerIndex: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                lane: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["lane"]
-                        }
-                    },
-                    required: ["outerIndex", "state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {
+          {reboundComments.mapWithPattern(__cfPattern_1, {
             outerIndex: outerIndex,
             state: {
                 lane: state.lane
@@ -581,80 +707,7 @@ visibleThreads.map(({ thread, outerIndex, visibleComments }) => {
         })}
           {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer computed */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {liftedSeparators.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const edge = __cf_pattern_input.key("element");
-            const edgeIndex = __cf_pattern_input.key("index");
-            const outerIndex = __cf_pattern_input.params.outerIndex;
-            const state = __cf_pattern_input.key("params", "state");
-            return (<small>
-              {__cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({
-                edgeIndex: edgeIndex,
-                outerIndex: outerIndex
-            }), __cfLift_6({
-                state: {
-                    lane: state.key("lane")
-                },
-                edge: edge
-            }), edge)}
-            </small>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "string"
-                },
-                index: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        outerIndex: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                lane: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["lane"]
-                        }
-                    },
-                    required: ["outerIndex", "state"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {
+          {liftedSeparators.mapWithPattern(__cfPattern_2, {
             outerIndex: outerIndex,
             state: {
                 lane: state.lane
@@ -702,57 +755,130 @@ const __cfLift_9 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state, label }) => `${state.lane}:${label}`);
-interface Comment {
-    id: string;
-    text: string;
-    flagged: boolean;
-    reactions: string[];
-}
-interface Thread {
-    id: string;
-    title: string;
-    muted: boolean;
-    comments: Comment[];
-}
-// [TRANSFORM] handler: event schema (true=unknown) and state schema injected
-const jumpToComment = handler({
-    type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
+const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
+    const label = __cf_pattern_input.key("element");
+    const labelIndex = __cf_pattern_input.key("index");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<header data-lane-label={labelIndex}>
+            {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_8({ labelIndex: labelIndex }), __cfLift_9({
+        state: {
+            lane: state.key("lane")
+        },
+        label: label
+    }), label)}
+          </header>);
+}, {
     type: "object",
     properties: {
-        selectedCommentId: {
-            type: ["string", "undefined"]
-        },
-        threadId: {
+        element: {
             type: "string"
         },
-        commentId: {
-            type: "string"
-        },
-        lane: {
-            type: "string"
-        },
-        outerIndex: {
+        index: {
             type: "number"
         },
-        innerIndex: {
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        lane: {
+                            type: "string"
+                        }
+                    },
+                    required: ["lane"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    const rowIndex = __cf_pattern_input.key("index");
+    return (<section data-row={rowIndex}>{row}</section>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/JSXElement"
+        },
+        index: {
             type: "number"
         }
     },
-    required: ["selectedCommentId", "threadId", "commentId", "lane", "outerIndex", "innerIndex"]
-} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-// [TRANSFORM] lift: input and output schemas injected
-const passthroughLabels = lift({
-    type: "array",
-    items: {
-        type: "string"
+    required: ["element"],
+    $defs: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }]
+        },
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
     }
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "array",
-    items: {
-        type: "string"
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
     }
-} as const satisfies __cfHelpers.JSONSchema, (labels: string[]) => labels);
+} as const satisfies __cfHelpers.JSONSchema);
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
     // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
@@ -777,135 +903,13 @@ export default pattern((state) => {
         [UI]: (<div>
         {/* [TRANSFORM] .map() → mapWithPattern: laneLabels is output of lift() in pattern context — reactive */}
         {/* [TRANSFORM] ternary lowered: labelIndex===0 ? `${state.lane}:${label}` : label → ifElse(lift(cond), lift(true-branch), label) */}
-        {laneLabels.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const label = __cf_pattern_input.key("element");
-                const labelIndex = __cf_pattern_input.key("index");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<header data-lane-label={labelIndex}>
-            {__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfLift_8({ labelIndex: labelIndex }), __cfLift_9({
-                    state: {
-                        lane: state.key("lane")
-                    },
-                    label: label
-                }), label)}
-          </header>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    lane: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["lane"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {laneLabels.mapWithPattern(__cfPattern_3, {
                 state: {
                     lane: state.key("lane")
                 }
             })}
         {/* [TRANSFORM] .map() → mapWithPattern: threadRows is output of computed() — reactive, back in pattern-owned UI */}
-        {threadRows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const row = __cf_pattern_input.key("element");
-                const rowIndex = __cf_pattern_input.key("index");
-                return (<section data-row={rowIndex}>{row}</section>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/JSXElement"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    JSXElement: {
-                        anyOf: [{
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }, {
-                                $ref: "#/$defs/UIRenderable"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }]
-                    },
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {threadRows.mapWithPattern(__cfPattern_4, {})}
       </div>),
     };
 }, {

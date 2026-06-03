@@ -11,9 +11,6 @@ import { computed as computedAlias } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(false, (): AliasResult => ({
-    length: state.text.length,
-}));
 type AliasInput = {
     text: string;
 };
@@ -21,6 +18,9 @@ type AliasResult = {
     length: number;
 };
 declare const state: AliasInput;
+const __cfLift_1 = __cfHelpers.lift(false, (): AliasResult => ({
+    length: state.text.length,
+}));
 // FIXTURE: schema-generation-computed-alias
 // Verifies: a reactive builder imported under an alias still gets schema injection
 //   computedAlias((): AliasResult => ...) → captures `state` and lowers to lift(inputSchema, outputSchema, ...)

@@ -11,6 +11,14 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const dynamicKey = "value" as const;
+interface Item {
+    value: number;
+    other: number;
+}
+interface State {
+    items: Item[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     element: any;
     __cf_val_key: any;
@@ -24,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ element, __cf_val_key }) => element[__cf_val_key]);
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const element = __cf_pattern_input.key("element");
     const __cf_val_key = dynamicKey;
     const val = __cfLift_1({
@@ -32,15 +40,49 @@ const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
         __cf_val_key: __cf_val_key
     }).for("val", true);
     return (<span>{val}</span>);
-});
-const dynamicKey = "value" as const;
-interface Item {
-    value: number;
-    other: number;
-}
-interface State {
-    items: Item[];
-}
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                },
+                other: {
+                    type: "number"
+                }
+            },
+            required: ["value", "other"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-destructured-computed-alias
 // Verifies: computed property key with a const-asserted identifier is lowered to lift-applied
 //   { [dynamicKey]: val } → __cf_val_key = dynamicKey; lift(...)(...element[__cf_val_key])
@@ -49,49 +91,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            value: {
-                                type: "number"
-                            },
-                            other: {
-                                type: "number"
-                            }
-                        },
-                        required: ["value", "other"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {state.key("items").mapWithPattern(__cfPattern_1, {})}
       </div>),
     };
 }, {

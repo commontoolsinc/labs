@@ -11,6 +11,23 @@ import { Cell, computed, handler, NAME, pattern, str, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        values: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["values"]
+} as const satisfies __cfHelpers.JSONSchema, (_, state: {
+    values: Cell<string[]>;
+}) => {
+    state.values.push(Math.random().toString(36).substring(2, 15));
+});
 const __cfLift_1 = __cfHelpers.lift<{
     values: unknown[];
 }, void>({
@@ -29,23 +46,44 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ values }) => {
     console.log("values#", values?.length);
 });
-const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const value = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return (<div>
+                {index}: {value}
+              </div>);
+}, {
     type: "object",
     properties: {
-        values: {
-            type: "array",
-            items: {
-                type: "string"
-            },
-            asCell: ["writeonly"]
+        element: {
+            type: "string"
+        },
+        index: {
+            type: "number"
         }
     },
-    required: ["values"]
-} as const satisfies __cfHelpers.JSONSchema, (_, state: {
-    values: Cell<string[]>;
-}) => {
-    state.values.push(Math.random().toString(36).substring(2, 15));
-});
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-array-map
 // Verifies: .map() on a reactive array is transformed to .mapWithPattern()
 //   values.map((value, index) => JSX)  → values.mapWithPattern(pattern(fn, elementSchema, outputSchema), {})
@@ -61,44 +99,7 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
-            {values.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const value = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                return (<div>
-                {index}: {value}
-              </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+            {values.mapWithPattern(__cfPattern_1, {})}
           </div>
         </div>),
         values,

@@ -17,6 +17,9 @@ import { action, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    title: string;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -34,9 +37,6 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     counter.set(0);
     label.set("Count");
 });
-interface State {
-    title: string;
-}
 // FIXTURE: writable-of-terminal-methods
 // Verifies: new Writable() gets schema annotation, and action() with .set() becomes handler()
 //   new Writable(0) → new Writable(0, { type: "number" })
