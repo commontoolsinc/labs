@@ -5,7 +5,7 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { isFabricValue } from "./fabric-value-modern.ts";
+import { isFabricValue } from "./type-check.ts";
 import { FabricEpochNsec } from "./fabric-primitives/FabricEpochNsec.ts";
 import {
   errorClassFromType,
@@ -592,8 +592,10 @@ function deepUnwrapFabricError(fe: FabricError, frozen: boolean): Error {
   }
 
   for (const [key, value] of fe.extraEntries()) {
-    (copy as unknown as Record<string, unknown>)[key] =
-      nativeFromFabricValue(value, frozen);
+    (copy as unknown as Record<string, unknown>)[key] = nativeFromFabricValue(
+      value,
+      frozen,
+    );
   }
 
   if (frozen) Object.freeze(copy);

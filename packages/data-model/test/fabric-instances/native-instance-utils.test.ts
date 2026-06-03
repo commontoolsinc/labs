@@ -12,7 +12,7 @@ import { FabricError } from "../../src/fabric-instances/FabricError.ts";
 import { FabricMap } from "../../src/fabric-instances/FabricMap.ts";
 import { FabricSet } from "../../src/fabric-instances/FabricSet.ts";
 import { isConvertibleNativeInstance } from "../../src/native-instance-utils.ts";
-import { nativeFromFabricValueModern } from "../../src/fabric-value-modern.ts";
+import { nativeFromFabricValue } from "../../src/native-conversion.ts";
 import { FrozenMap, FrozenSet } from "../../src/frozen-builtins.ts";
 import {
   NATIVE_TAGS,
@@ -26,11 +26,11 @@ import { deepFreeze, isDeepFrozen } from "../../src/deep-freeze.ts";
 import { DummyReconstructionContext } from "./fixtures.ts";
 
 describe("native-instance-utils", () => {
-  describe("nativeFromFabricValueModern", () => {
+  describe("nativeFromFabricValue()", () => {
     it("unwraps `FabricError` in nested object", () => {
       const se = FabricError.fromNativeError(new Error("deep"));
       const obj = { error: se } as FabricValue;
-      const result = nativeFromFabricValueModern(obj) as Record<
+      const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
       >;
@@ -43,7 +43,7 @@ describe("native-instance-utils", () => {
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
       const arr = [sm] as FabricValue;
-      const result = nativeFromFabricValueModern(arr) as unknown[];
+      const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenMap);
     });
 
@@ -52,14 +52,14 @@ describe("native-instance-utils", () => {
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
       const arr = [sm] as FabricValue;
-      const result = nativeFromFabricValueModern(arr, false) as unknown[];
+      const result = nativeFromFabricValue(arr, false) as unknown[];
       expect(result[0]).toBeInstanceOf(Map);
       expect(result[0]).not.toBeInstanceOf(FrozenMap);
     });
 
     it("passes through primitives at all levels", () => {
       const obj = { a: 1, b: "two", c: null, d: true } as FabricValue;
-      const result = nativeFromFabricValueModern(obj) as Record<
+      const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
       >;
@@ -73,7 +73,7 @@ describe("native-instance-utils", () => {
           inner: se,
         },
       } as FabricValue;
-      const result = nativeFromFabricValueModern(obj) as {
+      const result = nativeFromFabricValue(obj) as {
         outer: { inner: Error };
       };
       expect(result.outer.inner).toBeInstanceOf(Error);
@@ -87,7 +87,7 @@ describe("native-instance-utils", () => {
         error: se,
         code: 500,
       } as unknown as FabricValue;
-      const result = nativeFromFabricValueModern(obj) as Record<
+      const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
       >;
@@ -102,7 +102,7 @@ describe("native-instance-utils", () => {
       const err = new Error("array");
       const se = FabricError.fromNativeError(err);
       const arr = [1, se, 3] as unknown as FabricValue;
-      const result = nativeFromFabricValueModern(arr) as unknown[];
+      const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBe(1);
       expect(result[1]).toBeInstanceOf(Error);
       expect((result[1] as Error).message).toBe("array");
@@ -116,7 +116,7 @@ describe("native-instance-utils", () => {
         a: 1,
         b: "two",
       }) as unknown as FabricValue;
-      const result = nativeFromFabricValueModern(obj, false) as Record<
+      const result = nativeFromFabricValue(obj, false) as Record<
         string,
         unknown
       >;
@@ -128,7 +128,7 @@ describe("native-instance-utils", () => {
 
     it("freezes output when `frozen=true` (default)", () => {
       const obj = { a: 1, b: "two" } as unknown as FabricValue;
-      const result = nativeFromFabricValueModern(obj) as Record<
+      const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
       >;
@@ -140,7 +140,7 @@ describe("native-instance-utils", () => {
       arr[0] = 1;
       arr[2] = 3;
       Object.freeze(arr);
-      const result = nativeFromFabricValueModern(
+      const result = nativeFromFabricValue(
         arr as FabricValue,
       ) as unknown[];
       expect(result.length).toBe(3);
@@ -152,7 +152,7 @@ describe("native-instance-utils", () => {
     it("passes through non-native `FabricInstance`", () => {
       const us = new UnknownValue("Test@1", null);
       const obj = { thing: us } as unknown as FabricValue;
-      const result = nativeFromFabricValueModern(obj) as Record<
+      const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
       >;
@@ -165,7 +165,7 @@ describe("native-instance-utils", () => {
       ] as [FabricValue, FabricValue][]);
       const sm = new FabricMap(map);
       const obj = { data: sm } as unknown as FabricValue;
-      const result = nativeFromFabricValueModern(obj) as Record<
+      const result = nativeFromFabricValue(obj) as Record<
         string,
         unknown
       >;
@@ -177,7 +177,7 @@ describe("native-instance-utils", () => {
       const set = new Set<FabricValue>([42] as FabricValue[]);
       const ss = new FabricSet(set);
       const arr = [ss] as unknown as FabricValue;
-      const result = nativeFromFabricValueModern(arr) as unknown[];
+      const result = nativeFromFabricValue(arr) as unknown[];
       expect(result[0]).toBeInstanceOf(FrozenSet);
       expect((result[0] as Set<number>).has(42)).toBe(true);
     });
@@ -193,7 +193,7 @@ describe("native-instance-utils", () => {
       );
       const outerSe = FabricError.fromNativeError(outerErr);
 
-      const result = nativeFromFabricValueModern(
+      const result = nativeFromFabricValue(
         outerSe as FabricValue,
       ) as Error;
       expect(result).toBeInstanceOf(Error);
@@ -213,7 +213,7 @@ describe("native-instance-utils", () => {
       outerErr.cause = innerSe;
       const outerSe = FabricError.fromNativeError(outerErr);
 
-      const result = nativeFromFabricValueModern(
+      const result = nativeFromFabricValue(
         outerSe as FabricValue,
         false,
       ) as Error;

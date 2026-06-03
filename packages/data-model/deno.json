@@ -33,7 +33,6 @@
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-type-tags": "./src/fabric-type-tags.ts",
     "./fabric-value": "./src/fabric-value.ts",
-    "./fabric-value-modern": "./src/fabric-value-modern.ts",
     "./value-clone": "./src/value-clone.ts",
     "./frozen-builtins": "./src/frozen-builtins.ts",
     "./interface": "./src/interface.ts",

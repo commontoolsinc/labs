@@ -30,7 +30,7 @@ export {
   shallowMutableClone,
 } from "./value-clone.ts";
 
-export { isFabricValue } from "./fabric-value-modern.ts";
+export { isFabricValue } from "./type-check.ts";
 
 export {
   fabricFromNativeValue,
