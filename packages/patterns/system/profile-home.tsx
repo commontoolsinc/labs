@@ -13,6 +13,9 @@ import {
   WriteAuthorizedBy,
 } from "commonfabric";
 
+import MyCar from "../my-car/main.tsx";
+import { CAR_TAG } from "../my-car/claims.ts";
+
 export const TRUSTED_PROFILE_HOME_SURFACE = "ProfileHome";
 export const TRUSTED_PROFILE_EDIT_ACTION = "EditProfile";
 
@@ -117,6 +120,44 @@ const UrlPatternReference = pattern<
   }),
 );
 
+// Generic registry of LIVE patterns addable as profile elements. Each entry's
+// `make()` instantiates a real pattern instance (stamped via `.for(tag)`), NOT an
+// inert card — so a consumer's `wish({ query: "#<userTag>", scope: ["profile"] })`
+// resolves to the live pattern and can read its output fields (e.g. MyCar's
+// `selfClaims`). This keeps the add flow generic (new profile widgets = new
+// entries) rather than hardcoding a single pattern.
+//
+// NOTE (for Berni's review): the FULLY generic version would resolve+run an
+// arbitrary pattern URL at runtime (fetchAndRunPattern / compileAndRun in
+// common-fabric.tsx) so the profile need not import each widget. This
+// import-based registry is the tractable interim that unblocks the my-car worked
+// example; promoting it to URL-loaded live elements is the platform follow-up.
+// Metadata only — pure, serializable data (no functions; the runtime validates
+// module-scope values as plain data and rejects function fields).
+type ProfileElementCatalogEntry = {
+  id: string;
+  title: string;
+  tag: string;
+  userTags: readonly string[];
+};
+
+const PROFILE_ELEMENT_CATALOG: readonly ProfileElementCatalogEntry[] = [
+  { id: "my-car", title: "My Car", tag: "my-car", userTags: [CAR_TAG] },
+];
+
+// Instantiation lives in a module-scope function (not in the data above), so it
+// can return a LIVE pattern result cell stamped via `.for(tag)`. Add a `case`
+// per catalog entry. (The URL-loaded version — fetchAndRunPattern — would make
+// this dispatch unnecessary; see the note above.)
+const makeCatalogElementCell = (id: string): unknown => {
+  switch (id) {
+    case "my-car":
+      return (MyCar({}) as any).for("my-car");
+    default:
+      return undefined;
+  }
+};
+
 const appendElement = (
   element: ProfileElement,
   elements: Writable<ProfileElement[]>,
@@ -186,6 +227,24 @@ const applyInitialName = lift<
   string
 >(({ initialName, name }) => {
   return name.get() ?? trimInitialName(initialName);
+});
+
+// Generic: add a LIVE pattern element from PROFILE_ELEMENT_CATALOG by id. The
+// catalogId is bound per-button (void event), mirroring removeElementCell.
+const addCatalogPattern = handler<void, {
+  elements: Writable<ProfileElement[]>;
+  catalogId: string;
+}>((_, state) => {
+  const entry = PROFILE_ELEMENT_CATALOG.find((e) => e.id === state.catalogId);
+  const cell = makeCatalogElementCell(state.catalogId);
+  if (!entry || cell === undefined) return;
+  appendElement({
+    cell,
+    source: "catalog",
+    title: entry.title,
+    tag: entry.tag,
+    userTags: entry.userTags,
+  }, state.elements);
 });
 
 const addCatalogElement = handler<void, {
@@ -319,6 +378,13 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
               >
                 Add profile card
               </cf-button>
+              {PROFILE_ELEMENT_CATALOG.map((entry) => (
+                <cf-button
+                  onClick={addCatalogPattern({ elements, catalogId: entry.id })}
+                >
+                  Add {entry.title}
+                </cf-button>
+              ))}
             </cf-hstack>
 
             <cf-vstack gap="2">
