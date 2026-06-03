@@ -46,8 +46,8 @@ import {
   attachDatabase,
   detachDatabase,
   ensureTables,
-  runQuery,
 } from "./sqlite/exec.ts";
+import { assertReadOnly } from "./sqlite/guard.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
@@ -641,56 +641,53 @@ export class Server {
   }
 
   /**
-   * Run `op` against a cell-derived SQLite database: ATTACH it (under an alias
-   * derived from the db id), additively create its declared tables, run `op`
-   * synchronously, then DETACH in `finally`.
+   * Read a cell-derived database on a pooled read-only connection — unattached,
+   * like injected on-disk sources. (Writes still ATTACH to the engine connection
+   * in `#attachCommitSqliteDbs` for commit atomicity.)
    *
-   * Attach-one-at-a-time (rather than keeping dbs attached) is deliberate: it
-   * guarantees a pattern's unqualified table names resolve to *this* db (SQLite
-   * resolves unqualified names against attached dbs in order, so multiple
-   * simultaneously-attached cell-dbs would alias each other), and it sidesteps
-   * the connection's `SQLITE_MAX_ATTACHED` limit. `op` MUST be synchronous: the
-   * attach→op→detach block must not `await` (the engine connection is shared and
-   * single-threaded; an await between attach and detach could interleave another
-   * op's attach and reintroduce the ambiguity). ATTACH/DETACH require no open
-   * transaction — true on this RPC path. File-backed cell-dbs persist across
-   * detach.
+   * A cell-db file is created lazily by the first WRITE (its ATTACH), and that
+   * write's `ensureTables` creates the declared tables. So a read can find:
+   *   - no file yet (never written) → no rows;
+   *   - a file without the queried table (e.g. a newly-declared table not yet
+   *     created by a write) → no rows.
+   * Both map to an empty result, preserving the previous "read a fresh cell-db
+   * returns []" contract without the read needing to create anything.
    */
-  async #onCellDb<T>(
+  async #readCellDb(
     space: string,
     db: SqliteDbRef,
-    op: (engine: Engine.Engine) => T,
-  ): Promise<T> {
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<unknown[]> {
+    // Apply the statement guard BEFORE the file-existence short-circuit, so a
+    // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
+    // multi-statement) is refused even against a never-written cell-db rather
+    // than silently returning [].
+    assertReadOnly(sql);
     const engine = await this.openEngine(space);
-    const alias = aliasForDbId(db.id);
-
-    // Injected on-disk sources are read unattached via the read pool
-    // (Server.sqliteQuery), never here — `#onCellDb` is the cell-derived
-    // attach path (reads today; writes use #attachCommitSqliteDbs).
-    attachDatabase(
-      engine.database,
-      alias,
-      this.#cellDbPath(engine, space, db.id),
-    );
+    const path = this.#cellDbPath(engine, space, db.id);
+    let fileExists = true;
     try {
-      if (db.tables) {
-        ensureTables(
-          engine.database,
-          db.tables as Record<string, TableSchema>,
-          alias,
-        );
+      Deno.statSync(path);
+    } catch {
+      fileExists = false;
+    }
+    if (!fileExists) return [];
+    try {
+      return this.#readPool.query(path, sql, params);
+    } catch (error) {
+      if (/no such table/i.test(error instanceof Error ? error.message : "")) {
+        return [];
       }
-      return op(engine); // synchronous — see doc comment
-    } finally {
-      detachDatabase(engine.database, alias);
+      throw error;
     }
   }
 
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1) for
-   * `(space, id)`. After this, `#onCellDb` attaches the canonical `path`
-   * (read-only) for that `(space, id)` instead of the cell-derived db. The
-   * descriptor is server-side state — never the cell value.
+   * `(space, id)`. After this, `sqliteQuery` reads the canonical `path` on the
+   * read pool (read-only) for that `(space, id)` instead of the cell-derived db.
+   * The descriptor is server-side state — never the cell value.
    *
    * The path is validated here because it arrives over the wire (untrusted): it
    * must be absolute and must exist, and is `realpath`-canonicalized and then
@@ -858,15 +855,18 @@ export class Server {
       );
     }
     try {
-      // Injected on-disk source: read it unattached on a pooled read-only
-      // connection (no ATTACH, real read-only, its own `main` namespace).
+      // All reads run unattached on a pooled read-only connection (no ATTACH,
+      // real read-only, each file its own `main` namespace). The only
+      // per-source difference is path resolution: an injected on-disk source's
+      // registered path, else the cell-derived path.
       const disk = this.#diskSources.get(message.space, message.db.id);
       const rows = disk
         ? this.#readPool.query(disk.path, message.sql, message.params)
-        : await this.#onCellDb(
+        : await this.#readCellDb(
           message.space,
           message.db,
-          (engine) => runQuery(engine.database, message.sql, message.params),
+          message.sql,
+          message.params,
         );
       return { type: "response", requestId: message.requestId, ok: { rows } };
     } catch (error) {

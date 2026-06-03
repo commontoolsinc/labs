@@ -264,4 +264,23 @@ describe("sqlite protocol verbs (loopback)", () => {
     );
     expect(r.rows).toEqual([{ n: 2 }]);
   });
+
+  it("a pooled reader sees a write committed after its connection opened", async () => {
+    const db = dbRef();
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // First read opens + caches the pooled read-only connection (sees 1 row).
+    expect(
+      (await session.sqliteQuery(db, "SELECT count(*) AS n FROM messages"))
+        .rows,
+    ).toEqual([{ n: 1 }]);
+    // A second write lands via the separate engine-attach commit path.
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["b"]);
+    // The REUSED pooled connection must observe the newly-committed row (each
+    // query is a fresh read transaction — no WAL required for this sequential
+    // write-then-read pattern).
+    expect(
+      (await session.sqliteQuery(db, "SELECT count(*) AS n FROM messages"))
+        .rows,
+    ).toEqual([{ n: 2 }]);
+  });
 });

@@ -127,11 +127,11 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
   const dbRef = (): SqliteDbRef => ({ id: handleId });
 
   it("query reads rows from the registered on-disk file, not a cell-db", async () => {
-    // No registration yet → falls back to the cell-derived (empty) db, so the
-    // `lookup` table does not exist there.
-    await expect(
-      session.sqliteQuery(dbRef(), "SELECT v FROM lookup"),
-    ).rejects.toThrow();
+    // No registration yet → falls back to the cell-derived db. It has never been
+    // written, so there is no file and the read yields no rows (NOT the on-disk
+    // file's rows).
+    const before = await session.sqliteQuery(dbRef(), "SELECT v FROM lookup");
+    expect(before.rows).toEqual([]);
 
     // Register the on-disk source for this handle id, then the same query
     // resolves against the on-disk file's rows.
@@ -183,10 +183,10 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
     // Register the on-disk source under SPACE (session), NOT the second space.
     await session.registerSqliteDiskSource(handleId, diskPath);
     // The second space's read of the same handle id is not governed by SPACE's
-    // registration → it falls through to the cell-derived (empty) db, where the
-    // `lookup` table does not exist. No cross-space read of the injected file.
-    await expect(
-      session2.sqliteQuery(dbRef(), "SELECT v FROM lookup"),
-    ).rejects.toThrow();
+    // registration → it falls through to its own (never-written, empty)
+    // cell-derived db and yields NO rows — crucially, not the injected file's
+    // rows. No cross-space read of the injected file.
+    const r = await session2.sqliteQuery(dbRef(), "SELECT v FROM lookup");
+    expect(r.rows).toEqual([]);
   });
 });
