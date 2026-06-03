@@ -3834,12 +3834,16 @@ export class Runner {
       // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
       // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
       // the base result cell and collide on one shared child cell.
+      // `bindPatterns: false` — output bindings never carry sub-patterns to
+      // instantiate, so skip that work; we only need the pseudo-cell aliases
+      // resolved to their concrete links.
       const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
         this.runtime.cfc,
         outputBindings,
         argumentCellLink,
         internalCellLink,
         resultCellLink,
+        { bindPatterns: false },
       );
       const outputRedirect = firstResolvedOutputRedirect(
         this.runtime,
