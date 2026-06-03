@@ -119,6 +119,9 @@
       "packages/ui/src/v2/components/cf-chart/cf-chart.ts",
       "packages/ui/src/v2/components/cf-chart/lib/axes.ts",
       "packages/ui/src/v2/components/cf-chart/lib/render.ts",
+      "packages/ui/src/v2/components/cf-toggle/cf-toggle.ts",
+      "packages/ui/src/v2/components/cf-checkbox/cf-checkbox.ts",
+      "packages/ui/src/v2/components/cf-select/cf-select.ts",
       "packages/vendor-astral",
       "tutorials/"
     ]

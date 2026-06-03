@@ -119,7 +119,7 @@ export class CFScrollArea extends BaseElement {
   private _scrollStartY = 0;
   private _scrollStartX = 0;
   private _rafId: number | null = null;
-  private _hideTimeoutId: number | null = null;
+  private _hideTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   override firstUpdated() {
     // Set up event listeners

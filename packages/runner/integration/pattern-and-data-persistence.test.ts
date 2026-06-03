@@ -429,7 +429,7 @@ async function testPatternAndDataPersistence() {
 Deno.test({
   name: "pattern and data persistence - full reactive cycle",
   fn: async () => {
-    let timeoutHandle: number;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(() => {
         reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
