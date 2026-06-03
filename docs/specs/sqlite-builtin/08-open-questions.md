@@ -211,3 +211,38 @@ during design are marked **[resolved]** with the decision.
     (proven e2e), and `db.query` is build-time only. But the inconsistency is a
     latent trap; the capability analysis should learn the "sqlite" brand so both
     paths agree.
+
+## Code-review follow-ups (deferred hardening)
+
+21. **Injected-source jail on memory stores.** For a `file:` store the
+    disk-source path is `realpath`-confined to outside the (canonicalized) store
+    directory; for a **memory** store there is no on-disk store dir, so the only
+    guard is the internal-cell-db basename reject (`(cf-)?cell-*.sqlite`). An
+    injected `sqlite:` path on a memory store may therefore name an arbitrary
+    readable host `.sqlite`. Accepted under the v1 cf-trusted-operator model
+    (Q18); close it with the operator path-allowlist when CFC authz lands.
+22. **`provider.sqliteQuery!` non-null assertion.** The reactive `sqliteQuery`
+    builtin calls `provider.sqliteQuery!(…)` inside its post-commit flush, but the
+    method is optional on `IStorageProvider`. A provider that doesn't implement it
+    (a test double / alternate deployment) throws *inside the async flush*,
+    stranding the result cell at `{ pending: true }`. Surface a clear
+    "provider does not support sqlite" error at issue time instead.
+23. **Folded write isn't alias-qualified.** `applySqliteOperation` resolves the
+    attach alias only to assert it is present, then runs the raw unqualified SQL;
+    correctness rests on the ≤1-cell-db-per-commit invariant plus the core-table
+    denylist (so an unqualified name can't shadow `main`). Either qualify the
+    statement with the alias or drop the dead binding and document the coupling,
+    so a future reader doesn't assume qualification that isn't happening.
+24. **Codec / factory duplication.** `encodeSqliteParams` (cell.ts) inlines the
+    cell→sigil encoding that `encodeCfLinkValue` (cf-link.ts) owns — and misses
+    its `toCell` back-pointer handling, so `db.exec` and the `sqliteQuery` builtin
+    can diverge on a bound back-pointer value; `decodeCfLinkValue` re-implements
+    `parseCfLinkToSigil`'s parse prologue; and `cell.ts` rebuilds the `sqliteQuery`
+    node factory that `builder/built-in.ts` already exports. Consolidate (the
+    cell.ts ↔ cf-link.ts import cycle blocks the obvious direction — resolve via a
+    cycle-free helper module). The write and read codecs MUST stay byte-identical.
+25. **`decodeRowLinkColumns` copies every row.** It shallow-copies all N result
+    rows (`{ ...row }`) on every reactive re-run even when only the few `asCell`
+    link columns change. On a `reactOn: db` query that re-runs on each write, that
+    is N×R field copies per re-query; copy lazily (only when a value actually
+    decodes) or mutate the link keys in place.
