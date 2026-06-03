@@ -19,7 +19,6 @@ import {
   type SessionRevokedMessage,
   type SessionSync,
   type SqliteDbRef,
-  type SqliteExecuteResult,
   type SqliteParamsWire,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
@@ -478,23 +477,9 @@ export class SpaceSession {
     });
   }
 
-  /** Run a server-side SQLite write against a cell-derived db. */
-  async sqliteExecute(
-    db: SqliteDbRef,
-    sql: string,
-    params?: SqliteParamsWire,
-  ): Promise<SqliteExecuteResult> {
-    this.#assertOpen();
-    return await this.client.request<SqliteExecuteResult>({
-      type: "sqlite.execute",
-      requestId: crypto.randomUUID(),
-      space: this.space,
-      sessionId: this.#sessionId,
-      db,
-      sql,
-      params,
-    });
-  }
+  // No `sqliteExecute` write RPC: writes go through the commit fold (a `sqlite`
+  // op inside `transact`), applied atomically with cell ops — never a standalone
+  // non-atomic write request.
 
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). After

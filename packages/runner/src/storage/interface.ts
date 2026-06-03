@@ -6,7 +6,6 @@ import type {
   SchedulerActionSnapshotQuery,
   SchedulerSnapshotListResult,
   SqliteDbRef,
-  SqliteExecuteResult,
   SqliteOperation,
   SqliteParamsWire,
   SqliteQueryResult,
@@ -246,12 +245,8 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
     params?: SqliteParamsWire,
   ): Promise<SqliteQueryResult>;
 
-  /** Run a server-side SQLite write against a cell-derived db. */
-  sqliteExecute?(
-    db: SqliteDbRef,
-    sql: string,
-    params?: SqliteParamsWire,
-  ): Promise<SqliteExecuteResult>;
+  // No `sqliteExecute`: SQLite writes go through the commit fold
+  // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
 
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). After

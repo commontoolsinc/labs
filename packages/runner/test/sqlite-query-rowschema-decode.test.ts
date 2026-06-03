@@ -74,6 +74,19 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
     await storageManager?.close();
   });
 
+  // Seed rows through the real write path (a folded `sqlite` op committed via a
+  // tx) — there is no standalone write RPC.
+  const seedSqlite = async (
+    db: SqliteDbRef,
+    sql: string,
+    params?: readonly unknown[],
+  ): Promise<void> => {
+    const seedTx = runtime.edit();
+    seedTx.recordSqliteWrite!(space, { op: "sqlite", db, sql, params });
+    const res = await seedTx.commit();
+    if (res.error) throw res.error;
+  };
+
   it("decodes a rowSchema asCell column so an asCell read yields a live Cell", async () => {
     // A committed target + a seeded row holding its encoded link.
     const author = runtime.getCell<{ name: string }>(
@@ -91,8 +104,7 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
         people: table({ id: "integer primary key", author_cf_link: "text" }),
       },
     };
-    const provider = storageManager.open(space);
-    await provider.sqliteExecute!(
+    await seedSqlite(
       db,
       "INSERT INTO people (author_cf_link) VALUES (?)",
       [encoded],

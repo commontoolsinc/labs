@@ -142,11 +142,20 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
 
   it("rejects writes to an injected on-disk source (read-only v1)", async () => {
     await session.registerSqliteDiskSource(handleId, diskPath);
+    // The only write path is the commit fold; a folded write to an injected
+    // (read-only) source is rejected before any attach.
     await expect(
-      session.sqliteExecute(
-        dbRef(),
-        "INSERT INTO lookup (k, v) VALUES ('c', '3')",
-      ),
+      session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "sqlite",
+            db: dbRef(),
+            sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
+          },
+        ],
+      }),
     ).rejects.toThrow();
     // The on-disk file is unchanged.
     const r = await session.sqliteQuery(

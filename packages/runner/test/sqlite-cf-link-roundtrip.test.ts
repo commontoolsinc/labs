@@ -38,6 +38,19 @@ describe("_cf_link round-trip through SQLite storage", () => {
     await storageManager?.close();
   });
 
+  // Seed rows through the real write path (a folded `sqlite` op committed via a
+  // tx) — there is no standalone write RPC.
+  const seedSqlite = async (
+    db: SqliteDbRef,
+    sql: string,
+    params?: readonly unknown[],
+  ): Promise<void> => {
+    const seedTx = runtime.edit();
+    seedTx.recordSqliteWrite!(space, { op: "sqlite", db, sql, params });
+    const res = await seedTx.commit();
+    if (res.error) throw res.error;
+  };
+
   it("stores a cell link as TEXT and reads it back as the same cell", async () => {
     const target = runtime.getCell<{ name: string }>(
       space,
@@ -52,17 +65,16 @@ describe("_cf_link round-trip through SQLite storage", () => {
         links: table({ id: "integer primary key", target_cf_link: "text" }),
       },
     };
-    const provider = storageManager.open(space);
-
     // Encode the cell -> absolute sigil-link string, store it in the TEXT column.
     const encoded = encodeCfLinkValue(target);
-    await provider.sqliteExecute!(
+    await seedSqlite(
       db,
       "INSERT INTO links (target_cf_link) VALUES (?)",
       [encoded],
     );
 
     // Read it back and decode -> a live Cell pointing at the same entity.
+    const provider = storageManager.open(space);
     const r = await provider.sqliteQuery!(
       db,
       "SELECT target_cf_link FROM links",

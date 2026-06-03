@@ -49,11 +49,16 @@ describe("injected on-disk source via the runner storage provider", () => {
     // on id membership before any attach).
     await provider.registerSqliteDiskSource!(id, "/tmp/does-not-matter.db");
 
-    await expect(
-      provider.sqliteExecute!(
-        { id, tables: {} },
-        "INSERT INTO lookup (k, v) VALUES ('c', '3')",
-      ),
-    ).rejects.toThrow();
+    // The write is rejected on the commit-fold path (the only write path): a
+    // folded `sqlite` op against a registered injected source is refused before
+    // any attach.
+    const tx = runtime.edit();
+    tx.recordSqliteWrite!(space, {
+      op: "sqlite",
+      db: { id, tables: {} },
+      sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
+    });
+    const res = await tx.commit();
+    expect(res.error).toBeDefined();
   });
 });

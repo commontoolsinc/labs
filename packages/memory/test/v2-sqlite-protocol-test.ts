@@ -44,14 +44,27 @@ describe("sqlite protocol verbs (loopback)", () => {
     await server.close();
   });
 
-  it("executes a write then reads it back over the protocol", async () => {
+  // Seed rows through the real write path (a folded `sqlite` op in a transact
+  // commit, applied atomically by the engine) — there is no standalone write RPC.
+  let seedSeq = 1000;
+  const seedRows = (
+    db: SqliteDbRef,
+    sql: string,
+    params?: ReadonlyArray<unknown>,
+  ) =>
+    session.transact({
+      localSeq: seedSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "sqlite", db, sql, params }],
+    });
+
+  it("writes (folded commit) then reads back over the protocol", async () => {
     const db = dbRef();
-    const w = await session.sqliteExecute(
+    await seedRows(
       db,
       "INSERT INTO messages (author_cf_link, body) VALUES (?, ?)",
       ["sigil-link", "hello"],
     );
-    expect(w.changes).toBe(1);
 
     const r = await session.sqliteQuery(
       db,
@@ -75,9 +88,8 @@ describe("sqlite protocol verbs (loopback)", () => {
     // core-table reference
     await expect(session.sqliteQuery(db, "SELECT * FROM commit")).rejects
       .toThrow();
-    // DDL through the write verb
-    await expect(session.sqliteExecute(db, "DROP TABLE messages")).rejects
-      .toThrow();
+    // DDL through the folded write path aborts the commit.
+    await expect(seedRows(db, "DROP TABLE messages")).rejects.toThrow();
   });
 
   it("applies a sqlite write folded into a transact commit (atomic path)", async () => {
@@ -187,7 +199,7 @@ describe("sqlite protocol verbs (loopback)", () => {
         id: `${dbId}-lru-${i}`,
         tables: { t: table({ id: "integer primary key", v: "text" }) },
       };
-      await session.sqliteExecute(db, "INSERT INTO t (v) VALUES (?)", [`${i}`]);
+      await seedRows(db, "INSERT INTO t (v) VALUES (?)", [`${i}`]);
       const r = await session.sqliteQuery(db, "SELECT v FROM t");
       expect(r.rows).toEqual([{ v: `${i}` }]);
     }
@@ -195,16 +207,8 @@ describe("sqlite protocol verbs (loopback)", () => {
 
   it("persists across separate requests (cell-db is file-backed)", async () => {
     const db = dbRef();
-    await session.sqliteExecute(
-      db,
-      "INSERT INTO messages (body) VALUES (?)",
-      ["a"],
-    );
-    await session.sqliteExecute(
-      db,
-      "INSERT INTO messages (body) VALUES (?)",
-      ["b"],
-    );
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["b"]);
     const r = await session.sqliteQuery(
       db,
       "SELECT count(*) AS n FROM messages",

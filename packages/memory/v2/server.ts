@@ -26,8 +26,6 @@ import {
   type SessionOpenResult,
   type SessionRevokedMessage,
   type SqliteDbRef,
-  type SqliteExecuteRequest,
-  type SqliteExecuteResult,
   type SqliteParamsWire,
   type SqliteQueryRequest,
   type SqliteQueryResult,
@@ -414,14 +412,6 @@ class Connection {
         }
         this.send(await this.server.sqliteQuery(parsed));
         return;
-      case "sqlite.execute":
-        if (
-          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
-        ) {
-          return;
-        }
-        this.send(await this.server.sqliteExecute(parsed));
-        return;
       case "sqlite.register-disk-source":
         if (
           !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
@@ -801,45 +791,11 @@ export class Server {
     }
   }
 
-  async sqliteExecute(
-    message: SqliteExecuteRequest,
-  ): Promise<ResponseMessage<SqliteExecuteResult>> {
-    if (this.#sessions.get(message.space, message.sessionId) === null) {
-      return respondTypedError<SqliteExecuteResult>(
-        message.requestId,
-        toError("SessionError", "Unknown session for space"),
-      );
-    }
-    // Phase 7: injected on-disk sources are READ-ONLY in v1. Writes (and their
-    // atomicity with the space commit) are gated on co-location (Q13/Q14); reject
-    // up front rather than attach read-only and surface an opaque engine error.
-    if (this.#diskSources.has(message.db.id)) {
-      return respondTypedError<SqliteExecuteResult>(
-        message.requestId,
-        toError(
-          "ReadOnlyError",
-          "injected on-disk SQLite sources are read-only in v1 " +
-            "(db.exec is rejected; see open questions Q13/Q14)",
-        ),
-      );
-    }
-    try {
-      const result = await this.#onCellDb(
-        message.space,
-        message.db,
-        (engine) => runWrite(engine.database, message.sql, message.params),
-      );
-      return { type: "response", requestId: message.requestId, ok: result };
-    } catch (error) {
-      return respondTypedError<SqliteExecuteResult>(
-        message.requestId,
-        toError(
-          error instanceof Error ? error.name : "SqliteError",
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
-    }
-  }
+  // No `sqliteExecute` handler: there is no standalone SQLite write RPC. Writes
+  // arrive as a `sqlite` op inside a `transact` commit and are applied by the
+  // engine atomically with the cell ops (#attachCommitSqliteDbs + applyCommit) —
+  // which is also where an injected on-disk source's read-only rejection lives.
+  // `runWrite` remains the engine helper used by that commit-fold path.
 
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
@@ -2024,7 +1980,7 @@ export const parseClientMessage = (
   }
 
   if (
-    (parsed.type === "sqlite.query" || parsed.type === "sqlite.execute") &&
+    parsed.type === "sqlite.query" &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
@@ -2052,7 +2008,7 @@ export const parseClientMessage = (
       db,
       sql: parsed.sql,
       params,
-    } as SqliteQueryRequest | SqliteExecuteRequest;
+    } as SqliteQueryRequest;
   }
 
   if (

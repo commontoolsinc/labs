@@ -28,7 +28,6 @@ import {
   type SchedulerSnapshotListResult,
   type SessionSync,
   type SqliteDbRef,
-  type SqliteExecuteResult,
   type SqliteOperation,
   type SqliteParamsWire,
   type SqliteQueryResult,
@@ -870,14 +869,6 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.sqliteQuery(db, sql, params);
   }
 
-  sqliteExecute(
-    db: SqliteDbRef,
-    sql: string,
-    params?: SqliteParamsWire,
-  ): Promise<SqliteExecuteResult> {
-    return this.replica.sqliteExecute(db, sql, params);
-  }
-
   registerSqliteDiskSource(
     id: string,
     path: string,
@@ -1060,15 +1051,6 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteQuery(db, sql, params);
-  }
-
-  async sqliteExecute(
-    db: SqliteDbRef,
-    sql: string,
-    params?: SqliteParamsWire,
-  ): Promise<SqliteExecuteResult> {
-    const { session } = await this.sessionHandle();
-    return await session.sqliteExecute(db, sql, params);
   }
 
   async registerSqliteDiskSource(

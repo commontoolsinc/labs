@@ -328,20 +328,9 @@ export interface SqliteQueryResult {
   rows: unknown[];
 }
 
-export interface SqliteExecuteRequest {
-  type: "sqlite.execute";
-  requestId: string;
-  space: string;
-  sessionId: SessionId;
-  db: SqliteDbRef;
-  sql: string;
-  params?: SqliteParamsWire;
-}
-
-export interface SqliteExecuteResult {
-  changes: number;
-  lastInsertRowid: number;
-}
+// NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
+// fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the
+// engine) — never a standalone, non-atomic write RPC. See db.exec in the runner.
 
 /**
  * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
@@ -472,7 +461,6 @@ export type ClientMessage =
   | TransactRequest
   | GraphQueryRequest
   | SqliteQueryRequest
-  | SqliteExecuteRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest

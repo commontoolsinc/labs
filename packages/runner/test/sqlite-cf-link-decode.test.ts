@@ -49,6 +49,19 @@ describe("sqlite query result _cf_link behavior", () => {
     await storageManager?.close();
   });
 
+  // Seed rows through the real write path (a folded `sqlite` op committed via a
+  // tx) — there is no standalone write RPC.
+  const seedSqlite = async (
+    db: SqliteDbRef,
+    sql: string,
+    params?: readonly unknown[],
+  ): Promise<void> => {
+    const seedTx = runtime.edit();
+    seedTx.recordSqliteWrite!(space, { op: "sqlite", db, sql, params });
+    const res = await seedTx.commit();
+    if (res.error) throw res.error;
+  };
+
   it("returns the stored sigil-link string, decodable via decodeCfLinkValue", async () => {
     const author = runtime.getCell<{ name: string }>(
       space,
@@ -65,13 +78,13 @@ describe("sqlite query result _cf_link behavior", () => {
         people: table({ id: "integer primary key", author_cf_link: "text" }),
       },
     };
-    const provider = storageManager.open(space);
-    await provider.sqliteExecute!(
+    await seedSqlite(
       db,
       "INSERT INTO people (author_cf_link) VALUES (?)",
       [encoded],
     );
 
+    const provider = storageManager.open(space);
     const r = await provider.sqliteQuery!(
       db,
       "SELECT author_cf_link FROM people ORDER BY id",
@@ -99,11 +112,11 @@ describe("sqlite query result _cf_link behavior", () => {
         people: table({ id: "integer primary key", author_cf_link: "text" }),
       },
     };
-    const provider = storageManager.open(space);
-    await provider.sqliteExecute!(
+    await seedSqlite(
       db,
       "INSERT INTO people (author_cf_link) VALUES (NULL)",
     );
+    const provider = storageManager.open(space);
     const r = await provider.sqliteQuery!(
       db,
       "SELECT author_cf_link FROM people ORDER BY id",
