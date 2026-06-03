@@ -3,7 +3,8 @@
 > Follow-up to the shipped SQLite feature (PR #3776). Supersedes the
 > "attach/detach LRU cache" idea and most of the urgency of
 > [08-open-questions.md](../08-open-questions.md) Q23 (alias-qualification) and
-> Q21 (on-disk read-only attach). Status: **design / not yet implemented.**
+> Q21 (on-disk read-only attach). Status: **implemented** (phases 1–3;
+> `sqlite/read-pool.ts` + `Server`).
 
 ## Motivation
 
@@ -84,11 +85,16 @@ written** — so two cell-dbs are never attached at once.
    On-disk sources never hit this (external schema already exists; we never
    migrate them).
 2. **Read-after-write visibility (cell-dbs).** A cell-db now has a pooled read
-   connection *and* the write-via-attach. WAL lets the separate reader observe
-   the latest committed write. Note the spec already declares read-after-write
-   *within a transaction* unsupported ([04](../04-server-execution-and-transactions.md)
-   §isolation), so reads only ever need to see *committed* state — exactly what a
-   separate WAL reader provides. On-disk sources are read-only → no coordination.
+   connection *and* the write-via-attach. **WAL turned out NOT to be required**
+   for our access pattern: reads are post-commit effects, writes serialize on
+   the engine connection, and each query is a *fresh* read transaction
+   (`.all()`), so SQLite's change-counter makes a reused pooled connection
+   observe writes committed after it opened (pinned by a test in
+   `v2-sqlite-protocol-test.ts`). The spec also declares read-after-write
+   *within a transaction* unsupported ([04](../04-server-execution-and-transactions.md)),
+   so reads only ever need *committed* state. WAL remains a future hardening for
+   concurrent read-*during*-write, not a correctness prerequisite. On-disk
+   sources are read-only → no coordination.
 3. **Schema migration vs the pooled reader.** An additive migration on the write
    connection bumps the schema cookie; the pooled reader reloads schema on next
    access automatically. (Verify with a test; otherwise drop the reader on a
@@ -114,17 +120,16 @@ reads no longer run `ensureTables` at all.)
   and never share a namespace with core/cell tables. The jail still applies to
   *which path* may be registered (the operator-allowlist follow-up is unchanged).
 
-## Phasing (each shippable)
+## Phasing (each shippable) — all done
 
-1. **RO connection pool + on-disk reads unattached.** Build `#queryDb` + the
-   path-keyed `mode=ro` pool; route injected on-disk reads through it (drop the
-   ATTACH-read-only + `query_only` path). Lowest risk — on-disk is read-only,
-   no WAL coordination.
-2. **Cell-db reads through the pool.** Route cell-derived reads through `#queryDb`
-   too; add "no such table → []"; ensure cell-dbs open WAL. Removes per-read
-   attach/detach/ensureTables for cell-dbs.
-3. **`ensureTables`-once on the write path.** Per-engine `(id, schemaHash)`
-   ensured-set.
+1. **[done]** RO connection pool (`ReadConnectionPool`) + injected on-disk reads
+   routed through it unattached; the ATTACH-read-only + `query_only` path
+   removed.
+2. **[done]** Cell-derived reads routed through the pool too (`#readCellDb`);
+   `#onCellDb` removed; missing-file / "no such table" → `[]`; the statement
+   guard runs before the short-circuit. (WAL not needed — see wrinkle 2.)
+3. **[done]** `ensureTables` runs only on the first write per
+   `(space, id, schema-JSON)` (bounded LRU; re-ensures on a schema change).
 
 ## Open questions / risks
 
