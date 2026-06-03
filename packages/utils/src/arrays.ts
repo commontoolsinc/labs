@@ -88,8 +88,8 @@ export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
     return false;
   }
 
-  // Every key must be a syntactically valid array index. `Number(k)` would
-  // wrongly accept named keys whose numeric coercion lands in range -- e.g.
-  // `"01"`, `" 1"`, `"1.0"`, `"1e1"`, `"-0"`, and `""` (which coerces to `0`).
+  // Every key must be a syntactically valid array index. We use
+  // `isArrayIndexPropertyName()` to validate, in order to match the exact
+  // syntax for the string form of an array key.
   return keys.every(isArrayIndexPropertyName);
 }
