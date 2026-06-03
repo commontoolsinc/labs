@@ -956,6 +956,21 @@ describe("Cell utility functions", () => {
       expect(cell.getRawUntyped({ frozen: false })).toEqual(cell.getRaw());
     });
 
+    it("getRawUntyped({ frozen: false }) _does_ clone", () => {
+      const cell = runtime.getCell<{ items: number[] }>(
+        space,
+        "getRawUntyped frozen false clone off",
+        undefined,
+        tx,
+      );
+      const orig = { items: [1, 2] };
+      cell.set(orig);
+      const result = cell.getRawUntyped({ frozen: false });
+      expect(result).toEqual(orig);
+      expect(result).not.toBe(orig);
+      expect(Object.isFrozen(result)).toBe(false);
+    });
+
     it("setRawUntyped accepts an array", () => {
       const cell = runtime.getCell<number[]>(
         space,
@@ -1010,21 +1025,6 @@ describe("Cell utility functions", () => {
       expect(() => cell.setRawUntyped(42 as FabricValue)).toThrow(
         "Transaction required",
       );
-    });
-
-    it("getRawUntyped({ frozen: false }) _does_ clone (flag OFF)", () => {
-      // Even with `modernDataModel === false`, `cloneIfNecessary()` _will_
-      // make a clone of a frozen value to get a mutable result.
-      const cell = runtime.getCell<{ items: number[] }>(
-        space,
-        "getRawUntyped frozen false clone off",
-        undefined,
-        tx,
-      );
-      cell.set({ items: [1, 2] });
-      const result = cell.getRawUntyped({ frozen: false });
-      expect(result).toEqual({ items: [1, 2] });
-      expect(Object.isFrozen(result)).toBe(false);
     });
   });
 });
