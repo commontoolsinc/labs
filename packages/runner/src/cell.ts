@@ -2491,10 +2491,11 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   // Convert value to fabric form. This handles:
-  // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
-  // - Instances (e.g., Error → @Error wrapper)
+  // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
+  //   symbols)
+  // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
   // - Objects/arrays with toJSON() methods
-  // - Sparse arrays (densified with null in holes)
+  // - Sparse arrays (holes preserved)
   const converted = shallowFabricFromNativeValue(value);
 
   // `FabricInstance` returned by the conversion step (e.g. `FabricError`
