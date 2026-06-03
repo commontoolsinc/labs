@@ -125,16 +125,11 @@ export const viewImageTool: HarnessToolDefinition<
         detail: RESERVED_ARTIFACT_PATH_DETAIL,
       });
     }
-    if (context.workspaceHostPath === undefined) {
-      return createStructuredFileToolErrorOutput(context, "view_image", {
-        path: resolvedPath,
-        code: "unknown",
-        detail: "workspace host path is not configured",
-      });
-    }
     let hostPath: string;
+    let hostRootPath: string;
     try {
       hostPath = context.resolveHostPath(resolvedPath);
+      hostRootPath = context.resolveHostRootPath(resolvedPath);
     } catch (error) {
       return createStructuredFileToolErrorOutput(context, "view_image", {
         path: resolvedPath,
@@ -144,8 +139,8 @@ export const viewImageTool: HarnessToolDefinition<
     }
     try {
       const imageAttachment = await createHarnessImageAttachment({
-        workspaceHostPath: context.workspaceHostPath,
-        cwd: context.workspaceHostPath,
+        workspaceHostPath: hostRootPath,
+        cwd: hostRootPath,
         path: hostPath,
       });
       return {

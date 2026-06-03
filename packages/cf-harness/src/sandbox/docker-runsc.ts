@@ -168,12 +168,27 @@ const normalizeAdditionalMount = (
   if (mount.hostPath.trim() === "") {
     throw new Error(`${mount.kind} hostPath must not be empty`);
   }
+  if (mount.kind === "host-bind" && mount.name.trim() === "") {
+    throw new Error("host-bind name must not be empty");
+  }
+  if (mount.kind === "host-bind") {
+    return {
+      kind: "host-bind",
+      name: mount.name,
+      hostPath: mount.hostPath,
+      sandboxPath: validateSandboxRoot(
+        mount.sandboxPath,
+        "host-bind sandboxPath",
+      ),
+      readOnly: mount.readOnly ?? true,
+    };
+  }
   return {
-    kind: mount.kind,
+    kind: "fabric-fuse",
     hostPath: mount.hostPath,
     sandboxPath: validateSandboxRoot(
       mount.sandboxPath ?? DEFAULT_FABRIC_MOUNT_PATH,
-      `${mount.kind} sandboxPath`,
+      "fabric-fuse sandboxPath",
     ),
     readOnly: mount.readOnly ?? false,
   };
@@ -496,6 +511,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
 
   #mounts(): Array<{
     kind: SandboxRuntimeMountDescription["kind"];
+    name?: string;
     hostPath: string;
     sandboxPath: string;
     readOnly: boolean;
@@ -512,10 +528,15 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   }
 
   #mountDescriptions(): SandboxRuntimeMountDescription[] {
-    return this.#mounts().map(({ kind, sandboxPath, readOnly }) => ({
-      kind,
-      sandboxPath,
-      readOnly,
+    return this.#mounts().map((mount) => ({
+      kind: mount.kind,
+      ...(mount.kind === "host-bind" ? { name: mount.name } : {}),
+      hostPath: mount.hostPath,
+      sandboxPath: mount.sandboxPath,
+      readOnly: mount.readOnly,
+      ...(mount.kind === "host-bind"
+        ? { mode: mount.readOnly ? "readonly" as const : "writable" as const }
+        : {}),
     }));
   }
 
