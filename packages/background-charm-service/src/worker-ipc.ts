@@ -13,7 +13,6 @@ export type InitializationData = {
   rawIdentity: KeyPairRaw;
   experimental?: {
     modernCellRep?: boolean;
-    modernDataModel?: boolean;
     persistentSchedulerState?: boolean;
   };
 };
