@@ -76,12 +76,18 @@ const WRITE_METHODS = new Set([
   "copyWithin",
 ]);
 
-// The remedy half of the "method calls are not lowerable" diagnostics. Writes
-// belong in a module-scope handler<>; reads should move into computed()/lift().
+// The remedy half of the "method calls are not lowerable" diagnostics. The
+// pattern body runs once at construction, so an event-driven write there has no
+// triggering event and isn't lowerable; route it through a module-scope
+// handler<>. (Wrapping the write in computed() is not the fix either: a write in
+// a computed() re-triggers the computation and must be idempotent — see
+// docs/common/concepts/computed/side-effects.md.) Non-write unsupported calls
+// still belong in computed()/lift().
 function notLowerableMethodRemedy(methodName: string | undefined): string {
   if (methodName && WRITE_METHODS.has(methodName)) {
     return "Writes to pattern inputs must go through a module-scope handler<> " +
-      "(typed Writable<T>), not the pattern body. computed() is read-only.";
+      "(typed Writable<T>), not the pattern body, which runs once at " +
+      "construction.";
   }
   return "Move this call into computed().";
 }
