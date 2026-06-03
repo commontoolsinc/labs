@@ -33,6 +33,12 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import {
+  allowedVehicles,
+  isPlateAllowed,
+  PersonVouch,
+  toAuthoredClaims,
+} from "../../patterns/my-car-demo/vouching.ts";
 
 describe("wish #car profile-scope", () => {
   let userIdentity: Identity;
@@ -212,5 +218,90 @@ describe("wish #car profile-scope", () => {
     expect(resolved).toBeDefined();
     const data = resolved?.get?.() ?? resolved;
     expect(data.selfClaims?.[0]?.vehicle?.plateId).toBe("7ABC123");
+  });
+
+  // Composes the real #car wish resolution with the §13 delegated-vouch gate: a
+  // friend's wish-resolved self-claim is allowed only while an employee's
+  // person-vouch for them is in-window. (Author key here is the claim's
+  // `claimant`; production resolves it from the CFC atom — see vouching.ts.)
+  it("a vouched friend's resolved #car claim is allowed in-window, dropped when the vouch expires", async () => {
+    const BOB = "did:key:bob"; // employee voucher
+    const ERIN = "did:key:erin"; // Bob's friend — vouchee, NOT an employee
+    const claim = {
+      vehicle: {
+        plateId: "7ABC123",
+        plateState: "CA",
+        color: "Black",
+        make: "Subaru",
+        model: "Outback",
+      },
+      claimType: "self" as const,
+      claimedAt: 1,
+      claimant: ERIN,
+    };
+    const carCell = runtime.getCell(
+      profileSpace.did(),
+      "friend-car-element",
+      undefined,
+      tx,
+    );
+    carCell.set({ selfClaims: [claim] });
+
+    const wishResult = await wishCarAfterProfile({
+      elements: [{ cell: carCell, tag: "my-car", userTags: ["car"] }],
+    });
+    const resolved = wishResult?.result as any;
+    const data = resolved?.get?.() ?? resolved;
+    const claims = toAuthoredClaims(data.selfClaims ?? []);
+
+    const employees = new Set([BOB]); // Erin is only vouched, not an employee
+    const now = 1_700_000_000_000;
+    const DAY = 86_400_000;
+    const win = (from: number, until: number): PersonVouch => ({
+      kind: "person",
+      voucher: BOB,
+      vouchee: ERIN,
+      validFrom: from,
+      validUntil: until,
+    });
+
+    // In-window person-vouch (Bob → Erin) → the friend's car is allowed.
+    expect(
+      isPlateAllowed(
+        "7ABC123",
+        "CA",
+        allowedVehicles(
+          claims,
+          employees,
+          [win(now - DAY, now + DAY)],
+          [],
+          now,
+        ),
+      ),
+    ).toBe(true);
+
+    // Expired vouch → the same car drops out (time-boxing).
+    expect(
+      isPlateAllowed(
+        "7ABC123",
+        "CA",
+        allowedVehicles(
+          claims,
+          employees,
+          [win(now - 2 * DAY, now - DAY)],
+          [],
+          now,
+        ),
+      ),
+    ).toBe(false);
+
+    // No vouch → Erin (not an employee) is not trusted at all.
+    expect(
+      isPlateAllowed(
+        "7ABC123",
+        "CA",
+        allowedVehicles(claims, employees, [], [], now),
+      ),
+    ).toBe(false);
   });
 });

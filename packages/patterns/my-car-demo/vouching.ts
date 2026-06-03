@@ -11,6 +11,21 @@
 import { Vehicle } from "../vehicles.ts";
 import { AuthoredClaim, trustedAffiliatedVehicles } from "./provenance.ts";
 import { plateKey } from "./classification.ts";
+import { VehicleClaim } from "../my-car/claims.ts";
+
+// Bridge a VehicleClaim (carrying an optional `claimant` DID) to an AuthoredClaim
+// for the provenance/vouching gate. NOTE: production resolves the author from the
+// claim's CFC `represents-principal` atom via `getCfcLabel` (deferred — CT-1660 /
+// the cf-cfc-authorship helper lift). Until then, `claimant` is the author key.
+export const toAuthoredClaims = (
+  claims: readonly VehicleClaim[],
+): AuthoredClaim[] =>
+  claims.map((claim) => ({
+    vehicle: claim.vehicle,
+    authorAtoms: claim.claimant
+      ? [{ kind: "represents-principal", subject: claim.claimant }]
+      : [],
+  }));
 
 export interface Window {
   validFrom: number; // safeDateNow() epoch ms

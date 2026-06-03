@@ -8,8 +8,10 @@ import {
   isPlateAllowed,
   isWithin,
   PersonVouch,
+  toAuthoredClaims,
 } from "./vouching.ts";
 import { AuthoredClaim, IntegrityAtom } from "./provenance.ts";
+import { VehicleClaim } from "../my-car/claims.ts";
 
 const ALICE = "did:key:alice"; // employee
 const BOB = "did:key:bob"; // employee
@@ -143,5 +145,23 @@ describe("allowedVehicles (composite, time-aware)", () => {
     const allowed = allowedVehicles(claims, employees, personVouches, [], NOW);
     expect(isPlateAllowed("ERINCAR", "CA", allowed)).toBe(false); // friend no longer trusted
     expect(isPlateAllowed("ALICE1", "CA", allowed)).toBe(true); // employee still is
+  });
+});
+
+describe("toAuthoredClaims (claimant → author atom bridge)", () => {
+  it("maps a claim's claimant DID to a represents-principal author atom", () => {
+    const claims: VehicleClaim[] = [
+      { vehicle: v("X1"), claimType: "self", claimedAt: NOW, claimant: ERIN },
+    ];
+    expect(toAuthoredClaims(claims)[0].authorAtoms).toEqual([
+      { kind: "represents-principal", subject: ERIN },
+    ]);
+  });
+
+  it("yields no author atoms when claimant is absent (so it won't be trusted)", () => {
+    const claims: VehicleClaim[] = [
+      { vehicle: v("X2"), claimType: "self", claimedAt: NOW },
+    ];
+    expect(toAuthoredClaims(claims)[0].authorAtoms).toEqual([]);
   });
 });
