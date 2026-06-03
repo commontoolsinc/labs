@@ -13,9 +13,9 @@ All paths below are relative to the repo root.
 
 ## What this review is (and is not)
 
-- It is **changeset-scoped**: review the diff and its immediate ripple, not the
-  whole repo. Do not start an open-ended repo audit — that broader sweep is a
-  separate, heavier effort. This review is fast.
+- It is **changeset-scoped**: review the diff and its immediate ripple — which
+  for a big change can mean fanning out to trace _that change's_ blast radius —
+  but never an open-ended repo audit. This review is fast.
 - It is **loud on what matters** and **quiet on what doesn't**. Flag bugs,
   regressions, and broken principles unmistakably. Keep nits to a short,
   clearly-optional list — or omit them when there are real issues to focus on.
@@ -82,6 +82,50 @@ do one coherent thing, or has unrelated work leaked in?
 
 If the motivation is genuinely unclear, do **not** block — add a short
 **Questions for the author** list. Missing context is a question, not a defect.
+
+### Triage — pick your depth before you start reading
+
+Decide how to read _from the diff stat_, before opening files. Reading a large
+change set file-by-file burns context and loses the forest for the trees.
+
+- **Detail mode** (default — small/medium: roughly < 15 files / < 800 added
+  lines, one or two packages): read the changed code directly, per Step 2.
+- **Scope-and-theory mode** (large: many files, thousands of lines, 3+ packages
+  or pace layers, or simply too big to hold in your head): **do not try to read
+  every file.** Switch strategy:
+  1. **Map the shape.** Cluster the files from the stat + commits + PR body —
+     core / new abstraction · integration & wiring · tests · docs · generated /
+     mechanical — and note which pace layers it crosses.
+  2. **Form a theory of intent.** In a few lines, state what the change set is
+     _trying to achieve_ and its **blast radius** (its integration surface).
+     Build the theory top-down and probe to confirm it; don't reconstruct it
+     bottom-up from every line.
+  3. **Deep-read only the load-bearing files** — the core new abstraction,
+     public API / signature changes, and any hash / serialize / clone / identity
+     touchpoints (Dimension 3). Sample the rest; skim generated / mechanical
+     edits.
+  4. **Fan out with subagents** for the search-heavy, parallelizable parts —
+     this is where they earn their keep. Prefer read-only explore / search
+     agents; give each a tight, specific question and take back the conclusion,
+     not file dumps. Spawn parallel agents to:
+     - **trace blast radius** — callers / consumers of the changed surface that
+       are _not_ in the diff but should have been updated (the classic large-PR
+       coherence miss);
+     - **sweep coherence** — docs / examples / comments for each touched concept
+       (Dimension 2);
+     - **review a cluster** — hand one logical slice to a subagent and have it
+       return findings in this skill's format;
+     - **check anti-duplication** — search the repo for prior art the change may
+       be forking (Dimension 3).
+  5. **Synthesize, don't concatenate.** Merge results into one ranked report,
+     and test the change set against its own theory: flag pieces that don't fit
+     (scope creep, half-finished migration, leftover cruft) and gaps the theory
+     implies are missing (an un-updated caller or doc, a missing test for a new
+     seam).
+
+  **Coverage honesty (no silent caps).** State what you deep-read vs. sampled
+  vs. delegated, so the verdict's depth is legible. Never imply whole-diff
+  coverage you didn't do.
 
 ---
 
@@ -280,8 +324,8 @@ Reuse the canonical severity taxonomy from
 ```
 ## cf-review: <branch or PR #N>
 
-**Change:** <2–3 lines: what it does and why>
-**Scope:** <clean / scope creep noted> · **Verification:** <checks run>
+**Change:** <2–3 lines: what it does — in scope-and-theory mode, the theory of intent + blast radius>
+**Scope:** <clean / creep> · **Coverage:** <deep-read vs. sampled vs. delegated> · **Verification:** <checks run>
 
 ### 🔴 Blocking
 1. [file.ts:line] <what> — <why it matters>. Fix: <concrete>. (verified)
