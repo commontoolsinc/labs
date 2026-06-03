@@ -627,6 +627,111 @@ substrate options clearly bracketed.
 
 ---
 
+## 13. Delegated, time-boxed person-vouching (extension)
+
+An extension to the claim model (§2): an employee can vouch not just for a
+specific guest car, but for a **person** — delegating the claim-making
+capability one hop. Decided scope: **one hop only** (a vouchee cannot re-vouch)
+and every vouch is **time-boxed**.
+
+### Two vouch flavors (both time-boxed)
+
+Generalize `GuestVouch` into a `Vouch` with two kinds, each authored into the
+org space by an employee (authored-by the voucher), each carrying a validity
+window (absolute timestamps via `safeDateNow()`):
+
+```ts
+type Window = { validFrom: number; validUntil: number };
+
+// (a) car-vouch — the friend has no profile; the employee enters/photographs the car.
+interface CarVouch extends Window {
+  kind: "car";
+  voucher: string; // employee DID (authored-by)
+  vehicle: Vehicle;
+  voucheeName?: Confidential<string> /* admin-excluded */; // voucher-controlled
+}
+
+// (b) person-vouch — the friend IS in the fabric and self-claims their own car(s)
+//     ("any of their cars"). The employee delegates trust to the friend's DID.
+interface PersonVouch extends Window {
+  kind: "person";
+  voucher: string; // employee DID (authored-by)
+  vouchee: string; // friend's DID / profile-ref (NOT their name)
+  voucheeName?: Confidential<string> /* admin-excluded */; // voucher-controlled
+}
+```
+
+The person-vouch is the powerful one (the friend manages their own car(s) on
+their own profile, exactly like an employee's self-claim); the car-vouch is the
+lightweight fallback for a friend who isn't in the fabric.
+
+### Generalized trust set + allow rule
+
+The trusted-principal set (§4) gains a time-bounded delegation hop:
+
+> **trustedPrincipals(now)** = `{employees}` ∪
+> `{ v.vouchee : v is a person-vouch authored by an employee AND now ∈ v.window }`
+
+and the "ours"/allowed derivation (§5) becomes:
+
+> a vehicle is **allowed** iff its `(plateId, plateState)` matches **either** a
+> self-claim whose author ∈ `trustedPrincipals(now)` **or** an in-window
+> `CarVouch` authored by an employee.
+
+A friend's self-claim is trusted because their DID was vouched by an employee
+_for the window_. **One hop is enforced structurally:** only a vouch _authored
+by an employee_ grants trust — a vouchee's own vouch isn't employee-authored, so
+it grants nothing. This generalizes `trustedAffiliatedVehicles` (provenance.ts)
+from "author ∈ employees" to "author ∈ employees ∪ currently-valid vouched
+principals."
+
+### Time-boxing — reactive, abuse-bounding, portable
+
+- `now ∈ [validFrom, validUntil]` is part of the allow check; **expiry is
+  reactive and free** (revocation's shape, clock-driven) — past the window the
+  friend's car silently drops from "allowed."
+- It **bounds the "any of their cars, forever" risk** — a vouch is inherently
+  scoped to a window ("next Tuesday", "all next week").
+- The friend's car is **permanent on their profile**; only _this org's trust_ in
+  it is time-boxed. One friend, one car, many orgs each time-boxing their own
+  trust via their own employee's vouch — the multi-space weave (c-319).
+
+### Confidentiality — the org trusts _via the employee_, not _via knowing the guest_
+
+The car/plate is **inherently public and required for matching** (it's on a
+physical car, lot-watch reads it, auto-resolution needs it), so it cannot
+usefully be hidden. The only real privacy lever is the **identity** — the join
+"this plate = this named person." By default the org sees _"this plate is
+allowed, vouched by Bob, valid `<window>`"_ — enough to let them park and to
+follow up with Bob — **without the friend's identity.**
+
+- **Name is voucher-controlled (decided):** `voucheeName` is an optional
+  `Confidential` field the **voucher** (Bob) fills or reveals — not the friend.
+  Matches the social reality (the org's relationship is with its employee; Bob
+  mediates) and is low-friction. The friend's full profile identity is separate
+  and never auto-exposed.
+- **The reveal handshake (§7) generalizes by approver:** for a self-claim's
+  `ownerNote` the approver is the **owner**; for a vouch's `voucheeName` the
+  approver is the **voucher** (Bob). Carol can `requestReveal`; Bob approves /
+  declines. Same machinery, different consenting party.
+
+Principle: **scaled trust through a known party** (c-757) — the org extends
+trust to a stranger via Bob, attributably and time-boxed, without surveilling
+the stranger (c-689 "not creepy"; c-573 "policies on data").
+
+### Personas & status
+
+Bob (employee) vouches for his friend **Erin** (the vouchee); Erin self-claims
+her car on her own profile, and Bob optionally attaches "Erin" to the vouch.
+(The design conversation used "Gideon" informally for Bob's role.)
+
+Design-only extension, deferred with the rest until CT-1658 + the
+ESM/`SameAuthorAs` substrate land. It changes no earlier decision except the
+`trustedAffiliatedVehicles` generalization above, and it **expands scope beyond
+"employees only"** — a person-vouched friend has a profile and self-claims.
+
+---
+
 _Names used here are the ratified vocabulary from `naming-proposals.md`
 ("Recommended vocabulary at a glance"). Where this doc and `ux-journeys.md`
 differ on the hero's name, **Alice** is canonical (ux-journeys' "Dana" is a

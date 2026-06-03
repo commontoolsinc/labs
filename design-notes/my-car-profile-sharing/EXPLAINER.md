@@ -116,6 +116,16 @@ reveal; Alice approves or declines. No permission-prompt deluge, no hollow
 consent — the note is simply absent from what Carol's tool can read until Alice
 says otherwise. Good privacy is the kind you don't have to think about (c-496).
 
+**Trust that delegates — one hop, time-boxed, anonymous.** Bob can vouch not
+just for a car but for a _person_: "my friend can park next Tuesday." His friend
+then self-claims their own car on their _own_ profile — exactly like Bob does —
+and the org trusts it, because Bob delegated the capability to them, _for that
+window_. The org never has to learn who the friend is (Bob can choose to say);
+it just sees "this plate is allowed, vouched by Bob, valid Tuesday." When
+Tuesday passes — or Bob leaves the company — that trust evaporates on its own,
+no cleanup. Scaled trust extended to a stranger through someone you already
+trust, attributable and time-boxed, with nobody surveilled (c-757).
+
 ---
 
 ## The honest close
