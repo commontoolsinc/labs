@@ -7,10 +7,11 @@ triggered by a re-export live binding (`export { x } from "./sibling"`). Given
 ESM is "not turned on yet," why did it occur? Does CT-1661 require
 `esmModuleLoader` to be explicitly on?
 
-**Verdict: YES — CT-1661 is latent.** It only fires when the experimental
-`esmModuleLoader` flag is explicitly enabled (the ESM module-record loader
-path). Under today's default loader it does not trigger; the program compiles
-and runs correctly. It was surfaced only because the test
+**Verdict: YES — CT-1661 is latent.** It only fires when the ESM module-record
+loader is enabled — either via `experimental: { esmModuleLoader: true }` OR via
+the `CF_ESM_MODULE_LOADER=1`/`true` env var (both flip the same code path; see
+`esm-loader-config.ts` `readEnvDefault`). Under today's default (loader off, env
+unset) it does not trigger; the program compiles and runs correctly. It was surfaced only because the test
 `packages/runner/test/wish-profile-car.test.ts` (modeled on
 `esm-pattern-run.test.ts`) sets `experimental: { esmModuleLoader: true }`.
 
