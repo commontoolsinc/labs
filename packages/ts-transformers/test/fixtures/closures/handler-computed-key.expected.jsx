@@ -11,7 +11,20 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn((__cf_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter));
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        recordMap: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                type: "number",
+                asCell: ["cell"]
+            }
+        }
+    },
+    required: ["recordMap"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter));
 interface State {
     records: Record<string, Cell<number>>;
 }
@@ -28,20 +41,7 @@ __cfHardenFn(nextKey);
 export default pattern((state) => {
     const recordMap = state.key("records");
     return {
-        [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                recordMap: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: {
-                        type: "number",
-                        asCell: ["cell"]
-                    }
-                }
-            },
-            required: ["recordMap"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+        [UI]: (<button type="button" onClick={__cfHandler_1({
             recordMap: recordMap
         })}>
         Step

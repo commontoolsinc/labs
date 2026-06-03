@@ -93,6 +93,18 @@ export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
  */
 export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
 
+/**
+ * Prefix for the module-scope const a hoisted `handler(...)` call is bound to
+ * (CT-1655, extending CT-1644's whole-call hoisting to handler). The handler is
+ * emitted in the lift-applied shape `__cfHelpers.handler(eventSchema,
+ * stateSchema, cb)(captures)`; the inner `handler(...)` call is hoisted to
+ * `const __cfHandler_N = __cfHelpers.handler(...)` and the original site becomes
+ * `__cfHandler_N(captures)`. Mechanically identical to lift hoisting, but the
+ * applied call keeps classifying as `{ kind: "builder", builderName: "handler" }`
+ * (NOT `lift-applied`) so existing handler-specific dispatchers are unaffected.
+ */
+export const SYNTHETIC_HANDLER_HOIST_PREFIX = "__cfHandler";
+
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 
 export interface ArrayMethodAccessKind {
@@ -363,6 +375,52 @@ export function getCapabilitySummaryCallbackArgument(
  * wrapper additions handled consistently across the pipeline.
  */
 export function getLiftAppliedInnerCall(
+  call: ts.CallExpression,
+): ts.CallExpression | undefined {
+  const stripped = stripWrappers(call.expression);
+  return ts.isCallExpression(stripped) ? stripped : undefined;
+}
+
+/**
+ * True iff `call` is a handler in its applied shape
+ * `__cfHelpers.handler(eventSchema, stateSchema, cb)(captures)` — an outer
+ * application whose callee is itself the inner `handler(...)` call.
+ *
+ * Structurally this is the same single-application shape as lift-applied, but
+ * we deliberately keep it OUT of the `lift-applied` CallKind (CT-1655): a
+ * handler-applied call continues to classify as `{ kind: "builder",
+ * builderName: "handler" }` so handler-specific dispatchers (stream causes in
+ * ReactiveVariableFor, capture-schema injection, write-authorization, etc.) are
+ * unaffected. This predicate exists solely so the hoisting stage can recognise
+ * the unit to relocate without minting a new kind or widening the lift-applied
+ * gate.
+ *
+ * Guards against multi-application chains (`handler(cb)(x)(y)`) the same way
+ * lift-applied recognition does — only the single-application form is the
+ * canonical lowered handler shape.
+ */
+export function isHandlerAppliedCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = stripWrappers(call.expression);
+  if (!ts.isCallExpression(target) || isMultiApplicationChain(call)) {
+    return false;
+  }
+  const builderKind = resolveBuilderExpressionKind(target, checker, new Set(), {
+    followFactoryResults: true,
+  });
+  return builderKind?.builderName === "handler";
+}
+
+/**
+ * For a handler-applied call (`__cfHelpers.handler(...)(captures)`), return the
+ * inner `handler(...)` CallExpression — the unit the hoisting stage relocates
+ * to a module-scope const. Returns undefined if `call` is not the applied
+ * shape. Mirrors {@link getLiftAppliedInnerCall}; routes through `stripWrappers`
+ * for the same forward-compatibility reasons.
+ */
+export function getHandlerAppliedInnerCall(
   call: ts.CallExpression,
 ): ts.CallExpression | undefined {
   const stripped = stripWrappers(call.expression);
@@ -1517,19 +1575,24 @@ function resolveBuilderExpressionKind(
     }
   }
 
-  // Hoisted-lift fallback (CT-1644): a `lift(...)` call hoisted to a
-  // module-scope const leaves a synthetic `__cfLift_N(captures)` site whose
-  // callee identifier the checker can't resolve to its const initializer
-  // (synthetic nodes have no symbol). `LiftHoistingTransformer` records the
-  // hoisted inner `lift(...)` call as the identifier's original node; resolve
-  // the builder kind through it so the application still reads as lift-applied.
-  // Gated on `followFactoryResults` (matches the applied-call recognition path)
-  // and on the `__cfLift` prefix (so only our hoisted sites take this path),
-  // and only consulted after symbol/name resolution has failed.
+  // Hoisted-builder fallback (CT-1644 lift; CT-1655 handler): a `lift(...)` or
+  // `handler(...)` call hoisted to a module-scope const leaves a synthetic
+  // `__cfLift_N(captures)` / `__cfHandler_N(captures)` site whose callee
+  // identifier the checker can't resolve to its const initializer (synthetic
+  // nodes have no symbol). The hoisting stage records the hoisted inner call as
+  // the identifier's original node; resolve the builder kind through it so the
+  // application still classifies as the right builder (lift-applied for lift,
+  // `builderName: "handler"` for handler) for downstream stages — notably
+  // ReactiveVariableFor's `.for(...)` / stream-cause attachment, which runs
+  // after hoisting and sees only the synthetic site. Gated on
+  // `followFactoryResults` (matches the applied-call recognition path) and on
+  // the hoist prefixes (so only our hoisted sites take this path), and only
+  // consulted after symbol/name resolution has failed.
   if (
     options.followFactoryResults &&
     ts.isIdentifier(target) &&
-    target.text.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX)
+    (target.text.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX) ||
+      target.text.startsWith(SYNTHETIC_HANDLER_HOIST_PREFIX))
   ) {
     const original = ts.getOriginalNode(target);
     if (original !== target && ts.isCallExpression(original)) {

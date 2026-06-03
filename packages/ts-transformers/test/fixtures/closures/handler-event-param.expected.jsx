@@ -11,6 +11,41 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler({
+    type: "object",
+    properties: {
+        detail: {
+            type: "object",
+            properties: {
+                value: true
+            },
+            required: ["value"]
+        }
+    },
+    required: ["detail"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                changeCount: {
+                    type: "number",
+                    asCell: ["cell"]
+                },
+                selectedValue: {
+                    type: "string",
+                    asCell: ["writeonly"]
+                }
+            },
+            required: ["changeCount", "selectedValue"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (event, { state }) => {
+    state.selectedValue.set(event.detail.value);
+    state.changeCount.set(state.changeCount.get() + 1);
+});
 interface State {
     selectedValue: Cell<string>;
     changeCount: Cell<number>;
@@ -24,41 +59,7 @@ export default pattern((state) => {
         [UI]: (<cf-select $value={state.key("selectedValue")} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
-            ]} oncf-change={__cfHelpers.handler({
-            type: "object",
-            properties: {
-                detail: {
-                    type: "object",
-                    properties: {
-                        value: true
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["detail"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        changeCount: {
-                            type: "number",
-                            asCell: ["cell"]
-                        },
-                        selectedValue: {
-                            type: "string",
-                            asCell: ["writeonly"]
-                        }
-                    },
-                    required: ["changeCount", "selectedValue"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (event, { state }) => {
-            state.selectedValue.set(event.detail.value);
-            state.changeCount.set(state.changeCount.get() + 1);
-        })({
+            ]} oncf-change={__cfHandler_1({
             state: {
                 selectedValue: state.key("selectedValue"),
                 changeCount: state.key("changeCount")

@@ -12,6 +12,22 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift(false, () => deriveInput.key("foo").get());
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        input: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                }
+            },
+            required: ["foo"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["input"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get());
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
 // including explicit type arguments and interprocedural helper calls.
@@ -131,22 +147,7 @@ const actionPattern = pattern((input: Writable<{
     foo: string;
     bar: string;
 }>) => {
-    const a = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            input: {
-                type: "object",
-                properties: {
-                    foo: {
-                        type: "string"
-                    }
-                },
-                required: ["foo"],
-                asCell: ["readonly"]
-            }
-        },
-        required: ["input"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get())({
+    const a = __cfHandler_1({
         input: input
     }).for({ stream: "a" }, true);
     return a;

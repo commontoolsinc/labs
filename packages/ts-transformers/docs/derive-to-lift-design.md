@@ -12,7 +12,11 @@ of the `lift(...)({})` stopgap). **Phase 2 complete in CT-1644**
 (`LiftHoistingTransformer` hoists every lift call to a module-scope
 `const __cfLift_N = __cfHelpers.lift(...)`, after SchemaInjection; subsumes lift
 from the CT-1585 callback hoister). `derive` has since been fully retired from
-both the transformer (CT-1643) and the runtime export (CT-1624). **Phase 3
+both the transformer (CT-1643) and the runtime export (CT-1624). **CT-1655
+extends Phase 2's whole-call hoisting to the other builders**: `handler` shipped
+(hoisted to `const __cfHandler_N`, subsuming handler from the CT-1585 callback
+hoister); `pattern`/`patternTool` remain (different `mapWithPattern`-arg
+mechanic). See the follow-up section after the phase table. **Phase 3
 (`selfcontained` marker) is now the active phase** — its design below is current
 and its open questions are mostly resolved (see the Phase 3 section and
 tracker)._
@@ -37,8 +41,45 @@ one is merged.
 
 After all three phases land for `lift`, the same pattern extends to `handler`
 (which `action` lowers into) and to `pattern` (including transformer-synthesized
-pattern callbacks for `mapWithPattern` and friends). Those are out of scope for
-this doc but the architecture should make them tractable as follow-ups.
+pattern callbacks for `mapWithPattern` and friends). These are tracked under
+CT-1655, which converges the CT-1585 callback hoister and
+`LiftHoistingTransformer` into one unified module-scope hoisting phase.
+
+**Handler shipped in CT-1655.** `handler` is emitted in the same
+single-application shape as lift —
+`__cfHelpers.handler(eventSchema, stateSchema, cb)(captures)` (an `action` is
+lowered to this `handler` shape upstream, so it gets the same treatment) — so
+the hoist is mechanically identical to lift: the inner `handler(...)` call is
+hoisted to `const __cfHandler_N = __cfHelpers.handler(...)` and the original
+site becomes `__cfHandler_N(captures)`, with the `.for(...)` tail left anchored
+on the outer call. Implementation notes:
+
+- A new `HANDLER_BUILDER` `HoistableBuilderSpec` (prefix `__cfHandler`)
+  registers in `lift-hoisting.ts`'s `HOISTABLE_BUILDERS` alongside
+  `LIFT_BUILDER`.
+- Recognition uses a dedicated `isHandlerAppliedCall` predicate (not the
+  `lift-applied` CallKind): a handler-applied call keeps classifying as
+  `{ kind: "builder", builderName: "handler" }`, so every handler-specific
+  downstream dispatcher (ReactiveVariableFor's stream cause, capture-schema
+  injection, write-authorization, etc.) is unaffected.
+- `handler` is removed from CT-1585's `HOISTABLE_BUILDER_NAMES` in the same
+  change to avoid the double-hoist TDZ (the two consts would reference each
+  other out of declaration order). `BuilderCallbackHoistingTransformer` now owns
+  only `pattern`/`patternTool`.
+- The hoist-prefix original-node fallback in `resolveBuilderExpressionKind` is
+  generalized to `__cfHandler` so the synthetic `__cfHandler_N(captures)` site
+  still classifies as `handler` for the stages that run after hoisting.
+
+**Pattern / patternTool are the remaining piece of CT-1655.** Their hoist is a
+_different_ mechanic: `pattern` is not applied — it appears as
+`expr.mapWithPattern(__cfHelpers.pattern(cb, …), { extraParams })`, so the bare
+`pattern(...)` call (argument 0 of `mapWithPattern`) is hoisted and the call is
+rewritten to thread the hoisted name, while per-instance captures continue to
+flow through `mapWithPattern`'s second argument. The top-level
+`export default pattern(...)` is already module-scope and must NOT be hoisted.
+When pattern/patternTool land here too, `HOISTABLE_BUILDER_NAMES` empties and
+`BuilderCallbackHoistingTransformer` can be deleted — the "one unified hoisting
+phase" end-state.
 
 ## Relationship to prior work
 

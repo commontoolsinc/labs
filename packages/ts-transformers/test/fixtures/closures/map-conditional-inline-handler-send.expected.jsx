@@ -66,6 +66,28 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }));
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        boundCastVote: {
+            type: "unknown",
+            asCell: ["stream"]
+        },
+        item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                }
+            },
+            required: ["id"]
+        }
+    },
+    required: ["boundCastVote", "item"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { boundCastVote, item }) => boundCastVote.send({
+    id: item.id,
+    step: "single",
+}));
 interface Item {
     id: string;
     label: string;
@@ -148,28 +170,7 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, state.key("canVote"), <button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-                    type: "object",
-                    properties: {
-                        boundCastVote: {
-                            type: "unknown",
-                            asCell: ["stream"]
-                        },
-                        item: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id"]
-                        }
-                    },
-                    required: ["boundCastVote", "item"]
-                } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { boundCastVote, item }) => boundCastVote.send({
-                    id: item.id,
-                    step: "single",
-                }))({
+                } as const satisfies __cfHelpers.JSONSchema, state.key("canVote"), <button type="button" onClick={__cfHandler_1({
                     boundCastVote: boundCastVote,
                     item: {
                         id: item.key("id")

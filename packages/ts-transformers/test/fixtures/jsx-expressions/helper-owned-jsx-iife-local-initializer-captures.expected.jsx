@@ -19,6 +19,29 @@ import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler({
+    type: "object",
+    properties: {
+        name: {
+            type: "string"
+        }
+    },
+    required: ["name"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        path: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["path"]
+} as const satisfies __cfHelpers.JSONSchema, ({ name }, { path }) => {
+    path.push(name);
+});
 const __cfLift_1 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
 }, readonly string[]>({
@@ -177,6 +200,31 @@ const __cfLift_3 = __cfHelpers.lift<{
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name)));
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        pushPath: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"],
+            asCell: ["stream"]
+        },
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["pushPath", "item"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, item }) => pushPath.send({ name: item.name }));
 interface Entry {
     id: string;
     name: string;
@@ -209,29 +257,7 @@ export default pattern((__cf_pattern_input) => {
             type: "string"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("path", true);
-    const pushPath = __cfHelpers.handler({
-        type: "object",
-        properties: {
-            name: {
-                type: "string"
-            }
-        },
-        required: ["name"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            path: {
-                type: "array",
-                items: {
-                    type: "string"
-                },
-                asCell: ["writeonly"]
-            }
-        },
-        required: ["path"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ name }, { path }) => {
-        path.push(name);
-    })({
+    const pushPath = __cfHandler_1({
         path: path
     }).for({ stream: "pushPath" }, true);
     return {
@@ -260,31 +286,7 @@ export default pattern((__cf_pattern_input) => {
                 return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const item = __cf_pattern_input.key("element");
                     const pushPath = __cf_pattern_input.key("params", "pushPath");
-                    return (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-                        type: "object",
-                        properties: {
-                            pushPath: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"],
-                                asCell: ["stream"]
-                            },
-                            item: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        required: ["pushPath", "item"]
-                    } as const satisfies __cfHelpers.JSONSchema, (_, { pushPath, item }) => pushPath.send({ name: item.name }))({
+                    return (<button type="button" onClick={__cfHandler_2({
                         pushPath: pushPath,
                         item: {
                             name: item.key("name")

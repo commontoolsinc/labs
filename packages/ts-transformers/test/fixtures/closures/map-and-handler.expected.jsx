@@ -44,6 +44,25 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.discount);
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        index: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                selectedIndex: {
+                    type: "number",
+                    asCell: ["writeonly"]
+                }
+            },
+            required: ["selectedIndex"]
+        }
+    },
+    required: ["index", "state"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state, index }) => state.selectedIndex.set(index));
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: { price: number; }[];
@@ -146,25 +165,7 @@ export default pattern((state) => {
                         discount: state.key("discount")
                     }
                 })}</span>
-            <button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                selectedIndex: {
-                                    type: "number",
-                                    asCell: ["writeonly"]
-                                }
-                            },
-                            required: ["selectedIndex"]
-                        }
-                    },
-                    required: ["index", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state, index }) => state.selectedIndex.set(index))({
+            <button type="button" onClick={__cfHandler_1({
                     state: {
                         selectedIndex: state.key("selectedIndex")
                     },

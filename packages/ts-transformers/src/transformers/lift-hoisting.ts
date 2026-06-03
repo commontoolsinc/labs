@@ -1,7 +1,10 @@
 import ts from "typescript";
 import {
   detectCallKind,
+  getHandlerAppliedInnerCall,
   getLiftAppliedInnerCall,
+  isHandlerAppliedCall,
+  SYNTHETIC_HANDLER_HOIST_PREFIX,
   SYNTHETIC_LIFT_HOIST_PREFIX,
 } from "../ast/call-kind.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
@@ -49,19 +52,20 @@ import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
  *
  * CT-1585's `BuilderCallbackHoistingTransformer` hoists builder *callbacks*
  * (the function argument), not the whole call, and only when the callback
- * closes solely over module-level symbols. For `lift` that mechanic is now
- * redundant and actively harmful: hoisting the call here AND the callback
- * there produces a double hoist whose two consts reference each other out of
- * declaration order (TDZ `ReferenceError` at module load). So `lift` is
- * removed from CT-1585's hoistable set; this stage is its sole owner. CT-1585
- * still owns `pattern`/`handler`/`patternTool`.
+ * closes solely over module-level symbols. For `lift` (CT-1644) and `handler`
+ * (CT-1655) that mechanic is now redundant and actively harmful: hoisting the
+ * call here AND the callback there produces a double hoist whose two consts
+ * reference each other out of declaration order (TDZ `ReferenceError` at module
+ * load). So `lift` and `handler` are removed from CT-1585's hoistable set; this
+ * stage is their sole owner. CT-1585 still owns `pattern`/`patternTool`.
  *
  * ## Generality
  *
  * The hoist mechanic is builder-agnostic: only "which call expression is the
  * hoistable unit" and "what name prefix to bind it to" are builder-specific.
- * Those live in {@link HOISTABLE_BUILDERS}. Today only `lift` is registered;
- * when `pattern`/`handler` get the same addressed/selfcontained treatment they
+ * Those live in {@link HOISTABLE_BUILDERS}. Today `lift` and `handler` are
+ * registered (both the single-application `builder(...)(captures)` shape); when
+ * `pattern`/`patternTool` get the same addressed/selfcontained treatment they
  * register here too, converging CT-1585 and this stage into one hoisting phase
  * without restructuring.
  */
@@ -103,7 +107,29 @@ const LIFT_BUILDER: HoistableBuilderSpec = {
   },
 };
 
-const HOISTABLE_BUILDERS: readonly HoistableBuilderSpec[] = [LIFT_BUILDER];
+const HANDLER_BUILDER: HoistableBuilderSpec = {
+  prefix: SYNTHETIC_HANDLER_HOIST_PREFIX,
+  resolveHoistable: (call, context) => {
+    // The handler-applied shape is
+    // `__cfHelpers.handler(eventSchema, stateSchema, cb)(captures)` —
+    // structurally the same single-application unit as lift, so the same hoist
+    // mechanic applies: relocate the inner `handler(...)` call, leave
+    // `__cfHandler_N(captures)` at the site (the `.for(...)` tail stays
+    // anchored on the outer call). Unlike lift this is NOT a `lift-applied`
+    // CallKind — `isHandlerAppliedCall` recognises it while keeping the applied
+    // call classifying as `{ kind: "builder", builderName: "handler" }`, so
+    // handler-specific downstream dispatchers are untouched (CT-1655).
+    if (!isHandlerAppliedCall(call, context.checker)) {
+      return undefined;
+    }
+    return getHandlerAppliedInnerCall(call);
+  },
+};
+
+const HOISTABLE_BUILDERS: readonly HoistableBuilderSpec[] = [
+  LIFT_BUILDER,
+  HANDLER_BUILDER,
+];
 
 function hoistBuilderCalls(
   sourceFile: ts.SourceFile,

@@ -19,6 +19,22 @@ import { Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                isEditing: {
+                    type: "boolean",
+                    asCell: ["writeonly"]
+                }
+            },
+            required: ["isEditing"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.isEditing.set(true));
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         isEditing: __cfHelpers.ReadonlyCell<boolean>;
@@ -58,22 +74,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                isEditing: {
-                    type: "boolean",
-                    asCell: ["writeonly"]
-                }
-            },
-            required: ["isEditing"]
-        }
-    },
-    required: ["state"]
-} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.isEditing.set(true))({
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (<cf-button onClick={__cfHandler_1({
     state: {
         isEditing: state.isEditing
     }

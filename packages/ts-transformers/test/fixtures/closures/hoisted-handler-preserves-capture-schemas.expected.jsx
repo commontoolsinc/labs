@@ -11,7 +11,36 @@ import { action, NAME, pattern, SELF, UI, type VNode, Writable, } from "commonfa
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn((_, { items }) => {
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                label: {
+                    type: "string"
+                },
+                $NAME: {
+                    type: "string"
+                }
+            },
+            required: ["id", "label", "$NAME"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, (_, { items }) => {
     const pieces = items.get() ?? [];
     const existing = pieces.find((p) => {
         const n = p?.[NAME];
@@ -21,7 +50,61 @@ const __cfModuleCallback_1 = __cfHardenFn((_, { items }) => {
         return navigateTo(existing);
     }
 });
-const __cfModuleCallback_2 = __cfHardenFn(({ label }, { self, items }) => {
+const __cfHandler_2 = __cfHelpers.handler({
+    type: "object",
+    properties: {
+        label: {
+            type: "string"
+        }
+    },
+    required: ["label"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        self: {
+            $ref: "#/$defs/ListOutput"
+        },
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["self", "items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                label: {
+                    type: "string"
+                },
+                $NAME: {
+                    type: "string"
+                }
+            },
+            required: ["id", "label", "$NAME"]
+        },
+        ListOutput: {
+            type: "object",
+            properties: {
+                read: true,
+                write: true,
+                $NAME: {
+                    type: "string"
+                },
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["read", "write", "$NAME", "$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ label }, { self, items }) => {
     const newItem = Item({ id: 0, label, parent: self } as any);
     items.push(newItem as any);
     return newItem;
@@ -83,96 +166,13 @@ export default pattern((__cf_pattern_input) => {
     // `goToAllNotesAction` — reads `items.get()`, filters, conditionally
     // navigates. Triggers `items` to be classified `readonly` in this
     // action's captures schema.
-    const read = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                },
-                asCell: ["readonly"]
-            }
-        },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "number"
-                    },
-                    label: {
-                        type: "string"
-                    },
-                    $NAME: {
-                        type: "string"
-                    }
-                },
-                required: ["id", "label", "$NAME"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+    const read = __cfHandler_1({
         items: items
     }).for({ stream: "read" }, true);
     // `write` action: matches the shape of notebook.tsx's
     // `createNoteStreamAction` — pushes a new item, returns it. Should
     // get a schema with `items` classified `writeonly` (plus `self`).
-    const write = __cfHelpers.handler({
-        type: "object",
-        properties: {
-            label: {
-                type: "string"
-            }
-        },
-        required: ["label"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            self: {
-                $ref: "#/$defs/ListOutput"
-            },
-            items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                },
-                asCell: ["writeonly"]
-            }
-        },
-        required: ["self", "items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "number"
-                    },
-                    label: {
-                        type: "string"
-                    },
-                    $NAME: {
-                        type: "string"
-                    }
-                },
-                required: ["id", "label", "$NAME"]
-            },
-            ListOutput: {
-                type: "object",
-                properties: {
-                    read: true,
-                    write: true,
-                    $NAME: {
-                        type: "string"
-                    },
-                    $UI: {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }
-                },
-                required: ["read", "write", "$NAME", "$UI"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({
+    const write = __cfHandler_2({
         self: self,
         items: items
     }).for({ stream: "write" }, true);

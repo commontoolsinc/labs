@@ -17,6 +17,23 @@ import { action, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        counter: {
+            type: "number",
+            asCell: ["writeonly"]
+        },
+        label: {
+            type: "string",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["counter", "label"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { counter, label }) => {
+    counter.set(0);
+    label.set("Count");
+});
 interface State {
     title: string;
 }
@@ -36,23 +53,7 @@ export default pattern((__cf_pattern_input) => {
     const label = new Writable("Count", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("label", true);
-    const reset = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            counter: {
-                type: "number",
-                asCell: ["writeonly"]
-            },
-            label: {
-                type: "string",
-                asCell: ["writeonly"]
-            }
-        },
-        required: ["counter", "label"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { counter, label }) => {
-        counter.set(0);
-        label.set("Count");
-    })({
+    const reset = __cfHandler_1({
         counter: counter,
         label: label
     }).for({ stream: "reset" }, true);
