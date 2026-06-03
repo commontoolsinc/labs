@@ -83,6 +83,16 @@ describe("fabric-value", () => {
         sparse[2] = 3; // hole at index 1
         expect(isFabricValue(sparse)).toBe(true);
       });
+
+      it("accepts `FabricInstance` values", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        expect(isFabricValue(fe)).toBe(true);
+      });
+
+      it("accepts `FabricPrimitive` values", () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+        expect(isFabricValue(bytes)).toBe(true);
+      });
     });
 
     describe("returns `false` for non-fabric values", () => {
@@ -273,6 +283,20 @@ describe("fabric-value", () => {
       });
     });
 
+    describe("passes Fabric values through", () => {
+      it("passes a `FabricPrimitive` value through unchanged", () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+        expect(shallowFabricFromNativeValue(bytes)).toBe(bytes);
+      });
+
+      it("passes a frozen `FabricInstance` value through unchanged", () => {
+        const fe = Object.freeze(
+          FabricError.fromNativeError(new Error("test")),
+        );
+        expect(shallowFabricFromNativeValue(fe)).toBe(fe);
+      });
+    });
+
     describe("converts via `toJSON()` when available", () => {
       it("converts functions with `toJSON()`", () => {
         const fn = () => {};
@@ -381,6 +405,20 @@ describe("fabric-value", () => {
 
       it("passes through `undefined` at top level", () => {
         expect(fabricFromNativeValue(undefined)).toBe(undefined);
+      });
+    });
+
+    describe("passes Fabric values through", () => {
+      it("returns a `FabricPrimitive` value as-is", () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+        expect(fabricFromNativeValue(bytes)).toBe(bytes);
+      });
+
+      it("returns an already-converted `FabricError` as-is", () => {
+        // `fabricFromNativeValue(Error)` produces a deep-frozen `FabricError`;
+        // feeding that back in is an identity passthrough.
+        const fe = fabricFromNativeValue(new Error("test"));
+        expect(fabricFromNativeValue(fe)).toBe(fe);
       });
     });
 
@@ -1400,9 +1438,14 @@ describe("fabric-value", () => {
       expect(isFabricCompatible(new Uint8Array([1, 2, 3]))).toBe(true);
     });
 
-    // -- FabricInstance values --
-    it("accepts `FabricError` wrappers", () => {
+    // -- FabricSpecialObject values --
+    it("accepts `FabricInstance` (e.g. `FabricError`) values", () => {
       expect(isFabricCompatible(FabricError.fromNativeError(new Error("test"))))
+        .toBe(true);
+    });
+
+    it("accepts `FabricPrimitive` (e.g. `FabricBytes`) values", () => {
+      expect(isFabricCompatible(new FabricBytes(new Uint8Array([1, 2, 3]))))
         .toBe(true);
     });
 
