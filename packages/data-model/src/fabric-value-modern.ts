@@ -242,8 +242,6 @@ const PROCESSING = Symbol("PROCESSING");
  * input is already a deep-frozen `FabricValue`, returns it as-is (identity
  * optimization).
  *
- * Used when the `modernDataModel` flag is ON.
- *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), deep-freezes the result tree.
  *   When `false`, wrapping and validation still occur but the result is
@@ -267,10 +265,10 @@ export function fabricFromNativeValueModern(
 
 /**
  * Helper for `fabricFromNativeValueModern()`, which performs the recursive
- * conversion for the modern path. Single-pass: checks, wraps, and optionally
- * freezes each node as it's built. By the time this returns, the whole tree
- * is converted and (if `freeze` is true) deep-frozen. Unlike the legacy
- * version, this never returns `OMIT` -- `undefined` values are preserved.
+ * conversion. Single-pass: checks, wraps, and optionally freezes each node as
+ * it's built. By the time this returns, the whole tree is converted and (if
+ * `freeze` is true) deep-frozen. Unlike the legacy version, this never returns
+ * `OMIT` -- `undefined` values are preserved.
  */
 function fabricFromNativeValueModernInternal(
   original: unknown,
@@ -291,9 +289,9 @@ function fabricFromNativeValueModernInternal(
     converted.set(original, PROCESSING);
   }
 
-  // Try to convert the top level via the modern shallow converter.
-  // Pass freeze=false: the deep path handles freezing its own newly-built
-  // results; the shallow converter should not freeze anything.
+  // Try to convert the top level via the shallow converter. Pass
+  // `freeze=false`: the deep path handles freezing its own newly-built results;
+  // the shallow converter should not freeze anything.
   let value: FabricValueLayer;
   try {
     value = shallowFabricFromNativeValueModern(original, false);
@@ -424,12 +422,6 @@ function rebuildFabricErrorDeep(
  * -- in addition to the base fabric types (`null`, `boolean`, `number`,
  * `string`, plain objects, dense arrays).
  *
- * MUST be self-contained (inline base-type checks, does NOT delegate back to
- * `isFabricValue()`) to avoid circular dispatch when the `modernDataModel`
- * flag is ON. See session 2 notes about the stack overflow this caused.
- *
- * Used when the `modernDataModel` flag is ON.
- *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
 export function isFabricValueModern(
@@ -453,8 +445,8 @@ export function isFabricValueModern(
         return true;
       }
       if (Array.isArray(value)) {
-        // In the modern path, arrays with `undefined` elements and sparse holes
-        // are accepted. Only reject arrays with non-index properties.
+        // Arrays with `undefined` elements and sparse holes are accepted, but
+        // not arrays with non-index properties.
         return isArrayWithOnlyIndexProperties(value);
       }
       // Plain objects are accepted; class instances are not (except
@@ -598,10 +590,6 @@ function isFabricCompatibleInternal(
     }
   }
 }
-
-//
-// Deep unwrap: `FabricValue` -> native JS types (modern path)
-//
 
 /**
  * Recursively walks a `FabricValue` tree, unwrapping any
