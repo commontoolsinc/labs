@@ -332,12 +332,20 @@ export class UnionFormatter implements TypeFormatter {
     const checker = context.typeChecker;
 
     let realArrayIndex = -1;
-    let sawDegenerateEmpty = false;
+    // Only the BRANDED empty member (`[] & DefaultMarker<[]>`) proves this is an
+    // expanded `Default<[]>`. A bare `[]` / `never[]` is the *unbranded* arm of
+    // that same Default union — but it also appears in ordinary unions like
+    // `string[] | []` that have nothing to do with defaults. So we require at
+    // least one branded empty member before collapsing + attaching `default:[]`;
+    // a bare empty member alone is left to normal union handling. (CT-1639)
+    let sawBrandedEmpty = false;
 
     for (let i = 0; i < members.length; i++) {
       const member = members[i]!;
       if (this.isDegenerateEmptyArrayMember(member, checker)) {
-        sawDegenerateEmpty = true;
+        if (this.hasDefaultBrand(member, checker)) {
+          sawBrandedEmpty = true;
+        }
         continue;
       }
       if (!checker.isArrayType(member) && !checker.isTupleType(member)) {
@@ -353,7 +361,7 @@ export class UnionFormatter implements TypeFormatter {
       }
     }
 
-    if (realArrayIndex === -1 || !sawDegenerateEmpty) {
+    if (realArrayIndex === -1 || !sawBrandedEmpty) {
       return undefined;
     }
 
@@ -400,6 +408,18 @@ export class UnionFormatter implements TypeFormatter {
       return !!elementType && (elementType.flags & ts.TypeFlags.Never) !== 0;
     }
     return false;
+  }
+
+  /**
+   * True if `member` carries the Default brand — i.e. it is an intersection with
+   * a brand-only marker constituent (`X & DefaultMarker<V>`). This is what
+   * distinguishes the unbranded `[]` arm of an *expanded* `Default<[]>` union
+   * from a bare `[]` in an ordinary union like `string[] | []`.
+   */
+  private hasDefaultBrand(member: ts.Type, checker: ts.TypeChecker): boolean {
+    if ((member.flags & ts.TypeFlags.Intersection) === 0) return false;
+    const parts = (member as ts.IntersectionType).types ?? [];
+    return parts.some((p) => this.isBrandOnlyMarker(p, checker));
   }
 
   /**

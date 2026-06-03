@@ -166,6 +166,19 @@ describe("Schema: Default in unions", () => {
     }
   });
 
+  it("does NOT fabricate a default for an ordinary array | empty-tuple union (no Default brand) (CT-1639)", async () => {
+    // A plain `string[] | []` has a bare empty-tuple member but NO Default brand.
+    // The expanded-Default collapse must not fire here — it would invent a
+    // `default: []` the author never asked for. (Regression for a cubic review
+    // finding on the CT-1639 pt-1 PR.)
+    const code = `type T = string[] | [];`;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+    );
+    expect((result as any).default).toBeUndefined();
+  });
+
   it("applies array defaults from T[] | Default<[...]>", async () => {
     const code = `
       interface Default<T, V extends T = T> {}
