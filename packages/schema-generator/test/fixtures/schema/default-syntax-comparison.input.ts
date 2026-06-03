@@ -49,32 +49,36 @@ interface SchemaRoot {
     enabled: boolean | Default<false>;
     nullable: string | null | Default<null>;
     tags: string[] | Default<["default", "tags"]>;
-    preferences: Preferences | Default<
-      {
-        theme: "dark";
-        retries: 3;
-        profile: {
-          name: "Ada";
-          email: "";
-          flags: {
-            marketing: false;
+    preferences:
+      | Preferences
+      | Default<
+        {
+          theme: "dark";
+          retries: 3;
+          profile: {
+            name: "Ada";
+            email: "";
+            flags: {
+              marketing: false;
+            };
           };
-        };
-      }
-    >;
+        }
+      >;
     writableTags: Writable<string[] | Default<[]>>;
   };
   deep: {
-    preferences: Preferences | DeepDefault<
-      {
-        theme: "dark";
-        profile: {
-          name: "Ada";
-          flags: {
-            marketing: false;
+    preferences:
+      | Preferences
+      | DeepDefault<
+        {
+          theme: "dark";
+          profile: {
+            name: "Ada";
+            flags: {
+              marketing: false;
+            };
           };
-        };
-      }
-    >;
+        }
+      >;
   };
 }

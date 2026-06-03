@@ -33,7 +33,9 @@ export default pattern<State>((state) => {
         <p>Matrix value: {state.matrix[state.row]![state.col]}</p>
 
         {/* Triple nested access */}
-        <p>Deep nested: {state.nested.arrays[state.nested.index]![state.row]}</p>
+        <p>
+          Deep nested: {state.nested.arrays[state.nested.index]![state.row]}
+        </p>
 
         <h3>Multiple References to Same Array</h3>
         {/* Same array accessed multiple times with different indices */}
@@ -96,7 +98,9 @@ export default pattern<State>((state) => {
         <p>Product: {state.arr[state.a]! * state.arr[state.b]!}</p>
 
         {/* Element access with string concatenation */}
-        <p>Concat: {state.items[0]! + " - " + state.items[state.indices[0]!]!}</p>
+        <p>
+          Concat: {state.items[0]! + " - " + state.items[state.indices[0]!]!}
+        </p>
 
         {/* Multiple element accesses in single expression */}
         <p>Sum: {state.arr[0]! + state.arr[1]! + state.arr[2]!}</p>

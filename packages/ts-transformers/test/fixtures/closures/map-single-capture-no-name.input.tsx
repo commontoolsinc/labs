@@ -13,9 +13,7 @@ export default pattern((state: State) => {
   return {
     [UI]: (
       <div>
-        {state.items.map((item) => (
-          <span>{item.price * state.discount}</span>
-        ))}
+        {state.items.map((item) => <span>{item.price * state.discount}</span>)}
       </div>
     ),
   };

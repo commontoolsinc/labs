@@ -4,13 +4,7 @@
  * A direct alias may stay structural, but an ordinary helper call that consumes
  * that alias should still lower at its own seam.
  */
-import {
-  Default,
-  pattern,
-  UI,
-  VNode,
-  Writable,
-} from "commonfabric";
+import { Default, pattern, UI, VNode, Writable } from "commonfabric";
 
 interface FileEntry {
   name: string;

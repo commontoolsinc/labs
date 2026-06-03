@@ -89,13 +89,11 @@ export default pattern<{
                           })}
                         >
                           {/* [TRANSFORM] ternary lowered: task.done ? <span>...</span> : ifElse(...) → ifElse(task.done, ..., ...) */}
-                          {task.done
-                            ? <span>{task.label}</span>
-                            : ifElse(
-                              task.note !== undefined && task.note !== "",
-                              <strong>{task.label}</strong>,
-                              <em>{task.label}</em>,
-                            )}
+                          {task.done ? <span>{task.label}</span> : ifElse(
+                            task.note !== undefined && task.note !== "",
+                            <strong>{task.label}</strong>,
+                            <em>{task.label}</em>,
+                          )}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
@@ -124,7 +122,9 @@ export default pattern<{
           </div>,
           // [TRANSFORM] false-branch of ifElse(hasSections): ternary showCompleted ? "No completed sections" : "No sections"
           //   → local ifElse(...) inside the <p> JSX expression
-          <p>{state.showCompleted ? "No completed sections" : "No sections"}</p>,
+          <p>
+            {state.showCompleted ? "No completed sections" : "No sections"}
+          </p>,
         )}
       </div>
     ),

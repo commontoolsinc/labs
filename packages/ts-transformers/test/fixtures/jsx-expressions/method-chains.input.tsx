@@ -76,7 +76,9 @@ export default pattern<State>((state) => {
         {/* String methods with reactive args */}
         <p>
           Starts with:{" "}
-          {computed(() => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
+          {computed(() =>
+            state.names.filter((n) => n.startsWith(state.prefix)).join(", ")
+          )}
         </p>
 
         {/* Array find with reactive predicate */}
@@ -110,7 +112,8 @@ export default pattern<State>((state) => {
         <h3>Methods on Computed Values</h3>
         {/* Method on binary expression result */}
         <p>
-          Formatted price: {(state.prices[0]! * (1 - state.discount)).toFixed(2)}
+          Formatted price:{" "}
+          {(state.prices[0]! * (1 - state.discount)).toFixed(2)}
         </p>
 
         {/* Method on conditional result */}

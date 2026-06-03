@@ -1,4 +1,4 @@
-import { unless, pattern, UI, NAME } from "commonfabric";
+import { NAME, pattern, UI, unless } from "commonfabric";
 
 interface State {
   value: string | null;

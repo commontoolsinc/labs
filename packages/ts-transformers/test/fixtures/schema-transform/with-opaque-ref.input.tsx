@@ -13,16 +13,20 @@ const model = toSchema<State>({
 //   Cell<number> → { type: "number", asCell: true }
 //   toSchema<State>({default: ...}) → schema with "default" key preserved
 //   bare `cell.value.get() * 2` → auto-wraps, capturing cell.key("value") into lift(inputSchema, outputSchema, fn)
-export default pattern<State, State>((cell) => {
-  const doubled = cell.value.get() * 2;
+export default pattern<State, State>(
+  (cell) => {
+    const doubled = cell.value.get() * 2;
 
-  return {
-    [UI]: (
-      <div>
-        <p>Value: {cell.value}</p>
-        <p>Doubled: {doubled}</p>
-      </div>
-    ),
-    value: cell.value,
-  };
-}, model, model);
+    return {
+      [UI]: (
+        <div>
+          <p>Value: {cell.value}</p>
+          <p>Doubled: {doubled}</p>
+        </div>
+      ),
+      value: cell.value,
+    };
+  },
+  model,
+  model,
+);

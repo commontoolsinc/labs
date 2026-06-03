@@ -698,12 +698,12 @@ export class Server {
    *
    * The path is validated here because it arrives over the wire (untrusted): it
    * must be absolute and must exist, and is `realpath`-canonicalized and then
-   * rejected if it resolves INSIDE the engine's store directory — otherwise a
-   * caller could point a handle at another space's (or a cell-derived) `.sqlite`
-   * file and read it cross-tenant. (Confining injected sources to an operator
-   * allowlist, and gating the verb to an operator capability rather than any
-   * session, awaits CFC labels — see plans/on-disk-source.md and
-   * 08-open-questions Q12/Q15.)
+   * rejected if it resolves INSIDE the engine's store directory OR names an
+   * internal cell-db file — otherwise a caller could point a handle at another
+   * space's (or a cell-derived) `.sqlite` file and read it cross-tenant.
+   * (Confining injected sources to an operator allowlist, and gating the verb to
+   * an operator capability rather than any session, awaits CFC labels —
+   * 08-open-questions Q18.)
    */
   async registerDiskSource(
     space: string,
@@ -732,6 +732,16 @@ export class Server {
           "disk source path may not resolve inside the store directory",
         );
       }
+    }
+    // Internal cell-db files (`cell-<tag>.sqlite` beside a file store's space db;
+    // `cf-cell-<tag>.sqlite` under TMPDIR for a memory store — see #cellDbPath)
+    // are never valid injected sources. Reject by name so a memory store (which
+    // has no on-disk store directory to jail against) can't be pointed at another
+    // space's cell-db sitting in TMPDIR.
+    if (/^(?:cf-)?cell-[^/]*\.sqlite$/i.test(Path.basename(canonical))) {
+      throw new Engine.ProtocolError(
+        "disk source path may not be an internal cell-db file",
+      );
     }
     this.#diskSources.register(space, id, { path: canonical });
   }

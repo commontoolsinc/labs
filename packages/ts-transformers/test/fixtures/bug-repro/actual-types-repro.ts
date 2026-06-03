@@ -7,7 +7,7 @@
  * RUN: deno run -A test/fixtures/bug-repro/verify-actual.ts
  */
 
-import type { OpaqueRef, OpaqueCell } from "commonfabric";
+import type { OpaqueCell, OpaqueRef } from "commonfabric";
 
 // ============================================================================
 // TEST CASES
@@ -32,13 +32,21 @@ type ValueGet = ValueProp extends { get(): infer R } ? R : never;
 // With Required<>
 type RequiredStateRef = OpaqueRef<Required<State>>;
 type RequiredValueProp = RequiredStateRef["value"];
-type RequiredValueInner = RequiredValueProp extends OpaqueCell<infer T> ? T : never;
+type RequiredValueInner = RequiredValueProp extends OpaqueCell<infer T> ? T
+  : never;
 
 // ============================================================================
 // EXPORTS
 // ============================================================================
 export type {
-  Direct, DirectInner, DirectGet,
-  StateRef, ValueProp, ValueInner, ValueGet,
-  RequiredStateRef, RequiredValueProp, RequiredValueInner,
+  Direct,
+  DirectGet,
+  DirectInner,
+  RequiredStateRef,
+  RequiredValueInner,
+  RequiredValueProp,
+  StateRef,
+  ValueGet,
+  ValueInner,
+  ValueProp,
 };

@@ -30,9 +30,7 @@ export default pattern<{ items: Item[] }>((state) => {
             return (
               <div>
                 <span>{itemCount}</span>
-                {sorted.map((item: Item) => (
-                  <span>{item.name}</span>
-                ))}
+                {sorted.map((item: Item) => <span>{item.name}</span>)}
               </div>
             );
           })()

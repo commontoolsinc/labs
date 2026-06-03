@@ -5,6 +5,8 @@ import { pattern, UI } from "commonfabric";
 // of expanding into literal `true` / `false` enums.
 export default pattern((state: { isPremium: boolean; score: number }) => {
   return {
-    [UI]: <div>{state.isPremium || state.score > 100 ? "Premium" : "Regular"}</div>,
+    [UI]: (
+      <div>{state.isPremium || state.score > 100 ? "Premium" : "Regular"}</div>
+    ),
   };
 });

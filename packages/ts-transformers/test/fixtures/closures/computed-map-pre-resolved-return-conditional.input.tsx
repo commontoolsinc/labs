@@ -15,9 +15,7 @@ interface State {
 //   rows.map((row) => row.done ? "Done" : "Pending")
 //   → rows.mapWithPattern(pattern(... return ifElse(row.done, "Done", "Pending")))
 export default pattern<State>((state) => {
-  const rows = computed(() =>
-    state.items.map((item) => ({ done: item.done }))
-  );
+  const rows = computed(() => state.items.map((item) => ({ done: item.done })));
 
   return {
     [UI]: (

@@ -127,6 +127,18 @@ describe("assertWriteSafe", () => {
     );
     expect(() => assertWriteSafe("DELETE FROM commit")).toThrow(GuardError);
   });
+
+  it("rejects schema-qualified `UPDATE OR <conflict>` (qualifier-guard bypass)", () => {
+    // The `OR REPLACE` conflict clause sits between UPDATE and the target, which
+    // used to slip past the table-position qualifier check.
+    for (const conflict of ["ABORT", "FAIL", "IGNORE", "REPLACE", "ROLLBACK"]) {
+      expect(() =>
+        assertWriteSafe(`UPDATE OR ${conflict} foo.bar SET a = ? WHERE id = ?`)
+      ).toThrow(GuardError);
+    }
+    // A plain (unqualified) UPDATE OR REPLACE is still allowed.
+    assertWriteSafe("UPDATE OR REPLACE messages SET a = ? WHERE id = ?");
+  });
 });
 
 // Regression tests for guard bypasses found in code review.

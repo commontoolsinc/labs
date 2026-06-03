@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-collision-property
 // Verifies: a captured cell named the same as a returned object property does not rename the property

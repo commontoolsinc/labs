@@ -5,13 +5,7 @@
  * when it is only forwarded into JSX, because the renderer already knows how
  * to subscribe to structural opaque refs.
  */
-import {
-  Default,
-  pattern,
-  UI,
-  VNode,
-  Writable,
-} from "commonfabric";
+import { Default, pattern, UI, VNode, Writable } from "commonfabric";
 
 interface FileEntry {
   name: string;

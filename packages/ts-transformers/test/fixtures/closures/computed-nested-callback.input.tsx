@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-nested-callback
 // Verifies: capture extraction works with a nested .map() over a captured cell's array value
@@ -10,9 +10,7 @@ export default pattern(() => {
   const multiplier = new Writable(2);
 
   // Nested callback - the inner array map runs on the unwrapped plain array
-  const result = computed(() =>
-    numbers.get().map((n) => n * multiplier.get())
-  );
+  const result = computed(() => numbers.get().map((n) => n * multiplier.get()));
 
   return result;
 });

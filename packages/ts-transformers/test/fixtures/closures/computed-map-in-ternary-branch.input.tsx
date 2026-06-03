@@ -31,9 +31,7 @@ export default pattern<PatternInput>(({ people }) => {
   return {
     [UI]: (
       <div>
-        {people.map((person) => (
-          <span>{person.name}</span>
-        ))}
+        {people.map((person) => <span>{person.name}</span>)}
         {showAdmin
           ? (
             <div>

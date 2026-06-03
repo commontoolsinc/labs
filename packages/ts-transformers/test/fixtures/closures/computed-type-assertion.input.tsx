@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-type-assertion
 // Verifies: a type assertion (`as number`) in the callback body is preserved after capture extraction

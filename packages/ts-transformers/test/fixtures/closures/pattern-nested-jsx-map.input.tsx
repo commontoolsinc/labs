@@ -40,23 +40,23 @@ export default pattern<PatternInput>(({ items }) => {
   return {
     [UI]: (
       <div>
-        {hasItems ? (
-          items.map((item) => (
-            <div>
-              <strong>{item.label}</strong>
-              <ul>
-                {item.tags.map((tag, i) => (
-                  <li>
-                    {i === item.selectedIndex ? "* " : ""}
-                    {tag.name}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))
-        ) : (
-          <p>No items</p>
-        )}
+        {hasItems
+          ? (
+            items.map((item) => (
+              <div>
+                <strong>{item.label}</strong>
+                <ul>
+                  {item.tags.map((tag, i) => (
+                    <li>
+                      {i === item.selectedIndex ? "* " : ""}
+                      {tag.name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )
+          : <p>No items</p>}
       </div>
     ),
   };

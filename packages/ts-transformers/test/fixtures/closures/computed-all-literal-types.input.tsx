@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // Test that all literal types are widened in closure captures
 // FIXTURE: computed-all-literal-types

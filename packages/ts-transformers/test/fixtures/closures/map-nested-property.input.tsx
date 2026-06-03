@@ -25,7 +25,8 @@ export default pattern<State>((state) => {
       <div>
         {state.items.map((item) => (
           <div>
-            {item.name} - edited by {state.currentUser.firstName} {state.currentUser.lastName}
+            {item.name} - edited by {state.currentUser.firstName}{" "}
+            {state.currentUser.lastName}
           </div>
         ))}
       </div>

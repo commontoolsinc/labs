@@ -6,9 +6,7 @@ import { computed, ifElse, pattern } from "commonfabric";
 //   ifElse(show, computed(() => foo ? "A" : bar ? "B" : "C"), "D") → helper-owned branch lowering still preserves the inner ternaries
 export const OuterTernary = pattern<{ show: boolean; bar: boolean }>((
   { show, bar },
-) => (
-  <div>{show ? computed(() => bar ? "B" : "C") : "D"}</div>
-));
+) => <div>{show ? computed(() => bar ? "B" : "C") : "D"}</div>);
 
 export const AuthoredIfElse = pattern<{
   show: boolean;

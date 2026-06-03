@@ -1,9 +1,13 @@
-import { computed, pattern, type JSONSchema } from "commonfabric";
+import { computed, type JSONSchema, pattern } from "commonfabric";
 import "commonfabric/schema";
 
 // Test that pattern with both schemas already present is not transformed
-interface Input { count: number }
-interface Result { doubled: number }
+interface Input {
+  count: number;
+}
+interface Result {
+  doubled: number;
+}
 
 // FIXTURE: pattern-two-schemas
 // Verifies: pattern with both input and output schemas already present preserves them
@@ -13,21 +17,21 @@ interface Result { doubled: number }
 export default pattern<Input, Result>(
   ({ count }) => {
     return {
-      doubled: computed(() => count * 2)
+      doubled: computed(() => count * 2),
     };
   },
   {
     type: "object",
     properties: {
-      count: { type: "number" }
+      count: { type: "number" },
     },
-    required: ["count"]
+    required: ["count"],
   } as const satisfies JSONSchema,
   {
     type: "object",
     properties: {
-      doubled: { type: "number" }
+      doubled: { type: "number" },
     },
-    required: ["doubled"]
+    required: ["doubled"],
   } as const satisfies JSONSchema,
 );

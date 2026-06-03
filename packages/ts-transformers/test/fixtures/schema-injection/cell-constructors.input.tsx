@@ -1,9 +1,9 @@
 import {
   Cell,
   ComparableCell,
+  type PerUser,
   ReadonlyCell,
   Stream,
-  type PerUser,
   type Writable,
   Writable as WritableConstructor,
   WriteonlyCell,

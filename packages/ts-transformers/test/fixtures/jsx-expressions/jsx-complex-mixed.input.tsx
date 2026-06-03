@@ -28,8 +28,9 @@ export default pattern<State>((state) => {
         <h3>Array Operations</h3>
         <p>Total items: {state.items.length}</p>
         <p>
-          Filtered count:{" "}
-          {computed(() => state.items.filter((i) => i.name.includes(state.filter)).length)}
+          Filtered count: {computed(() =>
+            state.items.filter((i) => i.name.includes(state.filter)).length
+          )}
         </p>
 
         <h3>Array with Complex Expressions</h3>
@@ -62,8 +63,11 @@ export default pattern<State>((state) => {
         <p>All active: {state.items.every((i) => i.active) ? "Yes" : "No"}</p>
         <p>Any active: {state.items.some((i) => i.active) ? "Yes" : "No"}</p>
         <p>
-          Has expensive (gt 100):{" "}
-          {state.items.some((i) => i.price > 100) ? "Yes" : "No"}
+          Has expensive (gt 100): {state.items.some((i) =>
+              i.price > 100
+            )
+            ? "Yes"
+            : "No"}
         </p>
 
         <h3>Object Operations</h3>

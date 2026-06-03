@@ -1,10 +1,4 @@
-import {
-  DeepDefault,
-  Default,
-  NAME,
-  pattern,
-  toSchema,
-} from "commonfabric";
+import { DeepDefault, Default, NAME, pattern, toSchema } from "commonfabric";
 import "commonfabric/schema";
 
 interface Options {
@@ -18,12 +12,14 @@ interface Options {
 interface Input {
   title: string | Default<"">;
   subtitle: string | Default<null>;
-  options: Options | DeepDefault<{
-    theme: "dark";
-    profile: {
-      name: "Ada";
-    };
-  }>;
+  options:
+    | Options
+    | DeepDefault<{
+      theme: "dark";
+      profile: {
+        name: "Ada";
+      };
+    }>;
 }
 
 const inputSchema = toSchema<Input>();

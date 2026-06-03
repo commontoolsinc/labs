@@ -14,7 +14,9 @@ export default pattern<{ items?: Item[] }>(({ items }) => {
   return {
     [UI]: (
       <div>
-        {(items ?? []).map((item) => <span data-inline-id={item.id}>{item.id}</span>)}
+        {(items ?? []).map((item) => (
+          <span data-inline-id={item.id}>{item.id}</span>
+        ))}
         {((items as Item[] | undefined) ?? []).map((item) => (
           <span data-cast-id={item.id}>{item.id}</span>
         ))}

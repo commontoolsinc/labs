@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-pattern-typed
 // Verifies: computed() inside a typed pattern with destructured params is closure-extracted

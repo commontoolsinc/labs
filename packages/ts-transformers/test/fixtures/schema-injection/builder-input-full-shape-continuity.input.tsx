@@ -8,9 +8,9 @@ const liftWrapped = lift((input: Writable<{ foo: string; bar: string }>) =>
   input.get().foo
 );
 
-const patternFullShape = pattern((input: Writable<{ foo: string; bar: string }>) =>
-  input.key("foo")
-);
+const patternFullShape = pattern((
+  input: Writable<{ foo: string; bar: string }>,
+) => input.key("foo"));
 
 const patternExplicit = pattern<
   Writable<{ foo: string; bar: string }>,

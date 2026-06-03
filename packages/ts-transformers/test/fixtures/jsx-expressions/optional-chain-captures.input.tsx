@@ -19,9 +19,7 @@ export default pattern<State>((state) => {
     [UI]: (
       <div>
         <span>{state.maybe?.value}</span>
-        {state.items.map((item) => (
-          <span>{item.maybe?.value ?? 0}</span>
-        ))}
+        {state.items.map((item) => <span>{item.maybe?.value ?? 0}</span>)}
       </div>
     ),
   };

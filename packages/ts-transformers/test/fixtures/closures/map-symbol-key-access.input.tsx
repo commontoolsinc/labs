@@ -1,4 +1,4 @@
-import { NAME, UI, pattern } from "commonfabric";
+import { NAME, pattern, UI } from "commonfabric";
 
 interface Entry {
   [NAME]: string;

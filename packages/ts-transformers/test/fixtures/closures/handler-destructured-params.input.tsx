@@ -20,7 +20,7 @@ export default pattern<State>((state) => {
         ]}
         oncf-change={({ detail: { value, items } }) => {
           state.selectedValue.set(value);
-          state.lastItems.set(items.map(i => i.label).join(", "));
+          state.lastItems.set(items.map((i) => i.label).join(", "));
         }}
       />
     ),

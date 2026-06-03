@@ -29,11 +29,13 @@ export default pattern<State>((state) => {
         </p>
         <p>
           Filter joined upper:{" "}
-          {state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()}
+          {state.items.filter((x) => x > state.threshold).join(", ")
+            .toUpperCase()}
         </p>
         <p>
           Filter joined upper trimmed:{" "}
-          {state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
+          {state.items.filter((x) => x > state.threshold).join(", ")
+            .toUpperCase()
             .trim()}
         </p>
       </div>

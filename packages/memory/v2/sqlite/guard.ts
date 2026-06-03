@@ -148,9 +148,12 @@ function normalizeForGuard(sql: string): string {
 const FORBIDDEN_SCHEMA_RE =
   /\b(?:main|temp|sqlite_[A-Za-z0-9_]*|pragma_[A-Za-z0-9_]*)\s*\./i;
 
-// Generic schema-qualified table reference in a table position.
+// Generic schema-qualified table reference in a table position. The optional
+// `OR ABORT|FAIL|IGNORE|REPLACE|ROLLBACK` conflict clause can sit between
+// `UPDATE` and its target, so allow it — otherwise `UPDATE OR REPLACE s.t …`
+// would slip a schema-qualified write past this check.
 const TABLE_POS_QUALIFIED_RE =
-  /\b(?:FROM|JOIN|INTO|UPDATE)\s+[A-Za-z_][\w$]*\s*\.\s*[A-Za-z_][\w$]*/i;
+  /\b(?:FROM|JOIN|INTO|UPDATE(?:\s+OR\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK))?)\s+[A-Za-z_][\w$]*\s*\.\s*[A-Za-z_][\w$]*/i;
 
 // Core tables, sqlite_* / pragma_* introspection (sqlite_master, sqlite_schema,
 // pragma_table_info table-valued functions, etc.).

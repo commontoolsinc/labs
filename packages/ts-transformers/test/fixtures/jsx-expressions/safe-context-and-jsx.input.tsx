@@ -1,5 +1,5 @@
 // deno-lint-ignore-file no-unused-vars
-import { handler, computed } from "commonfabric";
+import { computed, handler } from "commonfabric";
 
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
@@ -13,6 +13,8 @@ const MyHandler = handler<Event, { show: boolean }>((_event, { show }) => {
 });
 
 // Test: || with JSX inside handler callback should transform to unless()
-const MyHandler2 = handler<Event, { value: string | null }>((_event, { value }) => {
-  return <div>{computed(() => value) || <span>Fallback</span>}</div>;
-});
+const MyHandler2 = handler<Event, { value: string | null }>(
+  (_event, { value }) => {
+    return <div>{computed(() => value) || <span>Fallback</span>}</div>;
+  },
+);

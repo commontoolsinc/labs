@@ -22,9 +22,7 @@ export default pattern<State>((state) => {
       <div>
         {state.items
           .filter((item) => item.active)
-          .map((item) => (
-            <div>Item #{item.id}: {item.name}</div>
-          ))}
+          .map((item) => <div>Item #{item.id}: {item.name}</div>)}
       </div>
     ),
   };

@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-template-literal
 // Verifies: captured cells used inside a template literal expression are extracted

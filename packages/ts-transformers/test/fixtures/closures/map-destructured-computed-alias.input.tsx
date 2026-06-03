@@ -20,9 +20,7 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map(({ [dynamicKey]: val }) => (
-          <span>{val}</span>
-        ))}
+        {state.items.map(({ [dynamicKey]: val }) => <span>{val}</span>)}
       </div>
     ),
   };

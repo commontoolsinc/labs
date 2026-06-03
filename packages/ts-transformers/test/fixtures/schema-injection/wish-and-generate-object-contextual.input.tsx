@@ -1,8 +1,4 @@
-import {
-  generateObject,
-  type WishState,
-  wish,
-} from "commonfabric";
+import { generateObject, wish, type WishState } from "commonfabric";
 
 const existingLabelSchema = {
   type: "object",

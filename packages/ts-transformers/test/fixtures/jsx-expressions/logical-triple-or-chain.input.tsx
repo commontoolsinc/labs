@@ -14,7 +14,9 @@ export default pattern((_state) => {
     [UI]: (
       <div>
         {/* Triple || chain - first truthy wins */}
-        <span>{primary.get().length || secondary.get().length || "no content"}</span>
+        <span>
+          {primary.get().length || secondary.get().length || "no content"}
+        </span>
 
         {/* Triple || with mixed types */}
         <span>{items.get()[0]?.length || items.get()[1]?.length || 0}</span>

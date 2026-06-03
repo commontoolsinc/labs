@@ -142,6 +142,12 @@ export function createTableSQL(
   t: TableSchema,
   schema?: string,
 ): string {
+  // A table with no columns would emit `CREATE TABLE t ()` — invalid SQL that
+  // fails opaquely at the engine. Reject it here (covers both `table({})` and a
+  // wire-supplied empty `db.tables` entry).
+  if (!t.properties || Object.keys(t.properties).length === 0) {
+    throw new TypeError(`table "${name}" must declare at least one column`);
+  }
   const cols = Object.entries(t.properties).map(
     ([col, col_schema]) => {
       // Re-validate at the interpolation site: `t` may be wire-supplied

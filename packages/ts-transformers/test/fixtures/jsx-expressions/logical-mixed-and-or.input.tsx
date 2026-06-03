@@ -15,10 +15,15 @@ export default pattern((_state) => {
     [UI]: (
       <div>
         {/* (condition && value) || fallback pattern */}
-        <span>{(user.get().name.length > 0 && user.get().name) || defaultMessage.get()}</span>
+        <span>
+          {(user.get().name.length > 0 && user.get().name) ||
+            defaultMessage.get()}
+        </span>
 
         {/* condition && (value || fallback) pattern */}
-        <span>{user.get().age > 18 && (user.get().name || "Anonymous Adult")}</span>
+        <span>
+          {user.get().age > 18 && (user.get().name || "Anonymous Adult")}
+        </span>
 
         {/* Complex: (a && b) || (c && d) */}
         <span>

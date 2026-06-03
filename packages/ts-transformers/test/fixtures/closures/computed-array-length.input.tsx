@@ -30,9 +30,7 @@ export default pattern(() => {
       <div>
         <span>Count: {computed(() => allCharms.length)}</span>
         <ul>
-          {allCharms.map((charm) => (
-            <li>{charm.name}</li>
-          ))}
+          {allCharms.map((charm) => <li>{charm.name}</li>)}
         </ul>
       </div>
     ),

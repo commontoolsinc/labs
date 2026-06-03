@@ -31,7 +31,9 @@ export default pattern<State>((state) => {
       <div>
         {state.items.map((item) => (
           <span>
-            Total: {item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost}
+            Total:{" "}
+            {item.price * item.quantity * state.discount * state.taxRate *
+                multiplier + shippingCost}
           </span>
         ))}
       </div>

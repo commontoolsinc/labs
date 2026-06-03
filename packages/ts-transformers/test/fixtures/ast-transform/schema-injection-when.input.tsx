@@ -1,4 +1,4 @@
-import { when, pattern, UI, NAME } from "commonfabric";
+import { NAME, pattern, UI, when } from "commonfabric";
 
 interface State {
   enabled: boolean;

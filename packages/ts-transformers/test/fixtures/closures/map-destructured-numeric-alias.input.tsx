@@ -12,9 +12,7 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.entries.map(({ 0: first }) => (
-          <span>{first}</span>
-        ))}
+        {state.entries.map(({ 0: first }) => <span>{first}</span>)}
       </div>
     ),
   };

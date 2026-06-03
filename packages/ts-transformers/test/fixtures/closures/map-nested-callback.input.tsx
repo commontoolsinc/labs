@@ -30,9 +30,7 @@ export default pattern<State>((state) => {
           <div>
             {state.prefix}: {item.name}
             <ul>
-              {item.tags.map((tag) => (
-                <li>{item.name} - {tag.name}</li>
-              ))}
+              {item.tags.map((tag) => <li>{item.name} - {tag.name}</li>)}
             </ul>
           </div>
         ))}

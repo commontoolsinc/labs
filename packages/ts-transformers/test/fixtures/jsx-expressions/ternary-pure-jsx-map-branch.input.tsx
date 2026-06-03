@@ -14,17 +14,15 @@ interface TagEvent {
 export default pattern<{ recentEvents: TagEvent[] }>(({ recentEvents }) => ({
   [UI]: (
     <div>
-      {recentEvents.length === 0
-        ? <span>No events yet</span>
-        : (
-          <div>
-            {recentEvents.map((event: TagEvent, idx: number) => (
-              <cf-hstack key={idx} gap="2">
-                <span>{event.label}</span>
-              </cf-hstack>
-            ))}
-          </div>
-        )}
+      {recentEvents.length === 0 ? <span>No events yet</span> : (
+        <div>
+          {recentEvents.map((event: TagEvent, idx: number) => (
+            <cf-hstack key={idx} gap="2">
+              <span>{event.label}</span>
+            </cf-hstack>
+          ))}
+        </div>
+      )}
     </div>
   ),
 }));

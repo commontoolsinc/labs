@@ -346,6 +346,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    // A folded SQLite write is a write — honor the wrapper's read-only mode the
+    // same way cell writes do, instead of silently recording it.
+    this.assertWritable("recordSqliteWrite");
     if (!this.tx.recordSqliteWrite) {
       throw new Error(
         "storage transaction does not support recordSqliteWrite()",

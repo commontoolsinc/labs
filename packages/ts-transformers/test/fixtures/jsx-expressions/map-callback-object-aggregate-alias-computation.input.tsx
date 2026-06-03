@@ -4,13 +4,7 @@
  * If a reactive field is first packed into a local object aggregate, later
  * computations over that aggregate should still lower correctly.
  */
-import {
-  Default,
-  pattern,
-  UI,
-  VNode,
-  Writable,
-} from "commonfabric";
+import { Default, pattern, UI, VNode, Writable } from "commonfabric";
 
 interface FileEntry {
   name: string;

@@ -226,6 +226,10 @@ export function sqliteQuery(
           // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
           const rows = decodeRowLinkColumns(res.rows, linkCols);
           await runtime.editWithRetry((wtx) => {
+            // Stale-writeback guard: a newer query (different inputs -> different
+            // hash) may have superseded this one while the RPC was in flight.
+            // Only write back if the result cell still records THIS request.
+            if (result.withTx(wtx).get()?.requestHash !== hash) return;
             result.withTx(wtx).set({
               pending: false,
               result: rows,
@@ -234,6 +238,7 @@ export function sqliteQuery(
           });
         } catch (error) {
           await runtime.editWithRetry((wtx) => {
+            if (result.withTx(wtx).get()?.requestHash !== hash) return;
             result.withTx(wtx).set({
               pending: false,
               error: errMsg(error),

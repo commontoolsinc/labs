@@ -1,4 +1,4 @@
-import { computed, pattern, UI, NAME } from "commonfabric";
+import { computed, NAME, pattern, UI } from "commonfabric";
 
 // Represents a question that may or may not exist
 type Question = {
@@ -32,11 +32,19 @@ export default pattern((_) => {
 
         {/* WORKAROUND: Explicit null check preserves nullability */}
         {/* This correctly generates anyOf [Question, null] in the schema */}
-        <p>Explicit check: {computed(() => topQuestion === null ? "" : topQuestion.question)}</p>
+        <p>
+          Explicit check:{" "}
+          {computed(() => topQuestion === null ? "" : topQuestion.question)}
+        </p>
 
         {/* Same issue with category field */}
-        <span>Category (buggy): {computed(() => topQuestion?.category || "")}</span>
-        <span>Category (works): {computed(() => topQuestion === null ? "" : topQuestion.category)}</span>
+        <span>
+          Category (buggy): {computed(() => topQuestion?.category || "")}
+        </span>
+        <span>
+          Category (works):{" "}
+          {computed(() => topQuestion === null ? "" : topQuestion.category)}
+        </span>
       </div>
     ),
   };

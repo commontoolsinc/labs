@@ -153,9 +153,8 @@ export default pattern<State>((state) => {
 
         {/* Nested array access with shared base */}
         <p>
-          Nested: {state.arrays.nested[0]!.items.length} items in first, count is
-          {" "}
-          {state.arrays.nested[0]!.count}
+          Nested: {state.arrays.nested[0]!.items.length}{" "}
+          items in first, count is {state.arrays.nested[0]!.count}
         </p>
 
         {/* Array and property access mixed */}

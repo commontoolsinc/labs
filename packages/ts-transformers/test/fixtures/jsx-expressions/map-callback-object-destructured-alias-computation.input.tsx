@@ -4,13 +4,7 @@
  * A destructured alias may remain structural, but later computations over it
  * should still lower at their own seam.
  */
-import {
-  Default,
-  pattern,
-  UI,
-  VNode,
-  Writable,
-} from "commonfabric";
+import { Default, pattern, UI, VNode, Writable } from "commonfabric";
 
 interface FileEntry {
   name: string;

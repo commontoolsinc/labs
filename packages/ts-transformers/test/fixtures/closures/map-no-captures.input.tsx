@@ -18,9 +18,7 @@ export default pattern<State>((state) => {
     [UI]: (
       <div>
         {/* No captures - just uses the callback parameter */}
-        {state.items.map((item) => (
-          <div>Item #{item.id}: ${item.price}</div>
-        ))}
+        {state.items.map((item) => <div>Item #{item.id}: ${item.price}</div>)}
       </div>
     ),
   };

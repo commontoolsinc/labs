@@ -6,6 +6,8 @@ import { pattern, UI } from "commonfabric";
 // inline function body that leaves the reactive argument outside.
 //   ((value) => prefix + value)(count)
 //     -> lift(({ prefix, count }) => ((value) => prefix + value)(count))({ prefix, count })
-export default pattern<{ prefix: string; count: number }>(({ prefix, count }) => ({
+export default pattern<{ prefix: string; count: number }>((
+  { prefix, count },
+) => ({
   [UI]: <div>{((value: number) => prefix + value)(count)}</div>,
 }));

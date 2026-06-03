@@ -13,9 +13,7 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map((item) => (
-          <span>{item.name} #{counter}</span>
-        ))}
+        {state.items.map((item) => <span>{item.name} #{counter}</span>)}
       </div>
     ),
   };

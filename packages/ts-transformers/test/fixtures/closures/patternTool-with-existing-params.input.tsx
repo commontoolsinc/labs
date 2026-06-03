@@ -1,4 +1,10 @@
-import { cell, computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import {
+  cell,
+  computed,
+  pattern,
+  patternTool,
+  type PatternToolResult,
+} from "commonfabric";
 
 const multiplier = cell(2);
 const offset = cell(10);

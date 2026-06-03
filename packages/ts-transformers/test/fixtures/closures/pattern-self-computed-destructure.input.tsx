@@ -1,4 +1,4 @@
-import { SELF, pattern } from "commonfabric";
+import { pattern, SELF } from "commonfabric";
 
 interface Input {
   value: string;

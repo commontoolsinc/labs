@@ -1,4 +1,4 @@
-import { pattern, type Writable, UI } from "commonfabric";
+import { pattern, UI, type Writable } from "commonfabric";
 
 interface State {
   foo: string;

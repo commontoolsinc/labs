@@ -31,9 +31,7 @@ export default pattern<
     list: [identity(row.done ? "Done" : "Pending")],
   }));
 
-  const labels = rows.map((row) =>
-    identity(row.done ? "Done" : "Pending")
-  );
+  const labels = rows.map((row) => identity(row.done ? "Done" : "Pending"));
 
   return { views, labels };
 });

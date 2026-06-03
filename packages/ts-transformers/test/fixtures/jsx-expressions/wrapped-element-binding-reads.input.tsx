@@ -29,14 +29,12 @@ export default pattern<Input, Output>(({ entries, prefix }) => ({
     <div>
       {entries.map((entry) => {
         // Parenthesized: (entry).name
-        const a = (entry).name === prefix;
+        const a = entry.name === prefix;
         // Non-null asserted: entry!.name
         const b = entry!.name === prefix;
         // 'as' asserted: (entry as Entry).name
         const c = (entry as Entry).name === prefix;
-        return (
-          <span data-a={a} data-b={b} data-c={c}>{entry.name}</span>
-        );
+        return <span data-a={a} data-b={b} data-c={c}>{entry.name}</span>;
       })}
     </div>
   ),

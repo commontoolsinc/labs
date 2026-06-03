@@ -10,7 +10,10 @@ interface State {
 export default pattern<State>((state) => {
   return {
     [UI]: (
-      <button type="button" onClick={() => state.counter.set(state.counter.get() + 1)}>
+      <button
+        type="button"
+        onClick={() => state.counter.set(state.counter.get() + 1)}
+      >
         Increment
       </button>
     ),

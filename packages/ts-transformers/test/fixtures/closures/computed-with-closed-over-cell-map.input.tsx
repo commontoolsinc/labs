@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-with-closed-over-cell-map
 // Verifies: .map() on a closed-over Cell inside computed() IS transformed to .mapWithPattern()
@@ -14,7 +14,7 @@ export default pattern(() => {
   // The computed gets transformed to the lift-applied form lift(() => numbers.map(...))({})
   // Inside a lift-applied computation, .map on a closed-over Cell should STILL be transformed to mapWithPattern
   // because Cells need the pattern-based mapping even when unwrapped
-  const doubled = computed(() => numbers.map(n => n * multiplier.get()));
+  const doubled = computed(() => numbers.map((n) => n * multiplier.get()));
 
   return doubled;
 });

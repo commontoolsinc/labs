@@ -26,20 +26,28 @@ export default pattern<Record<PropertyKey, never>>(() => {
     [UI]: (
       <div>
         {/* Case A: Top-level computed - always worked */}
-        <div style={computed(() => {
-          const val = secondToggle.get();
-          return { background: val ? "green" : "red" };
-        })}>Case A</div>
+        <div
+          style={computed(() => {
+            const val = secondToggle.get();
+            return { background: val ? "green" : "red" };
+          })}
+        >
+          Case A
+        </div>
 
         {/* Case B: Computed inside ifElse - this was the bug */}
         {ifElse(
           showOuter,
-          <div style={computed(() => {
-            // This .get() should NOT be wrapped in an extra lift-applied computation
-            const val = secondToggle.get();
-            return { background: val ? "green" : "red" };
-          })}>Case B</div>,
-          <div>Hidden</div>
+          <div
+            style={computed(() => {
+              // This .get() should NOT be wrapped in an extra lift-applied computation
+              const val = secondToggle.get();
+              return { background: val ? "green" : "red" };
+            })}
+          >
+            Case B
+          </div>,
+          <div>Hidden</div>,
         )}
       </div>
     ),

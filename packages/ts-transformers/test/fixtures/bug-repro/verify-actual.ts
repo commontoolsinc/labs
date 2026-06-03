@@ -7,11 +7,18 @@ import ts from "typescript";
 import { dirname, fromFileUrl, join } from "@std/path";
 
 // Derive project root from this file's location (6 levels up: bug-repro → fixtures → test → ts-transformers → packages → labs)
-const projectRoot = dirname(dirname(dirname(dirname(dirname(dirname(fromFileUrl(import.meta.url)))))));
-const testFile = join(projectRoot, "packages/ts-transformers/test/fixtures/bug-repro/actual-types-repro.ts");
+const projectRoot = dirname(
+  dirname(dirname(dirname(dirname(dirname(fromFileUrl(import.meta.url)))))),
+);
+const testFile = join(
+  projectRoot,
+  "packages/ts-transformers/test/fixtures/bug-repro/actual-types-repro.ts",
+);
 
 // Parse deno.json for import mappings
-const denoJson = JSON.parse(Deno.readTextFileSync(join(projectRoot, "deno.json")));
+const denoJson = JSON.parse(
+  Deno.readTextFileSync(join(projectRoot, "deno.json")),
+);
 const imports: Record<string, string> = denoJson.imports || {};
 
 const compilerOptions: ts.CompilerOptions = {
@@ -28,17 +35,31 @@ const compilerOptions: ts.CompilerOptions = {
 };
 
 const host = ts.createCompilerHost(compilerOptions);
-host.resolveModuleNames = (moduleNames, containingFile, _reusedNames, _redirectedReference, options) => {
+host.resolveModuleNames = (
+  moduleNames,
+  containingFile,
+  _reusedNames,
+  _redirectedReference,
+  options,
+) => {
   return moduleNames.map((moduleName) => {
     if (imports[moduleName]) {
       const resolvedPath = imports[moduleName].startsWith("./")
         ? join(projectRoot, imports[moduleName])
         : imports[moduleName];
       if (resolvedPath.endsWith(".ts")) {
-        return { resolvedFileName: resolvedPath, isExternalLibraryImport: false };
+        return {
+          resolvedFileName: resolvedPath,
+          isExternalLibraryImport: false,
+        };
       }
     }
-    const resolved = ts.resolveModuleName(moduleName, containingFile, options, host);
+    const resolved = ts.resolveModuleName(
+      moduleName,
+      containingFile,
+      options,
+      host,
+    );
     return resolved.resolvedModule;
   });
 };
@@ -50,9 +71,16 @@ const sourceFile = program.getSourceFile(testFile)!;
 console.log("=== NULL ELIMINATION - ACTUAL COMMON FABRIC TYPES ===\n");
 
 const typesToCheck = [
-  "Direct", "DirectInner", "DirectGet",
-  "StateRef", "ValueProp", "ValueInner", "ValueGet",
-  "RequiredStateRef", "RequiredValueProp", "RequiredValueInner",
+  "Direct",
+  "DirectInner",
+  "DirectGet",
+  "StateRef",
+  "ValueProp",
+  "ValueInner",
+  "ValueGet",
+  "RequiredStateRef",
+  "RequiredValueProp",
+  "RequiredValueInner",
 ];
 
 ts.forEachChild(sourceFile, (node) => {
@@ -60,7 +88,11 @@ ts.forEachChild(sourceFile, (node) => {
     const name = node.name.text;
     if (typesToCheck.includes(name)) {
       const type = checker.getTypeAtLocation(node.name);
-      const typeString = checker.typeToString(type, node, ts.TypeFormatFlags.NoTruncation);
+      const typeString = checker.typeToString(
+        type,
+        node,
+        ts.TypeFormatFlags.NoTruncation,
+      );
 
       const hasNull = typeString.includes("null");
       const isInnerType = name.endsWith("Inner") || name.endsWith("Get");
@@ -82,4 +114,6 @@ ts.forEachChild(sourceFile, (node) => {
 console.log("=== EXPECTED vs ACTUAL ===");
 console.log("For nullable properties (value: string | null):");
 console.log("  EXPECTED: Inner type should be 'string | null'");
-console.log("  ACTUAL: See above - if it shows just 'string', the bug is confirmed");
+console.log(
+  "  ACTUAL: See above - if it shows just 'string', the bug is confirmed",
+);

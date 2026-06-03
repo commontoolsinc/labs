@@ -18,7 +18,7 @@ export default pattern<{
         {ifElse(
           showHistory && messageCount !== dismissedIndex.get(),
           <div>Show notification</div>,
-          <div>Hide notification</div>
+          <div>Hide notification</div>,
         )}
       </div>
     ),

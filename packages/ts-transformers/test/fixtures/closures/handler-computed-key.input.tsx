@@ -18,7 +18,10 @@ export default pattern<State>((state) => {
   const recordMap = state.records;
   return {
     [UI]: (
-      <button type="button" onClick={() => recordMap[nextKey()]!.set(counter)}>
+      <button
+        type="button"
+        onClick={() => recordMap[nextKey()]!.set(counter)}
+      >
         Step
       </button>
     ),

@@ -61,7 +61,9 @@ export default pattern<{
   return {
     [UI]: (
       <div>
-        {allEntries.map(({ entry, index, isExpanded, isPinned, allowMultiple }) =>
+        {allEntries.map((
+          { entry, index, isExpanded, isPinned, allowMultiple },
+        ) =>
           ifElse(
             computed(() => !entry.collapsed),
             <div>

@@ -5,13 +5,7 @@
  * `message.author === senderName(name.get())` must read `message.author`
  * through a reactive field dependency, not as a plain property on the cell.
  */
-import {
-  Default,
-  pattern,
-  UI,
-  VNode,
-  Writable,
-} from "commonfabric";
+import { Default, pattern, UI, VNode, Writable } from "commonfabric";
 
 interface Message {
   author: string;

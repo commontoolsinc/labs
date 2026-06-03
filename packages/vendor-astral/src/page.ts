@@ -356,7 +356,7 @@ export class Page extends EventTarget implements AsyncDisposable {
         JSON.stringify(descriptor)
       }).state);self.close()`,
       //{ type: "module", deno: { permissions } },
-      { type: "module" }
+      { type: "module" },
     );
     worker.onmessage = ({ data: state }) => resolve(state);
     return promise;

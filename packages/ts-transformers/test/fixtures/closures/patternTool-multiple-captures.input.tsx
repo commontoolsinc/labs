@@ -1,4 +1,10 @@
-import { computed, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
+import {
+  computed,
+  pattern,
+  patternTool,
+  type PatternToolResult,
+  Writable,
+} from "commonfabric";
 
 const multiplier = new Writable(2);
 const prefix = new Writable("Result: ");

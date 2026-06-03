@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-basic-capture
 // Verifies: computed(() => expr) with two cell captures is closure-extracted into a lift-applied computation

@@ -1,4 +1,10 @@
-import { cell, computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import {
+  cell,
+  computed,
+  pattern,
+  patternTool,
+  type PatternToolResult,
+} from "commonfabric";
 
 const content = cell("Hello world\nGoodbye world");
 
@@ -12,11 +18,14 @@ type Output = {
 // Context: Module-scoped `content` cell is referenced inside the patternTool
 //   callback. The transformer threads it through the existing extraParams object.
 export default pattern<Record<string, never>, Output>(() => {
-  const grepTool = patternTool(({ query, content }: { query: string; content: string }) => {
-    return computed(() => {
-      return content.split("\n").filter((c: string) => c.includes(query));
-    });
-  }, { content });
+  const grepTool = patternTool(
+    ({ query, content }: { query: string; content: string }) => {
+      return computed(() => {
+        return content.split("\n").filter((c: string) => c.includes(query));
+      });
+    },
+    { content },
+  );
 
   return { grepTool };
 });

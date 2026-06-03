@@ -1,4 +1,4 @@
-import { Writable, computed, pattern } from "commonfabric";
+import { computed, pattern, Writable } from "commonfabric";
 
 // FIXTURE: computed-collision-shorthand
 // Verifies: a shorthand property `{ multiplier }` over a captured cell expands correctly

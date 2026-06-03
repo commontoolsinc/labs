@@ -1,11 +1,7 @@
 /**
  * TRANSFORM REPRO: patternized flatMap callback should lower reactive expression statements
  */
-import {
-  pattern,
-  UI,
-  VNode,
-} from "commonfabric";
+import { pattern, UI, VNode } from "commonfabric";
 
 interface FileEntry {
   name: string;

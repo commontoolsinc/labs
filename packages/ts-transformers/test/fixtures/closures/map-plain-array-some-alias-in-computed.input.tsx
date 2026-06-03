@@ -1,4 +1,4 @@
-import { Writable, computed, pattern, UI } from "commonfabric";
+import { computed, pattern, UI, Writable } from "commonfabric";
 
 interface Habit {
   name: string;
@@ -23,17 +23,21 @@ interface Input {
 // Context: Outer habits.map(...) is pattern-owned, but the inner some() runs on the aliased unwrapped array inside computed()
 export default pattern<Input>(({ habits, logs, todayDate }) => {
   return {
-    [UI]: <div>{habits.map((habit) => {
-      const doneToday = computed(() => {
-        const logList = logs.get();
-        return logList.some(
-          (log) =>
-            log.habitName === habit.name &&
-            log.date === todayDate &&
-            log.completed,
-        );
-      });
-      return <span>{doneToday ? "yes" : "no"}</span>;
-    })}</div>,
+    [UI]: (
+      <div>
+        {habits.map((habit) => {
+          const doneToday = computed(() => {
+            const logList = logs.get();
+            return logList.some(
+              (log) =>
+                log.habitName === habit.name &&
+                log.date === todayDate &&
+                log.completed,
+            );
+          });
+          return <span>{doneToday ? "yes" : "no"}</span>;
+        })}
+      </div>
+    ),
   };
 });

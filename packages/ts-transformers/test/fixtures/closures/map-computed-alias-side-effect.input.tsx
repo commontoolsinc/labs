@@ -18,9 +18,7 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map(({ [nextKey()]: amount }) => (
-          <span>{amount}</span>
-        ))}
+        {state.items.map(({ [nextKey()]: amount }) => <span>{amount}</span>)}
       </div>
     ),
   };

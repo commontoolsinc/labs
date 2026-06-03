@@ -1,11 +1,7 @@
 /**
  * TRANSFORM REPRO: patternized filter callback should lower callback-local const initializers
  */
-import {
-  pattern,
-  UI,
-  VNode,
-} from "commonfabric";
+import { pattern, UI, VNode } from "commonfabric";
 
 interface FileEntry {
   name: string;

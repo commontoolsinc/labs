@@ -1,4 +1,4 @@
-import { handler, Cell } from "commonfabric";
+import { Cell, handler } from "commonfabric";
 
 interface TimedEvent {
   timestamp: Date;

@@ -1,4 +1,4 @@
-import { pattern, Writable, UI } from "commonfabric";
+import { pattern, UI, Writable } from "commonfabric";
 
 interface State {
   items: Array<{ name: string }>;
@@ -13,9 +13,7 @@ export default pattern<State>((state) => {
   return {
     [UI]: (
       <div>
-        {state.items.map((item) => (
-          <span>{item.name} {selected}</span>
-        ))}
+        {state.items.map((item) => <span>{item.name} {selected}</span>)}
       </div>
     ),
   };
