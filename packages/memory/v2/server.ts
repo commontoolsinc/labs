@@ -538,6 +538,24 @@ export class Server {
   // reads — injected on-disk sources and cell-derived dbs alike run here,
   // unattached, instead of attach/detach-per-op on the engine connection.
   #readPool = new ReadConnectionPool();
+  // Schemas already created on the write path, keyed by `(space, id, schema)`.
+  // `ensureTables` (additive `CREATE TABLE IF NOT EXISTS` per declared table)
+  // runs only the first time a given schema is seen for a cell-db, not on every
+  // write. Bounded LRU; a miss (eviction / restart) just re-runs ensureTables,
+  // which is idempotent. Keyed by the full schema JSON so a changed declaration
+  // re-ensures (additive migration) with no hash-collision risk.
+  #ensuredSchemas = new Map<string, true>();
+  #ensuredSchemasMax = 4096;
+
+  #recordSchemaEnsured(key: string): void {
+    this.#ensuredSchemas.set(key, true);
+    if (this.#ensuredSchemas.size > this.#ensuredSchemasMax) {
+      const oldest = this.#ensuredSchemas.keys().next().value as
+        | string
+        | undefined;
+      if (oldest !== undefined) this.#ensuredSchemas.delete(oldest);
+    }
+  }
 
   constructor(
     readonly options: {
@@ -814,11 +832,17 @@ export class Server {
         attached.push(alias);
         const tables = tablesById.get(id);
         if (tables) {
-          ensureTables(
-            engine.database,
-            tables as Record<string, TableSchema>,
-            alias,
-          );
+          // Run ensureTables only the first time this (space, id, schema) is
+          // seen; record AFTER it succeeds so a throw re-ensures next time.
+          const key = `${space}\0${id}\0${JSON.stringify(tables)}`;
+          if (!this.#ensuredSchemas.has(key)) {
+            ensureTables(
+              engine.database,
+              tables as Record<string, TableSchema>,
+              alias,
+            );
+            this.#recordSchemaEnsured(key);
+          }
         }
       }
     } catch (error) {

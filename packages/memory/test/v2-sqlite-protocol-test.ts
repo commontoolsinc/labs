@@ -265,6 +265,28 @@ describe("sqlite protocol verbs (loopback)", () => {
     expect(r.rows).toEqual([{ n: 2 }]);
   });
 
+  it("re-runs ensureTables when the declared schema adds a table", async () => {
+    const id = `of:ensure-${crypto.randomUUID()}`;
+    const v1: SqliteDbRef = {
+      id,
+      tables: { messages: table({ id: "integer primary key", body: "text" }) },
+    };
+    await seedRows(v1, "INSERT INTO messages (body) VALUES (?)", ["a"]);
+    // Evolve the declaration: add a NEW table. The (space,id,schema) key changes,
+    // so ensureTables must re-run and create `notes` (it isn't skipped by the
+    // first-write cache) — otherwise this write would fail "no such table".
+    const v2: SqliteDbRef = {
+      id,
+      tables: {
+        messages: table({ id: "integer primary key", body: "text" }),
+        notes: table({ id: "integer primary key", note: "text" }),
+      },
+    };
+    await seedRows(v2, "INSERT INTO notes (note) VALUES (?)", ["n"]);
+    const r = await session.sqliteQuery(v2, "SELECT note FROM notes");
+    expect(r.rows).toEqual([{ note: "n" }]);
+  });
+
   it("a pooled reader sees a write committed after its connection opened", async () => {
     const db = dbRef();
     await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["a"]);
