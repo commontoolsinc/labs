@@ -1090,6 +1090,37 @@ export class PatternManager {
   }
 
   /**
+   * Load a pattern by its content-addressed {identity, symbol} reference and
+   * register it under `patternId` so `patternById(patternId)` resolves it (the
+   * reload path keys on patternId everywhere). The source-free fast path: no TS
+   * program, no meta-cell sync. Returns undefined when the by-identity load is
+   * unavailable, so the caller falls back to `loadPattern(patternId)`.
+   */
+  async loadPatternByIdentityAs(
+    patternId: URI,
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): Promise<Pattern | undefined> {
+    const existing = this.patternIdMap.get(patternId);
+    if (existing) {
+      this.touchPattern(patternId);
+      return existing;
+    }
+    const pattern = await this.loadPatternByIdentity(
+      entryIdentity,
+      symbol,
+      space,
+    );
+    if (!pattern) return undefined;
+    this.patternIdMap.set(patternId, pattern);
+    this.patternToIdMap.set(pattern, patternId);
+    this.associateVerifiedFunctions(patternId, pattern);
+    this.evictIfNeeded();
+    return pattern;
+  }
+
+  /**
    * Set or update metadata fields for a pattern before or after saving.
    * If the metadata cell already exists, it updates it in-place.
    * Otherwise, it stores the fields to be applied on the next save.

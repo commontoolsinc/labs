@@ -295,6 +295,7 @@ export interface IReadable<T> {
  */
 export type MetaField =
   | "pattern"
+  | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "argument"
   | "internal"
   | "schema"
