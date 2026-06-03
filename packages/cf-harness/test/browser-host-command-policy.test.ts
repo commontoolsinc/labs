@@ -42,6 +42,8 @@ Deno.test("validateBrowserHostCommand allows agent-browser invocations", () => {
   assertAllowed(
     "agent-browser --cdp http://host.docker.internal:9362 get text body",
   );
+  assertAllowed("agent-browser --cdp http://host.docker.internal:9362 console");
+  assertAllowed("agent-browser --cdp http://host.docker.internal:9362 errors");
   assertAllowed(
     "agent-browser --cdp http://host.docker.internal:9362 click @e1",
   );
@@ -149,6 +151,12 @@ Deno.test("validateBrowserHostCommand rejects high-risk agent-browser host surfa
   assertDenied("agent-browser --cdp http://host.docker.internal:9362 network");
   assertDenied("agent-browser --cdp http://host.docker.internal:9362 har");
   assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9362 console --clear",
+  );
+  assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9362 errors --clear",
+  );
+  assertDenied(
     "agent-browser --cdp http://host.docker.internal:9362 wait --download",
   );
   assertDenied(
@@ -162,6 +170,8 @@ Deno.test("validateBrowserHostCommand rejects high-risk agent-browser host surfa
 Deno.test("validateBrowserHostCommand requires local CDP for page commands", () => {
   assertDenied('agent-browser open "https://example.com"');
   assertDenied("agent-browser snapshot -i");
+  assertDenied("agent-browser console");
+  assertDenied("agent-browser errors");
   assertDenied('agent-browser find role button click "Submit"');
   assertDenied("agent-browser click '@e1'");
   assertDenied("agent-browser get title");
@@ -193,6 +203,14 @@ Deno.test("validateBrowserHostCommand binds page commands to Browser Access leas
   );
   assertDenied(
     "agent-browser --cdp http://host.docker.internal:9444 snapshot -i",
+    "http://host.docker.internal:9362",
+  );
+  assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9444 console",
+    "http://host.docker.internal:9362",
+  );
+  assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9444 errors",
     "http://host.docker.internal:9362",
   );
   assertEquals(
