@@ -150,6 +150,75 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     await tx2.commit();
   });
 
+  it("encodes link cells across a multi-row INSERT (cols cycle per tuple)", async () => {
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-multi-${crypto.randomUUID()}`,
+      tables: {
+        people: table({ id: "integer primary key", author_cf_link: "text" }),
+      },
+    };
+    const tx = runtime.edit();
+    const a = runtime.getCell<{ n: string }>(space, "a", undefined, tx);
+    a.set({ n: "A" });
+    const b = runtime.getCell<{ n: string }>(space, "b", undefined, tx);
+    b.set({ n: "B" });
+    const db = sqliteDb(dbRef, tx, "db-h");
+    // Both positional cells target author_cf_link; the second tuple must reuse
+    // the parsed column list (previously cols[1] was undefined -> wrongly threw).
+    db.exec(
+      "INSERT INTO people (author_cf_link) VALUES (?), (?)",
+      [a, b],
+    );
+    const res = await tx.commit();
+    expect(res.error).toBeUndefined();
+    const provider = storageManager.open(space);
+    const r = await provider.sqliteQuery!(
+      dbRef,
+      "SELECT count(*) AS c FROM people",
+    );
+    expect((r.rows[0] as { c: number }).c).toBe(2);
+  });
+
+  it("rejects a Cell bound where the target column can't be verified", () => {
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-unverif-${crypto.randomUUID()}`,
+      tables: {
+        notes: table({ id: "integer primary key", body: "text" }),
+      },
+    };
+    const tx = runtime.edit();
+    const cell = runtime.getCell<{ n: string }>(space, "c", undefined, tx);
+    cell.set({ n: "x" });
+    const db = sqliteDb(dbRef, tx, "db-h");
+    // UPDATE has no explicit column list, so a Cell's target column is unknown.
+    // Previously this silently sigil-encoded the cell into the plain `body`
+    // column (corruption); now it throws an actionable error.
+    expect(() => db.exec("UPDATE notes SET body = ? WHERE id = ?", [cell, 1]))
+      .toThrow("target column can't be determined");
+    // Columnless INSERT likewise can't verify the column for a Cell.
+    expect(() => db.exec("INSERT INTO notes VALUES (?, ?)", [1, cell])).toThrow(
+      "target column can't be determined",
+    );
+    tx.abort();
+  });
+
+  it("allows non-cell positional params in columnless/UPDATE statements", () => {
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-plain-${crypto.randomUUID()}`,
+      tables: { notes: table({ id: "integer primary key", body: "text" }) },
+    };
+    const tx = runtime.edit();
+    const db = sqliteDb(dbRef, tx, "db-h");
+    // Encoding runs synchronously at db.exec(); with no cell params, a columnless
+    // INSERT and an UPDATE must NOT false-throw at the encode layer (the column
+    // can't be resolved, but that only matters for Cell bindings).
+    expect(() => db.exec("INSERT INTO notes VALUES (?, ?)", [1, "hi"])).not
+      .toThrow();
+    expect(() => db.exec("UPDATE notes SET body = ? WHERE id = ?", ["bye", 1]))
+      .not.toThrow();
+    tx.abort();
+  });
+
   it(".exec is only available on a sqlite-kind cell", () => {
     const tx = runtime.edit();
     const plain = runtime.getCell<{ x: number }>(space, "plain", undefined, tx);

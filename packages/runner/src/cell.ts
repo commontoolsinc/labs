@@ -429,10 +429,15 @@ const cellMethods = new Set<
   "query",
 ]);
 
-/** Best-effort parse of the column list from `INSERT INTO t (a, b, c) ...`,
- *  used to map positional `_cf_link` params. */
+/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
+ *  used to map positional `_cf_link` params. Returns undefined when there is no
+ *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
+ *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
+ *  insert's VALUES tuple is NOT mistaken for a column list. */
 function parseSqliteInsertColumns(sql: string): string[] | undefined {
-  const m = sql.match(/insert\s+into\s+[^(]+\(([^)]*)\)/i);
+  const m = sql.match(
+    /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
+  );
   if (!m) return undefined;
   return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
 }
@@ -443,19 +448,30 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
  * throws; an `undefined` value throws (the pending-value guard — `null` is
  * allowed for SQL NULL). Shared by `db.exec` (CellImpl) and the `sqliteQuery`
  * builtin so the encode rules and the undefined guard cannot drift.
+ *
+ * Positional params are validated against the statement's explicit `INSERT`
+ * column list (cycled across multi-row `VALUES` tuples). When the target column
+ * of a positional `?` can't be determined (columnless INSERT, UPDATE, opaque
+ * SQL), a Cell binding cannot be verified to land in a `_cf_link` column, so it
+ * is REJECTED with an actionable error rather than blindly sigil-encoded (which
+ * would corrupt a non-link column). Use an explicit column list or named params
+ * (`:col`) to bind a Cell in those statements.
  */
 export function encodeSqliteParams(
   sql: string,
   params?: ReadonlyArray<unknown> | Record<string, unknown>,
 ): SqliteParamsWire | undefined {
   if (params === undefined) return undefined;
-  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+  const assertDefined = (value: unknown): void => {
     if (value === undefined) {
       throw new TypeError(
         "sqlite: param is undefined (it may be a value that isn't ready yet); " +
           "pass a resolved value, or null for SQL NULL",
       );
     }
+  };
+  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+    assertDefined(value);
     if (isCell(value)) {
       if (!isLinkCol) {
         throw new TypeError("cells may only be bound to _cf_link columns");
@@ -470,9 +486,22 @@ export function encodeSqliteParams(
   };
   if (Array.isArray(params)) {
     const cols = parseSqliteInsertColumns(sql);
-    return params.map((v, i) =>
-      encodeOne(v, cols ? isCfLinkColumn(cols[i] ?? "") : isCell(v))
-    ) as SqliteParamsWire;
+    return params.map((v, i) => {
+      if (cols) {
+        // Cycle the column list across multi-row `VALUES (?),(?)` tuples.
+        return encodeOne(v, isCfLinkColumn(cols[i % cols.length] ?? ""));
+      }
+      assertDefined(v);
+      if (isCell(v)) {
+        throw new TypeError(
+          "sqlite: a Cell parameter must bind to a _cf_link column, but the " +
+            "target column can't be determined from this statement. Use an " +
+            "explicit column list (INSERT INTO t (col) VALUES (?)) or named " +
+            "params (:col) so the binding can be verified.",
+        );
+      }
+      return v;
+    }) as SqliteParamsWire;
   }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(params)) {

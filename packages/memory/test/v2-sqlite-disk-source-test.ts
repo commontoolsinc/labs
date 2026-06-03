@@ -99,6 +99,20 @@ describe("DiskSourceRegistry", () => {
     expect(reg.has(SPACE_B, "of:x")).toBe(false);
     expect(reg.get(SPACE_B, "of:x")).toBeUndefined();
   });
+
+  it("caps total entries (rejects new keys past the cap; re-register ok)", () => {
+    const reg = new DiskSourceRegistry(2);
+    reg.register(SPACE_A, "of:1", { path: "/a/1.db" });
+    reg.register(SPACE_A, "of:2", { path: "/a/2.db" });
+    // A NEW (space,id) past the cap is rejected.
+    expect(() => reg.register(SPACE_A, "of:3", { path: "/a/3.db" })).toThrow(
+      "registry is full",
+    );
+    // Re-registering an existing key is always allowed (idempotent), even full.
+    expect(() => reg.register(SPACE_A, "of:1", { path: "/a/1b.db" })).not
+      .toThrow();
+    expect(reg.get(SPACE_A, "of:1")).toEqual({ path: "/a/1b.db" });
+  });
 });
 
 const SPACE = "did:key:z6Mk-sqlite-disk-source-test";

@@ -111,4 +111,26 @@ describe("createTableSQL", () => {
     } as unknown as Parameters<typeof createTableSQL>[1];
     expect(() => createTableSQL("t", badName)).toThrow("invalid column name");
   });
+
+  it("rejects a table with too many columns (DoS cap)", () => {
+    const props: Record<string, { type: string; sqlType: string }> = {};
+    for (let i = 0; i < 300; i++) {
+      props[`c${i}`] = { type: "string", sqlType: "text" };
+    }
+    const huge = {
+      type: "object",
+      required: [],
+      properties: props,
+    } as unknown as Parameters<typeof createTableSQL>[1];
+    expect(() => createTableSQL("t", huge)).toThrow("too many columns");
+  });
+
+  it("rejects a zero-column table", () => {
+    const empty = {
+      type: "object",
+      required: [],
+      properties: {},
+    } as unknown as Parameters<typeof createTableSQL>[1];
+    expect(() => createTableSQL("t", empty)).toThrow("at least one column");
+  });
 });

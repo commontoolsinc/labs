@@ -114,6 +114,16 @@ describe("sqlite protocol verbs (loopback)", () => {
     expect(r.rows).toEqual([{ body: "folded" }]);
   });
 
+  it("caps the folded-write statement length (DoS bound on the write path)", async () => {
+    // The sqlite.query parse branch caps sql at 100k; the folded-write path must
+    // too (it rides transact, parsed loosely). An over-long folded statement is
+    // rejected before the guard tokenizes it.
+    const db = dbRef();
+    const hugeSql = "INSERT INTO messages (body) VALUES ('" +
+      "x".repeat(100_001) + "')";
+    await expect(seedRows(db, hugeSql)).rejects.toThrow();
+  });
+
   it("isolates concurrent folded commits to two cell-dbs in one space (B1)", async () => {
     // Two folded commits to DISTINCT cell-dbs in the SAME space, fired
     // concurrently over two connections (the engine/Database is shared per

@@ -85,6 +85,11 @@ const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 
+// SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
+// to the folded-write path, which is parsed loosely as part of a `transact`).
+const MAX_SQLITE_SQL_LENGTH = 100_000;
+const MAX_SQLITE_TABLES = 256;
+
 // Memory v2 wire values may omit scope for default-space entries; storage and
 // watch keys need an explicit declared scope.
 const declaredScope = (scope: CellScope | undefined): CellScope =>
@@ -723,7 +728,16 @@ export class Server {
     }
     const engine = await this.openEngine(space);
     if (engine.url.protocol === "file:") {
-      const storeDir = Path.dirname(Path.fromFileUrl(engine.url));
+      // Canonicalize the store dir too (not just the source path): `canonical`
+      // is realpath-resolved, so comparing it against a NON-canonical storeDir
+      // lets a symlinked store dir produce a `..`-prefixed relative path for a
+      // file that actually lives in the store — defeating the jail. With both
+      // sides canonical, containment also covers the `<space>.sqlite` store
+      // files (not just `cell-*`).
+      let storeDir = Path.dirname(Path.fromFileUrl(engine.url));
+      try {
+        storeDir = await Deno.realPath(storeDir);
+      } catch { /* dir may not exist yet; fall back to the raw path */ }
       const rel = Path.relative(storeDir, canonical);
       const insideStore = rel === "" ||
         (!rel.startsWith("..") && !Path.isAbsolute(rel));
@@ -763,6 +777,22 @@ export class Server {
     for (const op of operations) {
       if (op.op !== "sqlite") continue;
       const id = op.db.id;
+      // Resource caps for the WRITE path. `sqlite.query` enforces these at parse
+      // time, but a folded `sqlite` op rides `transact` (whose commit is parsed
+      // loosely), so cap it here — before the guard tokenizes the statement and
+      // before ensureTables builds DDL — to bound CPU/DDL work on the shared,
+      // single-threaded per-space engine connection.
+      if (typeof op.sql === "string" && op.sql.length > MAX_SQLITE_SQL_LENGTH) {
+        throw new Engine.ProtocolError(
+          "sqlite statement exceeds the maximum length",
+        );
+      }
+      if (
+        op.db.tables &&
+        Object.keys(op.db.tables).length > MAX_SQLITE_TABLES
+      ) {
+        throw new Engine.ProtocolError("sqlite db declares too many tables");
+      }
       // Phase 7: injected on-disk sources are read-only in v1 — a folded write to
       // one is rejected before it can join the commit (Q13/Q14).
       if (this.#diskSources.has(space, id)) {

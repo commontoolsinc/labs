@@ -38,6 +38,9 @@ export function cfLink<_T = unknown>(): ColumnSchema {
 // wherever DDL is generated — not only in the client-side `table()` builder.
 // `db.tables` arrives over the wire (untrusted) and reaches createTableSQL via
 // ensureTables, so the same checks run there too.
+// Per-table column cap for wire-supplied schemas (DoS bound; SQLite's own limit
+// is far higher, so this is a policy cap, not the engine limit).
+const MAX_TABLE_COLUMNS = 256;
 const COLUMN_NAME_RE = /^[A-Za-z_][A-Za-z0-9_$]*$/;
 // Type keywords, constraints, numbers, parens, commas, quotes, hyphen — notably
 // NO ";", so multi-statement DDL injection ("text); DROP TABLE x;--") is rejected.
@@ -145,8 +148,16 @@ export function createTableSQL(
   // A table with no columns would emit `CREATE TABLE t ()` — invalid SQL that
   // fails opaquely at the engine. Reject it here (covers both `table({})` and a
   // wire-supplied empty `db.tables` entry).
-  if (!t.properties || Object.keys(t.properties).length === 0) {
+  const columnCount = t.properties ? Object.keys(t.properties).length : 0;
+  if (columnCount === 0) {
     throw new TypeError(`table "${name}" must declare at least one column`);
+  }
+  // Cap columns per table: `db.tables` is wire-supplied (untrusted), and a
+  // multi-thousand-column CREATE TABLE is a DoS vector on the shared engine.
+  if (columnCount > MAX_TABLE_COLUMNS) {
+    throw new TypeError(
+      `table "${name}" has too many columns (${columnCount} > ${MAX_TABLE_COLUMNS})`,
+    );
   }
   const cols = Object.entries(t.properties).map(
     ([col, col_schema]) => {
