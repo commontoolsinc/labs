@@ -893,7 +893,7 @@ attach scheduler observations to transactions, memory clients do not request
 scheduler snapshots, and the memory server does not write scheduler observation
 rows, dirty rows, or cross-space mirrors. Snapshot-list requests intentionally
 return an empty result while the flag is off, even if a previous flagged run
-left scheduler rows in the SQLite database. Unlike `modernDataModel`, this flag
+left scheduler rows in the SQLite database. Unlike `modernCellRep`, this flag
 is not a required memory protocol compatibility flag: mismatched peers may still
 connect, and the server-side flag determines whether scheduler observation rows
 are accepted and served.

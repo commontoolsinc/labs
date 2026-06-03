@@ -273,7 +273,7 @@ describe("Cell", () => {
     expect(2 in (result?.[0] ?? [])).toBe(false);
     expect(result?.[0][3]).toBe(2);
     expect(result?.[0].length).toBe(4);
-    // With modernDataModel ON, both should be structurally equal
+    // Both should be structurally equal
     expect(result?.[0]).toEqual(result?.[1]);
     await localTx.commit();
     await rt.dispose();
@@ -727,9 +727,6 @@ describe("Cell", () => {
       argumentLink?.scope,
     );
   });
-
-  // Cycle-resolution tests live in a separate `describe` below so they can be
-  // pinned to both `modernDataModel` flag states explicitly.
 });
 
 // Cycle-resolution behavior should hold under both `modernDataModel` flag

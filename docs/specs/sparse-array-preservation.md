@@ -248,8 +248,6 @@ Test coverage verifies sparse preservation at each layer:
 - **`packages/runner/test/data-updating.test.ts`** — All four hole transition
   cases (hole-to-hole, value-to-hole, hole-to-value, value-to-value); `hasPath`
   returns false through holes.
-- **`packages/runner/test/experimental-options.test.ts`** — `isFabricValue`
-  accepts sparse arrays regardless of the `modernDataModel` flag.
 - **`packages/runner/test/patterns-core.test.ts`** — End-to-end test: maps over
   `[10, <hole>, 30]` and verifies output is `[20, <hole>, 60]` with holes
   preserved through the full pipeline.
