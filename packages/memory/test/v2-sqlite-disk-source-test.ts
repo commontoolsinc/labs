@@ -79,18 +79,25 @@ describe("read-only attach of an on-disk file", () => {
 });
 
 describe("DiskSourceRegistry", () => {
-  it("registers and resolves a disk descriptor by handle id", () => {
+  const SPACE_A = "did:key:z6Mk-a";
+  const SPACE_B = "did:key:z6Mk-b";
+
+  it("registers and resolves a disk descriptor by (space, id)", () => {
     const reg = new DiskSourceRegistry();
-    expect(reg.get("of:bafy123")).toBeUndefined();
-    reg.register("of:bafy123", { path: "/abs/reference-data.db" });
-    expect(reg.get("of:bafy123")).toEqual({ path: "/abs/reference-data.db" });
+    expect(reg.get(SPACE_A, "of:bafy123")).toBeUndefined();
+    reg.register(SPACE_A, "of:bafy123", { path: "/abs/reference-data.db" });
+    expect(reg.get(SPACE_A, "of:bafy123")).toEqual({
+      path: "/abs/reference-data.db",
+    });
   });
 
-  it("reports whether an id is a registered disk source", () => {
+  it("is keyed by space — a registration does not leak across spaces", () => {
     const reg = new DiskSourceRegistry();
-    expect(reg.has("of:x")).toBe(false);
-    reg.register("of:x", { path: "/abs/x.db" });
-    expect(reg.has("of:x")).toBe(true);
+    reg.register(SPACE_A, "of:x", { path: "/abs/x.db" });
+    expect(reg.has(SPACE_A, "of:x")).toBe(true);
+    // Same id, different space → NOT registered (no cross-space hijack).
+    expect(reg.has(SPACE_B, "of:x")).toBe(false);
+    expect(reg.get(SPACE_B, "of:x")).toBeUndefined();
   });
 });
 
@@ -163,5 +170,27 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
       "SELECT count(*) AS n FROM lookup",
     );
     expect(r.rows).toEqual([{ n: 2 }]);
+  });
+
+  it("rejects a non-absolute or missing path at registration", async () => {
+    await expect(session.registerSqliteDiskSource(handleId, "relative/x.db"))
+      .rejects.toThrow();
+    await expect(
+      session.registerSqliteDiskSource(handleId, "/no/such/file/here.db"),
+    ).rejects.toThrow();
+  });
+
+  it("does not leak a registration across spaces (C2)", async () => {
+    const session2 = await client.mount(
+      "did:key:z6Mk-sqlite-disk-source-test-2",
+    );
+    // Register the on-disk source under SPACE (session), NOT the second space.
+    await session.registerSqliteDiskSource(handleId, diskPath);
+    // The second space's read of the same handle id is not governed by SPACE's
+    // registration → it falls through to the cell-derived (empty) db, where the
+    // `lookup` table does not exist. No cross-space read of the injected file.
+    await expect(
+      session2.sqliteQuery(dbRef(), "SELECT v FROM lookup"),
+    ).rejects.toThrow();
   });
 });

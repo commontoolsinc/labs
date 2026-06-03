@@ -660,7 +660,7 @@ export class Server {
     // ensureTables against it (v1 does not migrate external files). Read-only is
     // enforced for the synchronous attach→op→detach window via PRAGMA query_only
     // (the connection is single-threaded; `op` must not await — see below).
-    const disk = this.#diskSources.get(db.id);
+    const disk = this.#diskSources.get(space, db.id);
     if (disk) {
       attachDatabase(engine.database, alias, disk.path, { readOnly: true });
       setQueryOnly(engine.database, true);
@@ -692,12 +692,49 @@ export class Server {
   }
 
   /**
-   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
-   * this, `#onCellDb` attaches `path` (read-only) for `id` instead of the
-   * cell-derived db. The descriptor is server-side state — never the cell value.
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1) for
+   * `(space, id)`. After this, `#onCellDb` attaches the canonical `path`
+   * (read-only) for that `(space, id)` instead of the cell-derived db. The
+   * descriptor is server-side state — never the cell value.
+   *
+   * The path is validated here because it arrives over the wire (untrusted): it
+   * must be absolute and must exist, and is `realpath`-canonicalized and then
+   * rejected if it resolves INSIDE the engine's store directory — otherwise a
+   * caller could point a handle at another space's (or a cell-derived) `.sqlite`
+   * file and read it cross-tenant. (Confining injected sources to an operator
+   * allowlist, and gating the verb to an operator capability rather than any
+   * session, awaits CFC labels — see plans/on-disk-source.md and
+   * 08-open-questions Q12/Q15.)
    */
-  registerDiskSource(id: string, path: string): void {
-    this.#diskSources.register(id, { path });
+  async registerDiskSource(
+    space: string,
+    id: string,
+    path: string,
+  ): Promise<void> {
+    if (!Path.isAbsolute(path)) {
+      throw new Engine.ProtocolError(
+        `disk source path must be absolute: ${path}`,
+      );
+    }
+    let canonical: string;
+    try {
+      canonical = await Deno.realPath(path);
+    } catch {
+      throw new Engine.ProtocolError(`disk source path not found: ${path}`);
+    }
+    const engine = await this.openEngine(space);
+    if (engine.url.protocol === "file:") {
+      const storeDir = Path.dirname(Path.fromFileUrl(engine.url));
+      const rel = Path.relative(storeDir, canonical);
+      const insideStore = rel === "" ||
+        (!rel.startsWith("..") && !Path.isAbsolute(rel));
+      if (insideStore) {
+        throw new Engine.ProtocolError(
+          "disk source path may not resolve inside the store directory",
+        );
+      }
+    }
+    this.#diskSources.register(space, id, { path: canonical });
   }
 
   /**
@@ -719,7 +756,7 @@ export class Server {
       const id = op.db.id;
       // Phase 7: injected on-disk sources are read-only in v1 — a folded write to
       // one is rejected before it can join the commit (Q13/Q14).
-      if (this.#diskSources.has(id)) {
+      if (this.#diskSources.has(space, id)) {
         throw new Engine.ProtocolError(
           "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
         );
@@ -803,16 +840,26 @@ export class Server {
    * handle id resolve against the on-disk file (attached read-only) instead of the
    * cell-derived db. The descriptor is server-side state — never the cell value.
    */
-  sqliteRegisterDiskSource(
+  async sqliteRegisterDiskSource(
     message: SqliteRegisterDiskSourceRequest,
-  ): ResponseMessage<SqliteRegisterDiskSourceResult> {
+  ): Promise<ResponseMessage<SqliteRegisterDiskSourceResult>> {
     if (this.#sessions.get(message.space, message.sessionId) === null) {
       return respondTypedError<SqliteRegisterDiskSourceResult>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       );
     }
-    this.registerDiskSource(message.id, message.path);
+    try {
+      await this.registerDiskSource(message.space, message.id, message.path);
+    } catch (error) {
+      return respondTypedError<SqliteRegisterDiskSourceResult>(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "SqliteError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
     return {
       type: "response",
       requestId: message.requestId,

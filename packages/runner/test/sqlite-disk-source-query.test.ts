@@ -45,20 +45,28 @@ describe("injected on-disk source via the runner storage provider", () => {
   it("rejects a write to a registered injected source (read-only v1)", async () => {
     const id = `of:disk-${crypto.randomUUID()}`;
     const provider = storageManager.open(space);
-    // Register an injected source (path need not exist — the write is rejected
-    // on id membership before any attach).
-    await provider.registerSqliteDiskSource!(id, "/tmp/does-not-matter.db");
+    // Register an injected source. Registration canonicalizes + requires the
+    // path to exist, so use a real temp file (its contents don't matter — the
+    // write is rejected on (space, id) membership before any attach).
+    const diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
+    try {
+      await provider.registerSqliteDiskSource!(id, diskPath);
 
-    // The write is rejected on the commit-fold path (the only write path): a
-    // folded `sqlite` op against a registered injected source is refused before
-    // any attach.
-    const tx = runtime.edit();
-    tx.recordSqliteWrite!(space, {
-      op: "sqlite",
-      db: { id, tables: {} },
-      sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
-    });
-    const res = await tx.commit();
-    expect(res.error).toBeDefined();
+      // The write is rejected on the commit-fold path (the only write path): a
+      // folded `sqlite` op against a registered injected source is refused
+      // before any attach.
+      const tx = runtime.edit();
+      tx.recordSqliteWrite!(space, {
+        op: "sqlite",
+        db: { id, tables: {} },
+        sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
+      });
+      const res = await tx.commit();
+      expect(res.error).toBeDefined();
+    } finally {
+      try {
+        Deno.removeSync(diskPath);
+      } catch { /* ignore */ }
+    }
   });
 });

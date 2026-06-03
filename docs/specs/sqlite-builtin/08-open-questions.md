@@ -157,3 +157,25 @@ during design are marked **[resolved]** with the decision.
 17. **Read-time filtering vs. fail-closed.** When a reader lacks clearance for
     some rows, do we silently filter them out of the result set, or fail the
     whole query closed? Filtering leaks row counts; failing closed is coarse.
+
+## Authorization of the SQLite verbs
+
+18. **Per-resource authz for `sqlite.query`, the folded `sqlite` write op, and
+    `sqlite.register-disk-source`.** These are gated only by "a session exists on
+    this space" — the same bar as a normal read — and the write/registration
+    paths carry no per-cell/per-row policy.
+    - **Implemented defenses:** server-side DDL validation (no `sqlType`
+      injection — C1); a `(space, id)`-keyed disk-source registry (no cross-space
+      hijack — C2); and an injected disk path that must be absolute, must exist,
+      is `realpath`-canonicalized, and is rejected if it resolves **inside** the
+      engine store directory (no reading core/other-space `.sqlite` files).
+    - **Chosen v1 model:** `cf` is a **trusted operator** (operator access), so
+      `register-disk-source` is not yet gated to a distinct operator capability,
+      and an injected on-disk path is otherwise unconfined (any readable host
+      file the operator names).
+    - **Follow-up:** observe **CFC labels** for per-resource authorization here
+      (operator vs. pattern, per-row clearance), and confine on-disk sources to
+      an operator allowlist directory. **TODO before relying on this in a
+      multi-tenant VM:** review how `fuse` authorizes callables and what
+      `cf-harness` does inside a VM, and align the SQLite verbs' authorization
+      with that model.
