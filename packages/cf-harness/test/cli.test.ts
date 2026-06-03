@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import {
@@ -19,10 +19,11 @@ import {
 } from "../src/cli.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
-import type {
-  HarnessPromptLoopResult,
-  RunHarnessPromptOptions,
-  RunHarnessTranscriptOptions,
+import {
+  CfHarnessPromptLoop,
+  type HarnessPromptLoopResult,
+  type RunHarnessPromptOptions,
+  type RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 
 const ONE_PIXEL_PNG = decodeBase64(
@@ -2516,6 +2517,162 @@ Deno.test({
           .type,
         "cf-harness.skill-activations",
       );
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "runCfHarnessCli passes host skill script execution target into run_skill_script",
+  permissions: { read: true, write: true, run: true, env: true },
+  async fn() {
+    const workspace = await Deno.makeTempDir({
+      prefix: "cf-harness-cli-host-skill-script-",
+    });
+    try {
+      const skillDir = join(workspace, "skills", "agent-browser");
+      const scriptSource = [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        'echo "target=$CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET"',
+        'echo "skill=$SKILL_NAME"',
+        'echo "cdp=$2"',
+        'echo "url=$3"',
+        "",
+      ].join("\n");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: agent-browser",
+          "description: Browser automation",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "capture-workflow.sh"),
+        scriptSource,
+        { mode: 0o755 },
+      );
+
+      const { io, stdout, stderr } = createIoBuffers();
+      const fetchCalls: RequestInit[] = [];
+      let engine: CfHarnessEngine | undefined;
+      const exitCode = await runCfHarnessCli(
+        [
+          "--workspace",
+          workspace,
+          "--prompt",
+          "Run the host skill script.",
+          "--gateway-auth-mode",
+          "none",
+          "--skills-root",
+          "skills",
+          "--skill",
+          "agent-browser",
+          "--allow-tool",
+          "run_skill_script",
+          "--allow-skill-script",
+          "agent-browser:scripts/capture-workflow.sh",
+          "--skill-script-execution-target",
+          "host",
+          "--browser-access-lease-id",
+          "lease-1",
+          "--browser-access-cdp-url",
+          "http://localhost:9362",
+          "--browser-access-owner",
+          "test",
+          "--browser-access-expires-at",
+          "2099-01-01T00:00:00Z",
+        ],
+        {
+          io,
+          env: {},
+          createPromptLoop: (options) => {
+            engine = options.engine;
+            return new CfHarnessPromptLoop({
+              ...options,
+              fetchFn: (_input, init) => {
+                fetchCalls.push(init ?? {});
+                const payload = fetchCalls.length === 1
+                  ? {
+                    choices: [{
+                      index: 0,
+                      message: {
+                        role: "assistant",
+                        content: "",
+                        tool_calls: [{
+                          id: "call-host-skill-script",
+                          type: "function",
+                          function: {
+                            name: "run_skill_script",
+                            arguments: JSON.stringify({
+                              skill: "agent-browser",
+                              path: "scripts/capture-workflow.sh",
+                              args: [
+                                "--cdp",
+                                "http://localhost:9362",
+                                "http://localhost:8000/piece",
+                              ],
+                            }),
+                          },
+                        }],
+                      },
+                    }],
+                  }
+                  : {
+                    choices: [{
+                      index: 0,
+                      message: {
+                        role: "assistant",
+                        content: "Host skill script completed.",
+                      },
+                    }],
+                  };
+                return Promise.resolve(
+                  new Response(JSON.stringify(payload), { status: 200 }),
+                );
+              },
+            });
+          },
+        },
+      );
+
+      assertEquals(exitCode, 0);
+      assertEquals(stderr, []);
+      assertStringIncludes(stdout[0], "Host skill script completed.");
+      assertEquals(fetchCalls.length, 2);
+
+      const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      const toolMessage = secondRequest.messages.at(-1);
+      assertEquals(toolMessage?.role, "tool");
+      const toolOutput = JSON.parse(toolMessage!.content) as {
+        status: string;
+        executionTarget?: string;
+        stdout?: string;
+      };
+      assertEquals(toolOutput.status, "executed");
+      assertEquals(toolOutput.executionTarget, "host");
+      assertStringIncludes(toolOutput.stdout ?? "", "target=host\n");
+      assertStringIncludes(toolOutput.stdout ?? "", "skill=agent-browser\n");
+      assertStringIncludes(
+        toolOutput.stdout ?? "",
+        "cdp=http://localhost:9362\n",
+      );
+      assertStringIncludes(
+        toolOutput.stdout ?? "",
+        "url=http://localhost:8000/piece\n",
+      );
+
+      const execution = engine!.getRunState().skillScriptExecutions
+        ?.executions[0];
+      assertEquals(execution?.executionTarget, "host");
+      assertEquals(execution?.status, "executed");
     } finally {
       await Deno.remove(workspace, { recursive: true });
     }
