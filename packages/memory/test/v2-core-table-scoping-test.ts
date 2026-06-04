@@ -101,6 +101,28 @@ Deno.test("legacy bare db is migrated to scoped names in place, data intact", as
   }
 });
 
+Deno.test("DIDs that collided under the old 32-bit token now get disjoint names", async () => {
+  // These two same-length DIDs produced an identical FNV-1a-32 token (reported
+  // in review); the SHA-256 token must keep their core tables disjoint so their
+  // data can never alias when sharing a connection.
+  const didX = "did:key:ziU9nCvUN8Zwo2uhnJUkWeqMA5CFhUwVpxUzdpYQFrppg";
+  const didY = "did:key:zDpzMFyyrHYN9M1RoWKS6zKqz1y3Sf2kRrovdqpJfrVyv";
+  const pathX = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const pathY = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const x = await open({ url: toFileUrl(pathX), space: didX });
+  const y = await open({ url: toFileUrl(pathY), space: didY });
+  try {
+    const xCommit = tableNames(x).find((n) => /^commit__/.test(n))!;
+    const yCommit = tableNames(y).find((n) => /^commit__/.test(n))!;
+    assertEquals(xCommit === yCommit, false);
+  } finally {
+    close(x);
+    close(y);
+    await Deno.remove(pathX);
+    await Deno.remove(pathY);
+  }
+});
+
 Deno.test("two spaces' core tables are disjoint (cross-space attach ready)", async () => {
   const pathA = await Deno.makeTempFile({ suffix: ".sqlite" });
   const pathB = await Deno.makeTempFile({ suffix: ".sqlite" });

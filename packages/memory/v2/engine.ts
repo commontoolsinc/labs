@@ -83,18 +83,22 @@ const declaredScopeFromScopeKey = (scopeKey: string): CellScope => {
   return "space";
 };
 
-// Identifier-safe, stable-per-space token for scoping core table names (FNV-1a
-// 32-bit + length, hex). Empty space => "" (legacy bare names, back-compat).
-const scopeToken = (space: string | undefined): string => {
+// Identifier-safe, stable-per-space token for scoping core table names. Empty
+// space => "" (legacy bare names, back-compat).
+const scopeToken = async (space: string | undefined): Promise<string> => {
   if (!space) return "";
-  let h = 0x811c9dc5;
-  for (let i = 0; i < space.length; i++) {
-    h ^= space.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return `${(h >>> 0).toString(16).padStart(8, "0")}${
-    space.length.toString(16)
-  }`;
+  // Core table names must be GLOBALLY disjoint across spaces (two spaces' tables
+  // may share one connection for cross-space transactions), so a token collision
+  // would silently alias data. Use 128 bits of SHA-256 — collision-resistant
+  // even for adversarially-chosen space DIDs (a 32-bit hash is birthday-bounded
+  // at ~65k spaces and trivially collidable).
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(space),
+  );
+  return Array.from(new Uint8Array(digest).subarray(0, 16))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 };
 
 /** The 14 core engine tables, scoped per-space so they never collide with an
@@ -1505,7 +1509,7 @@ export const open = async (
     snapshotRetention = DEFAULT_SNAPSHOT_RETENTION,
   }: OpenOptions,
 ): Promise<Engine> => {
-  const token = scopeToken(space);
+  const token = await scopeToken(space);
   const tableNames = coreTableNames(token);
   const database = await new Database(toDatabaseAddress(url), { create: true });
   database.exec(NEW_DB_PRAGMAS);
