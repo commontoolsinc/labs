@@ -29,7 +29,7 @@ export const WIRE_TYPE_TAGS = Object.freeze(
     //
     // Tags for the built-in "primitive" `FabricPrimitive` classes. These tags
     // are for wire formats for which instances of (one or more of) these
-    // classes do not have a protocol-specific forms.
+    // classes do not have protocol-specific forms.
     //
 
     /** Constant for class `FabricBytes`. */
