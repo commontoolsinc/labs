@@ -249,19 +249,23 @@ export default pattern<State>(({ people, expenses, myName }) => {
                     const idx = cur.findIndex((p) => equals(person, p));
                     if (idx < 0) return;
                     const name = { ...cur[idx] }.name;
-                    people.set(cur.toSpliced(idx, 1));
                     // Cascade-clean so balances stay zero-sum: drop expenses
                     // they paid (money has no creditor now) and remove them
-                    // from every other split.
-                    const cleaned = expenses.get()
-                      .filter((e) => e.paidBy !== name)
-                      .map((e) => {
-                        const sharedBy = e.sharedBy.filter((s) => s !== name);
-                        return sharedBy.length === e.sharedBy.length
-                          ? e
-                          : { ...e, sharedBy };
-                      })
-                      .filter((e) => e.sharedBy.length > 0);
+                    // from every other split. Built with a plain for-loop and
+                    // explicit array spreads — chaining .filter()/.map() on the
+                    // reactive .get() array makes the transformer rewrite them
+                    // to .filterWithPattern()/.mapWithPattern(), which throw at
+                    // runtime here.
+                    const cleaned: Expense[] = [];
+                    for (const e of expenses.get()) {
+                      if (e.paidBy === name) continue;
+                      const shared = [...(e.sharedBy ?? [])].filter((s) =>
+                        s !== name
+                      );
+                      if (shared.length === 0) continue;
+                      cleaned.push({ ...e, sharedBy: shared });
+                    }
+                    people.set(cur.toSpliced(idx, 1));
                     expenses.set(cleaned);
                   }}
                 />
@@ -447,33 +451,42 @@ export default pattern<State>(({ people, expenses, myName }) => {
         <cf-card>
           <cf-vstack gap="3">
             <cf-heading level={4}>Balances</cf-heading>
+            {
+              /* Render the list as a stable array and keep the empty state as a
+                separate sibling. A single computed() that returns an array OR a
+                single node makes the reactive diff transition array<->object,
+                which throws TypeMismatchError. */
+            }
+            {computed(() =>
+              balances.map((b) => (
+                <cf-hstack
+                  align="center"
+                  style={{
+                    justifyContent: "space-between",
+                    fontWeight: b.name === me ? "700" : "400",
+                  }}
+                >
+                  <span>{b.name === me ? `${b.name} (you)` : b.name}</span>
+                  <cf-badge
+                    color={b.net > 0
+                      ? "accent"
+                      : b.net < 0
+                      ? "danger"
+                      : "neutral"}
+                  >
+                    {b.net > 0
+                      ? `is owed ${money(b.net)}`
+                      : b.net < 0
+                      ? `owes ${money(-b.net)}`
+                      : "settled"}
+                  </cf-badge>
+                </cf-hstack>
+              ))
+            )}
             {computed(() =>
               balances.length === 0
                 ? <cf-text tone="muted">No balances to show.</cf-text>
-                : balances.map((b) => (
-                  <cf-hstack
-                    align="center"
-                    style={{
-                      justifyContent: "space-between",
-                      fontWeight: b.name === me ? "700" : "400",
-                    }}
-                  >
-                    <span>{b.name === me ? `${b.name} (you)` : b.name}</span>
-                    <cf-badge
-                      color={b.net > 0
-                        ? "accent"
-                        : b.net < 0
-                        ? "danger"
-                        : "neutral"}
-                    >
-                      {b.net > 0
-                        ? `is owed ${money(b.net)}`
-                        : b.net < 0
-                        ? `owes ${money(-b.net)}`
-                        : "settled"}
-                    </cf-badge>
-                  </cf-hstack>
-                ))
+                : null
             )}
           </cf-vstack>
         </cf-card>
@@ -482,14 +495,8 @@ export default pattern<State>(({ people, expenses, myName }) => {
         <cf-card>
           <cf-vstack gap="3">
             <cf-heading level={4}>Settle up</cf-heading>
-            {computed(() => {
-              const plan = settlements;
-              if (plan.length === 0) {
-                return (
-                  <cf-text tone="muted">Everyone is settled up. 🎉</cf-text>
-                );
-              }
-              return plan.map((s) => (
+            {computed(() =>
+              settlements.map((s) => (
                 <cf-hstack gap="2" align="center">
                   <cf-badge color="danger">{s.from}</cf-badge>
                   <span>→</span>
@@ -498,8 +505,13 @@ export default pattern<State>(({ people, expenses, myName }) => {
                     {money(s.amount)}
                   </span>
                 </cf-hstack>
-              ));
-            })}
+              ))
+            )}
+            {computed(() =>
+              settlements.length === 0
+                ? <cf-text tone="muted">Everyone is settled up. 🎉</cf-text>
+                : null
+            )}
           </cf-vstack>
         </cf-card>
       </cf-vstack>
