@@ -83,6 +83,28 @@ function isWithinJsxExpression(node: ts.Node): boolean {
   return false;
 }
 
+/**
+ * True when `patternCall` (a `pattern(...)` call) is the first argument of an
+ * enclosing `patternTool(...)` call — the canonical CT-1655 shape
+ * `patternTool(pattern(cb), extraParams?)`. Used to give such a pattern's
+ * callback a patternTool boundary (function creation allowed in the
+ * surrounding restricted context) rather than the restricted pattern-builder
+ * boundary a bare `pattern(...)` gets.
+ */
+function isPatternToolPatternArgument(
+  patternCall: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const grandparent = patternCall.parent;
+  if (!grandparent || !ts.isCallExpression(grandparent)) {
+    return false;
+  }
+  if (grandparent.arguments[0] !== patternCall) {
+    return false;
+  }
+  return detectCallKind(grandparent, checker)?.kind === "pattern-tool";
+}
+
 export function classifyCallbackBoundary(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
@@ -153,6 +175,24 @@ export function classifyCallbackBoundary(
   if (callKind?.kind === "builder") {
     switch (callKind.builderName) {
       case "pattern":
+        // A `pattern(...)` that is itself the first argument of a
+        // `patternTool(...)` call is the canonical patternTool shape (CT-1655):
+        // authoring it inside a pattern body is legitimate, so its callback
+        // gets the same boundary as a directly-passed patternTool callback —
+        // allowing function creation in the surrounding restricted context.
+        // A bare `pattern(...)` (not a patternTool argument) keeps the
+        // restricted `pattern-builder` boundary below.
+        if (isPatternToolPatternArgument(parent, checker)) {
+          return {
+            kind: "supported",
+            boundaryKind: "pattern-tool",
+            bodyContext: {
+              strategy: "explicit",
+              kind: "compute",
+              owner: "unknown",
+            },
+          };
+        }
         return {
           kind: "supported",
           boundaryKind: "pattern-builder",

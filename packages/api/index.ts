@@ -1900,11 +1900,11 @@ export type PatternToolFunction = <
   T,
   E extends object = Record<PropertyKey, never>,
 >(
-  fnOrPattern:
-    | ((
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-    ) => any)
-    | PatternFactory<T, any>,
+  // CT-1655: the first argument must be an explicit `pattern(...)`. Passing a
+  // bare callback (and letting the runtime wrap it / a transformer auto-capture
+  // its closure) is no longer supported — wrap it yourself:
+  // `patternTool(pattern(fn), extraParams?)`.
+  pattern: PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
