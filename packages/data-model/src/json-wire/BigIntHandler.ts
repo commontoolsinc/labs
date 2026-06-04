@@ -1,5 +1,5 @@
 import type { FabricValue, ReconstructionContext } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -16,8 +16,8 @@ import type {
 import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
- * Handler for `bigint`. Serializes to `TAGS.BigInt` tag with an unpadded
- * base64 string encoding the bigint's two's-complement big-endian byte
+ * Handler for `bigint`. Serializes to `WIRE_TYPE_TAGS.BigInt` tag with an
+ * unpadded base64 string encoding the bigint's two's-complement big-endian byte
  * representation. Wire format: `{ "/BigInt@1": "<base64>" }`.
  *
  * The byte encoding is the same one used by the hash (Section 3.7 of the
@@ -25,7 +25,7 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * as needed.
  */
 export const BigIntHandler: TypeHandler = {
-  tag: TAGS.BigInt,
+  tag: WIRE_TYPE_TAGS.BigInt,
 
   canSerialize(value: FabricValue): boolean {
     return typeof value === "bigint";
@@ -38,7 +38,7 @@ export const BigIntHandler: TypeHandler = {
   ): JsonWireValue {
     const bytes = bigintToMinimalTwosComplement(value as bigint);
     const b64 = toUnpaddedBase64url(bytes);
-    return codec.wrapTag(TAGS.BigInt, b64 as JsonWireValue);
+    return codec.wrapTag(WIRE_TYPE_TAGS.BigInt, b64 as JsonWireValue);
   },
 
   deserialize(
@@ -48,7 +48,7 @@ export const BigIntHandler: TypeHandler = {
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        TAGS.BigInt,
+        WIRE_TYPE_TAGS.BigInt,
         state,
         `bigint: expected string state, got ${typeof state}`,
       );
@@ -58,7 +58,7 @@ export const BigIntHandler: TypeHandler = {
       return bigintFromMinimalTwosComplement(bytes);
     } catch {
       return new ProblematicValue(
-        TAGS.BigInt,
+        WIRE_TYPE_TAGS.BigInt,
         state,
         `bigint: invalid base64: ${state}`,
       );

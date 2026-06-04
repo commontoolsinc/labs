@@ -18,7 +18,8 @@ import {
   FabricMap,
   FabricSet,
 } from "../fabric-instances/index.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import { WIRE_META_TAGS } from "../wire-common/wire-meta-tags.ts";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 /**
@@ -125,9 +126,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Register native wrapper classes for deserialization. Each wrapper's
     // static `[RECONSTRUCT]` method is used by the class registry fallback
     // path in `deserialize()`.
-    this.registry.set(TAGS.Error, FabricError);
-    this.registry.set(TAGS.Map, FabricMap);
-    this.registry.set(TAGS.Set, FabricSet);
+    this.registry.set(WIRE_TYPE_TAGS.Error, FabricError);
+    this.registry.set(WIRE_TYPE_TAGS.Map, FabricMap);
+    this.registry.set(WIRE_TYPE_TAGS.Set, FabricSet);
   }
 
   //
@@ -318,7 +319,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
             count++;
             i++;
           }
-          result.push(this.wrapTag(TAGS.hole, count));
+          result.push(this.wrapTag(WIRE_META_TAGS.hole, count));
         } else {
           result.push(
             this.serialize(value[i] as FabricValue, seen, registry),
@@ -361,9 +362,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
             Object.entries(result).map(([k, v]) => [k, unquote(v)]),
           ),
         );
-        return this.wrapTag(TAGS.quote, unquoted) as JsonWireValue;
+        return this.wrapTag(WIRE_META_TAGS.quote, unquoted) as JsonWireValue;
       }
-      return this.wrapTag(TAGS.object, result) as JsonWireValue;
+      return this.wrapTag(WIRE_META_TAGS.object, result) as JsonWireValue;
     }
 
     return result as JsonWireValue;
@@ -403,8 +404,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
         ) as unknown as FabricValue;
       }
 
-      // `TAGS.object` unwrapping (Section 5.6).
-      if (tag === TAGS.object) {
+      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
+      if (tag === WIRE_META_TAGS.object) {
         const inner = state as Record<string, JsonWireValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
@@ -413,8 +414,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return Object.freeze(result);
       }
 
-      // `TAGS.quote` literal handling (Section 5.6).
-      if (tag === TAGS.quote) {
+      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
+      if (tag === WIRE_META_TAGS.quote) {
         return state as FabricValue;
       }
 
@@ -499,7 +500,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let logicalLength = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
+        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           logicalLength += entryDecoded.state as number;
         } else {
           logicalLength++;
@@ -510,7 +511,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let targetIndex = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
+        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           targetIndex += entryDecoded.state as number;
         } else {
           result[targetIndex] = this.deserialize(entry, runtime, registry);
