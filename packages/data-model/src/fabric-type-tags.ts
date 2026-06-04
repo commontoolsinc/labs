@@ -25,10 +25,5 @@ export const TAGS = Object.freeze(
     SpecialNumber: "SpecialNumber@1",
     Symbol: "Symbol@1",
     Undefined: "Undefined@1",
-
-    // -- Structural / meta tags (serialization format) --
-    quote: "quote",
-    hole: "hole",
-    object: "object",
   } as const,
 );
