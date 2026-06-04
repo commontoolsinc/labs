@@ -52,6 +52,7 @@ export class TypeHandlerRegistry {
         return handler;
       }
     }
+
     return undefined;
   }
 
