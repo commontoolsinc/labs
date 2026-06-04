@@ -124,12 +124,6 @@ export default pattern<State>(({ people, expenses, myName }) => {
   const paidByDraft = Writable.perSession.of<string>(""); // Person.name
   const splitWith = Writable.perSession.of<string[]>([]); // Person.name[]
 
-  // Locally retype without Default<>: the transformer only infers `comparable`
-  // array items (required for equals()) when the array type has no Default<>
-  // union member. The cells are the same; this just sharpens the static type.
-  const peopleList: Writable<Person[]> = people;
-  const expensesList: Writable<Expense[]> = expenses;
-
   // --- Identity (resolve per-user name once at top level) ---
   const me = (myName ?? "").trim();
 
@@ -246,16 +240,16 @@ export default pattern<State>(({ people, expenses, myName }) => {
                 silently breaks removal. Empty state is a separate sibling. */
             }
             <cf-hstack gap="2" wrap>
-              {peopleList.map((person) => (
+              {people.map((person) => (
                 <cf-chip
                   label={person.name}
                   removable
                   oncf-remove={() => {
-                    const cur = peopleList.get();
+                    const cur = people.get();
                     const idx = cur.findIndex((p) => equals(person, p));
                     if (idx < 0) return;
                     const name = { ...cur[idx] }.name;
-                    peopleList.set(cur.toSpliced(idx, 1));
+                    people.set(cur.toSpliced(idx, 1));
                     // Cascade-clean so balances stay zero-sum: drop expenses
                     // they paid (money has no creditor now) and remove them
                     // from every other split.
@@ -402,7 +396,7 @@ export default pattern<State>(({ people, expenses, myName }) => {
             </cf-hstack>
 
             {/* Bare .map() — see People note above. */}
-            {expensesList.map((expense) => (
+            {expenses.map((expense) => (
               <cf-hstack
                 gap="3"
                 align="center"
@@ -432,9 +426,9 @@ export default pattern<State>(({ people, expenses, myName }) => {
                   variant="ghost"
                   color="danger"
                   onClick={() => {
-                    const cur = expensesList.get();
+                    const cur = expenses.get();
                     const idx = cur.findIndex((el) => equals(expense, el));
-                    if (idx >= 0) expensesList.set(cur.toSpliced(idx, 1));
+                    if (idx >= 0) expenses.set(cur.toSpliced(idx, 1));
                   }}
                 >
                   ×
