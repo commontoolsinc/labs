@@ -2106,13 +2106,17 @@ export interface ISqliteQueryable {
 }
 
 /**
- * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing the
- * SQLite method surface (`.exec`/`.query`) instead of the general value-cell
- * mutators. It reads back the handle ref and carries the `toCell` back-pointer,
- * but is NOT writable (you can't `.set()` a DB handle).
+ * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing ONLY
+ * the SQLite method surface (`.exec`/`.query`), not the general value-cell
+ * read/write API. In particular it deliberately does **not** extend
+ * `IReadable<T>`: `.get()`/`.sample()` are meaningless on an opaque DB handle
+ * (the handle ref is an internal detail; pattern code reads rows via `.query`),
+ * so omitting them keeps `db.get()` from type-checking. The handle is also not
+ * writable (you can't `.set()` a DB handle). The runtime still reads the raw
+ * handle internally via `getRaw()` to fold writes onto the transaction.
  */
 export interface ISqliteDb<T = SqliteDatabase>
-  extends IAnyCell<T>, IReadable<T>, ISqliteExecutable, ISqliteQueryable {}
+  extends IAnyCell<T>, ISqliteExecutable, ISqliteQueryable {}
 
 export interface SqliteDb<T = SqliteDatabase>
   extends BrandedCell<T, "sqlite">, ISqliteDb<T> {}
