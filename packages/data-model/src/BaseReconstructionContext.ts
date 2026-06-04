@@ -10,17 +10,12 @@ import type { FabricInstance, ReconstructionContext } from "./interface.ts";
  * Abstract base that supplies the `shouldDeepFreeze` getter from a
  * constructor argument. Subclasses implement `getCell()` for their own
  * boundary semantics; they inherit `shouldDeepFreeze` for free.
- *
- * The `shouldDeepFreeze` argument defaults to `true`, mirroring
- * `cloneIfNecessary()`'s `frozen` option (see `value-clone.ts`): the
- * deep-frozen result is the safe default, and `shouldDeepFreeze === true`
- * corresponds to `cloneIfNecessary(value, { frozen: true })`.
  */
 export abstract class BaseReconstructionContext
   implements ReconstructionContext {
   readonly #shouldDeepFreeze: boolean;
 
-  constructor(shouldDeepFreeze: boolean = true) {
+  constructor(shouldDeepFreeze: boolean) {
     this.#shouldDeepFreeze = shouldDeepFreeze;
   }
 

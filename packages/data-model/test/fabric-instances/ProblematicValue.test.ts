@@ -20,9 +20,9 @@ describe("ProblematicValue", () => {
   });
 
   describe("constructor()", () => {
-    it("preserves `typeTag`, `state`, and `error`", () => {
+    it("preserves `wireTypeTag`, `state`, and `error`", () => {
       const ps = new ProblematicValue("BadType@1", { x: 1 }, "boom");
-      expect(ps.typeTag).toBe("BadType@1");
+      expect(ps.wireTypeTag).toBe("BadType@1");
       expect(ps.state).toEqual({ x: 1 });
       expect(ps.error).toBe("boom");
     });

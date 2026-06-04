@@ -10,7 +10,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricBytes`. Serializes to a flat base64url string
@@ -40,7 +40,7 @@ export const BytesHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.Bytes,
         state,
         `Bytes: expected string state, got ${typeof state}`,
@@ -50,7 +50,7 @@ export const BytesHandler: TypeHandler = {
       const bytes = fromBase64url(state);
       return new FabricBytes(bytes) as unknown as FabricValue;
     } catch {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.Bytes,
         state,
         `Bytes: invalid base64: ${state}`,

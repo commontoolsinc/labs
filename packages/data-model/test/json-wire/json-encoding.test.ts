@@ -12,6 +12,10 @@ import { BaseReconstructionContext } from "../../src/BaseReconstructionContext.t
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {
+  constructor() {
+    super(true);
+  }
+
   override getCell(): never {
     throw new Error("getCell not implemented in test runtime");
   }

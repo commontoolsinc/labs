@@ -14,7 +14,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricEpochNsec`. Serializes to a flat base64 string encoding
@@ -46,7 +46,7 @@ export const EpochNsecHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.EpochNsec,
         state,
         `EpochNsec: expected string state, got ${typeof state}`,
@@ -57,7 +57,7 @@ export const EpochNsecHandler: TypeHandler = {
       const bigint = bigintFromMinimalTwosComplement(bytes);
       return new FabricEpochNsec(bigint) as unknown as FabricValue;
     } catch {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.EpochNsec,
         state,
         `EpochNsec: invalid base64: ${state}`,

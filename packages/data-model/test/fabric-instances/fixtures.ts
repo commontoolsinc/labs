@@ -9,7 +9,7 @@ export class DummyReconstructionContext extends BaseReconstructionContext {
   }
 }
 
-export const dummyContext = new DummyReconstructionContext();
+export const dummyContext = new DummyReconstructionContext(true);
 
 /**
  * Recursion-callback helpers for exercising the `[DEEP_FREEZE]` /

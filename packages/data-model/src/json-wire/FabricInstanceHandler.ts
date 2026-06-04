@@ -36,11 +36,11 @@ export const FabricInstanceHandler: TypeHandler = {
   ): JsonWireValue {
     const inst = value as FabricInstance;
 
-    // `ExplicitTagValue` (`UnknownValue`, `ProblematicValue`): use
-    // preserved `.typeTag` and re-serialize their stored state.
+    // For `ExplicitTagValue`, use the preserved original `wireTypeTag` and
+    // `state`.
     if (inst instanceof ExplicitTagValue) {
       const serializedState = recurse(inst.state);
-      return codec.wrapTag(inst.typeTag, serializedState);
+      return codec.wrapTag(inst.wireTypeTag, serializedState);
     }
 
     // General `FabricInstance`: use `[DECONSTRUCT]` and codec for tag.

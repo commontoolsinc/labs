@@ -24,21 +24,6 @@ export interface CaptureCollectorOptions {
   ) => boolean;
 }
 
-export function createModuleScopedReactiveCaptureCollector(
-  checker: ts.TypeChecker,
-  shouldCaptureModuleScopedIdentifier: (
-    identifier: ts.Identifier,
-    type: ts.Type,
-    checker: ts.TypeChecker,
-  ) => boolean,
-): CaptureCollector {
-  return new CaptureCollector(checker, {
-    captureNonModuleExternalIdentifiers: false,
-    captureNonModuleExternalPropertyAccesses: false,
-    captureModuleScopedIdentifierWhen: shouldCaptureModuleScopedIdentifier,
-  });
-}
-
 export class CaptureCollector {
   constructor(
     private readonly checker: ts.TypeChecker,

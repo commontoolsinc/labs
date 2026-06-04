@@ -6,7 +6,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricRegExp`. Serializes the essential state
@@ -41,7 +41,7 @@ export const RegExpHandler: TypeHandler = {
   ): FabricValue {
     const decoded = recurse(state);
     if (decoded === null || typeof decoded !== "object") {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.RegExp,
         state,
         `RegExp: expected object state, got ${typeof decoded}`,
@@ -54,7 +54,7 @@ export const RegExpHandler: TypeHandler = {
     try {
       return new FabricRegExp(flavor, source, flags) as unknown as FabricValue;
     } catch (e) {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.RegExp,
         state,
         `RegExp: ${e instanceof Error ? e.message : String(e)}`,

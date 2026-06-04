@@ -2965,7 +2965,31 @@ Deno.test("Standalone Function Validation", async (t) => {
   );
 
   await t.step(
-    "allows reactive operations in functions passed to patternTool()",
+    "allows reactive operations in the pattern passed to patternTool()",
+    async () => {
+      const source =
+        `      import { pattern, patternTool, computed, Cell } from "commonfabric";
+
+      const multiplier = {} as Cell<number>;
+
+      const tool = patternTool(pattern(({ query }: { query: string }) => {
+        return computed(() => query.length * multiplier.get());
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reactive operations inside a patternTool's pattern should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when patternTool's first argument is a bare callback",
     async () => {
       const source =
         `      import { patternTool, computed, Cell } from "commonfabric";
@@ -2980,10 +3004,9 @@ Deno.test("Standalone Function Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
-        errors.length,
-        0,
-        "Reactive operations inside patternTool() should be allowed",
+      assertHasErrorType(
+        errors,
+        "pattern-context:patterntool-requires-pattern",
       );
     },
   );

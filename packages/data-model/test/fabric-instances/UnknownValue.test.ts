@@ -20,9 +20,9 @@ describe("UnknownValue", () => {
   });
 
   describe("constructor()", () => {
-    it("preserves `typeTag` and `state`", () => {
+    it("preserves `wireTypeTag` and `state`", () => {
       const us = new UnknownValue("FancyType@3", { data: [1, 2, 3] });
-      expect(us.typeTag).toBe("FancyType@3");
+      expect(us.wireTypeTag).toBe("FancyType@3");
       expect(us.state).toEqual({ data: [1, 2, 3] });
     });
   });
