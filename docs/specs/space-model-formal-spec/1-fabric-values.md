@@ -2045,7 +2045,7 @@ organized into four categories by high nibble:
 | `TAG_BIGINT`      | `0x26` | 38      | `bigint`                          |
 | `TAG_EPOCH_NSEC`  | `0x27` | 39      | `FabricEpochNsec`                 |
 | `TAG_EPOCH_DAYS`  | `0x28` | 40      | `FabricEpochDays`                 |
-| `TAG_CONTENT_ID`  | `0x29` | 41      | `FabricHash`                      |
+| `TAG_HASH`        | `0x29` | 41      | `FabricHash`                      |
 | `TAG_SYMBOL`      | `0x2A` | 42      | `symbol` (registry-interned only) |
 | `TAG_REGEXP`      | `0x2B` | 43      | `FabricRegExp`                    |
 
@@ -2135,8 +2135,7 @@ export function hashOf(value: unknown): FabricHash {
   //                        (same payload format as TAG_BIGINT but distinct tag)
   // - `FabricEpochDays`: hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   //                        (same payload format as TAG_BIGINT but distinct tag)
-  // - `FabricHash`: hash(TAG_CONTENT_ID, hashStr(algTag),
-  //                              leb128(hashByteLen), hashBytes)
+  // - `FabricHash`: hash(TAG_HASH, hashStr(algTag), leb128(hashByteLen), hashBytes)
   //                        (algorithm tag as a tagged string, then raw hash bytes)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
   //                        Elements are hashed in index order:
@@ -2184,7 +2183,7 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricBytes` uses TAG_BYTES (dedicated primitive tag).
   // - `FabricEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
   // - `FabricEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
-  // - `FabricHash` uses TAG_CONTENT_ID (dedicated primitive tag).
+  // - `FabricHash` uses TAG_HASH (dedicated primitive tag).
   // - `FabricRegExp` uses TAG_REGEXP (dedicated primitive tag).
   //
   // Examples (existing type tags are all short enough for the direct
@@ -2197,8 +2196,7 @@ export function hashOf(value: unknown): FabricHash {
   //                         where elements are hashed in insertion order
   // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `FabricEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
-  // - `FabricHash`:  hash(TAG_CONTENT_ID, hashStr(algTag),
-  //                               leb128(hashByteLen), hashBytes)
+  // - `FabricHash`:  hash(TAG_HASH, hashStr(algTag), leb128(hashByteLen), hashBytes)
   // - `FabricBytes`:      hash(TAG_BYTES, leb128(byteLen), rawBytes)
   // - `FabricRegExp`:     hash(TAG_REGEXP, hashStr(source), hashStr(flags),
   //                               hashStr(flavor))

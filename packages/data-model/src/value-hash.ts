@@ -47,7 +47,7 @@ const TAG_BYTES = 0x25;
 const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
-const TAG_CONTENT_HASH = 0x29;
+const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
 const TAG_REGEXP = 0x2b;
 
@@ -72,7 +72,7 @@ const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
-const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
+const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
 
@@ -271,9 +271,9 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.ContentHash: {
+    case NATIVE_TAGS.Hash: {
       const cid = value as FabricHash;
-      hasher.update(TAG_CONTENT_HASH_BYTES);
+      hasher.update(TAG_HASH_BYTES);
       hasher.update(getStringRep(cid.tag));
       // TODO(@danfuzz): Look into avoiding making a copy of bytes here.
       // This could be a performance issue.
