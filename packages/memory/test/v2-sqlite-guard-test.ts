@@ -106,6 +106,30 @@ describe("assertReadOnly", () => {
     expect(() => assertReadOnly("SELECT * FROM commit")).toThrow(GuardError);
     expect(() => assertReadOnly("SELECT * FROM revision")).toThrow(GuardError);
   });
+
+  it("rejects the SPACE-SCOPED core-table forms (commit__<token>)", () => {
+    // Core tables are renamed to `commit__<token>`; the token is a hash of the
+    // space's own public DID, so a pattern can derive it. Both the read and the
+    // folded-write guard must reject the scoped form, not just the bare name.
+    expect(() => assertReadOnly('SELECT * FROM "commit__deadbeefcafe"'))
+      .toThrow(
+        GuardError,
+      );
+    expect(() =>
+      assertWriteSafe('INSERT INTO "commit__deadbeefcafe" (seq) VALUES (1)')
+    ).toThrow(GuardError);
+    expect(() =>
+      assertReadOnly('SELECT * FROM "scheduler_observation__abc123"')
+    ).toThrow(GuardError);
+  });
+
+  it("does not false-reject pattern tables that merely start with a core name", () => {
+    // `commit__<token>` is reserved, but `commitments` / `commit_log` (no `__`)
+    // are ordinary pattern table names and must pass.
+    assertReadOnly("SELECT * FROM commitments");
+    assertReadOnly("SELECT * FROM commit_log");
+    assertWriteSafe("INSERT INTO commitments (a) VALUES (?)");
+  });
 });
 
 describe("assertWriteSafe", () => {

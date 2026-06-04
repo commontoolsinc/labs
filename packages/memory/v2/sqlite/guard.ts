@@ -160,10 +160,19 @@ const TABLE_POS_QUALIFIED_RE =
 
 // Core tables, sqlite_* / pragma_* introspection (sqlite_master, sqlite_schema,
 // pragma_table_info table-valued functions, etc.).
+//
+// Core engine tables are scoped per-space (`commit__<token>` — see engine.ts
+// `coreTableNames`), and that token is a hash of the space's own (public) DID,
+// so a pattern can derive it. We must reject the scoped form too — `commit`
+// AND `commit__<anything>` — otherwise a folded write to `"commit__<token>"`
+// would reach the real core table on the engine connection (`\b…\b` alone does
+// NOT match `commit__…`, since `_` is a word char). The optional `__\w+` only
+// applies to the core-table set, never to a plain `commit_log`/`commitments`
+// (no `__`), so it adds no false positives.
 const CORE_REF_RE = new RegExp(
-  `\\b(?:${
+  `\\b(?:(?:${
     CORE_TABLE_NAMES.join("|")
-  }|sqlite_[A-Za-z0-9_]*|pragma_[A-Za-z0-9_]*)\\b`,
+  })(?:__\\w+)?|sqlite_[A-Za-z0-9_]*|pragma_[A-Za-z0-9_]*)\\b`,
   "i",
 );
 

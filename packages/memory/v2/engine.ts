@@ -1,4 +1,5 @@
 import { Database } from "@db/sqlite";
+import { encodeHex } from "@std/encoding/hex";
 import type { FabricValue } from "../interface.ts";
 import { runWrite } from "./sqlite/exec.ts";
 import { applyPatch } from "./patch.ts";
@@ -96,9 +97,7 @@ const scopeToken = async (space: string | undefined): Promise<string> => {
     "SHA-256",
     new TextEncoder().encode(space),
   );
-  return Array.from(new Uint8Array(digest).subarray(0, 16))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  return encodeHex(new Uint8Array(digest).subarray(0, 16));
 };
 
 /** The 14 core engine tables, scoped per-space so they never collide with an
@@ -144,29 +143,16 @@ const CORE_TABLE_KEYS: readonly (keyof CoreTableNames)[] = [
  * table becomes the quoted scoped identifier `"<table>__<token>"`.
  */
 const coreTableNames = (token: string): CoreTableNames => {
-  if (token === "") {
-    return {
-      authorization: "authorization",
-      invocation: "invocation",
-      commit: `"commit"`,
-      revision: "revision",
-      head: "head",
-      snapshot: "snapshot",
-      branch: "branch",
-      blob_store: "blob_store",
-      scheduler_observation: "scheduler_observation",
-      scheduler_action_snapshot: "scheduler_action_snapshot",
-      scheduler_observation_replay: "scheduler_observation_replay",
-      scheduler_read_index: "scheduler_read_index",
-      scheduler_write_index: "scheduler_write_index",
-      scheduler_action_state: "scheduler_action_state",
-    };
-  }
-  const scoped = {} as CoreTableNames;
+  const names = {} as CoreTableNames;
   for (const key of CORE_TABLE_KEYS) {
-    scoped[key] = `"${key}__${token}"`;
+    // Empty token => byte-identical legacy names: `commit` is the only reserved
+    // word, so it stays quoted; the rest were bare. Non-empty => all quoted and
+    // scoped.
+    names[key] = token === ""
+      ? (key === "commit" ? `"commit"` : key)
+      : `"${key}__${token}"`;
   }
-  return scoped;
+  return names;
 };
 
 const PRAGMAS = `
@@ -1483,6 +1469,18 @@ const migrateCoreTablesToSpaceScoped = (
     (database.prepare(`PRAGMA table_info("${name}")`).all() as unknown[])
       .length > 0;
 
+  // Fast path: already scoped (the common case — every reopen). `commit` is
+  // always present once the schema is bootstrapped, so its scoped form is a
+  // reliable marker; skip the probes + write transaction entirely.
+  if (tableExists(`commit__${token}`)) {
+    return;
+  }
+
+  // `ALTER TABLE … RENAME TO` only auto-rewrites FK references in OTHER tables
+  // when legacy_alter_table is OFF (the default). Pin it so a renamed parent
+  // (e.g. `commit`) doesn't leave child FK clauses (`revision`, `scheduler_*`)
+  // pointing at the vanished bare name.
+  database.exec("PRAGMA legacy_alter_table = OFF;");
   database.exec("BEGIN TRANSACTION;");
   try {
     for (const key of CORE_TABLE_KEYS) {
