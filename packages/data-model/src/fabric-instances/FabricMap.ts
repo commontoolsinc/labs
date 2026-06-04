@@ -23,6 +23,11 @@ export class FabricMap
     super();
   }
 
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return TAGS.Map;
+  }
+
   [DECONSTRUCT](): FabricValue {
     throw new Error("FabricMap: not yet implemented");
   }

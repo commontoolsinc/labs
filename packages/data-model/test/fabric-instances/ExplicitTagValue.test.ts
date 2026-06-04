@@ -9,7 +9,7 @@ describe("ExplicitTagValue", () => {
     describe("`.typeTag` / `.state`", () => {
       it("provide access to the concrete subclass's tag and state", () => {
         const us: ExplicitTagValue = new UnknownValue("Tag@2", 42);
-        expect(us.typeTag).toBe("Tag@2");
+        expect(us.wireTypeTag).toBe("Tag@2");
         expect(us.state).toBe(42);
 
         const ps: ExplicitTagValue = new ProblematicValue(
@@ -17,7 +17,7 @@ describe("ExplicitTagValue", () => {
           "data",
           "err",
         );
-        expect(ps.typeTag).toBe("Bad@1");
+        expect(ps.wireTypeTag).toBe("Bad@1");
         expect(ps.state).toBe("data");
       });
     });

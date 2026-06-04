@@ -22,6 +22,11 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     super();
   }
 
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return TAGS.Set;
+  }
+
   [DECONSTRUCT](): FabricValue {
     throw new Error("FabricSet: not yet implemented");
   }

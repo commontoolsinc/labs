@@ -16,23 +16,31 @@ import { deepFreeze } from "../deep-freeze.ts";
  * failures. See Section 3.5 of the formal spec.
  */
 export class ProblematicValue extends ExplicitTagValue {
+  /** Value for {@link #error}. */
+  readonly #error;
+
   constructor(
     typeTag: string,
     state: FabricValue,
     /** Description of what went wrong. */
-    readonly error: string,
+    error: string,
   ) {
     super(typeTag, state);
+
+    this.#error = error;
+  }
+
+  /** Description of what went wrong. */
+  get error(): string {
+    return this.#error;
   }
 
   [DECONSTRUCT](): FabricValue {
-    return { type: this.typeTag, state: this.state, error: this.error };
+    return { type: this.wireTypeTag, state: this.state, error: this.error };
   }
 
   /**
-   * Deep-freezes in place. `typeTag` and `error` are immutable strings; the
-   * only `FabricValue`-typed slot is `state`, which is recursed via
-   * `subFreeze` before the wrapper itself is frozen.
+   * Deep-freezes in place.
    */
   [DEEP_FREEZE](
     subFreeze: (value: FabricValue) => FabricValue,
@@ -57,7 +65,7 @@ export class ProblematicValue extends ExplicitTagValue {
   }
 
   protected shallowUnfrozenClone(): ProblematicValue {
-    return new ProblematicValue(this.typeTag, this.state, this.error);
+    return new ProblematicValue(this.wireTypeTag, this.state, this.error);
   }
 
   static [RECONSTRUCT](

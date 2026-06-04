@@ -135,6 +135,11 @@ export class FabricError extends FabricNativeWrapper<Error> {
     }
   }
 
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return TAGS.Error;
+  }
+
   /**
    * Shallow conversion from a native `Error`. Used by the shallow conversion
    * layer (`shallowFabricFromNativeValueModern`). The error's `.cause` and

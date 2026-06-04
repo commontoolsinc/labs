@@ -13,12 +13,31 @@ import { BaseFabricInstance } from "./BaseFabricInstance.ts";
  * See Section 3.2 of the formal spec.
  */
 export abstract class ExplicitTagValue extends BaseFabricInstance {
+  /** The value of {@link #wireTypeTag}. */
+  readonly #wireTypeTag;
+
+  /** The value of {@link #state}. */
+  readonly #state;
+
   constructor(
-    /** The original type tag, e.g. `"FutureType@2"`. */
-    readonly typeTag: string,
-    /** The raw state, already recursively processed by the deserializer. */
-    readonly state: FabricValue,
+    /** The original wire type tag, e.g. `"FutureType@2"`. */
+    wireTypeTag: string,
+    /** The raw state. */
+    state: FabricValue,
   ) {
     super();
+
+    this.#wireTypeTag = wireTypeTag;
+    this.#state = state; // TODO(danfuzz): Should be guaranteed deep-frozen.
+  }
+
+  /** Arbitrary raw instance state. */
+  get state(): FabricValue {
+    return this.#state;
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return this.#wireTypeTag;
   }
 }
