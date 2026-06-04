@@ -342,7 +342,7 @@ export interface ReconstructionContext {
    * sufficient for correctness regardless: each impl freezes its own output
    * when asked.
    */
-  readonly shouldDeepFreeze: boolean;
+  get shouldDeepFreeze(): boolean;
 }
 
 /**

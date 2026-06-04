@@ -6,16 +6,18 @@ import {
   type ReconstructionContext,
   type SerializationContext,
 } from "../interface.ts";
-import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 import { UnknownValue } from "../fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue, TypeHandlerCodec } from "./interface.ts";
 import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
-import { FabricError } from "../fabric-instances/FabricError.ts";
-import { FabricMap } from "../fabric-instances/FabricMap.ts";
-import { FabricSet } from "../fabric-instances/FabricSet.ts";
+import {
+  BaseFabricInstance,
+  FabricError,
+  FabricMap,
+  FabricSet,
+} from "../fabric-instances/index.ts";
 import { TAGS } from "../fabric-type-tags.ts";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
@@ -116,7 +118,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Create a codec view that delegates to our private methods.
     this.codec = {
       wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) => this.getTagFor(value),
+      getTagFor: (value: FabricInstance) =>
+        BaseFabricInstance.wireTypeTagOf(value),
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
@@ -194,20 +197,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
   // Tag wrapping/unwrapping (private)
   //
-
-  /** Returns the wire format tag for a fabric instance's type. */
-  private getTagFor(value: FabricInstance): string {
-    if (value instanceof ExplicitTagValue) {
-      return value.typeTag;
-    }
-    const typeTag = (value as { typeTag?: unknown }).typeTag;
-    if (typeof typeTag === "string") {
-      return typeTag;
-    }
-    throw new Error(
-      `JsonEncodingContext: no tag registered for value: ${value}`,
-    );
-  }
 
   /** Returns the class that can reconstruct instances for a given tag. */
   private getClassFor(

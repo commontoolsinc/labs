@@ -16,6 +16,7 @@ import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "./fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
+import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
 import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
@@ -300,16 +301,11 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.FabricInstance: {
-      // Generic `FabricInstance` (protocol path via `[DECONSTRUCT]`).
+      const fabInst = value as FabricInstance;
       hasher.update(TAG_INSTANCE_BYTES);
-      const typeTag = (value as { typeTag?: unknown }).typeTag;
-      if (typeof typeTag !== "string") {
-        throw new Error(
-          `hashOf: FabricInstance missing typeTag property`,
-        );
-      }
-      hasher.update(getStringRep(typeTag));
-      const state = (value as FabricInstance)[DECONSTRUCT]();
+      const wireTypeTag = BaseFabricInstance.wireTypeTagOf(fabInst);
+      hasher.update(getStringRep(wireTypeTag));
+      const state = fabInst[DECONSTRUCT]();
       feedValue(hasher, state);
       return;
     }

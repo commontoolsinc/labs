@@ -16,15 +16,23 @@ import { BaseFabricInstance } from "../../src/fabric-instances/BaseFabricInstanc
  * counter (kept off the instance so freezing doesn't block bookkeeping).
  */
 class Probe extends BaseFabricInstance {
+  readonly #tag;
+
   constructor(
-    readonly tag: string,
+    tag: string,
     readonly counter: { calls: number } = { calls: 0 },
   ) {
     super();
+
+    this.#tag = tag;
+  }
+
+  get wireTypeTag(): string {
+    return this.#tag;
   }
 
   [DECONSTRUCT](): FabricValue {
-    return this.tag;
+    return this.#tag;
   }
 
   [DEEP_FREEZE](
@@ -46,7 +54,7 @@ class Probe extends BaseFabricInstance {
 
   protected shallowUnfrozenClone(): Probe {
     this.counter.calls += 1;
-    return new Probe(this.tag, this.counter);
+    return new Probe(this.#tag, this.counter);
   }
 }
 
@@ -78,7 +86,7 @@ describe("BaseFabricInstance", () => {
 
         expect(result).not.toBe(probe);
         expect(result instanceof Probe).toBe(true);
-        expect((result as Probe).tag).toBe("t");
+        expect((result as Probe).wireTypeTag).toBe("t");
         expect(Object.isFrozen(result)).toBe(true);
         // Original is left unfrozen.
         expect(Object.isFrozen(probe)).toBe(false);
@@ -95,7 +103,7 @@ describe("BaseFabricInstance", () => {
 
         expect(result).not.toBe(probe);
         expect(result instanceof Probe).toBe(true);
-        expect((result as Probe).tag).toBe("t");
+        expect((result as Probe).wireTypeTag).toBe("t");
         expect(Object.isFrozen(result)).toBe(false);
         // The identity-when-frozen optimization is `frozen===true` only;
         // a `frozen===false` call always allocates.
