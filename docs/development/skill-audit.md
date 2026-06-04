@@ -8,9 +8,10 @@ highest-value and highest-rot content (see
 Two mechanisms keep it honest, and they are complementary, not alternatives:
 
 - **Tripwire (deterministic floor).** `deno task check-skill-facts` — a cheap,
-  instant, zero-token CI gate that fails if a package or repo path a skill cites
-  stops existing. Runs on every PR (the `check` job). Catches _existence_ rot
-  only, and deliberately hardcodes nothing.
+  instant, zero-token CI gate that fails if an import specifier or repo path a
+  skill cites stops _resolving_: a bare import of a package with no root export,
+  a missing subpath, or a vanished path. Runs on every PR (the `check` job).
+  Catches resolvability rot only, and deliberately hardcodes nothing.
 - **Audit (LLM ceiling).** A periodic / on-change pass that reads a skill against
   the current tree and judges the _semantic_ rot the tripwire cannot see: a
   canonical home that moved or was renamed, advice that is now wrong, a new home
