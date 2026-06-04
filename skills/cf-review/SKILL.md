@@ -8,28 +8,24 @@ description: Review a changeset for the Common Fabric repo — the local branch 
 This skill is a **map and a statement of values**, not a recipe. It assumes you
 already know how to read and review code; it tells you the things about _this_
 repo you cannot derive — where its value and its footguns are, and how we like
-review done. (For why skills are written this way, see
-`docs/development/skill-authoring.md`.)
+review done.
 
 All paths are relative to the repo root.
 
 ## What we value in a review
 
-- **Changeset-scoped.** Review the diff and its immediate ripple — which for a
-  big change can mean fanning out to trace _that change's_ blast radius — never
-  an open-ended repo audit. This review is fast.
-- **Loud on what matters, quiet on what doesn't.** Bugs, regressions, and broken
-  principles, unmistakably; don't pad with nits. We ship many PRs and don't
-  demand a pristine first cycle — the bar is no regressions, no silent principle
-  breaks, and no one misled later by a stale doc this change should have
-  updated.
-- **Report-first, then offer to post.** Always show the report. Then offer to
-  post it to the PR — **signed as yourself** (the agent and model, on behalf of
-  the human), never impersonating them. Skip posting when it isn't worth it.
-- **An aid to thinking, not a gate.** This review helps people decide with eyes
-  open; it does not police merges. Surface what matters — especially a spec or
-  principle a change violates — loudly and unmistakably so the author _knows_;
-  they own the merge and may proceed regardless. Don't posture as a gatekeeper.
+- **Changeset-scoped.** Review the diff and its immediate effects — for a large
+  change, its blast radius — not a repo-wide audit. Focus on the changeset; keep
+  it fast.
+- **Loud, with intention.** Flag bugs, regressions, and broken principles
+  unmistakably; let nits stay quiet. We ship many PRs — aim for sound, not
+  pristine.
+- **Report-first, then offer to post.** Always show the report, then offer to
+  post it — **signed as yourself** (the agent and model, on the human's behalf).
+  Skip posting when it isn't worth it.
+- **An aid to thinking.** Help people decide with eyes open: surface what
+  matters — especially a spec or principle a change violates — clearly enough to
+  act on. The human owns the merge.
 
 ## The north star for coherence
 
@@ -58,8 +54,7 @@ themselves, the semantic equivalent of apps). They review differently:
   you would any TS codebase, plus this repo's conventions and the
   anti-duplication map below.
 
-Two failure modes recur on a high-velocity team — not AI's fault in particular,
-just easy to do when moving fast without the whole picture:
+Two failure modes recur when moving fast without the whole picture:
 
 1. **Fighting the framework** (patterns, and the runtime that serves them) —
    when the idiom is hard to find, code reaches for try/catch, singletons,
@@ -84,18 +79,14 @@ for the author**, not a defect.
 burns context and loses the forest:
 
 - **Detail mode** (small/medium — a package or two): read the changed code.
-- **Scope-and-theory mode** (large — many files, thousands of lines, several
-  packages or pace layers): don't read every file. Map the file clusters; form a
-  top-down **theory of intent and blast radius**; deep-read only the
-  load-bearing files (the core new abstraction, public API / signature changes,
-  and any hashing / serialization / cloning / identity touchpoints); and **fan
-  out read-only subagents** for the search-heavy parts — tracing callers not in
-  the diff that should have changed, sweeping docs / examples for touched
-  concepts, reviewing a cluster, hunting prior art the change may be forking.
-  Give each a tight question; take back the conclusion, not file dumps.
-  Synthesize into one report and test the change against its own theory (scope
-  creep, half-finished migration, a missing caller / doc / test). **Say what you
-  deep-read vs. sampled vs. delegated** — never imply coverage you didn't do.
+- **Scope-and-theory mode** (large — many files, several packages): build a
+  top-down **theory of intent and blast radius** rather than reading every file.
+  Deep-read only the load-bearing files (core abstraction, API / signature
+  changes, hashing / serialization / cloning / identity), and **fan out
+  read-only subagents** to search the rest — callers the diff missed, docs /
+  examples for touched concepts, prior art it may be forking. Synthesize into
+  one report, test the change against that theory, and state your coverage
+  (deep-read / sampled / delegated).
 
 ---
 
@@ -174,8 +165,8 @@ recurring). Tells (seeds, drawn from `docs/development/DEVELOPMENT.md`):
   fine; fatal errors _should_ propagate);
 - new singletons / module-global mutable state (breaks multiple instances +
   tests);
-- ambiguous `any` away from a serialization boundary; types that admit invalid
-  intermediate states;
+- ambiguous `any` (or abuse of `unknown`) away from a serialization boundary;
+  types that admit invalid intermediate states;
 - working around the transformer (stray `/// <cf-disable-transform />`, manual
   graph wiring the transformers would do, imperative escapes from the target
   language);
@@ -185,7 +176,9 @@ recurring). Tells (seeds, drawn from `docs/development/DEVELOPMENT.md`):
 
 When a transformer behavior is in doubt, read the **emitted output** before
 reasoning from source:
-`deno task cf check <file>.tsx --show-transformed [--no-run]`.
+`deno task cf check <file>.tsx --show-transformed [--no-run]`. If the
+transformer is the real culprit, the fix is to diagnose it and file a
+transformer bug with a repro — not to hand-build a workaround.
 
 ### 5. Changeset hygiene
 
@@ -210,12 +203,12 @@ relisting it.
 
 We modify tests constantly but often can't say _why_ a given test exists. For
 each touched or added test, name the principle it guards; if you can't, that's a
-finding (it may be incidental or testing an implementation detail). Check the
-cases cover the actual semantic change and its edge / empty / error states, sit
-at the right level (behavior over internals), and that a removed test dropped
-dead coverage, not real coverage. Follow the repo's testing conventions
-(`docs/common/ai/pattern-testing-guide.md`); run targeted tests, not the whole
-suite, while reviewing.
+finding (likely incidental, or testing an implementation detail). A good test
+exposes the intended behavior and reads like a sentence — a user story, not an
+assertion on internals. Check the cases cover the actual semantic change and its
+edge / empty / error states, and that a removed test dropped dead coverage, not
+real coverage. Follow the repo's testing conventions
+(`docs/common/ai/pattern-testing-guide.md`); run targeted tests while reviewing.
 
 ---
 
@@ -242,7 +235,7 @@ critical / major / minor / info). The report's only required shape:
   — each finding gives location · what · why it matters · concrete fix ·
   verified/suspected;
 - **Questions for the author** only if motivation or scope is unclear;
-- **Possible follow-ups** as proposals, never tickets you file;
+- **Possible follow-ups** as proposals, for a human to file;
 - a one-line **verdict**.
 
 Let the findings drive the format — don't pad to fill a template. Lead with the
@@ -251,10 +244,9 @@ worst thing; if the change is clean, say so in two lines and stop.
 **Then offer to post** (after showing the report), signed as yourself: a body
 opening with self-attribution — e.g. _"cf-review via Claude `<model>`, on behalf
 of @`<handle>`"_ (use the human's real GitHub handle from `gh` / the PR context;
-omit the `@` if unsure — never guess) — via `gh pr review --comment`, or inline
-comments through the reviews API for Blocking / Improvements with Nits left in
-the summary. Don't impersonate the human, and skip posting when it isn't worth
-it.
+omit the `@` if unsure) — via `gh pr review --comment`, or inline comments
+through the reviews API for Blocking / Improvements with Nits left in the
+summary. Skip posting when it isn't worth it.
 
 ---
 
