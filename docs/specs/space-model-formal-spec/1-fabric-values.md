@@ -2042,7 +2042,7 @@ regardless of nibble range.
  *
  * Native `Date`, `RegExp`, and `Uint8Array` values are handled via
  * on-the-fly conversion to their fabric equivalents
- * (`shallowFabricFromNativeValueModern`), then hashed in their converted
+ * (`shallowFabricFromNativeValue`), then hashed in their converted
  * form.
  */
 export function hashOf(value: unknown): FabricHash {
