@@ -2183,12 +2183,8 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricBytes` uses TAG_BYTES (dedicated primitive tag).
   // - `FabricEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
   // - `FabricEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
-<<<<<<< HEAD
   // - `FabricHash` uses TAG_HASH (dedicated primitive tag).
-=======
-  // - `FabricHash` uses TAG_CONTENT_ID (dedicated primitive tag).
   // - `FabricRegExp` uses TAG_REGEXP (dedicated primitive tag).
->>>>>>> main
   //
   // Examples (existing type tags are all short enough for the direct
   // string form, so `hashStr(tag)` below expands to
