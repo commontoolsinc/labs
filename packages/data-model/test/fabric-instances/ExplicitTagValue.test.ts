@@ -6,7 +6,7 @@ import { ExplicitTagValue } from "../../src/fabric-instances/ExplicitTagValue.ts
 
 describe("ExplicitTagValue", () => {
   describe("instance members", () => {
-    describe("`.typeTag` / `.state`", () => {
+    describe("`.wireTypeTag` / `.state`", () => {
       it("provide access to the concrete subclass's tag and state", () => {
         const us: ExplicitTagValue = new UnknownValue("Tag@2", 42);
         expect(us.wireTypeTag).toBe("Tag@2");
