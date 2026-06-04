@@ -344,7 +344,7 @@ The JSON encoding context's internal `wrapTag()` / `unwrapTag()` methods
 generate and parse `/<Type>@<Version>` keys. The context is also responsible
 for:
 
-- Re-wrapping unknown types using the `typeTag` preserved in
+- Re-wrapping unknown types using the `wireTypeTag` preserved in
   `UnknownValue` and `ExplicitTagValue`.
 - Managing the class registry for deserialization of known `FabricInstance`
   types (e.g., `FabricError`, `FabricMap`, `FabricSet`).

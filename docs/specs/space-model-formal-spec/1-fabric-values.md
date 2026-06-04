@@ -1471,7 +1471,7 @@ export class UnknownValue extends ExplicitTagValue {
   }
 
   [DECONSTRUCT]() {
-    return { type: this.typeTag, state: this.state };
+    return { type: this.wireTypeTag, state: this.state };
   }
 
   static [RECONSTRUCT](
