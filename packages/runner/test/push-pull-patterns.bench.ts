@@ -299,10 +299,13 @@ function formatTimingDelta(label: string, delta?: TimingDelta): string | null {
   }`;
 }
 
+const benchDiagnosticsEnabled = Deno.env.get("BENCH_DIAGNOSTICS") === "1";
+
 addEventListener("unload", () => {
+  if (!benchDiagnosticsEnabled) return;
   if (benchTimingSummaries.size === 0) return;
 
-  console.log("\nScheduler timing summaries:");
+  console.error("\nScheduler timing summaries:");
   for (const [benchmarkName, summary] of benchTimingSummaries) {
     const executeTotal = summary.execute?.totalTime ?? 0;
     const runTotal = summary.run?.totalTime ?? 0;
@@ -310,8 +313,8 @@ addEventListener("unload", () => {
     const externalScheduling = Math.max(0, executeTotal - runTotal);
     const runWrapper = Math.max(0, runTotal - actionTotal);
 
-    console.log(`- ${benchmarkName}`);
-    console.log(
+    console.error(`- ${benchmarkName}`);
+    console.error(
       `  scheduling vs compute: execute ${formatMs(executeTotal)}, run ${
         formatMs(runTotal)
       }, run/action ${formatMs(actionTotal)}, outside-run overhead ${
@@ -331,7 +334,7 @@ addEventListener("unload", () => {
         ),
       ]
     ) {
-      if (line) console.log(`  ${line}`);
+      if (line) console.error(`  ${line}`);
     }
   }
 });
@@ -764,14 +767,14 @@ async function setupFanoutScenario(
   const outputCells: Cell<number>[] = [];
 
   for (let i = 0; i < FANOUT_WIDTH; i++) {
-    const derive = env.lift(
+    const addOffset = env.lift(
       numberSchema,
       numberSchema,
       (value: number) => value + i + 1,
     );
     const derivePattern = env.pattern<{ value: number }>(
       ({ value }) => ({
-        result: derive(value),
+        result: addOffset(value),
       }),
       scalarInputSchema,
       scalarResultSchema,

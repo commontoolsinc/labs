@@ -191,9 +191,9 @@ Representative fixtures documenting the new behaviour:
 - Map closures:
   `packages/ts-transformers/test/fixtures/closures/map-outer-element.*`,
   `map-computed-alias-side-effect.*`, `map-destructured-numeric-alias.*`.
-- Derive transformer:
-  `packages/ts-transformers/test/fixtures/ast-transform/ternary_derive.*` and
-  unit test `test/derive/create-derive-call.test.ts`.
+- Lift-applied lowering:
+  `packages/ts-transformers/test/fixtures/ast-transform/ternary_computed.*` and
+  unit test `test/lift-applied/create-lift-applied-call.test.ts`.
 - Optional chaining:
   `packages/ts-transformers/test/fixtures/jsx-expressions/optional-chain-captures.*`.
 

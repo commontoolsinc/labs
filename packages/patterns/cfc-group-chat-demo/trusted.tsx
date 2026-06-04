@@ -407,11 +407,24 @@ export const applyTrustedProfileSave = (
   }
 
   const existingProfile = currentProfileSnapshot(myProfile);
+  const nextSnapshot = makeProfileSnapshot(
+    trimmedName,
+    existingProfile,
+  ) as TrustedProfile;
+  // Each user's profile must be its OWN cell. The previous
+  // `Writable.for("profile")` used a constant cause, so every user sharing the
+  // space derived the *same* underlying entity: all message `authorProfile`
+  // links redirected to one shared profile cell holding whoever saved last.
+  // Authorship verification then compared each message's signature against that
+  // single (current-user) profile, so genuine messages from other users read
+  // as unverified while imported "fake" messages read as verified — a
+  // nondeterministic outcome that made the integration test flaky. A
+  // per-user-scoped cell is isolated by active DID (see
+  // docs/common/patterns/multi-user-patterns.md), giving each user a distinct
+  // profile entity.
   const profile = currentProfileCell(myProfile) ??
-    Writable.for<TrustedProfile>("profile");
-  profile.set(
-    makeProfileSnapshot(trimmedName, existingProfile) as TrustedProfile,
-  );
+    Writable.perUser.of<TrustedProfile>(nextSnapshot);
+  profile.set(nextSnapshot);
   myProfile.set({ profile });
   registerProfile(profiles, profile);
   return { trimmedName, profile };

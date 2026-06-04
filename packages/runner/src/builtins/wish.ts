@@ -33,6 +33,8 @@ import { scopedCell } from "./scope-policy.ts";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
+const PROFILE_CREATE_TSX_PATH = getPatternEnvironment().apiUrl +
+  "api/patterns/system/profile-create.tsx";
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
   level: "warn",
@@ -48,6 +50,25 @@ const mentionableListSchema = internSchema(
       type: "object",
       properties: { [NAME]: { type: "string" } },
       asCell: ["cell"],
+    },
+  },
+);
+
+const profileElementListSchema = internSchema(
+  {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        cell: { type: "object", asCell: ["cell"] },
+        tag: { type: "string" },
+        userTags: {
+          type: "array",
+          items: { type: "string" },
+        },
+        title: { type: "string" },
+        source: { type: "string" },
+      },
     },
   },
 );
@@ -117,7 +138,11 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#favorites":
     case "#journal":
     case "#learned":
+    case "#learnedSummary":
     case "#profile":
+    case "#profileName":
+    case "#profileAvatar":
+    case "#profileSpace":
       return "home-target";
     default:
       return "hashtag-search";
@@ -166,7 +191,7 @@ type WishContext = {
   tx: IExtendedStorageTransaction;
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
-  scope?: ("~" | "." | string)[];
+  scope?: ("~" | "." | "profile" | string)[];
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
   usedHomeSpace?: boolean;
@@ -221,7 +246,7 @@ function getSpaceCellForDID(
 }
 
 function getArbitraryDIDs(scope?: string[]): string[] {
-  return (scope ?? []).filter((s) => s !== "~" && s !== ".");
+  return (scope ?? []).filter((s) => s !== "~" && s !== "." && s !== "profile");
 }
 
 function resolvePath(
@@ -238,6 +263,59 @@ function resolvePath(
 function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
   ctx.usedHomeSpace = true;
   return ctx.runtime.getHomeSpaceCell(ctx.tx);
+}
+
+/**
+ * Resolves the cell backing the user's profile default pattern, reached through
+ * `homeSpaceCell.defaultPattern.profile`.
+ *
+ * The profile link is owner-protected and created through a writeonly
+ * (`WriteAuthorizedBy`) binding that stores a direct cross-space link to the
+ * profile pattern. A valid profile link therefore resolves to a cell in another
+ * space (the profile space) with an empty path; if it is unset or still points
+ * into the home space, the profile does not exist yet and we throw so callers
+ * can fall back to the create surface.
+ */
+function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
+  const homeSpaceCell = getHomeSpaceCell(ctx);
+  const profileField = homeSpaceCell.key("defaultPattern").key(
+    "profile",
+  );
+  const profileDefault = profileField.resolveAsCell();
+  const profileLink = profileDefault.getAsNormalizedFullLink();
+  if (
+    profileField.getRaw() === undefined ||
+    profileLink.space === homeSpaceCell.space ||
+    profileLink.path.length > 0
+  ) {
+    throw new WishError("homeSpaceCell.defaultPattern.profile is not set");
+  }
+  void profileDefault.pull().catch((error) => {
+    wishFlowLogger.warn("profile-pull", () => [
+      "Failed to pull profile default pattern",
+      error,
+    ]);
+  });
+  void profileDefault.key("initialNameApplied").pull().catch((error) => {
+    wishFlowLogger.warn("profile-name-pull", () => [
+      "Failed to pull profile default name",
+      error,
+    ]);
+  });
+  // Read initialNameApplied so this wish subscribes to it and re-runs once the
+  // freshly-created profile's name materializes across the space boundary.
+  profileDefault.key("initialNameApplied").get();
+  return profileDefault;
+}
+
+function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
+  const profileDefaultCell = getProfileDefaultCell(ctx);
+  const { space } = profileDefaultCell.getAsNormalizedFullLink();
+  return getSpaceCellForDID(ctx.runtime, space, ctx.tx);
+}
+
+function isProfilePersonaTarget(parsed: ParsedWishTarget): boolean {
+  return parsed.key === "#profile" && parsed.path.length === 0;
 }
 
 function formatTarget(parsed: ParsedWishTarget): string {
@@ -296,7 +374,7 @@ function searchFavoritesForHashtag(
   );
 }
 
-type MentionableSearchResult = {
+type HashtagSearchResult = {
   matches: BaseResolution[];
   /** true when cell data has loaded (even if empty); false when still pending */
   loaded: boolean;
@@ -312,7 +390,7 @@ function searchMentionablesForHashtag(
   searchTermWithoutHash: string,
   pathPrefix: string[],
   spaceCell?: Cell<unknown>,
-): MentionableSearchResult {
+): HashtagSearchResult {
   const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
   const mentionableCell = measureWishPhase(
     "mentionable-cell",
@@ -400,6 +478,61 @@ function searchMentionablesForHashtag(
   };
 }
 
+function searchProfileForHashtag(
+  ctx: WishContext,
+  searchTermWithoutHash: string,
+  pathPrefix: string[],
+): HashtagSearchResult {
+  const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
+  const elementsCell = measureWishPhase(
+    "profile-elements-cell",
+    queryKey,
+    () =>
+      getProfileDefaultCell(ctx)
+        .key("elements")
+        .asSchema(profileElementListSchema),
+  );
+  const elements = measureWishPhase(
+    "profile-elements-get",
+    queryKey,
+    () => elementsCell.get(),
+  );
+  if (elements === undefined || elements === null) {
+    return { matches: [], loaded: false };
+  }
+
+  const profileElements = elements as Array<{
+    cell?: Cell<unknown>;
+    tag?: string;
+    userTags?: string[];
+  }>;
+
+  const matches = measureWishPhase(
+    "profile-elements-filter",
+    queryKey,
+    () =>
+      profileElements.filter((entry) => {
+        const userTags = entry.userTags ?? [];
+        for (const t of userTags) {
+          if (t.toLowerCase() === searchTermWithoutHash) return true;
+        }
+        return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
+      }),
+  );
+
+  return {
+    matches: measureWishPhase(
+      "profile-elements-result-map",
+      queryKey,
+      () =>
+        matches.flatMap((match) =>
+          match.cell ? [{ cell: match.cell, pathPrefix }] : []
+        ),
+    ),
+    loaded: true,
+  };
+}
+
 /**
  * Search for pieces by hashtag across favorites and/or mentionables based on scope.
  * Synchronous: relies on cell.get() returning undefined for unloaded data;
@@ -416,9 +549,10 @@ function searchByHashtag(
   // Default (no scope) = favorites only for backward compatibility
   const searchFavorites = !ctx.scope || ctx.scope.includes("~");
   const searchMentionables = ctx.scope?.includes(".");
+  const searchProfile = ctx.scope?.includes("profile");
 
   const allMatches: BaseResolution[] = [];
-  let allMentionablesLoaded = true;
+  let allScopedDataLoaded = true;
 
   if (searchFavorites) {
     allMatches.push(
@@ -433,7 +567,17 @@ function searchByHashtag(
       parsed.path,
     );
     allMatches.push(...matches);
-    if (!loaded) allMentionablesLoaded = false;
+    if (!loaded) allScopedDataLoaded = false;
+  }
+
+  if (searchProfile) {
+    const { matches, loaded } = searchProfileForHashtag(
+      ctx,
+      searchTermWithoutHash,
+      parsed.path,
+    );
+    allMatches.push(...matches);
+    if (!loaded) allScopedDataLoaded = false;
   }
 
   // Search mentionables in arbitrary DID spaces
@@ -447,18 +591,19 @@ function searchByHashtag(
       didSpaceCell,
     );
     allMatches.push(...matches);
-    if (!loaded) allMentionablesLoaded = false;
+    if (!loaded) allScopedDataLoaded = false;
   }
 
   if (allMatches.length === 0) {
-    if (!allMentionablesLoaded) {
-      // Some mentionable data not loaded yet — return empty so the reactive
+    if (!allScopedDataLoaded) {
+      // Some scoped data not loaded yet — return empty so the reactive
       // system re-triggers wish when cell data arrives.
       return [];
     }
     const parts: string[] = [];
     if (searchFavorites) parts.push("favorites");
     if (searchMentionables) parts.push("mentionables");
+    if (searchProfile) parts.push("profile");
     if (arbitraryDIDs.length > 0) {
       parts.push(`${arbitraryDIDs.length} space(s)`);
     }
@@ -553,18 +698,77 @@ function resolveHomeSpaceTarget(
       }];
     }
 
+    case "#learnedSummary": {
+      // The free-form learned summary string (home `learned.summary`). This is
+      // what `#profile` used to resolve to before it was repurposed for the
+      // profile default pattern object; summary consumers wish for this instead.
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError(
+          "User identity DID not available for #learnedSummary",
+        );
+      }
+      return [{
+        cell: getHomeSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "learned", "summary"],
+      }];
+    }
+
     case "#profile": {
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
       }
-      const learnedCell = getHomeSpaceCell(ctx)
-        .key("defaultPattern")
-        .key("learned")
-        .resolveAsCell();
       return [{
-        cell: learnedCell,
-        pathPrefix: ["summary"],
+        cell: getProfileDefaultCell(ctx),
+        pathPrefix: [],
+      }];
+    }
+
+    case "#profileName": {
+      // Prefer the LIVE profile name (`initialNameApplied` tracks edits made via
+      // the profile's setName handler). The home `profileName` creation mirror
+      // is used only while the profile link is still resolving (so the name
+      // shows immediately during creation latency); it is not updated on later
+      // edits, so it must not take precedence.
+      const mirror = () =>
+        getHomeSpaceCell(ctx).key("defaultPattern").resolveAsCell().key(
+          "profileName",
+        );
+      try {
+        const profileDefault = getProfileDefaultCell(ctx);
+        const liveName = profileDefault.key("initialNameApplied")
+          .get() as unknown;
+        if (typeof liveName === "string" && liveName.length > 0) {
+          return [{ cell: profileDefault, pathPrefix: ["initialNameApplied"] }];
+        }
+        // Profile resolved but no name yet — use the mirror.
+        return [{ cell: mirror(), pathPrefix: [] }];
+      } catch (error) {
+        // The profile link is unresolved. If the creation mirror has a value the
+        // profile is mid-creation, so show it; otherwise there is genuinely no
+        // profile, so re-surface the error as an error state (a consumer test
+        // asserts a missing profile space errors rather than silently resolving).
+        const mirrorCell = mirror();
+        const mirrorValue = mirrorCell.get() as unknown;
+        if (typeof mirrorValue === "string" && mirrorValue.length > 0) {
+          return [{ cell: mirrorCell, pathPrefix: [] }];
+        }
+        throw error;
+      }
+    }
+
+    case "#profileAvatar": {
+      return [{
+        cell: getProfileDefaultCell(ctx),
+        pathPrefix: ["avatar"],
+      }];
+    }
+
+    case "#profileSpace": {
+      return [{
+        cell: getProfileSpaceCell(ctx),
+        pathPrefix: [],
       }];
     }
 
@@ -690,7 +894,7 @@ function canUseSharedHashtagResult(
 function sharedHashtagResolverKey(
   parentSpace: string,
   parsed: ParsedWishTarget,
-  scope?: ("~" | "." | string)[],
+  scope?: ("~" | "." | "profile" | string)[],
 ): string {
   return JSON.stringify({
     space: parentSpace,
@@ -850,6 +1054,8 @@ function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
 // fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
 let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let suggestionPattern: Pattern | undefined;
+let profileCreatePatternFetchPromise: Promise<Pattern | undefined> | undefined;
+let profileCreatePattern: Pattern | undefined;
 
 async function fetchSuggestionPattern(
   runtime: Runtime,
@@ -873,12 +1079,48 @@ async function fetchSuggestionPattern(
   }
 }
 
+async function fetchProfileCreatePattern(
+  runtime: Runtime,
+): Promise<Pattern | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(PROFILE_CREATE_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load profile-create.tsx");
+    }
+    const pattern = await runtime.patternManager.compilePattern(program);
+
+    if (!pattern) throw new WishError("Can't compile profile-create.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("Can't load profile-create.tsx", e);
+    return undefined;
+  }
+}
+
 function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("cf-cell-link", { $cell: cell });
+}
+
+function wishResultUI(
+  parsed: ParsedWishTarget,
+  resultCell: Cell<unknown>,
+): VNode | undefined {
+  if (isProfilePersonaTarget(parsed)) {
+    return cellLinkUI(resultCell);
+  }
+  return resultCell.key(UI).get() as VNode | undefined;
 }
 
 function projectWishCellValue(
@@ -963,9 +1205,12 @@ function wishOutputScope(
 
 export function wishTargetMayUseHomeSpace(
   query: unknown,
-  scope?: ("~" | "." | string)[],
+  scope?: ("~" | "." | "profile" | string)[],
 ): boolean {
-  if (typeof query !== "string") return scope?.includes("~") === true;
+  if (typeof query !== "string") {
+    return scope?.includes("~") === true ||
+      scope?.includes("profile") === true;
+  }
 
   let parsed: ParsedWishTarget;
   try {
@@ -976,7 +1221,7 @@ export function wishTargetMayUseHomeSpace(
 
   const kind = getResolutionKind(parsed);
   if (kind === "home-target") return true;
-  if (scope?.includes("~")) return true;
+  if (scope?.includes("~") || scope?.includes("profile")) return true;
   return kind === "hashtag-search" && scope === undefined;
 }
 
@@ -1027,12 +1272,25 @@ export function wish(
     }
     | undefined;
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
+  let profileCreatePatternInput:
+    | {
+      profile: unknown;
+      profileName: unknown;
+      inputId: string;
+      buttonId: string;
+    }
+    | undefined;
+  let profileCreatePatternResultCell: Cell<any> | undefined;
+  let profileCreatePatternReadyCell: Cell<boolean> | undefined;
 
   addCancel(() => {
     cancelled = true;
     releaseCurrentSharedHashtagResolver();
     if (suggestionPatternResultCell) {
       runtime.runner.stop(suggestionPatternResultCell);
+    }
+    if (profileCreatePatternResultCell) {
+      runtime.runner.stop(profileCreatePatternResultCell);
     }
   });
 
@@ -1149,6 +1407,142 @@ export function wish(
     return suggestionPatternResultCell;
   }
 
+  // Renders an error message into a pattern result cell in its own committed
+  // transaction. Used when a deferred system-pattern run fails after the
+  // originating wish transaction has already gone.
+  function commitPatternErrorUI(
+    resultCell: Cell<any>,
+    message: string,
+  ): void {
+    const errorTx = runtime.edit();
+    resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
+    runtime.prepareTxForCommit(errorTx);
+    errorTx.commit();
+  }
+
+  function launchProfileCreatePattern(
+    ctx: WishContext,
+    providedTx?: IExtendedStorageTransaction,
+  ): Cell<any> {
+    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
+      .resolveAsCell();
+    profileCreatePatternInput = {
+      profile: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("profile").getAsNormalizedFullLink(),
+      ),
+      profileName: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("profileName").getAsNormalizedFullLink(),
+      ),
+      inputId: "wish-profile-name-input",
+      buttonId: "wish-profile-create-button",
+    };
+    const tx = providedTx || runtime.edit();
+
+    if (!profileCreatePatternResultCell) {
+      profileCreatePatternResultCell = runtime.getCell(
+        parentCell.space,
+        {
+          wish: {
+            profileCreatePattern: cause,
+            user: runtime.userIdentityDID,
+          },
+        },
+        undefined,
+        tx,
+      );
+    }
+    if (!profileCreatePatternReadyCell) {
+      profileCreatePatternReadyCell = runtime.getCell<boolean>(
+        parentCell.space,
+        {
+          wish: {
+            profileCreatePatternReady: cause,
+            user: runtime.userIdentityDID,
+          },
+        },
+        undefined,
+        tx,
+      );
+    }
+    profileCreatePatternReadyCell.get();
+
+    const profileCreateInputForTx = (tx: IExtendedStorageTransaction) => {
+      const bindInputCell = (cell: unknown) =>
+        cell && typeof (cell as { withTx?: unknown }).withTx === "function"
+          ? (cell as Cell<unknown>).withTx(tx)
+          : cell;
+      return profileCreatePatternInput && {
+        ...profileCreatePatternInput,
+        profile: bindInputCell(profileCreatePatternInput.profile),
+        profileName: bindInputCell(profileCreatePatternInput.profileName),
+      };
+    };
+
+    if (!profileCreatePattern) {
+      if (!profileCreatePatternFetchPromise) {
+        profileCreatePatternFetchPromise = fetchProfileCreatePattern(runtime)
+          .then((pattern) => {
+            profileCreatePattern = pattern;
+            if (pattern && profileCreatePatternReadyCell) {
+              const readyTx = runtime.edit();
+              profileCreatePatternReadyCell.withTx(readyTx).set(true);
+              runtime.prepareTxForCommit(readyTx);
+              readyTx.commit();
+            }
+            if (!pattern) {
+              profileCreatePatternFetchPromise = undefined;
+            }
+            return pattern;
+          });
+      }
+      void profileCreatePatternFetchPromise.then((pattern) => {
+        if (!cancelled && pattern && profileCreatePatternResultCell) {
+          const resultCell = profileCreatePatternResultCell;
+          try {
+            const runTx = runtime.edit();
+            runtime.run(
+              runTx,
+              pattern,
+              profileCreateInputForTx(runTx),
+              resultCell.withTx(runTx),
+            );
+            runtime.prepareTxForCommit(runTx);
+            runTx.commit().then(({ error }) => {
+              if (error) {
+                commitPatternErrorUI(resultCell, toCompactDebugString(error));
+              }
+            }).catch((error) => {
+              commitPatternErrorUI(resultCell, errorMessage(error));
+            });
+          } catch (error) {
+            commitPatternErrorUI(resultCell, errorMessage(error));
+          }
+        }
+      });
+    } else if (!cancelled && profileCreatePatternResultCell) {
+      runtime.run(
+        tx,
+        profileCreatePattern,
+        profileCreateInputForTx(tx),
+        profileCreatePatternResultCell.withTx(tx),
+      );
+    }
+
+    if (!providedTx) {
+      runtime.prepareTxForCommit(tx);
+      tx.commit();
+    }
+
+    return profileCreatePatternResultCell;
+  }
+
+  function profileCreateUI(ctx: WishContext): VNode {
+    return h("cf-render", {
+      "data-profile-create-ui": "wish",
+      $cell: launchProfileCreatePattern(ctx, ctx.tx),
+    });
+  }
+
   // Wish action, reactive to changes in inputsCell and any cell we read during
   // initial resolution. Synchronous: reads cell.get() which triggers sync and
   // returns undefined if data isn't loaded yet. The reactive system re-triggers
@@ -1214,19 +1608,20 @@ export function wish(
             scope,
             nowCell,
           };
+          let parsed: ParsedWishTarget | undefined;
           try {
             const resolveStartedAt = performance.now();
-            const parsed = measureWishPhase(
+            const activeParsed = parsed = measureWishPhase(
               "parse-target",
               queryKey,
               () => {
-                const parsed = parseWishTarget(query);
-                parsed.path = [...parsed.path, ...(path ?? [])];
-                return parsed;
+                const nextParsed = parseWishTarget(query);
+                nextParsed.path = [...nextParsed.path, ...(path ?? [])];
+                return nextParsed;
               },
             );
-            if (canUseSharedHashtagResult(parsed, { headless })) {
-              const shared = getCurrentSharedHashtagResolver(ctx, parsed);
+            if (canUseSharedHashtagResult(activeParsed, { headless })) {
+              const shared = getCurrentSharedHashtagResolver(ctx, activeParsed);
               usedSharedHashtagResolver = true;
               measureWishPhase(
                 "send-shared-hashtag",
@@ -1243,7 +1638,7 @@ export function wish(
             const baseResolutions = measureWishPhase(
               "resolve-base",
               queryKey,
-              () => resolveBase(parsed, ctx),
+              () => resolveBase(activeParsed, ctx),
             );
             const outputScope = wishOutputScope(
               schema,
@@ -1282,8 +1677,8 @@ export function wish(
               () =>
                 baseResolutions.map((baseResolution) => {
                   const combinedPath = baseResolution.pathPrefix
-                    ? [...baseResolution.pathPrefix, ...parsed.path]
-                    : parsed.path;
+                    ? [...baseResolution.pathPrefix, ...activeParsed.path]
+                    : activeParsed.path;
                   const resolvedCell = resolvePath(
                     baseResolution.cell,
                     combinedPath,
@@ -1331,7 +1726,7 @@ export function wish(
               const resultUI = measureWishPhase(
                 "result-ui-get",
                 queryKey,
-                () => uniqueResultCells[0].key(UI).get(),
+                () => wishResultUI(activeParsed, uniqueResultCells[0]),
               );
               measureWishPhase(
                 "send-fast",
@@ -1378,7 +1773,7 @@ export function wish(
                 const resultUI = measureWishPhase(
                   "result-ui-get",
                   queryKey,
-                  () => uniqueResultCells[0].key(UI).get(),
+                  () => wishResultUI(activeParsed, uniqueResultCells[0]),
                 );
                 measureWishPhase(
                   "send-fast-before-suggestion",
@@ -1415,6 +1810,9 @@ export function wish(
             }
           } catch (e) {
             const errorMsg = e instanceof WishError ? e.message : String(e);
+            const ui = parsed && isProfilePersonaTarget(parsed)
+              ? profileCreateUI(ctx)
+              : errorUI(errorMsg);
             measureWishPhase(
               "send-error",
               queryKey,
@@ -1425,7 +1823,7 @@ export function wish(
                     result: undefined,
                     candidates: [],
                     error: errorMsg,
-                    [UI]: errorUI(errorMsg),
+                    [UI]: ui,
                   } satisfies WishState<any>,
                   wishOutputScope(
                     schema,

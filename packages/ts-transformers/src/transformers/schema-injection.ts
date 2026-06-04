@@ -31,7 +31,6 @@ import {
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   type CapabilityParamSummary,
-  type CapabilitySummaryRegistry,
   HelpersOnlyTransformer,
   type SchemaHint,
   type SchemaHints,
@@ -44,11 +43,10 @@ import {
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
-  isStreamTypeNode,
+  preservedWrapperFor,
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -64,8 +62,9 @@ const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
 /**
  * Schema Injection Transformer - TypeRegistry Integration
  *
- * This transformer injects JSON schemas for Common Fabric core functions (pattern, derive,
- * pattern, handler, lift) by analyzing TypeScript types and converting them to runtime schemas.
+ * This transformer injects JSON schemas for Common Fabric core functions
+ * (pattern, handler, lift) by analyzing TypeScript types and converting them to
+ * runtime schemas.
  *
  * ## TypeRegistry Integration (Unified Approach)
  *
@@ -89,7 +88,6 @@ const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
  * ## Pattern-Specific Behavior
  *
  * - **Handler**: Checks TypeRegistry for type arguments, uses `unknown` fallback
- * - **Derive**: Checks TypeRegistry for type arguments, preserves shorthand property types
  * - **Pattern**: Checks TypeRegistry before inferring, registers inferred types
  * - **Pattern**: Checks TypeRegistry for type arguments
  * - **Lift**: Checks TypeRegistry for type arguments and inferred types
@@ -139,13 +137,6 @@ function extractCellLikeInnerTypeNode(
   if (!ts.isTypeReferenceNode(node)) return undefined;
   if (!node.typeArguments || node.typeArguments.length === 0) return undefined;
   return node.typeArguments[0];
-}
-
-function isStreamCellType(
-  type: ts.Type | undefined,
-  checker: ts.TypeChecker,
-): boolean {
-  return !!type && getCellKind(type, checker) === "stream";
 }
 
 function parameterUsesCellLikeMethods(
@@ -205,7 +196,7 @@ function getSymbolTypeAtSource(
 function findCapabilitySummaryForParameter(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   index: number,
-  capabilityRegistry?: CapabilitySummaryRegistry,
+  context?: TransformationContext,
   options?: {
     readonly checker?: ts.TypeChecker;
     readonly includeNestedCallbacks?: boolean;
@@ -216,8 +207,8 @@ function findCapabilitySummaryForParameter(
       checker: options.checker,
       includeNestedCallbacks: true,
     })
-    : capabilityRegistry
-    ? (capabilityRegistry.get(fn) ?? analyzeFunctionCapabilities(fn))
+    : context
+    ? (context.lookupCapabilitySummary(fn) ?? analyzeFunctionCapabilities(fn))
     : analyzeFunctionCapabilities(fn, {
       checker: options?.checker,
     });
@@ -237,7 +228,6 @@ function applyCapabilitySummaryToArgument(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   mode: CapabilitySummaryApplicationMode = "full",
   context?: TransformationContext,
   fnNode?: ts.Node,
@@ -247,7 +237,7 @@ function applyCapabilitySummaryToArgument(
   const paramSummary = findCapabilitySummaryForParameter(
     fn,
     0,
-    capabilityRegistry,
+    context,
     (argumentNode.pos < 0 || argumentNode.end < 0) &&
       context?.isSyntheticComputeCallback?.(fnNode ?? fn)
       ? {
@@ -268,8 +258,9 @@ function applyCapabilitySummaryToArgument(
       sourceFile,
     );
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(argumentNode) || isStreamCellType(argumentType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(argumentNode, argumentType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? argumentNode;
   let baseType = shouldWrap && argumentType
     ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
@@ -295,7 +286,7 @@ function applyCapabilitySummaryToArgument(
     mode === "defaults_only" ? "opaque" : paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
@@ -307,7 +298,6 @@ function applyCapabilitySummaryToParameter(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
   fnNode?: ts.Node,
 ): ts.TypeNode | undefined {
@@ -316,7 +306,7 @@ function applyCapabilitySummaryToParameter(
   const paramSummary = findCapabilitySummaryForParameter(
     fn,
     parameterIndex,
-    capabilityRegistry,
+    context,
     {
       checker,
       includeNestedCallbacks: true,
@@ -328,9 +318,9 @@ function applyCapabilitySummaryToParameter(
 
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(parameterNode) ||
-      isStreamCellType(parameterType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(parameterNode, parameterType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? parameterNode;
   let baseType = shouldWrap && parameterType
     ? (unwrapCellLikeType(parameterType, checker) ?? parameterType)
@@ -356,7 +346,7 @@ function applyCapabilitySummaryToParameter(
     paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
@@ -367,7 +357,6 @@ function collectFunctionSchemaTypeNodes(
   factory: ts.NodeFactory,
   fallbackArgType?: ts.Type,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   argumentCapabilityMode: CapabilitySummaryApplicationMode = "full",
   context?: TransformationContext,
 ): {
@@ -424,7 +413,6 @@ function collectFunctionSchemaTypeNodes(
     checker,
     sourceFile,
     factory,
-    capabilityRegistry,
     argumentCapabilityMode,
     context,
     fn,
@@ -534,7 +522,6 @@ function collectFunctionSchemaTypeNodes(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (synthesizedResult) {
@@ -560,7 +547,6 @@ function collectFunctionSchemaTypeNodes(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (scopedResult) {
@@ -595,7 +581,6 @@ function collectFunctionSchemaTypeNodes(
         sourceFile,
         factory,
         typeRegistry,
-        capabilityRegistry,
         context,
       );
       if (recoveredNode) {
@@ -1143,7 +1128,6 @@ function applyCallbackBuilderArgumentCapabilitySummary(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
-  capabilityRegistry: CapabilitySummaryRegistry | undefined,
   context: TransformationContext,
 ): {
   argumentTypeNode: ts.TypeNode;
@@ -1160,7 +1144,6 @@ function applyCallbackBuilderArgumentCapabilitySummary(
     checker,
     sourceFile,
     factory,
-    capabilityRegistry,
     "full",
     context,
     callback,
@@ -1184,7 +1167,6 @@ function resolveDualSchemaBuilderTypes(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry: TypeRegistry | undefined,
-  capabilityRegistry: CapabilitySummaryRegistry | undefined,
   context: TransformationContext,
   options?: {
     readonly fallbackArgumentType?: ts.Type;
@@ -1218,7 +1200,6 @@ function resolveDualSchemaBuilderTypes(
       checker,
       sourceFile,
       factory,
-      capabilityRegistry,
       context,
     ));
   }
@@ -1237,7 +1218,6 @@ function resolveDualSchemaBuilderTypes(
       factory,
       options?.fallbackArgumentType,
       typeRegistry,
-      capabilityRegistry,
       options?.capabilityMode ?? "full",
       context,
     );
@@ -1277,7 +1257,6 @@ function resolveDualSchemaBuilderTypes(
         checker,
         sourceFile,
         factory,
-        capabilityRegistry,
         context,
       ));
     } else {
@@ -1308,7 +1287,6 @@ function resolveDualSchemaBuilderTypes(
         checker,
         sourceFile,
         factory,
-        capabilityRegistry,
         context,
       ));
     }
@@ -1371,9 +1349,8 @@ function visitInjectedDualSchemaBuilderCall(
   // Mark BEFORE re-descending: the re-descent below re-enters `updated` to
   // reach the callback body (catching pattern calls ClosureTransformer
   // created inside builder callbacks, e.g. from map transformations). Marking
-  // first means that re-entry self-skips the builder/schema logic — including
-  // the re-narrowing of the synthetic schema arg that previously required
-  // narrowedWrapperTypeRegistry (CT-1621) — and only the callback is visited.
+  // first means that re-entry self-skips the builder/schema logic and only the
+  // callback is visited.
   context.markSchemaInjected(updated);
   return ts.visitEachChild(updated, visit, transformation);
 }
@@ -1435,7 +1412,6 @@ function inferLiftFactoryResultType(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.Type | undefined {
   const valueInitializer = getVariableInitializer(node, checker);
@@ -1484,7 +1460,6 @@ function inferLiftFactoryResultType(
     factory,
     fallbackArgType,
     typeRegistry,
-    capabilityRegistry,
     "full",
     context,
   );
@@ -1628,7 +1603,6 @@ function inferLiftAppliedResultTypeFromInitializer(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.Type | undefined {
   const initializer = getVariableInitializer(node, checker);
@@ -1661,7 +1635,6 @@ function inferLiftAppliedResultTypeFromInitializer(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (recoveredArgumentType && !isAnyOrUnknownType(recoveredArgumentType)) {
@@ -1676,7 +1649,6 @@ function inferLiftAppliedResultTypeFromInitializer(
     factory,
     argumentType,
     typeRegistry,
-    capabilityRegistry,
     "full",
     context,
   );
@@ -1700,7 +1672,6 @@ function inferExpressionTypeWithInitializerFallback(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.Type | undefined {
   const type = getTypeAtLocationWithFallback(expr, checker, typeRegistry) ??
@@ -1715,7 +1686,6 @@ function inferExpressionTypeWithInitializerFallback(
     sourceFile,
     factory,
     typeRegistry,
-    capabilityRegistry,
     context,
   );
   if (fromLift && !isAnyOrUnknownType(fromLift)) {
@@ -1728,7 +1698,6 @@ function inferExpressionTypeWithInitializerFallback(
     sourceFile,
     factory,
     typeRegistry,
-    capabilityRegistry,
     context,
   );
   if (fromLiftApplied && !isAnyOrUnknownType(fromLiftApplied)) {
@@ -1744,7 +1713,6 @@ function buildObjectLiteralReturnTypeNode(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry?: TypeRegistry,
-  capabilityRegistry?: CapabilitySummaryRegistry,
   context?: TransformationContext,
 ): ts.TypeNode | undefined {
   const members: ts.TypeElement[] = [];
@@ -1766,7 +1734,6 @@ function buildObjectLiteralReturnTypeNode(
       sourceFile,
       factory,
       typeRegistry,
-      capabilityRegistry,
       context,
     );
     if (!valueType || isAnyOrUnknownType(valueType)) {
@@ -2324,42 +2291,27 @@ function resolveLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // See getLiftAppliedInputAndCallback in src/ast/call-kind.ts for the
-  // two recognized shapes (legacy derive vs lift-applied).
+  // Lift-applied `lift(...)(input)`: callback is the last arg of the inner lift
+  // call; input is the first arg of the outer applied call. The outer call's
+  // callee is always the inner CallExpression — that is the only shape
+  // detectCallKind classifies as lift-applied (see getLiftAppliedInputAndCallback
+  // in src/ast/call-kind.ts).
   const innerCall = getLiftAppliedInnerCall(call);
-  if (innerCall) {
-    // Lift-applied: callback is the last arg of the inner lift call; input
-    // is the first arg of the outer applied call.
-    const callbackIndex = innerCall.arguments.length - 1;
-    const callbackExpression = innerCall.arguments[callbackIndex];
-    const callback = callbackExpression
-      ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
-      : undefined;
-    if (!callback) {
-      return undefined;
-    }
-    const input = call.arguments[0];
-    if (!input) {
-      return undefined;
-    }
-    return { input, callback };
+  if (!innerCall) {
+    return undefined;
   }
-
-  const callbackIndex = call.arguments.length - 1;
-  const callbackExpression = call.arguments[callbackIndex];
+  const callbackIndex = innerCall.arguments.length - 1;
+  const callbackExpression = innerCall.arguments[callbackIndex];
   const callback = callbackExpression
     ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
     : undefined;
   if (!callback) {
     return undefined;
   }
-
-  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
-  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  const input = call.arguments[0];
   if (!input) {
     return undefined;
   }
-
   return { input, callback };
 }
 
@@ -2574,7 +2526,6 @@ function handlePatternSchemaInjection(
 ): ts.Node | undefined {
   const { factory, checker, sourceFile, tsContext: transformation } = context;
   const typeArgs = node.typeArguments;
-  const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
@@ -2671,7 +2622,6 @@ function handlePatternSchemaInjection(
       factory,
       undefined,
       typeRegistry,
-      capabilityRegistry,
       argumentCapabilityMode,
       context,
     );
@@ -2713,7 +2663,6 @@ function handlePatternSchemaInjection(
         factory,
         undefined,
         typeRegistry,
-        capabilityRegistry,
         argumentCapabilityMode,
         context,
       );
@@ -2773,7 +2722,6 @@ function handlePatternSchemaInjection(
         factory,
         undefined,
         typeRegistry,
-        capabilityRegistry,
         argumentCapabilityMode,
         context,
       );
@@ -2812,7 +2760,6 @@ function handlePatternSchemaInjection(
     checker,
     sourceFile,
     factory,
-    capabilityRegistry,
     argumentCapabilityMode,
     context,
     builderFunction,
@@ -2877,17 +2824,16 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
     const typeRegistry = context.options.state?.typeRegistry;
-    const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
       // Single idempotency guard: if SchemaInjection already finalized this
       // builder call/new node, do NOT re-process it — only descend into its
       // children (to reach callback bodies). This replaces the per-builder
       // arg-count guards (`args.length >= 5`, etc.) and the implicit
-      // "drop the type args so re-detection fails" tricks, and it plugs the
-      // gap in the lift `isToSchemaCall` branch whose re-narrowing of the
-      // synthetic schema arg was the sole reason narrowedWrapperTypeRegistry
-      // existed (CT-1621). Producers call `context.markSchemaInjected(...)`.
+      // "drop the type args so re-detection fails" tricks. Producers call
+      // `context.markSchemaInjected(...)`. The lift `isToSchemaCall` branch
+      // additionally skips synthetic capability-wrapper re-entries inline
+      // (see CT-1621) for nodes whose mark did not survive reconstruction.
       if (
         (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
         context.isSchemaInjected(node)
@@ -2927,7 +2873,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                   sourceFile,
                   factory,
                   typeRegistry,
-                  capabilityRegistry,
                   context,
                 );
                 return valueType && !isUnresolvedSchemaType(valueType)
@@ -3036,7 +2981,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
               handlerFn,
             ) ?? eventType;
@@ -3049,14 +2993,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
               handlerFn,
             ) ?? stateType;
             const stateSummary = findCapabilitySummaryForParameter(
               handlerFn,
               1,
-              capabilityRegistry,
+              context,
               { checker, includeNestedCallbacks: true },
             );
             applyIdentityArrayItemSchemaHints(
@@ -3105,7 +3048,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               factory,
               undefined,
               typeRegistry,
-              capabilityRegistry,
               "full",
               context,
             );
@@ -3126,7 +3068,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 checker,
                 sourceFile,
                 factory,
-                capabilityRegistry,
                 undefined,
                 handlerFn,
               ) ?? eventTypeBase;
@@ -3151,14 +3092,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
               handlerFn,
             ) ?? stateTypeBase;
             const stateSummary = findCapabilitySummaryForParameter(
               handlerFn,
               1,
-              capabilityRegistry,
+              context,
               { checker, includeNestedCallbacks: true },
             );
             applyIdentityArrayItemSchemaHints(
@@ -3201,10 +3141,19 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           sourceFile,
         );
 
-        // For lift-applied shape (callee is itself a call), the generic
+        // For the lift-applied shape (callee is itself a call), the generic
         // type arguments live on the *inner* lift call, not on the outer
-        // applied call. The legacy derive shape kept them on the call
-        // itself. Read from whichever holds them.
+        // applied call — the lowering builds the outer call with `undefined`
+        // type args (see lift/transformer.ts). The `?? node.typeArguments`
+        // fallback reads them off the outer call defensively.
+        //
+        // UNCERTAIN whether the fallback is still reachable: dropping it kept
+        // the full fixture suite green (CT-1643), and the main lowering path
+        // never puts type args on the outer call. But this wasn't proven dead
+        // across all three lift-applied construction sites + schema-injection
+        // re-entry, so it's kept as a cheap robustness guard rather than
+        // removed. (It is NOT derive-specific; the prior comment misattributed
+        // it to the removed "legacy derive shape.")
         const innerLiftCall = getLiftAppliedInnerCall(node);
         const sourceTypeArguments = innerLiftCall?.typeArguments ??
           node.typeArguments;
@@ -3229,7 +3178,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               explicitArgumentTypeNode: argumentType,
@@ -3291,7 +3239,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 sourceFile,
                 factory,
                 typeRegistry,
-                capabilityRegistry,
                 context,
               );
               if (
@@ -3309,7 +3256,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               fallbackArgumentType: fallbackArgType,
@@ -3353,23 +3299,37 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (argumentType && liftCallback) {
-            // Prefer the pre-shrink type from `narrowedWrapperTypeRegistry`
-            // when available — when the first toSchema argument is a synthetic
-            // wrapper TypeNode, `checker.getTypeFromTypeNode` resolves it to
-            // `any`, dropping the inner `type:`. The registry recovers the
-            // pre-shrink type. CT-1621: the only live consumer is `derive`'s
-            // value-as-input lowering (first pass); the redundant self-re-entry
-            // consumer was removed via the schemaInjectedRegistry marker, and
-            // `computed`/user-`lift` never produce this shape. Registry is
-            // derive-bound — see core/mod.ts and type-shrinking.ts
-            // `applyShrinkAndWrap`.
-            const argumentTypeValue =
-              context.lookupNarrowedWrapper(argumentType) ??
-                getTypeFromTypeNodeWithFallback(
-                  argumentType,
-                  checker,
-                  typeRegistry,
-                );
+            // CT-1621: when the toSchema argument is a SYNTHETIC capability
+            // wrapper TypeNode (pos < 0, e.g. `__cfHelpers.ComparableCell<…>`),
+            // it is our OWN already-shrunk output that re-entered this branch —
+            // the input schema is already correct and the callback's capability
+            // summary was already applied upstream. Re-running the recover +
+            // re-shrink here is redundant (it reproduces the same wrapper) and
+            // was the SOLE consumer of narrowedWrapperTypeRegistry: the
+            // synthetic wrapper resolves to `any`, so the re-shrink needed the
+            // pre-shrink type fed back. Skip it — keep the already-injected
+            // input, mark the node, and only descend into the callback body.
+            // Authored `lift(toSchema<T>(), fn)` has a real-source T (pos >= 0)
+            // that the checker resolves, so it falls through to the normal path.
+            //
+            // This is layered with the top-of-visit `nodeLinks.schemaInjected`
+            // guard (see SchemaInjectionTransformer.transform) as defense-in-
+            // depth: that guard catches re-entries on nodes whose mark survived
+            // reconstruction; this one catches the structural re-entry case
+            // (synthetic Cell-family / Stream wrapper as toSchema arg) for
+            // nodes whose mark did not.
+            if (argumentType.pos < 0 && isCellLikeTypeNode(argumentType)) {
+              context.markSchemaInjected(node);
+              return ts.visitEachChild(node, visit, transformation);
+            }
+            // Authored `lift(toSchema<T>(), fn)`: T is a real-source TypeNode
+            // the checker resolves (the synthetic-wrapper re-entry case is
+            // handled by the skip above).
+            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
+              argumentType,
+              checker,
+              typeRegistry,
+            );
             const {
               argumentTypeNode: narrowedArgumentType,
               argumentTypeValue: narrowedArgumentTypeValue,
@@ -3380,7 +3340,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               checker,
               sourceFile,
               factory,
-              capabilityRegistry,
               context,
             );
             const inputSchema = createSchemaCallWithRegistryTransfer(
@@ -3399,9 +3358,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               [inputSchema, ...node.arguments.slice(1)],
             );
             // Mark so the re-descent below does NOT re-enter this branch and
-            // re-narrow the synthetic `inputSchema` wrapper against `any`.
-            // That re-narrowing was the sole consumer of
-            // narrowedWrapperTypeRegistry (CT-1621).
+            // re-process the synthetic `inputSchema` wrapper.
             context.markSchemaInjected(updated);
             return ts.visitEachChild(updated, visit, transformation);
           }
@@ -3424,7 +3381,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               explicitArgumentTypeNode: argumentType,
@@ -3472,7 +3428,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               fallbackArgumentType: getTypeFromTypeNodeWithFallback(
@@ -3519,7 +3474,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
             factory,
             typeRegistry,
-            capabilityRegistry,
             context,
             {
               fallbackArgumentNode: getParameterSchemaType(
@@ -3574,7 +3528,6 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
                 sourceFile,
                 factory,
                 typeRegistry,
-                capabilityRegistry,
                 context,
               );
               return valueType && !isUnresolvedSchemaType(valueType)
@@ -3778,6 +3731,100 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.expression,
             node.typeArguments,
             [newOptions, ...args.slice(1)],
+          );
+          context.markSchemaInjected(updated);
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
+      // sqliteQuery<Row>({ db, sql, ... }) - lowers the Row type argument to an
+      // injected `rowSchema` property (mirrors generate-object's `schema`). The
+      // runtime builtin composes `result.items = rowSchema`, so a consumer's
+      // schema carries `asCell` for Cell<> Row fields and `*_cf_link` result
+      // columns rehydrate to live Cells (see
+      // docs/specs/sqlite-builtin/plans/sqlite-query-row-lowering.md).
+      if (
+        callKind?.kind === "runtime-call" &&
+        callKind.exportName === "sqliteQuery"
+      ) {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        // Only the typed form is injectable. Untyped sqliteQuery(...) /
+        // db.query(...) must compile and lower to NO schema (runtime falls back
+        // to suffix/table detection).
+        if (!typeArgs || typeArgs.length !== 1) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        // Two call shapes inject `rowSchema` into the OPTIONS object:
+        //  - free function `sqliteQuery<Row>({ db, sql, ... })` → options is arg 0
+        //  - method `db.query<Row>(sql, { ... })`              → options is arg 1
+        const isMethod = ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === "query";
+        const optIdx = isMethod ? 1 : 0;
+        const optArg = args[optIdx];
+
+        // Idempotency: skip if a `rowSchema` property is already present.
+        if (
+          optArg && ts.isObjectLiteralExpression(optArg) &&
+          optArg.properties.some(
+            (p: ts.ObjectLiteralElementLike) =>
+              p.name && ts.isIdentifier(p.name) && p.name.text === "rowSchema",
+          )
+        ) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        const resolved = resolveInjectableSchemaType(
+          typeArgs[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => undefined,
+        );
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
+
+        if (schemaCall) {
+          let newOptions: ts.Expression;
+          if (optArg && ts.isObjectLiteralExpression(optArg)) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                ...optArg.properties,
+                factory.createPropertyAssignment("rowSchema", schemaCall),
+              ],
+              true,
+            );
+          } else if (optArg) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                factory.createSpreadAssignment(optArg),
+                factory.createPropertyAssignment("rowSchema", schemaCall),
+              ],
+              true,
+            );
+          } else {
+            newOptions = factory.createObjectLiteralExpression(
+              [factory.createPropertyAssignment("rowSchema", schemaCall)],
+              true,
+            );
+          }
+
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [
+              ...args.slice(0, optIdx),
+              newOptions,
+              ...args.slice(optIdx + 1),
+            ],
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);

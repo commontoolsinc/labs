@@ -124,7 +124,7 @@ export default pattern<OmniboxFABInput>(
       `omnibot-${nonPrivateRandom().toString(36).slice(2, 10)}`,
     );
 
-    const profile = wish<string>({ query: "#profile" });
+    const profile = wish<string>({ query: "#learnedSummary" });
 
     const patternIndexUrl = wish<{ url: Writable<string> }>({
       query: "#pattern-index",

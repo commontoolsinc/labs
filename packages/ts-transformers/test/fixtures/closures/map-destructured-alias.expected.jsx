@@ -17,97 +17,99 @@ interface State {
     }>;
     discount: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    cost: number;
+    state: {
+        discount: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        cost: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number"
+                }
+            },
+            required: ["discount"]
+        }
+    },
+    required: ["cost", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cost, state }) => cost * state.discount);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const cost = __cf_pattern_input.key("element", "price");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<span>{__cfLift_1({
+        cost: cost,
+        state: {
+            discount: state.key("discount")
+        }
+    })}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-destructured-alias
 // Verifies: object destructuring with alias in .map() param is lowered to key() on the original name
 //   .map(({ price: cost }) => ...) → key("element", "price") assigned to cost
-//   cost * state.discount → derive() with both element key and captured state
+//   cost * state.discount → lift(...)(...) with both element key and captured state
 // Context: Captures state.discount from outer scope; alias uses the original property name for key access
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const cost = __cf_pattern_input.key("element", "price");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<span>{__cfHelpers.lift<{
-                    cost: number;
-                    state: {
-                        discount: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        cost: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                discount: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["discount"]
-                        }
-                    },
-                    required: ["cost", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ cost, state }) => cost * state.discount)({
-                    cost: cost,
-                    state: {
-                        discount: state.key("discount")
-                    }
-                })}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["discount"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     discount: state.key("discount")
                 }

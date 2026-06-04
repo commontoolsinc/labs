@@ -148,7 +148,7 @@ const CF_DISABLE_TRANSFORM_DIRECTIVE_RE =
   /^\/\/\/\s*<cf-disable-transform\s*\/>/m;
 
 // Rewrite a leading transform directive line, or inject helpers by default,
-// so the AST transformer pipeline has access to helpers like `derive`.
+// so the AST transformer pipeline has access to helpers like `lift`.
 // This operates on strings, and to be used outside of
 // the TypeScript transformer pipeline, since symbol binding
 // occurs before transformers run.

@@ -86,10 +86,298 @@ interface State {
         }>;
     };
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+            profile: {
+                location: string;
+                bio: string;
+            };
+        };
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        profile: {
+                            type: "object",
+                            properties: {
+                                location: {
+                                    type: "string"
+                                },
+                                bio: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["location", "bio"]
+                        }
+                    },
+                    required: ["name", "profile"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
+    state.user.profile.bio);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        user: {
+            age: number;
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        age: {
+                            type: "number"
+                        }
+                    },
+                    required: ["age"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age * 12);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        user: {
+            age: number;
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        age: {
+                            type: "number"
+                        }
+                    },
+                    required: ["age"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age * 365);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+            settings: {
+                theme: string;
+            };
+        };
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        settings: {
+                            type: "object",
+                            properties: {
+                                theme: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["theme"]
+                        }
+                    },
+                    required: ["name", "settings"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " has notifications on with " +
+    state.user.settings.theme + " theme");
+const __cfLift_5 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+        };
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " has notifications off");
+const __cfLift_6 = __cfHelpers.lift<{
+    state: {
+        config: {
+            theme: {
+                spacing: {
+                    small: number;
+                    medium: number;
+                    large: number;
+                };
+            };
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                config: {
+                    type: "object",
+                    properties: {
+                        theme: {
+                            type: "object",
+                            properties: {
+                                spacing: {
+                                    type: "object",
+                                    properties: {
+                                        small: {
+                                            type: "number"
+                                        },
+                                        medium: {
+                                            type: "number"
+                                        },
+                                        large: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["small", "medium", "large"]
+                                }
+                            },
+                            required: ["spacing"]
+                        }
+                    },
+                    required: ["theme"]
+                }
+            },
+            required: ["config"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.spacing.small +
+    state.config.theme.spacing.medium +
+    state.config.theme.spacing.large);
+const __cfLift_7 = __cfHelpers.lift<{
+    state: {
+        user: {
+            name: string;
+        };
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name.toUpperCase());
+const __cfLift_8 = __cfHelpers.lift<{
+    state: {
+        user: {
+            email: string;
+        };
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                user: {
+                    type: "object",
+                    properties: {
+                        email: {
+                            type: "string"
+                        }
+                    },
+                    required: ["email"]
+                }
+            },
+            required: ["user"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.email.toLowerCase());
 // FIXTURE: parent-suppression-edge
-// Verifies: property access suppression -- sibling properties share a captured parent in derive()
-//   {state.user.name} ... {state.user.age} → individual .key() or shared derive({user: {...}})
-//   {state.config.theme.colors.primary}    → derive with deeply nested capture
+// Verifies: property access suppression -- sibling properties share a captured parent in a lift-applied computation
+//   {state.user.name} ... {state.user.age} → individual .key() or shared lift(...)({ user: {...} })
+//   {state.config.theme.colors.primary}    → lift-applied computation with deeply nested capture
 // Context: Tests that the transformer correctly deduplicates and suppresses parent captures
 export default pattern((state) => {
     return {
@@ -104,52 +392,7 @@ export default pattern((state) => {
         {/* String concatenation with multiple property accesses */}
         <p>
           Full profile:{" "}
-          {__cfHelpers.lift<{
-            state: {
-                user: {
-                    name: string;
-                    profile: {
-                        location: string;
-                        bio: string;
-                    };
-                };
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                },
-                                profile: {
-                                    type: "object",
-                                    properties: {
-                                        location: {
-                                            type: "string"
-                                        },
-                                        bio: {
-                                            type: "string"
-                                        }
-                                    },
-                                    required: ["location", "bio"]
-                                }
-                            },
-                            required: ["name", "profile"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
-            state.user.profile.bio)({ state: {
+          {__cfLift_1({ state: {
                 user: {
                     name: state.key("user", "name"),
                     profile: {
@@ -162,68 +405,12 @@ export default pattern((state) => {
 
         {/* Arithmetic with multiple properties from same base */}
         <p>
-          Age calculation: {__cfHelpers.lift<{
-            state: {
-                user: {
-                    age: number;
-                };
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                age: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["age"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age * 12)({ state: {
+          Age calculation: {__cfLift_2({ state: {
                 user: {
                     age: state.key("user", "age")
                 }
             } })} months, or{" "}
-          {__cfHelpers.lift<{
-            state: {
-                user: {
-                    age: number;
-                };
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                age: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["age"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age * 365)({ state: {
+          {__cfLift_3({ state: {
                 user: {
                     age: state.key("user", "age")
                 }
@@ -308,83 +495,14 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfHelpers.lift<{
-            state: {
-                user: {
-                    name: string;
-                    settings: {
-                        theme: string;
-                    };
-                };
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                },
-                                settings: {
-                                    type: "object",
-                                    properties: {
-                                        theme: {
-                                            type: "string"
-                                        }
-                                    },
-                                    required: ["theme"]
-                                }
-                            },
-                            required: ["name", "settings"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " has notifications on with " +
-            state.user.settings.theme + " theme")({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfLift_4({ state: {
                 user: {
                     name: state.key("user", "name"),
                     settings: {
                         theme: state.key("user", "settings", "theme")
                     }
                 }
-            } }), __cfHelpers.lift<{
-            state: {
-                user: {
-                    name: string;
-                };
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " has notifications off")({ state: {
+            } }), __cfLift_5({ state: {
                 user: {
                     name: state.key("user", "name")
                 }
@@ -393,61 +511,7 @@ export default pattern((state) => {
 
         {/* Computed expression with shared base */}
         <p>
-          Spacing calc: {__cfHelpers.lift<{
-            state: {
-                config: {
-                    theme: {
-                        spacing: {
-                            small: number;
-                            medium: number;
-                            large: number;
-                        };
-                    };
-                };
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        config: {
-                            type: "object",
-                            properties: {
-                                theme: {
-                                    type: "object",
-                                    properties: {
-                                        spacing: {
-                                            type: "object",
-                                            properties: {
-                                                small: {
-                                                    type: "number"
-                                                },
-                                                medium: {
-                                                    type: "number"
-                                                },
-                                                large: {
-                                                    type: "number"
-                                                }
-                                            },
-                                            required: ["small", "medium", "large"]
-                                        }
-                                    },
-                                    required: ["spacing"]
-                                }
-                            },
-                            required: ["theme"]
-                        }
-                    },
-                    required: ["config"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.spacing.small +
-            state.config.theme.spacing.medium +
-            state.config.theme.spacing.large)({ state: {
+          Spacing calc: {__cfLift_6({ state: {
                 config: {
                     theme: {
                         spacing: {
@@ -483,68 +547,12 @@ export default pattern((state) => {
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
         <p>
-          Formatted: {__cfHelpers.lift<{
-            state: {
-                user: {
-                    name: string;
-                };
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name.toUpperCase())({ state: {
+          Formatted: {__cfLift_7({ state: {
                 user: {
                     name: state.key("user", "name")
                 }
             } })} -{" "}
-          {__cfHelpers.lift<{
-            state: {
-                user: {
-                    email: string;
-                };
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        user: {
-                            type: "object",
-                            properties: {
-                                email: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["email"]
-                        }
-                    },
-                    required: ["user"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.email.toLowerCase())({ state: {
+          {__cfLift_8({ state: {
                 user: {
                     email: state.key("user", "email")
                 }

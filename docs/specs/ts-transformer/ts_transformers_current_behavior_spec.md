@@ -65,15 +65,25 @@ Transformers always run in this order:
 3. `OpaqueGetValidationTransformer`
 4. `PatternContextValidationTransformer`
 5. `JsxExpressionSiteRouterTransformer`
-6. `ComputedTransformer`
+6. `LiftLoweringTransformer`
 7. `ClosureTransformer`
 8. `PatternOwnedExpressionSiteLoweringTransformer`
 9. `HelperOwnedExpressionSiteLoweringTransformer`
-10. `PatternCallbackLoweringTransformer`
-11. `SchemaInjectionTransformer`
-12. `SchemaGeneratorTransformer`
+10. `WriteAuthorizedByValidationTransformer`
+11. `PatternCallbackLoweringTransformer`
+12. `BuilderCallbackHoistingTransformer`
+13. `SchemaInjectionTransformer`
+14. `LiftHoistingTransformer`
+15. `SchemaGeneratorTransformer`
+16. `ReactiveVariableForTransformer`
+17. `ModuleScopeShadowingTransformer`
+18. `ModuleScopeCfDataTransformer`
+19. `ModuleScopeFunctionHardeningTransformer`
 
-The order is behaviorally significant.
+The order is behaviorally significant. (`LiftHoistingTransformer`, stage 14,
+runs **after** `SchemaInjectionTransformer` so the lift call it relocates to
+module scope already carries its injected schemas — see CT-1644 and
+`packages/ts-transformers/docs/derive-to-lift-design.md`.)
 
 ## 4. Global Modes
 
@@ -94,7 +104,6 @@ Current mode-sensitive behavior:
 `detectCallKind()` drives multiple transformers. It recognizes:
 
 - builders: `pattern`, `handler`, `action`, `lift`, `computed`, `render`
-- `derive`
 - `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
   `flatMap`, `flatMapWithPattern`)
@@ -169,7 +178,6 @@ On call `receiver.get()` (no args):
   - structurally traces back to a reactive-origin call result/alias/binding
     initialized from one of:
     - builders (`pattern`, `computed`, `lift`, `handler`, `action`, `render`)
-    - `derive`
     - `ifElse`, `when`, `unless`
     - cell factories / `Cell.for`
     - `wish`
@@ -199,7 +207,7 @@ access chain. This means `as any` single casts do not hide property accesses
 from capability analysis.
 
 When interprocedural analysis is enabled (compute-context builders like `lift`,
-`derive`, `handler`), read paths discovered in helper function bodies propagate
+`handler`), read paths discovered in helper function bodies propagate
 back to the caller's parameter summary, but the current MVP intentionally only
 does this for resolved helper bodies in the same source file. Cross-file or
 otherwise unsupported helper calls fall back to the conservative wildcard path
@@ -271,7 +279,7 @@ Restricted contexts are callbacks of:
 
 Compute wrappers override restrictions:
 
-- `computed`, `action`, `derive`, `lift`, `handler` callbacks
+- `computed`, `action`, `lift`, `handler` callbacks
 - inline JSX `on*` handlers
 - standalone function definitions
 - JSX expressions (handled by opaque-ref JSX transformer)
@@ -288,19 +296,19 @@ Diagnostics emitted in all modes:
   - special message for immediate `lift(fn)(args)` suggesting `computed()`
 - **Error** `standalone-function:reactive-operation`
   - in standalone functions (except inline first arg to `patternTool`):
-    `computed(...)`, `derive(...)`, or reactive collection methods on reactive
+    `computed(...)`, `lift(...)`, or reactive collection methods on reactive
     receivers
   - collection-method diagnostics currently use `.map(...)`-style guidance and
     suggest eager `<cell>.get().map(...)` when explicit eager mapping is
     acceptable
 - **Error** `compute-context:local-reactive-use`
-  - inside a `computed(...)`/`derive(...)` callback, a reactive value created in
+  - inside a `computed(...)`/`lift(...)` callback, a reactive value created in
     that same callback is consumed as a plain value in control-flow or another
     non-lowered computation site
-  - typical culprits are local `computed(...)`, `derive(...)`, `lift(...)`,
+  - typical culprits are local `computed(...)`, `lift(...)`,
     `wish(...)`, or reactive collection aliases and their property accesses
   - message instructs the author to move the use into a nested
-    `computed(() => ...)` or `derive(() => ...)`
+    `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
   - optional calls in restricted reactive context (outside JSX)
   - optional property / element access that appears outside a supported
@@ -382,7 +390,7 @@ For each `JsxExpression`:
 - if no rewrite required and no logical binary operators (`&&`, `||`), skip
 - in compute context:
   - only semantic logical rewrites (`&&`/`||`) are considered
-  - derive/computed wrapping is skipped
+  - computed wrapping is skipped
 - compute-context JSX does not lower `&&` / `||`
 - pattern-context JSX lowers `&&` / `||` deterministically
 - in `mode: "error"`:
@@ -411,9 +419,9 @@ Key rewrite rules:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
 - non-compute contexts:
   - complex reactive expressions are wrapped via `computed(() => expr)` (later
-    lowered to `derive`)
+    lowered to the lift-applied form)
 - compute contexts:
-  - no derive/computed wrappers; only child rewrites and logical conversions
+  - no computed wrappers; only child rewrites and logical conversions
 
 Helper-owned compute branches introduced by ternary / conditional-helper
 rewriting are re-analyzed with synthetic compute ownership. This preserves
@@ -424,11 +432,14 @@ created inside compute code.
 Synthetic calls generated by this pass register result types in `typeRegistry`
 for later schema injection.
 
-## 8. Computed Lowering
+## 8. Lift-Applied Lowering
 
-`ComputedTransformer` rewrites Common Fabric `computed(...)` calls:
+`LiftLoweringTransformer` rewrites Common Fabric `computed(...)` calls into the
+canonical lift-applied form:
 
-- `computed(arg)` -> `__cfHelpers.derive({}, arg)` (exactly one argument)
+- `computed(fn)` -> `__cfHelpers.lift(fn)({})` before schema injection
+- no-input computed-origin calls are schema-injected as
+  `__cfHelpers.lift(false, fn)()`
 - preserves call type arguments
 - does not additionally validate callback shape in this pass
 - preserves type information through `typeRegistry`
@@ -444,7 +455,7 @@ calls.
 2. action strategy
 3. array-method strategy
 4. patternTool strategy
-5. derive strategy
+5. lift-applied strategy
 
 ### 9.1 Capture model
 
@@ -487,9 +498,9 @@ Transform eligibility:
   - compute context + `celllike_requires_rewrite` receiver kind -> transform
   - compute context + `opaque_autounwrapped` receiver kind -> do not transform
   - compute context + local alias in the same callback whose initializer
-    re-wraps a reactive collection (`computed`, `derive`, `lift`, `action`,
-    `handler`, `wish`, already-rewritten collection calls, or other reactive
-    cell-like receivers) -> transform
+    re-wraps a reactive collection (`computed`, `lift`, `action`, `handler`,
+    `wish`, already-rewritten collection calls, or other reactive cell-like
+    receivers) -> transform
 - plain array `.map()` is not transformed
 - transformed callbacks are marked in `mapCallbackRegistry` and become
   pattern-callback contexts for downstream classification
@@ -504,16 +515,16 @@ Result shape:
 - callback schema includes `{ element, index?, array? }` and adds `params` only
   when captures exist
 - computed destructuring keys are stabilized with generated key constants and
-  derive wrappers where needed
+  lift-applied wrappers where needed
 
-### 9.5 Derive strategy
+### 9.5 Lift-applied strategy
 
-Transforms derive closures only when captures exist.
+Transforms lift-applied closures only when captures exist.
 
 Supported input forms:
 
-- 2-arg `derive(input, callback)`
-- 4-arg `derive(inputSchema, resultSchema, input, callback)`
+- `lift(callback)(input)`
+- `lift(inputSchema, resultSchema, callback)(input)`
 
 Behavior:
 
@@ -522,9 +533,9 @@ Behavior:
 - resolve name collisions (`name`, `name_1`, ...)
 - preserve/reinfer callback result type
 - skip explicit type args when result type is uninstantiated type parameter
-- register derive call type for downstream inference
+- register lift-applied call type for downstream inference
 
-If no captures are found, derive call is left unchanged.
+If no captures are found, the lift-applied call is left unchanged.
 
 ### 9.6 patternTool strategy
 
@@ -557,7 +568,7 @@ Primary behaviors:
   lowering when they appear in supported expression-root positions
 - classifies map captures as reactive vs non-reactive and avoids `.key(...)`
   rewrites for non-reactive captures
-- recursively rewrites derive callback bodies so locally-declared
+- recursively rewrites lift-applied callback bodies so locally-declared
   opaque/reactive aliases created inside compute callbacks (including inside
   nested blocks) also receive `.key(...)` lowering
 - local opaque-root discovery is symbol-scoped and block-aware to avoid
@@ -574,12 +585,12 @@ Current-main behavior distinguishes three buckets for non-JSX authored sites:
 1. **top-level pattern-owned ordinary call roots**
    - when the authored site root is an ordinary call (for example
      `identity(state.done ? "Done" : "Pending")`), the shared expression-site
-     path whole-wraps that call in `derive(...)`
+     path whole-wraps that call in a lift-applied computation
    - this applies across non-JSX container kinds such as
      `variable-initializer`, `object-property`, `array-element`, and
      `return-expression`
 2. **explicit compute callbacks**
-   - `computed` / `derive` / `action` / `lift` / `handler` callbacks remain the
+   - `computed` / `action` / `lift` / `handler` callbacks remain the
      explicit reactive boundary
    - inside those callbacks, authored conditionals stay authored JS inside the
      callback body rather than being rewritten to helper control flow
@@ -587,7 +598,7 @@ Current-main behavior distinguishes three buckets for non-JSX authored sites:
    - callback-local **ordinary call roots** now join the shared ordinary-call
      slice across `variable-initializer`, `object-property`, `array-element`,
      and direct `return-expression` sites, so the whole call lowers as a
-     callback-local `derive(...)`
+     callback-local lift-applied computation
    - callback-local **plain structural control-flow sites** that are not under
      an owning ordinary call root still lower directly (for example bare
      conditional `object-property` / `array-element` / `variable-initializer`
@@ -643,19 +654,18 @@ structurally representable top-level result:
   - infers event/state schemas from parameters
   - event absent -> `never`; untyped params -> `unknown`
 
-### 10.4 `derive(...)` and `lift(...)`
+### 10.4 `lift(...)`
 
 If schemas are not already present via type args:
 
 - infer input/result schema types from arguments and callbacks
-- special-case `derive({}, cb)` to treat input as exact empty object type
 - literal-based input inference widens literals (`"x"` -> `string`, `1` ->
   `number`, etc.)
 - when inferred result type is missing or degrades to `any`/`unknown`, recovery
   first attempts object-literal return reconstruction and then direct projection
   recovery (`x => x.foo`, `x => x["foo"]`)
 - direct projection recovery can reuse result types recovered from local
-  `lift(...)` / `derive(...)` initializer aliases registered in `typeRegistry`
+  `lift(...)` initializer aliases registered in `typeRegistry`
 - unresolved generic helper-definition-site type parameters degrade to
   `{ type: "unknown" }` when schemas are injected from explicit builder type
   arguments
@@ -779,9 +789,9 @@ pipeline. Current built-in behavior:
 
 ## 13. Current Known Limits (Observed)
 
-1. Generic helper functions with uninstantiated type-parameter derive result
-   types can degrade schema precision (type arguments may be intentionally
-   omitted).
+1. Generic helper functions with uninstantiated type-parameter lift-applied
+   result types can degrade schema precision (type arguments may be
+   intentionally omitted).
 2. Action and JSX inline handler callback extraction currently unwraps arrow
    functions only.
 3. Optional-call forms on opaque pattern roots are non-lowerable and report
@@ -819,7 +829,7 @@ Additional non-fixture unit suites cover:
 - event-handler detection heuristics
 - opaque-ref analysis/normalization/runtime-style APIs
 - pipeline regression and policy/capability-analysis behavior
-- derive call helper and identifier utilities
+- lift-applied call helper and identifier utilities
 
 ## 15. Stability Statement
 

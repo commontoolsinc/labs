@@ -11,12 +11,77 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
+}, number>({
+    type: "object",
+    properties: {
+        config: {
+            type: "object",
+            properties: {
+                timeout: {
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "null"
+                        }]
+                }
+            },
+            required: ["timeout"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["config"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().timeout ?? 30));
+const __cfLift_2 = __cfHelpers.lift<{
+    config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
+}, boolean>({
+    type: "object",
+    properties: {
+        config: {
+            type: "object",
+            properties: {
+                retries: {
+                    type: "number"
+                }
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["config"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().retries ?? 3) > 0);
+const __cfLift_3 = __cfHelpers.lift<{
+    items: __cfHelpers.Cell<string[]>;
+}, string | false>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "boolean",
+            "enum": [false]
+        }]
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty"));
 // Tests nullish coalescing (??) interaction with && and ||
 // ?? should NOT be transformed to when/unless (different semantics)
 // FIXTURE: logical-nullish-coalescing
-// Verifies: ?? operator combined with && and || is correctly handled in derive()
-//   (config.get().timeout ?? 30) || "disabled" → derive({config}, ...)
-//   (config.get().retries ?? 3) > 0 && "text"  → derive({config}, ...)
+// Verifies: ?? operator combined with && and || is correctly handled in a lift-applied computation
+//   (config.get().timeout ?? 30) || "disabled" → lift(...)({ config })
+//   (config.get().retries ?? 3) > 0 && "text"  → lift(...)({ config })
 // Context: ?? has different semantics from || and must not be transformed to unless
 export default pattern((_state) => {
     const config = cell<{
@@ -56,30 +121,7 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
-        }, number>({
-            type: "object",
-            properties: {
-                config: {
-                    type: "object",
-                    properties: {
-                        timeout: {
-                            anyOf: [{
-                                    type: "number"
-                                }, {
-                                    type: "null"
-                                }]
-                        }
-                    },
-                    required: ["timeout"],
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["config"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().timeout ?? 30))({ config: config }), "disabled")}</span>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ config: config }), "disabled")}</span>
 
         {/* ?? followed by && */}
         <span>{__cfHelpers.when({
@@ -88,25 +130,7 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": [false, "Will retry"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                config: {
-                    type: "object",
-                    properties: {
-                        retries: {
-                            type: "number"
-                        }
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["config"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().retries ?? 3) > 0)({ config: config }), "Will retry")}</span>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ config: config }), "Will retry")}</span>
 
         {/* Mixed: ?? with && and || */}
         <span>
@@ -116,28 +140,7 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: __cfHelpers.Cell<string[]>;
-        }, string | false>({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["items"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "boolean",
-                    "enum": [false]
-                }]
-        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty"))({ items: items }), "no items")}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ items: items }), "no items")}
         </span>
       </div>),
     };

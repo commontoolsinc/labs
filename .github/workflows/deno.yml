@@ -217,11 +217,6 @@ jobs:
             junit_name: shell
             step_name: shell integration tests
             headless: true
-          - suite_name: background-charm-service
-            package_dir: packages/background-charm-service
-            junit_name: background-charm-service
-            step_name: background worker integration tests
-            headless: true
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -237,7 +232,8 @@ jobs:
           TOOLSHED_PORT: 8000
         run: |
           chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
       # For Astral
@@ -323,7 +319,7 @@ jobs:
           # Set tools to path
           # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
+          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
       - name: 📦 Install CLI integration dependencies
         env:
@@ -367,7 +363,21 @@ jobs:
 
       - name: 📋 FUSE daemon log (on failure)
         if: ${{ failure() && matrix.suite_name == 'fuse' }}
-        run: cat ~/.cf/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
+        # `cf fuse mount --background` writes its log to /tmp/cf-fuse-<mountpoint>.log
+        # (see packages/cli/commands/fuse.ts), not ~/.cf/fuse — the old path always
+        # printed "No daemon log found", hiding the real daemon error. The mountpoint
+        # is an mktemp dir, so glob all fuse daemon logs.
+        run: |
+          shopt -s nullglob
+          logs=(/tmp/cf-fuse-*.log)
+          if [ ${#logs[@]} -eq 0 ]; then
+            echo "No FUSE daemon log found at /tmp/cf-fuse-*.log"
+          else
+            for f in "${logs[@]}"; do
+              echo "===== ${f} ====="
+              cat "${f}"
+            done
+          fi
 
       - name: 📤 Upload CLI integration timing data
         if: ${{ always() && startsWith(matrix.suite_name, 'core-') }}
@@ -401,7 +411,8 @@ jobs:
       - name: 🚀 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          CFTS_AI_GATEWAY_URL="" \
+          CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed &
 
       # For Astral

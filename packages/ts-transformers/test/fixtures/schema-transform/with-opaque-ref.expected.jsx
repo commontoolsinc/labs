@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Cell, derive, pattern, toSchema, UI } from "commonfabric";
+import { Cell, pattern, toSchema, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -27,17 +27,37 @@ const model = __cfHelpers.__cf_data({
         value: 0
     }
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_1 = __cfHelpers.lift<{
+    cell: {
+        value: __cfHelpers.Cell<number>;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        cell: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["cell"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value.get() * 2);
 // FIXTURE: with-opaque-ref
-// Verifies: Cell<> fields generate asCell in schema and derive() gets input/output type schemas injected
+// Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }
 //   toSchema<State>({default: ...}) → schema with "default" key preserved
-//   derive(cell.value, fn) → derive(inputSchema, outputSchema, cell.key("value"), fn)
+//   bare `cell.value.get() * 2` → auto-wraps, capturing cell.key("value") into lift(inputSchema, outputSchema, fn)
 export default pattern((cell) => {
-    const doubled = __cfHelpers.lift({
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, (v: number) => v * 2)(cell.key("value")).for("doubled", true);
+    const doubled = __cfLift_1({ cell: {
+            value: cell.key("value")
+        } }).for("doubled", true);
     return {
         [UI]: (<div>
         <p>Value: {cell.key("value")}</p>

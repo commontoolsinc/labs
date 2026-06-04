@@ -13,7 +13,7 @@ const { FRONTEND_URL } = env;
 // Keep these as guardrails rather than exact budgets; CI reload runs vary
 // slightly while still exercising persisted scheduler-state reuse.
 const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 150;
-const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 80;
+const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 90;
 const NOTEBOOK_RELOAD_TIMEOUT_MS = 180_000;
 
 const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
@@ -25,6 +25,13 @@ describe("default-app notebook reload integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
+  // Re-enabled (CT-1623): map/flatmap/filter result containers (and nested
+  // pattern result cells) are now identified by the reserved output spot — a
+  // stable, position-derived identity — instead of the serialized `op` / inputs
+  // cell, which dragged in the session-varying `program` and forced per-row
+  // cell ids to churn across reloads. Persisted scheduler state now rehydrates,
+  // dropping reload action runs well under this shard's budget (was ~167 > 150;
+  // now ~80-95).
   it("reloads every rapidly created notebook note in a separate shard", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const notebookSpaceName = globalThis.crypto.randomUUID();

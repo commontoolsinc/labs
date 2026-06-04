@@ -14,16 +14,17 @@ const __cfAmdHooks = undefined;
 interface State {
     counter: Cell<number>;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {}
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, __cf_handler_params) => console.log("hi"));
 // FIXTURE: handler-no-captures
 // Verifies: inline handler with no captured outer variables still gets wrapped with empty captures
 //   onClick={() => console.log("hi")) → handler(false, { properties: {} }, (_, __cf_handler_params) => ...)({})
 // Context: No closed-over state; capture object is empty
 export default pattern((_state) => {
     return {
-        [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {}
-        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, __cf_handler_params) => console.log("hi"))({})}>
+        [UI]: (<button type="button" onClick={__cfHandler_1({})}>
         Log
       </button>),
     };

@@ -11,9 +11,27 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    value: __cfHelpers.ReadonlyCell<number>;
+    multiplier: number;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        multiplier: {
+            type: "number"
+        }
+    },
+    required: ["value", "multiplier"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => value.get() * multiplier);
 // FIXTURE: computed-pattern-typed
 // Verifies: computed() inside a typed pattern with destructured params is closure-extracted
-//   computed(() => value.get() * multiplier) → derive(..., { value, multiplier }, ({ value, multiplier }) => value.get() * multiplier)
+//   computed(() => value.get() * multiplier) → lift(({ value, multiplier }) => value.get() * multiplier)({ value, multiplier })
 // Context: The pattern uses generic type params <{ multiplier: number }, number>.
 //   Destructured `multiplier` is captured with asOpaque: true (it is an OpaqueRef
 //   from the pattern input), while `value` is captured with asCell: true.
@@ -22,24 +40,7 @@ export default pattern((__cf_pattern_input) => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const result = __cfHelpers.lift<{
-        value: __cfHelpers.ReadonlyCell<number>;
-        multiplier: number;
-    }, number>({
-        type: "object",
-        properties: {
-            value: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            multiplier: {
-                type: "number"
-            }
-        },
-        required: ["value", "multiplier"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => value.get() * multiplier)({
+    const result = __cfLift_1({
         value: value,
         multiplier: multiplier
     }).for("result", true);

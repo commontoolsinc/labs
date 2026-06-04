@@ -11,48 +11,49 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    count: number;
+}, import("commonfabric").JSXElement>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => {
+    const format = (value: number) => `Count: ${value}`;
+    return <span>{format(count)}</span>;
+});
 // FIXTURE: computed-jsx-local-function
 // Verifies: computed() with a locally-defined function inside the callback is closure-extracted
-//   computed(() => { const format = ...; return <span>{format(count)}</span> }) → derive(captureSchema, resultSchema, { count }, ({ count }) => { ... })
+//   computed(() => { const format = ...; return <span>{format(count)}</span> }) → lift(({ count }) => { ... })({ count })
 //   The pattern param `count` is captured with asOpaque: true in the schema.
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
-        {__cfHelpers.lift<{
-                count: number;
-            }, import("commonfabric").JSXElement>({
-                type: "object",
-                properties: {
-                    count: {
-                        type: "number"
-                    }
-                },
-                required: ["count"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, ({ count }) => {
-                const format = (value: number) => `Count: ${value}`;
-                return <span>{format(count)}</span>;
-            })({ count: count })}
+        {__cfLift_1({ count: count })}
       </div>),
     };
 }, {

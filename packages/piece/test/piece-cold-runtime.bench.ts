@@ -12,8 +12,8 @@ const defaultPatternProgram: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { handler, pattern } from 'commonfabric';",
-        "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
+        "import { handler, pattern, type Writable } from 'commonfabric';",
+        "const addPiece = handler<{ piece: unknown }, { allPieces: Writable<unknown[]> }>(",
         "  ({ piece }, { allPieces }) => {",
         "    allPieces.push(piece);",
         "  },",
@@ -91,9 +91,8 @@ async function createSeed(): Promise<Seed> {
   };
 }
 
-const seed = await createSeed();
-
 async function withFreshManager<T>(
+  seed: Seed,
   run: (env: { runtime: Runtime; manager: PieceManager }) => Promise<T>,
 ): Promise<T> {
   const runtime = new Runtime({
@@ -109,24 +108,36 @@ async function withFreshManager<T>(
   try {
     return await run({ runtime, manager });
   } finally {
+    await runtime.idle();
+    await manager.synced();
     await runtime.dispose();
   }
 }
 
 let nextPieceIndex = 0;
 
-Deno.bench(
-  "PieceManager.getDefaultPattern(runIt=true, fresh runtime)",
-  async () => {
-    await withFreshManager(async ({ manager }) => {
-      await manager.getDefaultPattern(true);
-    });
+Deno.bench({
+  name: "PieceManager.getDefaultPattern(runIt=true, fresh runtime)",
+  async fn(b) {
+    const seed = await createSeed();
+    try {
+      await withFreshManager(seed, async ({ manager }) => {
+        b.start();
+        try {
+          await manager.getDefaultPattern(true);
+        } finally {
+          b.end();
+        }
+      });
+    } finally {
+      await seed.storageManager.close();
+    }
   },
-);
+});
 
-Deno.bench(
-  "PieceManager.add(single persisted piece, fresh runtime)",
-  async () => {
+Deno.bench({
+  name: "PieceManager.add(single persisted piece, fresh runtime)",
+  async fn(b) {
     const storageManager = StorageManager.emulate({
       as: signer,
     });
@@ -182,8 +193,15 @@ Deno.bench(
         const piece = runtime.getCellFromEntityId(manager.getSpace(), {
           "/": pieceId(persistedPiece)!,
         });
-        await manager.add([piece]);
+        b.start();
+        try {
+          await manager.add([piece]);
+        } finally {
+          b.end();
+        }
       } finally {
+        await runtime.idle();
+        await manager.synced();
         await runtime.dispose();
       }
     } finally {
@@ -191,4 +209,4 @@ Deno.bench(
       await storageManager.close();
     }
   },
-);
+});

@@ -10,9 +10,9 @@
  * corresponding declarations there.
  */
 
-// ===========================================================================
+//
 // `FabricSpecialObject`
-// ===========================================================================
+//
 
 /**
  * Abstract base class for all fabric-system value types. This is the common
@@ -24,9 +24,9 @@
  */
 export abstract class FabricSpecialObject {}
 
-// ===========================================================================
+//
 // Fabric instance protocol (`[DECONSTRUCT]` / `[RECONSTRUCT]` / `FabricInstance`)
-// ===========================================================================
+//
 
 /**
  * Well-known symbol for deconstructing a fabric instance into its essential
@@ -152,9 +152,9 @@ export abstract class FabricInstance extends FabricSpecialObject {
   abstract shallowClone(frozen: boolean): FabricInstance;
 }
 
-// ===========================================================================
+//
 // Fabric primitive base class
-// ===========================================================================
+//
 
 /**
  * Abstract base class for "special primitive" fabric types -- values that
@@ -179,9 +179,9 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
   }
 }
 
-// ===========================================================================
+//
 // Type definitions
-// ===========================================================================
+//
 
 /**
  * The full set of values that the fabric storage layer can represent. This
@@ -190,21 +190,20 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  *   JavaScript "wild west" (`unknown`) <-> `FabricValue` <-> Serialized (`Uint8Array`)
  *
  * Most native JS object types enter the fabric layer via wrapper classes
- * that implement `FabricInstance`. However, `FabricPrimitive` subclasses
- * and `bigint` are direct members of `FabricValue` without implementing
- * `FabricInstance`. Some native types are converted to fabric primitives
- * during conversion.
+ * that extend `FabricInstance`; other special values extend `FabricPrimitive`.
+ * Both of those reach `FabricValue` through the common `FabricSpecialObject`
+ * arm. The non-object values (`bigint` and the other scalars) are direct
+ * members of the union instead, not routed through that arm. Some native types
+ * are converted to fabric primitives during conversion.
  *
- * `undefined` is preserved when the `modernDataModel` flag is ON. When the
- * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
- * object properties are omitted -- matching legacy behavior.
+ * `undefined` is preserved.
  *
  * `symbol` values are restricted at runtime to **registry-interned** symbols
  * -- those for which `Symbol.keyFor(s)` returns a string. These are
  * portable across realms and processes via their registry key. Unique
  * symbols (`Symbol(desc)`) are not portable and are rejected at the fabric
  * boundary. TypeScript's `symbol` type cannot distinguish the two, so the
- * gate is a runtime one. Note also that the modern fabric-value path
+ * gate is a runtime one. Note also that the fabric-value path
  * separately rejects all symbols at the entrance (relaxation deferred to a
  * follow-up); the type union admits `symbol` so the lower layers (hashing,
  * JSON encoding) can be written and tested ahead of that gate change.
@@ -259,8 +258,9 @@ export type FabricValueLayer =
  * inside `FabricValue`.
  *
  * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to fabric form via their `toJSON()` method. This is a legacy
- * conversion path but is included here so the `isFabricCompatible()` type predicate
+ * convertible to fabric form via their `toJSON()` method. This is a
+ * `toJSON()`-based conversion path, included here so the
+ * `isFabricCompatible()` type predicate
  * (`value is FabricValue | FabricNativeObject`) remains sound.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
@@ -275,9 +275,9 @@ export type FabricNativeObject =
   | Uint8Array
   | { toJSON(): unknown };
 
-// ===========================================================================
+//
 // Fabric protocol interfaces
-// ===========================================================================
+//
 
 /**
  * Interface for classes that can reconstruct fabric instances from essential

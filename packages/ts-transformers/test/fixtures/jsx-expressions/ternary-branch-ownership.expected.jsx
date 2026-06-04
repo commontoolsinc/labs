@@ -27,104 +27,166 @@ type State = {
     recentEvents: TagEvent[];
     items: Item[];
 };
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, Item[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["name", "value"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["name", "value"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value));
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        items: {
+            length: number;
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: any;
+}, boolean>({
+    type: "object",
+    properties: {
+        state: true
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.recentEvents.length === 0);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const event = __cf_pattern_input.key("element");
+    const idx = __cf_pattern_input.key("index");
+    return (<cf-hstack key={idx} gap="2">
+                  <span>{event.key("label")}</span>
+                </cf-hstack>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/TagEvent"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        TagEvent: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: ternary-branch-ownership
 // Verifies: ternary branches preserve the right ownership mode for lowered work
 //   state.user.settings.notifications ? "enabled" : "disabled"
 //     -> ifElse(...) with a boolean predicate schema after key(...) lowering
 //   recentEvents.length === 0 ? <span>... : <div>{recentEvents.map(...)}</div>
-//     -> single branch derive + recentEvents.mapWithPattern(...)
+//     -> single branch lift-applied computation + recentEvents.mapWithPattern(...)
 //   showList ? (() => { const itemCount = count + " items"; return <div>{sorted.map(...)}</div>; })() : ...
 //     -> whole branch compute-wrapped, so sorted.map(...) stays plain JS
 export default pattern((state) => {
     const showList = new Writable(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
-    const sorted = __cfHelpers.lift<{
-        state: {
-            items: Item[];
-        };
-    }, Item[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Item"
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    value: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "value"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Item"
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    value: {
-                        type: "number"
-                    }
-                },
-                required: ["name", "value"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value))({ state: {
+    const sorted = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("sorted", true);
-    const count = __cfHelpers.lift<{
-        state: {
-            items: {
-                length: number;
-            };
-        };
-    }, number>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "object",
-                        properties: {
-                            length: {
-                                type: "number"
-                            }
-                        },
-                        required: ["length"]
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length)({ state: {
+    const count = __cfLift_2({ state: {
             items: {
                 length: state.key("items", "length")
             }
@@ -157,66 +219,8 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: any;
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: true
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.recentEvents.length === 0)({ state: state }), <span>No events yet</span>, <div>
-              {state.key("recentEvents").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const event = __cf_pattern_input.key("element");
-                const idx = __cf_pattern_input.key("index");
-                return (<cf-hstack key={idx} gap="2">
-                  <span>{event.key("label")}</span>
-                </cf-hstack>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/TagEvent"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    TagEvent: {
-                        type: "object",
-                        properties: {
-                            label: {
-                                type: "string"
-                            }
-                        },
-                        required: ["label"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ state: state }), <span>No events yet</span>, <div>
+              {state.key("recentEvents").mapWithPattern(__cfPattern_1, {})}
             </div>)}
         {__cfHelpers.ifElse({
             type: "boolean",

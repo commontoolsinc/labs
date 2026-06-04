@@ -14,7 +14,6 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ entries, p }) => visibleEntries(entries, p[0] || ""));
 interface Entry {
     name: string;
 }
@@ -31,6 +30,187 @@ function visibleEntries(entries: Writable<Default<Entry[], [
     return list.filter((entry) => prefix.length === 0 || entry.name.startsWith(prefix));
 }
 __cfHardenFn(visibleEntries);
+const __cfLift_1 = __cfHelpers.lift<{
+    path: __cfHelpers.Cell<string[]>;
+}, readonly string[]>({
+    type: "object",
+    properties: {
+        path: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["path"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get());
+const __cfLift_2 = __cfHelpers.lift<{
+    entries: Writable<Default<Entry[], [
+    ]>>;
+    p: readonly string[];
+}, Entry[]>({
+    type: "object",
+    properties: {
+        entries: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Entry"
+            },
+            "default": [],
+            asCell: ["readonly"]
+        },
+        p: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
+    },
+    required: ["entries", "p"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Entry"
+    },
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ entries, p }) => visibleEntries(entries, p[0] || ""));
+const __cfLift_3 = __cfHelpers.lift<{
+    entry: {
+        name: string;
+    };
+    labelPrefix: __cfHelpers.Cell<string>;
+}, boolean>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        labelPrefix: {
+            type: "string",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["entry", "labelPrefix"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(`${labelPrefix}`));
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
+    return __cfLift_3({
+        entry: {
+            name: entry.key("name")
+        },
+        labelPrefix: labelPrefix
+    }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        },
+        params: {
+            type: "object",
+            properties: {
+                labelPrefix: {
+                    type: "string",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["labelPrefix"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    return <button type="button">{entry.key("name")}</button>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const path = new Writable<string[]>([], {
@@ -58,191 +238,15 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    path: __cfHelpers.Cell<string[]>;
-                }, readonly string[]>({
-                    type: "object",
-                    properties: {
-                        path: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asCell: ["readonly"]
-                        }
-                    },
-                    required: ["path"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get())({ path: path }).for(["p", 3], true), []).for("p", true);
-                const visible = __cfHelpers.lift<{
-                    entries: Writable<Default<Entry[], [
-                    ]>>;
-                    p: readonly string[];
-                }, Entry[]>({
-                    type: "object",
-                    properties: {
-                        entries: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            },
-                            "default": [],
-                            asCell: ["readonly"]
-                        },
-                        p: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["entries", "p"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Entry"
-                    },
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+                } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ path: path }).for(["p", 3], true), []).for("p", true);
+                const visible = __cfLift_2({
                     entries: entries,
                     p: p
                 }).for("visible", true);
-                const filtered = visible.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const entry = __cf_pattern_input.key("element");
-                    const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
-                    return __cfHelpers.lift<{
-                        entry: {
-                            name: string;
-                        };
-                        labelPrefix: __cfHelpers.Cell<string>;
-                    }, boolean>({
-                        type: "object",
-                        properties: {
-                            entry: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            },
-                            labelPrefix: {
-                                type: "string",
-                                asCell: ["readonly"]
-                            }
-                        },
-                        required: ["entry", "labelPrefix"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(`${labelPrefix}`))({
-                        entry: {
-                            name: entry.key("name")
-                        },
-                        labelPrefix: labelPrefix
-                    });
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Entry"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                labelPrefix: {
-                                    type: "string",
-                                    asCell: ["readonly"]
-                                }
-                            },
-                            required: ["labelPrefix"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema), {
+                const filtered = visible.filterWithPattern(__cfPattern_1, {
                     labelPrefix: labelPrefix
                 }).for("filtered", true);
-                return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const entry = __cf_pattern_input.key("element");
-                    return <button type="button">{entry.key("name")}</button>;
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Entry"
-                        }
-                    },
-                    required: ["element"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {});
+                return filtered.mapWithPattern(__cfPattern_2, {});
             })()}
       </div>)
     };

@@ -63,27 +63,28 @@ export const PatternLogicalAnd = pattern((__cf_pattern_input) => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_1 = __cfHelpers.lift<{
+    bar: string;
+}, string | false>({
+    type: "object",
+    properties: {
+        bar: {
+            type: "string"
+        }
+    },
+    required: ["bar"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "boolean",
+            "enum": [false]
+        }]
+} as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo && bar);
 export const ComputedLogicalAnd = pattern((__cf_pattern_input) => {
     const foo = __cf_pattern_input.key("foo");
     const bar = __cf_pattern_input.key("bar");
-    return (<div>{__cfHelpers.lift<{
-        bar: string;
-    }, string | false>({
-        type: "object",
-        properties: {
-            bar: {
-                type: "string"
-            }
-        },
-        required: ["bar"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "boolean",
-                "enum": [false]
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo && bar)({
+    return (<div>{__cfLift_1({
         foo: foo,
         bar: bar
     })}</div>);

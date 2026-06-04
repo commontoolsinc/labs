@@ -9,9 +9,11 @@ import { SchemaAndHash } from "./SchemaAndHash.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
 import { hashOf, hashStringOf } from "./value-hash.ts";
 
-// ---------------------------------------------------------------------------
-// Hash computation: Passes through to `value-hash.ts`.
-// ---------------------------------------------------------------------------
+//
+// Hash computation
+//
+// Passes through to `value-hash.ts`.
+//
 
 /**
  * Computes a deterministic hash of a JSONSchema. Structurally-equal schemas
@@ -25,9 +27,9 @@ export function hashSchema(schema: JSONSchema): string {
   return hashStringOf(schema);
 }
 
-// ---------------------------------------------------------------------------
+//
 // Schema interning
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Bidirectional intern cache for schemas.

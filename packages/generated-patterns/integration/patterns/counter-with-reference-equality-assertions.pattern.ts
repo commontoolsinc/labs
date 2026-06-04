@@ -1,8 +1,8 @@
 import {
   Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -121,23 +121,16 @@ export const counterWithReferenceEqualityAssertions = pattern<
     });
     const versionCounter = cell<number>(0);
 
-    const summary = derive(
-      { count: currentValue, version: versionCounter },
-      ({
-        count,
-        version,
-      }: {
-        count: number;
-        version: number | undefined;
-      }): Summary => {
-        const parity: Parity = count % 2 === 0 ? "even" : "odd";
-        return {
-          value: count,
-          parity,
-          version: ensureNumber(version),
-        };
-      },
-    );
+    const summary = computed((): Summary => {
+      const count = currentValue;
+      const version = versionCounter.get();
+      const parity: Parity = count % 2 === 0 ? "even" : "odd";
+      return {
+        value: count,
+        parity,
+        version: ensureNumber(version),
+      };
+    });
 
     const parity = liftParity(summary);
     const version = liftVersion(summary);

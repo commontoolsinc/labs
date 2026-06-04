@@ -21,7 +21,7 @@ which makes it hard to localize.
 The failure is tied to **what you're mapping**, not merely to reading a
 perSession cell in a `.map()`:
 
-- ❌ **FAILS — mapping a `computed()`/`derive`-produced list** (rows are plain
+- ❌ **FAILS — mapping a `computed()`/`lift`-produced list** (rows are plain
   objects). `lot-watch`'s `sightingRows = computed(() => sightings.get().map(…))`
   with a per-row `computed(() => guestTarget.get() === row.id)` never opened the
   form. (Verified before/after.)
@@ -42,7 +42,7 @@ treat "mapping a computed-produced list" as the danger sign, and verify.)
 
 ## Fix — bake the flag into the producing `computed()`
 
-When the list comes from a `computed()`/`derive`, read the perSession cell once
+When the list comes from a `computed()`/`lift`, read the perSession cell once
 at the top (a top-level read resolves) and emit a **plain boolean per row**, so
 no per-row perSession follow is needed:
 
@@ -67,10 +67,10 @@ mapped **directly**, which is the case that already works, so it needs no fix.
 ### Substitutes that look right but FAIL (when mapping a computed-produced list)
 
 - Lifting the session value into a `computed()` then feeding it to a
-  `derive({ items, openId }, …)` that produces the rows: the derive inherits
-  **session scope** and renders an **empty** list when mapped in a space-scoped
-  render.
-- A per-row `derive({ openId, id }, …)` inside the map: never re-renders.
+  row-producing `lift`/`computed` bridge: the derived list inherits **session
+  scope** and renders an **empty** list when mapped in a space-scoped render.
+- A per-row `computed()` bridge over `{ openId, id }` inside the map: never
+  re-renders.
 - `equals()` + a boxed reference via a lifted `computed`: never flips.
 
 Setting the perSession cell from an `onClick`/action is **not** affected — only
@@ -85,5 +85,5 @@ doesn't.
 **Known-good references:**
 `lot-watch/main.tsx` (`sightingRows`, spot picker) and
 `parking-coordinator/main.tsx` (`adminPeopleData`/`adminSpotsData`) both bake the
-flag into the producing computed. `cozy-poll-scoped/main.tsx` maps `options`
+flag into the producing computed. `cozy-poll/main.tsx` maps `options`
 directly and needs no change.

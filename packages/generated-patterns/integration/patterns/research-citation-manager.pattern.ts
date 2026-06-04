@@ -1,7 +1,6 @@
 import {
   type Cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -407,8 +406,8 @@ export const researchCitationManager = pattern<CitationArgs>(
 
     const groups = liftGroups({ entries: citationCatalog });
 
-    const groupedByTopic = derive(groups, (result) => result.byTopic);
-    const groupedByStyle = derive(groups, (result) => result.byStyle);
+    const groupedByTopic = groups.byTopic;
+    const groupedByStyle = groups.byStyle;
 
     const topicBibliographies = liftTopicBibliographies(groupedByTopic);
 

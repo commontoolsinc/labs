@@ -13,6 +13,7 @@ import {
   MemoryCompilationCache,
 } from "../src/compilation-cache/mod.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -60,10 +61,12 @@ describe("PatternManager program persistence", () => {
     };
 
     const compiled = await runtime.patternManager.compilePattern(program);
-    expect(compiled.program).toBeDefined();
-    expect(compiled.program?.main).toEqual("/main.tsx");
+    expect(getPatternProgram(compiled)).toBeDefined();
+    expect(getPatternProgram(compiled)?.main).toEqual("/main.tsx");
     // Ensure original file names are preserved (no injected prefix leaked here)
-    const fileNames = (compiled.program?.files ?? []).map((f) => f.name).sort();
+    const fileNames = (getPatternProgram(compiled)?.files ?? []).map((f) =>
+      f.name
+    ).sort();
     expect(fileNames).toEqual(["/main.tsx", "/util.ts"].sort());
 
     const patternId = runtime.patternManager.registerPattern(compiled, program);
@@ -174,6 +177,28 @@ describe("PatternManager program persistence", () => {
     const meta = await runtime.patternManager.loadPatternMeta(patternId, space);
     expect(meta.program?.main).toEqual("/legacy.ts");
   });
+
+  it("returns metadata for a registered compiled pattern factory", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern(() => ({ name: 'factory meta' }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    const meta = runtime.patternManager.getPatternMeta(compiled);
+
+    expect(patternId).toBeDefined();
+    expect(meta.program?.main).toEqual("/main.ts");
+  });
 });
 
 describe("PatternManager.loadPattern error handling", () => {
@@ -259,8 +284,8 @@ describe("PatternManager.compileOrGetPattern", () => {
       simpleProgram,
     );
     expect(pattern).toBeDefined();
-    expect(pattern.program).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(pattern)).toBeDefined();
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.ts");
   });
 
   it("returns cached pattern on second call (same instance)", async () => {
@@ -357,8 +382,8 @@ describe("PatternManager.compileOrGetPattern", () => {
 
     // Should be different pattern instances
     expect(second).not.toBe(first);
-    expect(first.program?.files[0].contents).toContain("doubled");
-    expect(second.program?.files[0].contents).toContain("tripled");
+    expect(getPatternProgram(first)?.files[0].contents).toContain("doubled");
+    expect(getPatternProgram(second)?.files[0].contents).toContain("tripled");
   });
 
   it("single-flight: concurrent calls share one compilation", async () => {
@@ -382,7 +407,7 @@ describe("PatternManager.compileOrGetPattern", () => {
 
     const pattern = await runtime.patternManager.compileOrGetPattern(source);
     expect(pattern).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.tsx");
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.tsx");
   });
 
   it("pattern is cached and returns same instance on subsequent calls", async () => {
@@ -397,12 +422,18 @@ describe("PatternManager.compileOrGetPattern", () => {
     expect(pattern2).toBe(pattern);
 
     // And the pattern should have its program attached
-    expect(pattern.program).toBeDefined();
-    expect(pattern.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(pattern)).toBeDefined();
+    expect(getPatternProgram(pattern)?.main).toEqual("/main.ts");
   });
 });
 
-describe("PatternManager compilation cache integration", () => {
+// AMD bundle-cache path (esmModuleLoader OFF): the persistent CachedCompiler
+// stores a whole-bundle jsScript keyed by program hash and skips evaluate-time
+// SES bundle validation on a hit. The ESM loader path uses an entirely
+// different cache — the per-module content-addressed cell cache — whose
+// cold→warm / cross-session / per-space(inSpace A→B) / CFC fail-closed behavior
+// is covered in esm-cell-cache-integration.test.ts.
+describe("PatternManager compilation cache integration (AMD bundle cache)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let cacheStorage: MemoryCompilationCache;
   let cachedCompiler: CachedCompiler;
@@ -429,6 +460,10 @@ describe("PatternManager compilation cache integration", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cachedCompiler,
+      // Pin the AMD bundle-cache path regardless of CF_ESM_MODULE_LOADER: this
+      // suite asserts CachedCompiler behavior. The ESM cell-cache equivalent is
+      // covered in esm-cell-cache-integration.test.ts.
+      experimental: { esmModuleLoader: false },
     });
   });
 
@@ -443,7 +478,7 @@ describe("PatternManager compilation cache integration", () => {
     // First compile — cache miss, should write an entry
     const first = await runtime.patternManager.compilePattern(simpleProgram);
     expect(first).toBeDefined();
-    expect(first.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(first)?.main).toEqual("/main.ts");
     expect(await cacheStorage.count()).toBe(1);
     expect(cachedCompiler.getStats().misses).toBe(1);
     expect(cachedCompiler.getStats().writes).toBe(1);
@@ -451,7 +486,7 @@ describe("PatternManager compilation cache integration", () => {
     // Second compile — cache hit, no new writes
     const second = await runtime.patternManager.compilePattern(simpleProgram);
     expect(second).toBeDefined();
-    expect(second.program?.main).toEqual("/main.ts");
+    expect(getPatternProgram(second)?.main).toEqual("/main.ts");
     expect(await cacheStorage.count()).toBe(1);
     expect(cachedCompiler.getStats().hits).toBe(1);
     expect(cachedCompiler.getStats().writes).toBe(1);

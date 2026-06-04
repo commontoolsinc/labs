@@ -11,6 +11,20 @@ import { pattern, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    layout: __cfHelpers.Writable<string>;
+}, number>({
+    type: "object",
+    properties: {
+        layout: {
+            type: "string",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["layout"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ layout }) => layout.get().trim().length);
 // FIXTURE: cell-get-binding-autowrap
 // Verifies: a bare `cell.get()` that feeds a computation at a variable-initializer
 //   binding is auto-wrapped into a lift, the same way it is in a JSX expression.
@@ -18,24 +32,11 @@ const __cfAmdHooks = undefined;
 //   `pattern-context:get-call`; that restriction was legacy (the rewriter already
 //   lowers the computation). A bare *terminal* `cell.get()` (no enclosing
 //   computation) is still rejected elsewhere, since it has no lowerable site.
-// Context: enables `derive(cell, v => f(v))` migrations to drop the wrapper and
+// Context: enabled migrating `cell.get()`-wrapped reads to drop the wrapper and
 //   write a plain expression even when the input is a Writable/Cell.
 export default pattern((__cf_pattern_input) => {
     const layout = __cf_pattern_input.key("layout");
-    const len = __cfHelpers.lift<{
-        layout: __cfHelpers.Writable<string>;
-    }, number>({
-        type: "object",
-        properties: {
-            layout: {
-                type: "string",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["layout"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ layout }) => layout.get().trim().length)({ layout: layout }).for("len", true);
+    const len = __cfLift_1({ layout: layout }).for("len", true);
     return { len };
 }, {
     type: "object",

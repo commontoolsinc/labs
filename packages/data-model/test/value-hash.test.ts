@@ -8,7 +8,7 @@ import { FabricValue } from "../src/interface.ts";
 import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
@@ -925,7 +925,7 @@ describe("value-hash", () => {
         expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
       });
     });
-    describe("FabricHash hashing (TAG_CONTENT_ID = 0x29)", () => {
+    describe("FabricHash hashing (TAG_HASH = 0x29)", () => {
       it("matches a hand-computed byte stream for `FabricHash`", () => {
         // Algorithm tag "fid1" = [0x66, 0x69, 0x64, 0x31] (4 bytes UTF-8)
         // Hash bytes: [0xDE, 0xAD, 0xBE, 0xEF] (4 bytes)
@@ -933,7 +933,7 @@ describe("value-hash", () => {
           new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]),
           "fid1",
         );
-        // Expected: TAG_CONTENT_ID(0x29), "fid1" (encoded), hashLen(0x04), hash
+        // Expected: TAG_HASH (0x29), "fid1" (encoded), hashLen (0x04), hash
         const expected = sha256([
           0x29,
           0x24,

@@ -3,7 +3,6 @@ import {
   cell,
   computed,
   Default,
-  derive,
   handler,
   pattern,
   str,
@@ -180,7 +179,7 @@ export const counterWithComplexUnionState = pattern<ComplexUnionArgs>(
 
     const transitions = cell<string[]>([]);
 
-    const mode = derive(unionState, (current) => current.status);
+    const mode = unionState.status;
     const readyValue = computed(() => extractReadyValue(unionState));
     const historyView = computed(() => extractHistoryView(unionState));
     const attemptCount = computed(() => extractAttemptCount(unionState));

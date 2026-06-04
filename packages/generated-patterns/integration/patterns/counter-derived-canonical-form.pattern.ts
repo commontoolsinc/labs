@@ -2,7 +2,6 @@ import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -252,10 +251,10 @@ export const counterWithDerivedCanonicalForm = pattern<CanonicalFormArgs>(
 
     const groupsView = liftSanitizeGroups(groups);
 
-    const canonical = derive(groupsView, canonicalizeGroups);
+    const canonical = canonicalizeGroups(groupsView);
 
-    const totalValue = derive(canonical, (form) => form.totalValue);
-    const signatureList = derive(canonical, (form) => form.signature);
+    const totalValue = canonical.totalValue;
+    const signatureList = canonical.signature;
 
     const signatureText = liftSignatureText(signatureList);
 

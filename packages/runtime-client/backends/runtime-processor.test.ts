@@ -17,25 +17,9 @@ import {
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { cellRefToSigilLink } from "./utils.ts";
-import {
-  getDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
 import { Runtime } from "@commonfabric/runner";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
-
-const withModernDataModel = async <T>(
-  fn: () => Promise<T> | T,
-): Promise<T> => {
-  const previousDataModel = getDataModelConfig();
-  setDataModelConfig(true);
-  try {
-    return await fn();
-  } finally {
-    setDataModelConfig(previousDataModel);
-  }
-};
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -755,18 +739,16 @@ describe("RuntimeProcessor blob upload IPC", () => {
     } as unknown as RuntimeProcessor;
 
     try {
-      await withModernDataModel(async () => {
-        await expect(
-          RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
-            type: RequestType.UploadBlob,
-            contentType: "image/png",
-            body: [1, 2, 3],
-            suffix: "png",
-          }),
-        ).resolves.toEqual({
-          id: "fid1:test",
-          url: "blobs/test.png",
-        });
+      await expect(
+        RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
+          type: RequestType.UploadBlob,
+          contentType: "image/png",
+          body: [1, 2, 3],
+          suffix: "png",
+        }),
+      ).resolves.toEqual({
+        id: "fid1:test",
+        url: "blobs/test.png",
       });
     } finally {
       globalThis.fetch = originalFetch;

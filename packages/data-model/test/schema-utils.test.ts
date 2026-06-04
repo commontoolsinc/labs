@@ -950,6 +950,58 @@ describe("schema-utils", () => {
       expect(isDeepFrozen(schema)).toBe(true);
     });
 
+    it("canonicalizes `selector.schema` to the interned instance", () => {
+      const title = `internPathSelectorCanonAt${Date.now()}-${Math.random()}`;
+      // Establish the canonical interned instance from one distinct object...
+      const canonical = internSchema({ type: "object", title });
+      // ...then intern a selector holding a structurally-equal but distinct
+      // schema object. After interning, `selector.schema` should be the shared
+      // canonical instance, not the (now-redundant) input object.
+      const selector: SchemaPathSelector = {
+        path: ["x"],
+        schema: { type: "object", title },
+      };
+      expect(selector.schema).not.toBe(canonical);
+      internPathSelector(selector);
+      expect(selector.schema).toBe(canonical);
+    });
+
+    it("returns a new selector when a frozen input's schema must be canonicalized", () => {
+      const title = `internPathSelectorFrozenAt${Date.now()}-${Math.random()}`;
+      // Establish the canonical interned instance from one distinct object...
+      const canonical = internSchema({ type: "object", title });
+      // ...then build a *frozen* selector holding a structurally-equal but
+      // distinct (non-canonical) schema object. Since the input is frozen, its
+      // schema can't be replaced in place, so interning must allocate and
+      // return a new selector carrying the canonical schema.
+      const selector = Object.freeze({
+        path: Object.freeze(["x"]),
+        schema: Object.freeze({ type: "object", title }),
+      }) as SchemaPathSelector;
+      expect(selector.schema).not.toBe(canonical);
+      const result = internPathSelector(selector);
+      expect(result).not.toBe(selector);
+      expect(result.schema).toBe(canonical);
+      expect(result.path).toEqual(["x"]);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("returns the input reference when `selector.schema` is already interned", () => {
+      const title =
+        `internPathSelectorPreInternedAt${Date.now()}-${Math.random()}`;
+      const interned = internSchema({ type: "object", title });
+      expect(isInternedSchema(interned)).toBe(true);
+      // Even a frozen selector is returned as-is when its schema is already the
+      // canonical interned instance: there is nothing to replace, so no clone.
+      const selector = Object.freeze({
+        path: Object.freeze(["x"]),
+        schema: interned,
+      }) as SchemaPathSelector;
+      const result = internPathSelector(selector);
+      expect(result).toBe(selector);
+      expect(result.schema).toBe(interned);
+    });
+
     it("handles selectors whose `schema` is undefined", () => {
       const selector: SchemaPathSelector = { path: ["p"] };
       // Must not throw — `internSchema(undefined)` would, and the guard

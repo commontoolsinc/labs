@@ -70,6 +70,32 @@ type PositionMapper = (
   | null
   | undefined;
 
+/**
+ * Wrap a harness into a {@link PositionMapper} that rewrites the mapped
+ * `source` into its reload-stable canonical form (`cf:module/<hash>/<path>`)
+ * when the harness can resolve it. This is what makes every `fn.src` (and thus
+ * scheduler action ids, fingerprints, CFC verified-source) stable across reloads
+ * irrespective of which bundle/entry-point compiled the module. Built-in or
+ * unmapped sources are left untouched.
+ */
+function canonicalizingMapPosition(
+  harness: {
+    mapPosition(
+      file: string,
+      line: number,
+      col: number,
+    ): ReturnType<PositionMapper>;
+    canonicalModuleSource?(source: string): string | undefined;
+  } | undefined,
+): PositionMapper {
+  return (file, line, col) => {
+    const mapped = harness?.mapPosition(file, line, col) ?? null;
+    if (!mapped?.source) return mapped;
+    const canonical = harness?.canonicalModuleSource?.(mapped.source);
+    return canonical ? { ...mapped, source: canonical } : mapped;
+  };
+}
+
 const INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS = [
   /\bgetExternalSourceLocation\b/,
   /\bannotateFunctionDebugMetadata\b/,
@@ -163,8 +189,7 @@ export function parseStackFrame(
  */
 function getExternalSourceLocation(): SourceLocationResult {
   const topFrame = getTopFrame();
-  const mapPosition = (file: string, line: number, col: number) =>
-    topFrame?.runtime?.harness?.mapPosition(file, line, col);
+  const mapPosition = canonicalizingMapPosition(topFrame?.runtime?.harness);
   const stackResult = resolveSourceLocationFromStack(
     new Error().stack,
     mapPosition,
@@ -478,50 +503,7 @@ export function handler<E, T>(
   return handlerInternal(eventSchema, stateSchema, handler);
 }
 
-export function derive<
-  InputSchema extends JSONSchema = JSONSchema,
-  ResultSchema extends JSONSchema = JSONSchema,
->(
-  argumentSchema: InputSchema,
-  resultSchema: ResultSchema,
-  input: Opaque<SchemaWithoutCell<InputSchema>>,
-  f: (
-    input: Schema<InputSchema>,
-  ) => Schema<ResultSchema>,
-  options?: DeriveSchedulerOptions,
-): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
-export function derive<In, Out>(
-  input: Opaque<In>,
-  f: (input: In) => Out,
-): OpaqueRef<Out>;
-export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
-  if (args.length >= 4) {
-    const [argumentSchema, resultSchema, input, f, options] = args as [
-      JSONSchema,
-      JSONSchema,
-      Opaque<SchemaWithoutCell<any>>,
-      (input: Schema<any>) => Schema<any>,
-      DeriveSchedulerOptions | undefined,
-    ];
-    return createNodeFactory({
-      type: "javascript",
-      argumentSchema,
-      resultSchema,
-      implementation: f as (input: Schema<any>) => Schema<any>,
-      ...(options?.materializerWriteInputPaths
-        ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
-        : {}),
-    })(input);
-  }
-
-  const [input, f] = args as [
-    Opaque<In>,
-    (input: In) => Out,
-  ];
-  return lift(f)(input);
-}
-
-// unsafe closures: like derive, but doesn't need any arguments.
+// unsafe closures: doesn't need any arguments.
 // Uses argumentSchema: false to signal "takes no input" so the action
 // validation doesn't skip it due to undefined arguments.
 export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
@@ -534,12 +516,13 @@ export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
 /**
  * action: Creates a handler that doesn't use the state parameter.
  *
- * This is to handler as computed is to lift/derive:
+ * This is to handler as computed is to lift:
  * - User writes: action((e) => count.set(e.data))
  * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
- * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ * computed(() => expr) becomes a lift-applied computation with closure
+ * extraction.
  *
  * NOTE: This function should never be called directly at runtime because the
  * CTS transformer rewrites action() calls to handler() calls. If this function
@@ -655,7 +638,7 @@ export function resolveLocationFromFunctionSource(
     context.script,
     index,
     index + source.length,
-    harness.mapPosition.bind(harness),
+    canonicalizingMapPosition(harness),
   );
   if (mapped) {
     return mapped;

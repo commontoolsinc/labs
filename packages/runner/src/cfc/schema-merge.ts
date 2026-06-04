@@ -9,6 +9,7 @@ const IFC_KEYS = [
   "addIntegrity",
   "requiredIntegrity",
   "maxConfidentiality",
+  "ownerPrincipal",
   "writeAuthorizedBy",
   "exactCopyOf",
   "projection",
@@ -105,6 +106,7 @@ const mergeSetLikeIfcArray = (
     case "exactCopyOf":
     case "projection":
     case "collection":
+    case "ownerPrincipal":
       if (!deepEqual(existing, candidate)) {
         throw new Error(`${key} must remain stable at ${path || "/"}`);
       }

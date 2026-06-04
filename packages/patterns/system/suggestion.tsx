@@ -108,7 +108,7 @@ export default pattern<
   });
 
   // --- LLM state (freeform query path) ---
-  const profile = wish<string>({ query: "#profile" });
+  const profile = wish<string>({ query: "#learnedSummary" });
 
   const mentionable = wish<MentionablePiece[]>({
     query: "#mentionable",

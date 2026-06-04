@@ -14,27 +14,28 @@ const __cfAmdHooks = undefined;
 interface State {
     counter: Cell<number>;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                counter: {
+                    type: "number",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["counter"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.counter.set(state.counter.get() + 1));
 // FIXTURE: handler-basic
 // Verifies: inline arrow function in JSX onClick is extracted into a handler with captures
 //   onClick={() => state.counter.set(...)} → onClick={handler(false, { state: { counter: asCell } }, (_, { state }) => ...)({ state: { counter } })}
 export default pattern((state) => {
     return {
-        [UI]: (<button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        counter: {
-                            type: "number",
-                            asCell: ["cell"]
-                        }
-                    },
-                    required: ["counter"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.counter.set(state.counter.get() + 1))({
+        [UI]: (<button type="button" onClick={__cfHandler_1({
             state: {
                 counter: state.key("counter")
             }

@@ -19,81 +19,83 @@ interface State {
     items: Item[];
     prefix: string;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        name: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.name.toUpperCase());
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return (<div>
+            Item #{index}: {__cfLift_1({ item: {
+            name: item.key("name")
+        } })}
+          </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-element-computed
 // Verifies: .map() on reactive array is transformed with computed element property access
 //   .map(fn) → .mapWithPattern(pattern(...), {})
-//   item.name.toUpperCase() → derive() wrapping the computed expression
-// Context: Uses index param; computation on element property triggers derive wrapper
+//   item.name.toUpperCase() → lift-applied computation wrapping the computed expression
+// Context: Uses index param; computation on element property triggers a lift-applied wrapper
 export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Performs computation on element property - should wrap in computed() */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                return (<div>
-            Item #{index}: {__cfHelpers.lift<{
-                    item: {
-                        name: string;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.name.toUpperCase())({ item: {
-                        name: item.key("name")
-                    } })}
-          </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {state.key("items").mapWithPattern(__cfPattern_1, {})}
       </div>),
     };
 }, {

@@ -31,24 +31,36 @@ act as the same DID.
 
 ## Existing Browser Mnemonic To CLI
 
-If the browser identity already exists and you need a matching CLI key, export a
-PKCS8 key from the browser mnemonic:
+If the browser identity already exists and you need a matching CLI key, derive a
+PKCS8 key from the browser recovery phrase with `cf id from-mnemonic`. Give it
+the phrase as a file (`-- <file>`) or on stdin (`-`) so the recovery phrase
+never lands in your shell history or the process argument list:
 
 ```bash
-deno eval '
-import { Identity } from "./packages/identity/src/identity.ts";
-const mnemonic = "your 24-word mnemonic here";
-const id = await Identity.fromMnemonic(mnemonic, { implementation: "noble" });
-await Deno.writeFile(".cf/browser.key", id.toPkcs8());
-'
+# Read the phrase from a file (the phrase never appears on the command line):
+deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > .cf/browser.key
+
+# Or read it from stdin — pipe it in, or type/paste it then press Ctrl-D:
+deno run -A packages/cli/mod.ts id from-mnemonic - > .cf/browser.key
 
 export CF_IDENTITY="$PWD/.cf/browser.key"
 deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
 ```
 
-Do not use `cf id derive <mnemonic>` for this. Browser mnemonic login uses
-`Identity.fromMnemonic()`, while `cf id derive` uses
-`Identity.fromPassphrase()`. The same text produces different DIDs.
+A single trailing newline is stripped from file or stdin input, so a phrase
+saved with `echo` or a text editor works as-is. You can still pass the phrase as
+a quoted inline argument (`id from-mnemonic "word1 ... word24"`), but avoid it
+for real recovery phrases: arguments are visible in shell history and to other
+processes via `ps`.
+
+Do not use `cf id derive <mnemonic>` for this. `from-mnemonic` uses
+`Identity.fromMnemonic()` (the same path as browser mnemonic login), while
+`cf id derive` uses `Identity.fromPassphrase()`. The same text produces
+different DIDs.
+
+> Use `deno run -A packages/cli/mod.ts`, not `deno task cf`, when redirecting to
+> a key file: the `deno task` wrapper prints colored preamble to stdout that
+> would corrupt the key.
 
 ## Existing CLI Key To Browser
 
@@ -57,7 +69,9 @@ If the CLI key already exists, import it directly in the browser with
 
 ```bash
 deno run -A packages/cli/mod.ts id new > .cf/shared-dev.key
-deno run -A packages/cli/mod.ts id derive "some passphrase" > .cf/shared-dev.key
+# `id derive` also reads the passphrase from a file (`-- <file>`) or stdin
+# (`-`), keeping it out of shell history (recommended for anything sensitive):
+deno run -A packages/cli/mod.ts id derive -- passphrase.txt > .cf/shared-dev.key
 ```
 
 The file must be a PKCS8/PEM private key. `*.key` and `.cf/` are gitignored in

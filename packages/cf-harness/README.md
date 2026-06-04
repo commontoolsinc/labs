@@ -301,8 +301,8 @@ use the leased endpoint, for example
 `agent-browser open` / `snapshot` launches are denied so the child cannot race
 the host's live browser profile. `agent-browser` is fail-closed to a small
 positive allowlist: `open` for HTTP(S) URLs, `snapshot`, `get title/url/text`,
-bounded `wait`, and ref-based `fill`, `type`, `select`, `check`, `click`, and
-`press`.
+read-only `console` / `errors` inspection without mutation flags, bounded
+`wait`, and ref-based `fill`, `type`, `select`, `check`, `click`, and `press`.
 
 Host-target skill scripts run with a cleared subprocess environment plus a
 controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not

@@ -17,6 +17,26 @@ interface BaseState {
 }
 // Required<BaseState> should make 'a' required in the schema
 type ReqState = Required<BaseState>;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        a: {
+            type: "string",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["a"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { a }) => a.set("hello"));
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        b: {
+            type: "number",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["b"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { b }) => b.set(42));
 // FIXTURE: action-required-partial
 // Verifies: Required<BaseState> makes originally-optional properties required in capture schemas
 //   action(() => a.set("hello")) → handler(false, { a: { type: "string", asCell, required } }, ...)({ a })
@@ -25,28 +45,10 @@ export default pattern((__cf_pattern_input) => {
     const a = __cf_pattern_input.key("a");
     const b = __cf_pattern_input.key("b");
     return {
-        setA: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                a: {
-                    type: "string",
-                    asCell: ["writeonly"]
-                }
-            },
-            required: ["a"]
-        } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => a.set("hello"))({
+        setA: __cfHandler_1({
             a: a
         }).for({ stream: ["__patternResult", "setA"] }, true),
-        setB: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                b: {
-                    type: "number",
-                    asCell: ["writeonly"]
-                }
-            },
-            required: ["b"]
-        } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => b.set(42))({
+        setB: __cfHandler_2({
             b: b
         }).for({ stream: ["__patternResult", "setB"] }, true)
     };

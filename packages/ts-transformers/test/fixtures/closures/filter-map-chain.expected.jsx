@@ -20,152 +20,155 @@ interface State {
     items: Item[];
     taxRate: number;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item.key("active");
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "price", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        taxRate: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                taxRate: {
+                    type: "number"
+                }
+            },
+            required: ["taxRate"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 + state.taxRate));
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>
+              Total: {__cfLift_1({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            taxRate: state.key("taxRate")
+        }
+    })}
+            </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        taxRate: {
+                            type: "number"
+                        }
+                    },
+                    required: ["taxRate"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "price", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: filter-map-chain
 // Verifies: filter+map chain with captured outer variables
 //   .filter(fn) → .filterWithPattern(pattern(...), {})  — no captures
 //   .map(fn)    → .mapWithPattern(pattern(...), { state: { taxRate } })
 // Context: The map callback captures state.taxRate from outer scope, so it
-//   appears in the params object and the map body uses derive() for the
-//   reactive computation. The filter has no captures (only element properties).
+//   appears in the params object and the map body uses a lift-applied
+//   computation for the reactive computation. The filter has no captures (only element properties).
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                return item.key("active");
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            price: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["id", "price", "active"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema), {}).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<div>
-              Total: {__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        taxRate: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                taxRate: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["taxRate"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 + state.taxRate))({
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        taxRate: state.key("taxRate")
-                    }
-                })}
-            </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    taxRate: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["taxRate"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            price: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["id", "price", "active"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").filterWithPattern(__cfPattern_1, {}).mapWithPattern(__cfPattern_2, {
                 state: {
                     taxRate: state.key("taxRate")
                 }

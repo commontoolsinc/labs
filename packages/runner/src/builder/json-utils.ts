@@ -18,6 +18,7 @@ import {
   unsafe_originalPattern,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
+import { getPatternProgram } from "./pattern-metadata.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
@@ -350,10 +351,8 @@ export function moduleToJSON(module: Module) {
   const frame = getTopFrame();
   // Destructure-and-drop the runtime-only methods that handler modules
   // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
-  // They are not part of the serialized contract — under the legacy
-  // data-model layer they were silently omitted by `JSON.stringify`-style
-  // semantics; under modern they would surface as
-  // `Cannot store function per se`.
+  // They are not part of the serialized contract; left in, they would surface
+  // as `Cannot store function per se`, so they are destructured out here.
   const {
     implementation: _implementation,
     toJSON: _toJSON,
@@ -450,6 +449,6 @@ export function patternToJSON(pattern: Pattern) {
     ...(pattern.initial ? { initial: pattern.initial } : {}),
     result: pattern.result,
     nodes: pattern.nodes,
-    program: pattern.program,
+    program: getPatternProgram(pattern),
   };
 }

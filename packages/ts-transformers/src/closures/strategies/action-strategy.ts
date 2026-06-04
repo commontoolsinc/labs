@@ -10,7 +10,7 @@ import { buildCapturedHandlerClosureCall } from "../utils/capture-scaffold.ts";
 /**
  * ActionStrategy transforms action() calls to handler() calls with explicit closures.
  *
- * This is to handler as computed is to lift/derive:
+ * This is to handler as computed is to lift:
  * - Input: action(() => count.set(count.get() + 1))
  * - Output: handler((_, { count }) => count.set(count.get() + 1))({ count })
  *

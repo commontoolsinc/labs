@@ -654,8 +654,8 @@ Deno.bench(
     const commitTime = performance.now() - start;
 
     // Log commit time (won't show in bench output but useful for debugging)
-    if (commitTime > 100) {
-      console.log(`Commit took ${commitTime.toFixed(1)}ms`);
+    if (commitTime > 100 && Deno.env.get("BENCH_DIAGNOSTICS") === "1") {
+      console.error(`Commit took ${commitTime.toFixed(1)}ms`);
     }
 
     await runtime.dispose();

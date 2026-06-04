@@ -89,8 +89,8 @@ export function registerCapabilitySummary(
   interprocedural: boolean,
   defaultsByParamName?: ReadonlyMap<string, readonly CapabilityParamDefault[]>,
 ): void {
-  const registry = context.options.state?.capabilitySummaryRegistry;
-  if (!registry) return;
+  // No cross-stage state → nowhere to record; skip the analysis work entirely.
+  if (!context.options.state) return;
 
   const summary = analyzeFunctionCapabilities(callback, {
     checker: context.checker,
@@ -98,11 +98,11 @@ export function registerCapabilitySummary(
   });
 
   if (!defaultsByParamName || defaultsByParamName.size === 0) {
-    registry.set(callback, summary);
+    context.recordCapabilitySummary(callback, summary);
     return;
   }
 
-  registry.set(callback, {
+  context.recordCapabilitySummary(callback, {
     ...summary,
     params: summary.params.map((param) => {
       const defaults = defaultsByParamName.get(param.name);

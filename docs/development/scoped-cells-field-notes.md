@@ -12,7 +12,7 @@ For solutions-oriented advice, see also
 
 ## 2026-05-14 — Cozy lunch poll build
 
-Built `packages/patterns/cozy-poll-scoped/` as a multi-user voting pattern.
+Built `packages/patterns/cozy-poll/` as a multi-user voting pattern.
 Established what works, what doesn't, and what looks broken in the runtime.
 
 ### What worked (validated end-to-end)
@@ -23,8 +23,8 @@ Established what works, what doesn't, and what looks broken in the runtime.
   leak to another. Concretely observable: CLI `inspect` running as
   `claude.key` shows `myName: ""` while the browser session shows `"Alex"` —
   same cell id, different scope key.
-- **Derived scope checks.** `isJoined = derive(myName, …)` and `isAdmin =
-  derive({myName, adminName}, …)` flip correctly when their dependencies
+- **Derived scope checks.** `isJoined = computed(() => …)` and `isAdmin =
+  computed(() => …)` flip correctly when their dependencies
   update.
 - **First-writer-wins admin claim.** The handler that does `if
   (adminName.get() === "") { adminName.set(me); }` works correctly. The
@@ -52,7 +52,7 @@ These are the things that bit during the build. Each is also captured in
 
 2. **`.length` on a top-level `PerSpace<Array>` doesn't lift reactively.**
    `users.length` snapshots once. Have to write
-   `derive(users, u => u.length)`. Nested access through an object cell
+   `computed(() => users.length)`. Nested access through an object cell
    (`conversation.rooms.length`) works fine, but a top-level array does not.
    First version of the test reported `undefined` for `userCount`.
 
@@ -96,7 +96,7 @@ problem. Cherry-picking it locally did not fix this.
 **Verification after PR #3595:**
 
 ```bash
-deno task cf check packages/patterns/cozy-poll-scoped/main.tsx --show-transformed \
+deno task cf check packages/patterns/cozy-poll/main.tsx --show-transformed \
   | grep -c __cfModuleCallback
 # → 0 (was 4 pre-fix, 8 with PR #3582 cherry-picked)
 ```
@@ -113,7 +113,7 @@ that locks this case in.
 #### B2. ~~`array.length` on a top-level scoped array doesn't lift reactively~~ — NOT A BUG
 
 **Status:** Investigated and closed. Per `--show-transformed` analysis,
-both `items.length` and `derive(items, i => i.length)` lower to the same
+both `items.length` and `computed(() => items.length)` lower to the same
 underlying reads. The behavioral diff observed in the first cozy-poll test
 was likely an artifact of how the test asserted (see B3) or a misread.
 
@@ -183,7 +183,7 @@ split compound assertions into individual ones, or coerce with
   working? The architect's stated guidance was to use it; the scrabble
   pattern doesn't. Worth picking one and documenting.
 - The CFC-integrity admin direction in
-  `packages/patterns/cozy-poll-scoped/ADMIN-FUTURE.md` — what's the realistic
+  `packages/patterns/cozy-poll/ADMIN-FUTURE.md` — what's the realistic
   ETA, and what's the right way to design admin authority *now* if we ship
   patterns before CFC integrity is plumbed?
 

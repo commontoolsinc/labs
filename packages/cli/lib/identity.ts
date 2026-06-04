@@ -10,6 +10,15 @@ export async function pkcs8FromPassphrase(
   return decode(identity.toPkcs8());
 }
 
+export async function pkcs8FromMnemonic(
+  mnemonic: string,
+): Promise<string> {
+  const identity = await Identity.fromMnemonic(mnemonic.trim(), {
+    implementation: "noble",
+  });
+  return decode(identity.toPkcs8());
+}
+
 export async function pkcs8FromEntropy(): Promise<string> {
   return decode(await Identity.generatePkcs8());
 }

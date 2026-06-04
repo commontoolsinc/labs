@@ -3,7 +3,6 @@ import {
   cell,
   computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -129,11 +128,8 @@ export const counterWithDynamicHandlerList = pattern<DynamicHandlerArgs>(
 
     const normalizedValues = liftNormalizedValues(values);
 
-    const count = derive(normalizedValues, (entries) => entries.length);
-    const total = derive(
-      normalizedValues,
-      (entries) => entries.reduce((sum, value) => sum + value, 0),
-    );
+    const count = normalizedValues.length;
+    const total = normalizedValues.reduce((sum, value) => sum + value, 0);
     const average = liftAverage(normalizedValues);
 
     const slots = computed(() =>

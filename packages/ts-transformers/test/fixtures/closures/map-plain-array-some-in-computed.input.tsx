@@ -19,7 +19,7 @@ interface Input {
 // FIXTURE: map-plain-array-some-in-computed
 // Verifies: plain-array callbacks nested inside computed() remain plain even inside a reactive outer map callback
 //   habits.map(fn) -> habits.mapWithPattern(...)
-//   computed(() => logs.get().some(fn)) -> derive(...) whose inner some(fn) stays plain JS
+//   computed(() => logs.get().some(fn)) -> lift(...)(...) whose inner some(fn) stays plain JS
 // Context: The outer callback is pattern-owned, but the inner some() callback runs on the unwrapped logs array inside computed()
 export default pattern<Input>(({ habits, logs, todayDate }) => {
   return {

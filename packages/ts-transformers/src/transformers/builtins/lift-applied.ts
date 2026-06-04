@@ -234,7 +234,7 @@ export function createLiftAppliedCall(
   // callback (and type arguments, since lift<In, Out> is the generic) live
   // on the inner lift call. This matches the canonical post-Phase-1 shape
   // produced by LiftLoweringTransformer (see src/lift/transformer.ts) for
-  // user-authored derive(...) calls.
+  // user-authored computed() calls.
   const [inputObject] = createLiftAppliedInputArgs(
     factory,
     captureTree,

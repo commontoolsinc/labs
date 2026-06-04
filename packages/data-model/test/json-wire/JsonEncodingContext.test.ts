@@ -10,11 +10,7 @@ import { FabricEpochNsec } from "../../src/fabric-primitives/FabricEpochNsec.ts"
 import { FabricError } from "../../src/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "../../src/deep-freeze.ts";
 import { BaseReconstructionContext } from "../../src/BaseReconstructionContext.ts";
-import {
-  resetDataModelConfig,
-  setDataModelConfig,
-  shallowFabricFromNativeValue,
-} from "../../src/fabric-value.ts";
+import { shallowFabricFromNativeValue } from "../../src/fabric-value.ts";
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test
@@ -694,46 +690,31 @@ describe("JsonEncodingContext", () => {
 
   describe("`Date` -> `FabricEpochNsec` conversion", () => {
     it("converts `Date(0)` to `FabricEpochNsec(0n)`", () => {
-      setDataModelConfig(true);
-      try {
-        const date = new Date(0);
-        const result = shallowFabricFromNativeValue(
-          date,
-        ) as unknown as FabricEpochNsec;
-        expect(result).toBeInstanceOf(FabricEpochNsec);
-        expect(result.value).toBe(0n);
-      } finally {
-        resetDataModelConfig();
-      }
+      const date = new Date(0);
+      const result = shallowFabricFromNativeValue(
+        date,
+      ) as unknown as FabricEpochNsec;
+      expect(result).toBeInstanceOf(FabricEpochNsec);
+      expect(result.value).toBe(0n);
     });
 
     it("converts `Date` to nanoseconds (`msec * 1_000_000`)", () => {
-      setDataModelConfig(true);
-      try {
-        const date = new Date("2024-01-01T00:00:00.000Z");
-        const result = shallowFabricFromNativeValue(
-          date,
-        ) as unknown as FabricEpochNsec;
-        expect(result).toBeInstanceOf(FabricEpochNsec);
-        const expectedNsec = BigInt(date.getTime()) * 1_000_000n;
-        expect(result.value).toBe(expectedNsec);
-      } finally {
-        resetDataModelConfig();
-      }
+      const date = new Date("2024-01-01T00:00:00.000Z");
+      const result = shallowFabricFromNativeValue(
+        date,
+      ) as unknown as FabricEpochNsec;
+      expect(result).toBeInstanceOf(FabricEpochNsec);
+      const expectedNsec = BigInt(date.getTime()) * 1_000_000n;
+      expect(result.value).toBe(expectedNsec);
     });
 
     it("converts negative `Date` to negative nanoseconds", () => {
-      setDataModelConfig(true);
-      try {
-        const date = new Date(-86400000); // -1 day
-        const result = shallowFabricFromNativeValue(
-          date,
-        ) as unknown as FabricEpochNsec;
-        expect(result).toBeInstanceOf(FabricEpochNsec);
-        expect(result.value).toBe(-86400000000000n);
-      } finally {
-        resetDataModelConfig();
-      }
+      const date = new Date(-86400000); // -1 day
+      const result = shallowFabricFromNativeValue(
+        date,
+      ) as unknown as FabricEpochNsec;
+      expect(result).toBeInstanceOf(FabricEpochNsec);
+      expect(result.value).toBe(-86400000000000n);
     });
   });
 

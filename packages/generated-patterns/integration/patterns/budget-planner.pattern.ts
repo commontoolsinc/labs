@@ -2,7 +2,6 @@ import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -484,7 +483,7 @@ export const budgetPlanner = pattern<BudgetPlannerArgs>(
 
     const baseState = liftBaseState({ categories, total: sanitizedTotal });
 
-    const categoryCatalog = derive(baseState, (state) => state.catalog);
+    const categoryCatalog = baseState.catalog;
     const overrides = cell<AllocationRecord | null>(null);
     const history = cell<string[]>(["Budget initialized"]);
     const lastAction = cell("Budget initialized");
@@ -496,15 +495,12 @@ export const budgetPlanner = pattern<BudgetPlannerArgs>(
       overrides,
     });
 
-    const categorySummary = derive(summary, (state) => state.categories);
-    const allocationView = derive(summary, (state) => state.allocations);
-    const allocatedTotal = derive(summary, (state) => state.totalAllocated);
-    const remainingBudget = derive(summary, (state) => state.remaining);
-    const overflowAmount = derive(summary, (state) => state.overflow);
-    const balanced = derive(
-      summary,
-      (state) => state.remaining <= 0.01 && state.overflow === 0,
-    );
+    const categorySummary = summary.categories;
+    const allocationView = summary.allocations;
+    const allocatedTotal = summary.totalAllocated;
+    const remainingBudget = summary.remaining;
+    const overflowAmount = summary.overflow;
+    const balanced = summary.remaining <= 0.01 && summary.overflow === 0;
 
     const summaryLabel = liftSummaryLabel({ total: sanitizedTotal, summary });
 

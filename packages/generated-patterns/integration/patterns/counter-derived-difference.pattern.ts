@@ -2,7 +2,6 @@ import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -178,10 +177,7 @@ export const counterWithDerivedDifference = pattern<DerivedDifferenceArgs>(
       secondary: secondaryValue,
     });
 
-    const differenceValue = derive(
-      differenceSummary,
-      (snapshot) => snapshot.difference,
-    );
+    const differenceValue = differenceSummary.difference;
     const summaryLabel =
       str`Difference ${differenceValue} (primary ${primaryValue}, secondary ${secondaryValue})`;
 

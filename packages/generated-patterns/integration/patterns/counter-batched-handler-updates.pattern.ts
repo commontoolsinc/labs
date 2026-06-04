@@ -1,8 +1,8 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -107,15 +107,14 @@ export const counterWithBatchedHandlerUpdates = pattern<BatchedCounterArgs>(
     const historyView = liftHistoryView(history);
     const noteView = liftNoteView(lastNote);
 
-    const lastTotal = derive(
-      { entries: historyView, current: currentValue },
-      ({ entries, current }) => {
-        if (entries.length === 0) {
-          return current;
-        }
-        return entries[entries.length - 1];
-      },
-    );
+    const lastTotal = computed(() => {
+      const entries = historyView;
+      const current = currentValue;
+      if (entries.length === 0) {
+        return current;
+      }
+      return entries[entries.length - 1];
+    });
 
     const summary =
       str`Processed ${processed} increments over ${batches} batches (${noteView})`;

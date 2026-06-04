@@ -25,7 +25,7 @@ export default pattern<{ count: number }>((state) => {
       expect(diagnostics.length).toBeGreaterThan(0);
       expect(
         diagnostics.some((d) =>
-          d.message.includes("OpaqueRef computation should use derive")
+          d.message.includes("OpaqueRef computation should use computed()")
         ),
       ).toBe(true);
     });
@@ -57,7 +57,7 @@ export default pattern<{ count: number; isActive: boolean }>((state) => {
   describe("debug logging", () => {
     it("logs transformation details", async () => {
       const logs: string[] = [];
-      const source = `import { pattern, derive, h, UI } from "commonfabric";
+      const source = `import { pattern, h, UI } from "commonfabric";
 
 export default pattern<{ count: number }>((state) => {
   return { [UI]: <div>{state.count + 1}</div> };

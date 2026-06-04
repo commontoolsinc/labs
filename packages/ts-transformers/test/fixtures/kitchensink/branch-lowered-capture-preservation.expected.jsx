@@ -97,6 +97,409 @@ interface Item {
     pinned?: boolean;
     allowMultiple: boolean;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    items: Item[];
+}, { entry: Item; index: number; isExpanded: boolean; isPinned: boolean; allowMultiple: boolean; }[]>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            }
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                note: {
+                    type: "string"
+                },
+                collapsed: {
+                    type: "boolean"
+                },
+                pinned: {
+                    type: "boolean"
+                },
+                allowMultiple: {
+                    type: "boolean"
+                }
+            },
+            required: ["allowMultiple"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "object",
+        properties: {
+            entry: {
+                $ref: "#/$defs/Item"
+            },
+            index: {
+                type: "number"
+            },
+            isExpanded: {
+                type: "boolean"
+            },
+            isPinned: {
+                type: "boolean"
+            },
+            allowMultiple: {
+                type: "boolean"
+            }
+        },
+        required: ["entry", "index", "isExpanded", "isPinned", "allowMultiple"]
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                note: {
+                    type: "string"
+                },
+                collapsed: {
+                    type: "boolean"
+                },
+                pinned: {
+                    type: "boolean"
+                },
+                allowMultiple: {
+                    type: "boolean"
+                }
+            },
+            required: ["allowMultiple"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((entry, index) => ({
+    entry,
+    index,
+    isExpanded: index === 0,
+    isPinned: entry.pinned || false,
+    allowMultiple: entry.allowMultiple,
+})));
+const __cfLift_2 = __cfHelpers.lift<{
+    entry: {
+        collapsed?: boolean | undefined;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                collapsed: {
+                    anyOf: [{
+                            type: "undefined"
+                        }, {
+                            type: "boolean"
+                        }]
+                }
+            }
+        }
+    },
+    required: ["entry"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ entry }) => !entry.collapsed);
+const __cfLift_3 = __cfHelpers.lift<{
+    entry: {
+        note?: string | undefined;
+    };
+}, { fontWeight: string; }>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                note: {
+                    type: "string"
+                }
+            }
+        }
+    },
+    required: ["entry"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        fontWeight: {
+            type: "string"
+        }
+    },
+    required: ["fontWeight"]
+} as const satisfies __cfHelpers.JSONSchema, ({ entry }) => ({
+    fontWeight: entry?.note ? "700" : "400",
+}));
+const __cfLift_4 = __cfHelpers.lift<{
+    entry: {
+        note?: string | undefined;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        entry: {
+            type: "object",
+            properties: {
+                note: {
+                    type: "string"
+                }
+            }
+        }
+    },
+    required: ["entry"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ entry }) => entry?.note || "Add note...");
+const __cfLift_5 = __cfHelpers.lift<{
+    isExpanded: boolean;
+}, boolean>({
+    type: "object",
+    properties: {
+        isExpanded: {
+            type: "boolean"
+        }
+    },
+    required: ["isExpanded"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded);
+const __cfLift_6 = __cfHelpers.lift<{
+    isExpanded: boolean;
+}, boolean>({
+    type: "object",
+    properties: {
+        isExpanded: {
+            type: "boolean"
+        }
+    },
+    required: ["isExpanded"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element", "entry");
+    const index = __cf_pattern_input.key("element", "index");
+    const isExpanded = __cf_pattern_input.key("element", "isExpanded");
+    const isPinned = __cf_pattern_input.key("element", "isPinned");
+    const allowMultiple = __cf_pattern_input.key("element", "allowMultiple");
+    const subPieces = __cf_pattern_input.key("params", "subPieces");
+    const editingNoteIndex = __cf_pattern_input.key("params", "editingNoteIndex");
+    const editingNoteText = __cf_pattern_input.key("params", "editingNoteText");
+    const settingsModuleIndex = __cf_pattern_input.key("params", "settingsModuleIndex");
+    const expandedIndex = __cf_pattern_input.key("params", "expandedIndex");
+    const trashedSubPieces = __cf_pattern_input.key("params", "trashedSubPieces");
+    return ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "null"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ entry: {
+            collapsed: entry.key("collapsed")
+        } }), <div>
+              {ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "null"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "null"
+                }, {}]
+        } as const satisfies __cfHelpers.JSONSchema, allowMultiple, <button type="button" onClick={openNoteEditor({
+                subPieces,
+                editingNoteIndex,
+                editingNoteText,
+                index,
+            })} style={__cfLift_3({ entry: entry })} title={__cfLift_4({ entry: entry })}>
+                  note
+                </button>, null)}
+              {__cfHelpers.when({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: ["boolean", "null"]
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({ isExpanded: isExpanded }), ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "null"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, true, <button type="button" onClick={openSettings({ settingsModuleIndex, index })}>
+                  settings
+                </button>, null))}
+              <button type="button" onClick={toggleExpanded({ expandedIndex, index })} style={{ background: __cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            "enum": ["a", "b"]
+        } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b") }}>
+                expand
+              </button>
+              {__cfHelpers.when({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "boolean"
+            }, {}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_6({ isExpanded: isExpanded }), <button type="button" onClick={trashSubPiece({
+            subPieces,
+            trashedSubPieces,
+            expandedIndex,
+            settingsModuleIndex,
+            index,
+        })}>
+                  trash
+                </button>)}
+            </div>, null).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                entry: {
+                    $ref: "#/$defs/Item"
+                },
+                index: {
+                    type: "number"
+                },
+                isExpanded: {
+                    type: "boolean"
+                },
+                isPinned: {
+                    type: "boolean"
+                },
+                allowMultiple: {
+                    type: "boolean"
+                }
+            },
+            required: ["entry", "index", "isExpanded", "isPinned", "allowMultiple"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                subPieces: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                editingNoteIndex: {
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
+                },
+                editingNoteText: {
+                    type: "string",
+                    asCell: ["readonly"]
+                },
+                settingsModuleIndex: {
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
+                },
+                expandedIndex: {
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
+                },
+                trashedSubPieces: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["subPieces", "editingNoteIndex", "editingNoteText", "settingsModuleIndex", "expandedIndex", "trashedSubPieces"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                note: {
+                    type: "string"
+                },
+                collapsed: {
+                    type: "boolean"
+                },
+                pinned: {
+                    type: "boolean"
+                },
+                allowMultiple: {
+                    type: "boolean"
+                }
+            },
+            required: ["allowMultiple"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "null"
+        }, {
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: branch-lowered-capture-preservation
 // Verifies: branch-lowered UI chunks inside a computed-array map preserve captured
 // params needed by nested ifElse branches, inline computed() attributes, and handlers
@@ -122,406 +525,10 @@ export default pattern((__cf_pattern_input) => {
     const settingsModuleIndex = new Writable<number | undefined>(undefined, {
         type: ["number", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("settingsModuleIndex", true);
-    const allEntries = __cfHelpers.lift<{
-        items: Item[];
-    }, { entry: Item; index: number; isExpanded: boolean; isPinned: boolean; allowMultiple: boolean; }[]>({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    $ref: "#/$defs/Item"
-                }
-            }
-        },
-        required: ["items"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    note: {
-                        type: "string"
-                    },
-                    collapsed: {
-                        type: "boolean"
-                    },
-                    pinned: {
-                        type: "boolean"
-                    },
-                    allowMultiple: {
-                        type: "boolean"
-                    }
-                },
-                required: ["allowMultiple"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "object",
-            properties: {
-                entry: {
-                    $ref: "#/$defs/Item"
-                },
-                index: {
-                    type: "number"
-                },
-                isExpanded: {
-                    type: "boolean"
-                },
-                isPinned: {
-                    type: "boolean"
-                },
-                allowMultiple: {
-                    type: "boolean"
-                }
-            },
-            required: ["entry", "index", "isExpanded", "isPinned", "allowMultiple"]
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    note: {
-                        type: "string"
-                    },
-                    collapsed: {
-                        type: "boolean"
-                    },
-                    pinned: {
-                        type: "boolean"
-                    },
-                    allowMultiple: {
-                        type: "boolean"
-                    }
-                },
-                required: ["allowMultiple"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((entry, index) => ({
-        entry,
-        index,
-        isExpanded: index === 0,
-        isPinned: entry.pinned || false,
-        allowMultiple: entry.allowMultiple,
-    })))({ items: items }).for("allEntries", true);
+    const allEntries = __cfLift_1({ items: items }).for("allEntries", true);
     return {
         [UI]: (<div>
-        {allEntries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const entry = __cf_pattern_input.key("element", "entry");
-                const index = __cf_pattern_input.key("element", "index");
-                const isExpanded = __cf_pattern_input.key("element", "isExpanded");
-                const isPinned = __cf_pattern_input.key("element", "isPinned");
-                const allowMultiple = __cf_pattern_input.key("element", "allowMultiple");
-                const subPieces = __cf_pattern_input.key("params", "subPieces");
-                const editingNoteIndex = __cf_pattern_input.key("params", "editingNoteIndex");
-                const editingNoteText = __cf_pattern_input.key("params", "editingNoteText");
-                const settingsModuleIndex = __cf_pattern_input.key("params", "settingsModuleIndex");
-                const expandedIndex = __cf_pattern_input.key("params", "expandedIndex");
-                const trashedSubPieces = __cf_pattern_input.key("params", "trashedSubPieces");
-                return ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "null"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "null"
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    entry: {
-                        collapsed?: boolean | undefined;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        entry: {
-                            type: "object",
-                            properties: {
-                                collapsed: {
-                                    anyOf: [{
-                                            type: "undefined"
-                                        }, {
-                                            type: "boolean"
-                                        }]
-                                }
-                            }
-                        }
-                    },
-                    required: ["entry"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ entry }) => !entry.collapsed)({ entry: {
-                        collapsed: entry.key("collapsed")
-                    } }), <div>
-              {ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{}, {
-                                type: "object",
-                                properties: {}
-                            }]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "null"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{
-                                type: "null"
-                            }, {}]
-                    } as const satisfies __cfHelpers.JSONSchema, allowMultiple, <button type="button" onClick={openNoteEditor({
-                            subPieces,
-                            editingNoteIndex,
-                            editingNoteText,
-                            index,
-                        })} style={__cfHelpers.lift<{
-                            entry: {
-                                note?: string | undefined;
-                            };
-                        }, { fontWeight: string; }>({
-                            type: "object",
-                            properties: {
-                                entry: {
-                                    type: "object",
-                                    properties: {
-                                        note: {
-                                            type: "string"
-                                        }
-                                    }
-                                }
-                            },
-                            required: ["entry"]
-                        } as const satisfies __cfHelpers.JSONSchema, {
-                            type: "object",
-                            properties: {
-                                fontWeight: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["fontWeight"]
-                        } as const satisfies __cfHelpers.JSONSchema, ({ entry }) => ({
-                            fontWeight: entry?.note ? "700" : "400",
-                        }))({ entry: entry })} title={__cfHelpers.lift<{
-                        entry: {
-                            note?: string | undefined;
-                        };
-                    }, string>({
-                        type: "object",
-                        properties: {
-                            entry: {
-                                type: "object",
-                                properties: {
-                                    note: {
-                                        type: "string"
-                                    }
-                                }
-                            }
-                        },
-                        required: ["entry"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, ({ entry }) => entry?.note || "Add note...")({ entry: entry })}>
-                  note
-                </button>, null)}
-              {__cfHelpers.when({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "null"
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: ["boolean", "null"]
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    isExpanded: boolean;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        isExpanded: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["isExpanded"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded)({ isExpanded: isExpanded }), ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "null"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "null"
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, true, <button type="button" onClick={openSettings({ settingsModuleIndex, index })}>
-                  settings
-                </button>, null))}
-              <button type="button" onClick={toggleExpanded({ expandedIndex, index })} style={{ background: __cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        "enum": ["a", "b"]
-                    } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b") }}>
-                expand
-              </button>
-              {__cfHelpers.when({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "boolean"
-                        }, {}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    isExpanded: boolean;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        isExpanded: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["isExpanded"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded)({ isExpanded: isExpanded }), <button type="button" onClick={trashSubPiece({
-                        subPieces,
-                        trashedSubPieces,
-                        expandedIndex,
-                        settingsModuleIndex,
-                        index,
-                    })}>
-                  trash
-                </button>)}
-            </div>, null).for("__patternResult", true);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            entry: {
-                                $ref: "#/$defs/Item"
-                            },
-                            index: {
-                                type: "number"
-                            },
-                            isExpanded: {
-                                type: "boolean"
-                            },
-                            isPinned: {
-                                type: "boolean"
-                            },
-                            allowMultiple: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["entry", "index", "isExpanded", "isPinned", "allowMultiple"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            subPieces: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            },
-                            editingNoteIndex: {
-                                anyOf: [{
-                                        type: "number"
-                                    }, {
-                                        type: "undefined"
-                                    }],
-                                asCell: ["readonly"]
-                            },
-                            editingNoteText: {
-                                type: "string",
-                                asCell: ["readonly"]
-                            },
-                            settingsModuleIndex: {
-                                anyOf: [{
-                                        type: "number"
-                                    }, {
-                                        type: "undefined"
-                                    }],
-                                asCell: ["readonly"]
-                            },
-                            expandedIndex: {
-                                anyOf: [{
-                                        type: "number"
-                                    }, {
-                                        type: "undefined"
-                                    }],
-                                asCell: ["readonly"]
-                            },
-                            trashedSubPieces: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            }
-                        },
-                        required: ["subPieces", "editingNoteIndex", "editingNoteText", "settingsModuleIndex", "expandedIndex", "trashedSubPieces"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            note: {
-                                type: "string"
-                            },
-                            collapsed: {
-                                type: "boolean"
-                            },
-                            pinned: {
-                                type: "boolean"
-                            },
-                            allowMultiple: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["allowMultiple"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        type: "null"
-                    }, {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {allEntries.mapWithPattern(__cfPattern_1, {
                 subPieces: subPieces,
                 editingNoteIndex: editingNoteIndex,
                 editingNoteText: editingNoteText,
@@ -529,7 +536,7 @@ export default pattern((__cf_pattern_input) => {
                 expandedIndex: expandedIndex,
                 trashedSubPieces: trashedSubPieces
             })}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",

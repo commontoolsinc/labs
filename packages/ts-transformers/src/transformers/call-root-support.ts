@@ -20,12 +20,17 @@ export type CallRootPolicyDecision =
   | { kind: "unsupported"; unsupportedKind: UnsupportedCallRootKind }
   | { kind: "none" };
 
+// NOTE (CT-1643): a former `"derive"` member was removed here. It was dead —
+// matched against `detectCallKind().kind`, which never returns "derive" (the
+// canonical lowered form is `kind: "lift-applied"`; CallKind has no derive kind).
+// Whether the lowered lift-applied form SHOULD be treated as a helper boundary
+// at expression sites is a separate, open question (see CT-1643 notes); removing
+// the dead entry is byte-identical and does not pre-judge that.
 export type ExpressionSiteHelperBoundaryKind =
   | "ifElse"
   | "when"
   | "unless"
   | "builder"
-  | "derive"
   | "pattern-tool";
 
 export type ExpressionSiteCallRootKind =

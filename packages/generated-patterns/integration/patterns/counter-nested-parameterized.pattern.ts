@@ -1,8 +1,8 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -194,11 +194,11 @@ export const counterNestedParameterized = pattern<NestedParameterizedArgs>(
 
     const children = liftChildren(sanitizedConfigs);
 
-    const childCount = derive(sanitizedConfigs, (entries) => entries.length);
+    const childCount = sanitizedConfigs.length;
 
-    const manifestLabels = derive(manifest, (records) => {
-      if (records.length === 0) return "none";
-      return records
+    const manifestLabels = computed(() => {
+      if (manifest.length === 0) return "none";
+      return manifest
         .map((record) => `${record.id}:${record.step}`)
         .join(", ");
     });

@@ -15,15 +15,20 @@ import type {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
+  getModernCellRepConfig,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import {
   getPersistentSchedulerStateConfig,
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
+import {
+  getEsmModuleLoaderConfig,
+  resetEsmModuleLoaderConfig,
+  setEsmModuleLoaderConfig,
+} from "./sandbox/esm-loader-config.ts";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -35,8 +40,9 @@ import type {
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
-import { type Cell, createCell } from "./cell.ts";
+import { type Cell, createCell, schemaCellScope } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
+import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
 import { Engine } from "./harness/index.ts";
 import {
@@ -169,12 +175,19 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
  */
 export interface ExperimentalOptions {
-  /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
-  modernDataModel?: boolean | undefined;
+  /** Enable the modern "cell representation" classes. */
+  modernCellRep?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
+  /**
+   * Load compiled patterns as a graph of per-module records through the SES
+   * Compartment module system (synchronous `importNow`) instead of evaluating
+   * one flattened AMD bundle. Default off; the AMD path remains the default.
+   * See docs/specs/module-loading.md (Phases 2–5).
+   */
+  esmModuleLoader?: boolean | undefined;
 }
 
 export interface RuntimeOptions {
@@ -263,6 +276,10 @@ export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
 
+function isMemorySpaceDID(value: string): boolean {
+  return /^did:[^:]+:.+/.test(value);
+}
+
 /**
  * Main Runtime class that orchestrates all services in the runner package.
  *
@@ -303,6 +320,8 @@ export class Runtime {
   readonly experimental: ExperimentalOptions;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
+  /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
+  private readonly spaceNameToDid = new Map<string, MemorySpace>();
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
@@ -310,9 +329,10 @@ export class Runtime {
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
-      modernDataModel: undefined,
+      modernCellRep: undefined,
       persistentSchedulerState: undefined,
       schedulerHistoricalMightWrite: undefined,
+      esmModuleLoader: undefined,
       ...options.experimental,
     };
 
@@ -326,19 +346,21 @@ export class Runtime {
       );
     }
 
-    // Propagate experimental flags to their ambient control points, then
-    // read back the effective state so `experimental.modernDataModel` reflects
-    // what is actually in effect (matters when the caller didn't pass an
-    // explicit value — without this, consumers like `createQueryResultProxy`
-    // see `undefined` and treat the runtime as legacy even when the global
-    // default is modern).
-    setDataModelConfig(this.experimental.modernDataModel);
-    this.experimental.modernDataModel = getDataModelConfig();
+    // Propagate experimental flags to their ambient control points, then read
+    // back the effective state so `experimental.*` reflects what is actually in
+    // effect (matters when the caller didn't pass an explicit value and the
+    // default happens to be `true`; without this, consumers would see
+    // `undefined` and probably get very confused).
+    setModernCellRepConfig(this.experimental.modernCellRep);
+    this.experimental.modernCellRep = getModernCellRepConfig();
     setPersistentSchedulerStateConfig(
       this.experimental.persistentSchedulerState,
     );
     this.experimental.persistentSchedulerState =
       getPersistentSchedulerStateConfig();
+    // Env-seeded default (CF_ESM_MODULE_LOADER) unless an explicit option is set.
+    setEsmModuleLoaderConfig(this.experimental.esmModuleLoader);
+    this.experimental.esmModuleLoader = getEsmModuleLoaderConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
@@ -515,8 +537,9 @@ export class Runtime {
     this.harness.dispose();
 
     // Reset experimental config to defaults.
-    resetDataModelConfig();
+    resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
+    resetEsmModuleLoaderConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -727,14 +750,19 @@ export class Runtime {
     cause: any,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
-    scope: NormalizedFullLink["scope"] = "space",
+    scope?: NormalizedFullLink["scope"],
   ): Cell<any> {
+    // Creating a cell uses the schema to seed the initial link scope: an
+    // explicit scope wins, otherwise a top-level schema scope, otherwise space.
+    // (Per-property/asCell scopes are not a top-level concern here; they are
+    // resolved during read/write, see data-updating.ts and link-resolution.ts.)
+    const effectiveScope = scope ?? schemaCellScope(schema) ?? "space";
     return this.getCellFromLink(
       {
         id: toURI(createRef({}, cause)),
         path: [],
         space,
-        scope,
+        scope: effectiveScope,
       },
       schema,
       tx,
@@ -910,6 +938,47 @@ export class Runtime {
       spaceCellSchema,
       tx,
     ) as Cell<SpaceCellContents>;
+  }
+
+  /**
+   * Returns the DID for a named `PatternFactory.inSpace("name")` target if it
+   * has already been resolved (or is itself a DID), otherwise `undefined`.
+   *
+   * Synchronous so the pattern builder can route a child result into the target
+   * space at graph-construction time. On a miss, the caller records the name as
+   * pending and the runner resolves it via {@link resolveSpaceName} before
+   * re-running the handler/action (see RetryImmediately).
+   */
+  resolveSpaceNameSync(name: string): MemorySpace | undefined {
+    if (isMemorySpaceDID(name)) return name as MemorySpace;
+    return this.spaceNameToDid.get(name);
+  }
+
+  /**
+   * Resolves a named `inSpace` target to a DID, caching the result.
+   *
+   * NOTE(#1): The derivation is intentionally name-based for now — `createSession`
+   * derives the space key from the name alone (the identity is ignored on the
+   * `spaceName` path), so equal names map to the same shared space across users.
+   * This is the deliberate "shared profile space" behaviour today; revisit once
+   * we can derive unique space DIDs from a string.
+   */
+  async resolveSpaceName(name: string): Promise<MemorySpace> {
+    const cached = this.resolveSpaceNameSync(name);
+    if (cached !== undefined) return cached;
+    const session = await createSession({
+      identity: this.storageManager.as as unknown as Identity,
+      spaceName: name,
+    });
+    // SECURITY INVARIANT: consume ONLY the resolved space DID. `createSession`
+    // may also derive a per-name space identity (private key); we must never
+    // adopt it as a signer here. Writes to the resolved space stay authorized
+    // as the active user (`storageManager.as`) and are gated per-space by the
+    // memory server's ACL, so resolving a name can never grant write access the
+    // caller does not already hold.
+    const did = session.space as MemorySpace;
+    this.spaceNameToDid.set(name, did);
+    return did;
   }
 
   // Convenience methods that delegate to the runner

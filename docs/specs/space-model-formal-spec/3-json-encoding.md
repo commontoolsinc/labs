@@ -349,7 +349,7 @@ for:
 - Re-wrapping unknown types using the `typeTag` preserved in
   `UnknownValue` and `ExplicitTagValue`.
 - Managing the class registry for deserialization of known `FabricInstance`
-  types (e.g., `FabricError`, `FabricMap`, `FabricSet`, `FabricRegExp`).
+  types (e.g., `FabricError`, `FabricMap`, `FabricSet`).
 - Providing a narrow `TypeHandlerCodec` view to type handlers during tree
   walking, exposing only `wrapTag()` and `getTagFor()`.
 

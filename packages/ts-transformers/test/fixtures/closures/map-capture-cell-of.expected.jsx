@@ -16,6 +16,55 @@ interface State {
         name: string;
     }>;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const counter = __cf_pattern_input.key("params", "counter");
+    return (<span>{item.key("name")} #{counter}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                counter: {
+                    type: "number",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["counter"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-capture-cell-of
 // Verifies: new Cell() variable closed over in .map() is captured with asCell schema annotation
 //   .map(fn) → .mapWithPattern(pattern(...), { counter: counter })
@@ -26,55 +75,7 @@ export default pattern((state) => {
     } as const satisfies __cfHelpers.JSONSchema).for("counter", true);
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const counter = __cf_pattern_input.key("params", "counter");
-                return (<span>{item.key("name")} #{counter}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            counter: {
-                                type: "number",
-                                asCell: ["readonly"]
-                            }
-                        },
-                        required: ["counter"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 counter: counter
             })}
       </div>),

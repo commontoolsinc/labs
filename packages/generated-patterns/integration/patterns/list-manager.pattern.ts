@@ -1,7 +1,7 @@
 import {
   Cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -48,10 +48,7 @@ const incrementItem = handler(
 export const listManager = pattern<ListManagerArgs>(
   ({ items }) => {
     const size = liftSize(items);
-    const names = derive(
-      items,
-      (collection) => collection.map((item) => item.label),
-    );
+    const names = computed(() => items.map((item) => item.label));
 
     return {
       summary: str`Items: ${size}`,

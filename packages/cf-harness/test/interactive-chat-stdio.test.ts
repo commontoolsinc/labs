@@ -995,6 +995,8 @@ Deno.test("interactive NDJSON transport accepts valid Browser Access leases", as
             leaseId: "lease-1",
             cdpUrl: "http://127.0.0.1:9222",
             owner: "loom",
+            profileMode: "transient",
+            accountAccess: "none",
           },
         },
       }),
@@ -1010,5 +1012,39 @@ Deno.test("interactive NDJSON transport accepts valid Browser Access leases", as
   assertEquals(
     response !== undefined && "ok" in response ? response.ok : false,
     true,
+  );
+});
+
+Deno.test("interactive NDJSON transport rejects invalid Browser Access profile mode", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-bad-browser-mode",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          browserAccess: {
+            type: HARNESS_BROWSER_ACCESS_LEASE_TYPE,
+            leaseId: "lease-1",
+            cdpUrl: "http://127.0.0.1:9222",
+            profileMode: "loggedout",
+          },
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output)[0];
+  assertEquals("ok" in response ? response.ok : true, false);
+  assertEquals(
+    "ok" in response && response.ok === false ? response.error.code : "",
+    "invalid_request",
   );
 });

@@ -7,6 +7,19 @@ cd "$SCRIPT_DIR/.."
 source "$SCRIPT_DIR/common/port-utils.sh"
 read_base_ports
 
+require_command() {
+    local command_name=$1
+    local install_hint=$2
+
+    if ! command -v "$command_name" &>/dev/null; then
+        echo "Error: $command_name is required but not found." >&2
+        if [[ -n "$install_hint" ]]; then
+            echo "       $install_hint" >&2
+        fi
+        exit 1
+    fi
+}
+
 # Default ports and offset
 PORT_OFFSET=${PORT_OFFSET:-0}
 SHELL_PORT=${SHELL_PORT:-}
@@ -14,6 +27,7 @@ TOOLSHED_PORT=${TOOLSHED_PORT:-}
 INSPECT=false
 INSPECT_BRK=false
 INSPECT_PORT=${INSPECT_PORT:-}
+LOCAL_DEV_STARTUP_TIMEOUT=${LOCAL_DEV_STARTUP_TIMEOUT:-120}
 
 # Parse command line arguments
 FORCE=false
@@ -91,10 +105,22 @@ INSPECT_PORT=${INSPECT_PORT:-$((BASE_INSPECTOR_PORT + PORT_OFFSET))}
 export SHELL_PORT
 export TOOLSHED_PORT
 
+require_command "deno" \
+    "Run 'mise install' from the repo root or install Deno before starting local dev."
+require_command "curl" \
+    "Install curl so startup can verify that local dev servers reached HTTP 200."
+
 KEEP_ALIVE=false
 if [[ -n "${CODEX_SANDBOX:-}" ]]; then
     KEEP_ALIVE=true
 fi
+
+SHELL_LOG="$SCRIPT_DIR/../packages/shell/local-dev-shell.log"
+TOOLSHED_LOG="$SCRIPT_DIR/../packages/toolshed/local-dev-toolshed.log"
+BG_LOG="$SCRIPT_DIR/../packages/background-charm-service/local-dev-bg.log"
+SHELL_PID=""
+TOOLSHED_PID=""
+BG_PID=""
 
 # Check if port is free; kill processes if --force, otherwise error
 check_port() {
@@ -124,17 +150,117 @@ check_port() {
 check_port "$TOOLSHED_PORT"
 check_port "$SHELL_PORT"
 
-# Start shell dev server in background
-cd packages/shell
-TOOLSHED_PORT="$TOOLSHED_PORT" deno task dev-local > local-dev-shell.log 2>&1 &
-SHELL_PID=$!
+show_recent_log() {
+    local name=$1
+    local log_file=$2
 
-# Wait a moment for shell to start
-sleep 2
+    if [[ -f "$log_file" ]]; then
+        echo "" >&2
+        echo "Last 40 lines from $name log ($log_file):" >&2
+        tail -n 40 "$log_file" >&2
+    fi
+}
+
+kill_port_listeners() {
+    local port=$1
+    local pids
+    pids=$(get_pids_on_port "$port")
+
+    for pid in $pids; do
+        kill "$pid" 2>/dev/null
+    done
+}
+
+cleanup_started_processes() {
+    if [[ -n "$BG_PID" ]]; then
+        kill "$BG_PID" 2>/dev/null
+    fi
+    if [[ -n "$TOOLSHED_PID" ]]; then
+        kill "$TOOLSHED_PID" 2>/dev/null
+    fi
+    if [[ -n "$SHELL_PID" ]]; then
+        kill "$SHELL_PID" 2>/dev/null
+    fi
+
+    kill_port_listeners "$TOOLSHED_PORT"
+    kill_port_listeners "$SHELL_PORT"
+}
+
+fail_startup() {
+    local message=$1
+
+    echo "Error: $message" >&2
+    cleanup_started_processes
+    show_recent_log "shell" "$SHELL_LOG"
+    show_recent_log "toolshed" "$TOOLSHED_LOG"
+    exit 1
+}
+
+ensure_process_running() {
+    local name=$1
+    local pid=$2
+    local log_file=$3
+    local process_state
+
+    if kill -0 "$pid" 2>/dev/null; then
+        process_state=$(ps -p "$pid" -o stat= 2>/dev/null)
+        if [[ "$process_state" != *Z* ]]; then
+            return
+        fi
+    fi
+
+    wait "$pid" 2>/dev/null
+    local exit_status=$?
+    echo "Error: $name exited before it became ready (exit $exit_status)." >&2
+    cleanup_started_processes
+    show_recent_log "$name" "$log_file"
+    exit 1
+}
+
+wait_for_http() {
+    local name=$1
+    local url=$2
+    local pid=$3
+    local log_file=$4
+    local deadline=$((SECONDS + LOCAL_DEV_STARTUP_TIMEOUT))
+    local remaining
+    local status
+
+    echo "Waiting for $name at $url..."
+    while (( SECONDS < deadline )); do
+        ensure_process_running "$name" "$pid" "$log_file"
+
+        remaining=$((deadline - SECONDS))
+        if (( remaining > 2 )); then
+            remaining=2
+        fi
+
+        status=$(
+            curl -s -o /dev/null -w "%{http_code}" --max-time "$remaining" \
+                "$url" 2>/dev/null
+        )
+        if [[ "$status" == "200" ]]; then
+            echo "  $name is ready."
+            return
+        fi
+
+        if (( SECONDS < deadline )); then
+            sleep 1
+        fi
+    done
+
+    fail_startup \
+        "$name did not become ready at $url within ${LOCAL_DEV_STARTUP_TIMEOUT}s."
+}
+
+# Start shell dev server in background
+cd "$SCRIPT_DIR/../packages/shell"
+TOOLSHED_PORT="$TOOLSHED_PORT" deno task dev-local > "$SHELL_LOG" 2>&1 &
+SHELL_PID=$!
 
 # Start toolshed dev server in background
 # We pass --port= as CLI arg because deno --watch doesn't pass env vars to subprocess
-cd ../toolshed
+cd "$SCRIPT_DIR/../packages/toolshed"
 WATCH_FLAG=""
 if [[ "$WATCH" == "true" ]]; then
     WATCH_FLAG="--watch"
@@ -148,8 +274,12 @@ if [[ "$INSPECT" == "true" ]]; then
     fi
 fi
 SHELL_URL="http://localhost:$SHELL_PORT" \
-    deno run --unstable-otel -A $INSPECT_FLAG $WATCH_FLAG --env-file=.env index.ts --port="$TOOLSHED_PORT" > local-dev-toolshed.log 2>&1 &
+    deno run --unstable-otel -A $INSPECT_FLAG $WATCH_FLAG \
+        --env-file=.env index.ts --port="$TOOLSHED_PORT" \
+        > "$TOOLSHED_LOG" 2>&1 &
 TOOLSHED_PID=$!
+
+wait_for_http "shell" "http://localhost:$SHELL_PORT" "$SHELL_PID" "$SHELL_LOG"
 
 # # Function to cleanup background processes
 # cleanup() {
@@ -160,8 +290,9 @@ TOOLSHED_PID=$!
 # # Set up trap to cleanup on script exit
 # trap cleanup EXIT INT TERM
 
-# Wait a moment for toolshed to start
-sleep 3
+wait_for_http \
+    "toolshed" "http://localhost:$TOOLSHED_PORT/_health" \
+    "$TOOLSHED_PID" "$TOOLSHED_LOG"
 
 # Print the toolshed URL on success (when not using --bg-updater, which prints after health check)
 if [[ "$BG_UPDATER" != "true" ]]; then
@@ -199,26 +330,17 @@ if [[ "$BG_UPDATER" == "true" ]]; then
         rm -f "$BG_PID_FILE"
     fi
 
-    # Wait for toolshed to be healthy before starting bg service
-    echo "  Waiting for toolshed to be ready..."
-    for i in $(seq 1 30); do
-        if curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:$TOOLSHED_PORT/_health" 2>/dev/null | grep -q "200"; then
-            echo "  Toolshed is ready!"
-            break
-        fi
-        if [[ $i -eq 30 ]]; then
-            echo "  Warning: Toolshed not ready after 30s, starting bg service anyway"
-        fi
-        sleep 1
-    done
+    echo "  Toolshed is ready."
 
     # Start the background service directly (not via deno task, for reliable PID tracking)
     cd "$SCRIPT_DIR/../packages/background-charm-service"
     OPERATOR_PASS="implicit trust" API_URL="http://localhost:$TOOLSHED_PORT" \
         deno run -A --unstable-worker-options src/main.ts \
-        > "$SCRIPT_DIR/../packages/background-charm-service/local-dev-bg.log" 2>&1 &
+        > "$BG_LOG" 2>&1 &
     BG_PID=$!
     cd "$SCRIPT_DIR/.."
+    sleep 2
+    ensure_process_running "background service" "$BG_PID" "$BG_LOG"
 
     # Save PID for stop script
     echo "$BG_PID" > "$BG_PID_FILE"

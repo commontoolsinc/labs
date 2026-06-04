@@ -475,12 +475,15 @@ for (const pathCount of PATH_COUNTS) {
   });
 }
 
+const benchDiagnosticsEnabled = Deno.env.get("BENCH_DIAGNOSTICS") === "1";
+
 addEventListener("unload", () => {
+  if (!benchDiagnosticsEnabled) return;
   if (benchmarkMetrics.size === 0) return;
 
-  console.log("\nScheduler observation persistence diagnostics:");
+  console.error("\nScheduler observation persistence diagnostics:");
   for (const [name, metrics] of benchmarkMetrics) {
-    console.log(
+    console.error(
       `- ${name}: runs=${metrics.runs}, paths=${metrics.pathCount}, ` +
         `activeSqlite=${formatBytes(metrics.activeSqliteBytes)} (${
           formatBytes(metrics.bytesPerRun)

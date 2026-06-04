@@ -7,7 +7,8 @@ export type CellBrand =
   | "stream"
   | "comparable"
   | "readonly"
-  | "writeonly";
+  | "writeonly"
+  | "sqlite";
 
 export type CellWrapperKind =
   | "OpaqueCell"
@@ -16,6 +17,7 @@ export type CellWrapperKind =
   | "ComparableCell"
   | "ReadonlyCell"
   | "WriteonlyCell"
+  | "SqliteDb"
   | "OpaqueRef"; // this last one may be obsolete.
 
 export interface CellWrapperInfo {
@@ -136,6 +138,8 @@ function brandToWrapperKind(brand: CellBrand): CellWrapperKind | undefined {
       return "ReadonlyCell";
     case "writeonly":
       return "WriteonlyCell";
+    case "sqlite":
+      return "SqliteDb";
     default:
       return undefined;
   }
@@ -158,6 +162,8 @@ export function wrapperKindToBrand(
       return "readonly";
     case "WriteonlyCell":
       return "writeonly";
+    case "SqliteDb":
+      return "sqlite";
     default:
       return undefined;
   }

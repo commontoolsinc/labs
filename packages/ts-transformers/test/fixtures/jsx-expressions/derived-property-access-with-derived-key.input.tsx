@@ -1,4 +1,4 @@
-import { Cell, derive, pattern, UI } from "commonfabric";
+import { Cell, computed, pattern, UI } from "commonfabric";
 
 interface Item {
   name: string;
@@ -16,12 +16,12 @@ interface Assignment {
 // FIXTURE: derived-property-access-with-derived-key
 // Verifies: .map() chains with derived keys and element access are fully transformed
 //   aisleNames.map(...)            → aisleNames.mapWithPattern(pattern(...), {captures})
-//   groupedByAisle[aisleName].map  → derive({groupedByAisle, aisleName}, ...).mapWithPattern(...)
+//   groupedByAisle[aisleName].map  → lift over {groupedByAisle, aisleName} then .mapWithPattern(...)
 // Context: CT-1036 -- nested map with derived object indexed by derived key, two levels deep
 export default pattern<{ items: Item[] }>(
   ({ items }) => {
-    // Create assignments with aisle data
-    const itemsWithAisles = derive({ items }, ({ items }) =>
+    // Create assignments with aisle data (whole-array map kept inside computed)
+    const itemsWithAisles = computed(() =>
       items.map((item, idx) => ({
         aisle: `Aisle ${(idx % 3) + 1}`,
         item: item,
@@ -29,7 +29,7 @@ export default pattern<{ items: Item[] }>(
     );
 
     // Group by aisle - returns Record<string, Assignment[]>
-    const groupedByAisle = derive({ itemsWithAisles }, ({ itemsWithAisles }) => {
+    const groupedByAisle = computed(() => {
       const groups: Record<string, Assignment[]> = {};
       for (const assignment of itemsWithAisles) {
         if (!groups[assignment.aisle]) {
@@ -41,9 +41,7 @@ export default pattern<{ items: Item[] }>(
     });
 
     // Derive sorted aisle names from grouped object
-    const aisleNames = derive({ groupedByAisle }, ({ groupedByAisle }) =>
-      Object.keys(groupedByAisle).sort()
-    );
+    const aisleNames = computed(() => Object.keys(groupedByAisle).sort());
 
     // The pattern from CT-1036:
     // - Map over derived keys (aisleNames)

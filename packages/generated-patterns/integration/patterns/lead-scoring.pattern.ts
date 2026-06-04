@@ -1,8 +1,8 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -611,17 +611,17 @@ export const leadScoring = pattern<LeadScoringArgs>(
 
     const totalScore = liftTotalScore(leadSummaries);
 
-    const signalTotals = derive(signalSummary, (list) => {
+    const signalTotals = computed(() => {
       const record: Record<string, number> = {};
-      for (const entry of list) {
+      for (const entry of signalSummary) {
         record[entry.signal] = entry.totalCount;
       }
       return record;
     });
 
-    const weightedSignalTotals = derive(signalSummary, (list) => {
+    const weightedSignalTotals = computed(() => {
       const record: Record<string, number> = {};
-      for (const entry of list) {
+      for (const entry of signalSummary) {
         record[entry.signal] = entry.weightedTotal;
       }
       return record;
@@ -631,15 +631,11 @@ export const leadScoring = pattern<LeadScoringArgs>(
 
     const signalCount = liftSignalCount(signalSummary);
 
-    const topLeadName = derive(
-      leadSummaries,
-      (list) => list.length > 0 ? list[0].name : "none",
-    );
+    const topLeadName = leadSummaries.length > 0
+      ? leadSummaries[0].name
+      : "none";
 
-    const topLeadScore = derive(
-      leadSummaries,
-      (list) => list.length > 0 ? list[0].score : 0,
-    );
+    const topLeadScore = leadSummaries.length > 0 ? leadSummaries[0].score : 0;
 
     const topScoreLabel = liftTopScoreLabel(topLeadScore);
 

@@ -17,6 +17,24 @@ interface MyEvent {
 interface State {
     value: Cell<string>;
 }
+const __cfHandler_1 = __cfHelpers.handler({
+    type: "object",
+    properties: {
+        data: {
+            type: "string"
+        }
+    },
+    required: ["data"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        value: {
+            type: "string",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["value"]
+} as const satisfies __cfHelpers.JSONSchema, (e, { value }) => value.set(e.data));
 // FIXTURE: action-with-event
 // Verifies: action() with an inline-annotated event parameter generates a typed event schema
 //   action((e: MyEvent) => value.set(e.data)) → handler(MyEvent schema, captureSchema, (e, { value }) => ...)({ value })
@@ -24,24 +42,7 @@ interface State {
 export default pattern((__cf_pattern_input) => {
     const value = __cf_pattern_input.key("value");
     return {
-        update: __cfHelpers.handler({
-            type: "object",
-            properties: {
-                data: {
-                    type: "string"
-                }
-            },
-            required: ["data"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                value: {
-                    type: "string",
-                    asCell: ["writeonly"]
-                }
-            },
-            required: ["value"]
-        } as const satisfies __cfHelpers.JSONSchema, (e, { value }) => value.set(e.data))({
+        update: __cfHandler_1({
             value: value
         }).for({ stream: ["__patternResult", "update"] }, true)
     };

@@ -14,11 +14,76 @@ const __cfAmdHooks = undefined;
 interface TagEvent {
     label: string;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    recentEvents: TagEvent[];
+}, boolean>({
+    type: "object",
+    properties: {
+        recentEvents: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["recentEvents"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ recentEvents }) => recentEvents.length === 0);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const event = __cf_pattern_input.key("element");
+    const idx = __cf_pattern_input.key("index");
+    return (<cf-hstack key={idx} gap="2">
+                <span>{event.key("label")}</span>
+              </cf-hstack>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/TagEvent"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        TagEvent: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: ternary-pure-jsx-map-branch
 // Verifies: a plain reactive array map inside a ternary JSX branch stays
-// pattern-lowered without wrapping the whole branch in extra derive noise.
+// pattern-lowered without wrapping the whole branch in extra lift-applied noise.
 //   recentEvents.length === 0 ? <span>...</span> : <div>{recentEvents.map(...)}</div>
-//     → ifElse(derive(length===0), <span>...</span>, <div>{recentEvents.mapWithPattern(...)}</div>)
+//     → ifElse(lift(...)(length===0), <span>...</span>, <div>{recentEvents.mapWithPattern(...)}</div>)
 // Context: implicit JSX ternary branch selection with a pure pattern-owned map
 //   in the false branch.
 export default pattern((__cf_pattern_input) => {
@@ -42,71 +107,8 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            recentEvents: TagEvent[];
-        }, boolean>({
-            type: "object",
-            properties: {
-                recentEvents: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    }
-                }
-            },
-            required: ["recentEvents"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ recentEvents }) => recentEvents.length === 0)({ recentEvents: recentEvents }), <span>No events yet</span>, <div>
-            {recentEvents.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const event = __cf_pattern_input.key("element");
-                const idx = __cf_pattern_input.key("index");
-                return (<cf-hstack key={idx} gap="2">
-                <span>{event.key("label")}</span>
-              </cf-hstack>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/TagEvent"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    TagEvent: {
-                        type: "object",
-                        properties: {
-                            label: {
-                                type: "string"
-                            }
-                        },
-                        required: ["label"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ recentEvents: recentEvents }), <span>No events yet</span>, <div>
+            {recentEvents.mapWithPattern(__cfPattern_1, {})}
           </div>)}
     </div>),
     });

@@ -234,15 +234,18 @@ function formatTimingDelta(label: string, delta?: TimingDelta): string | null {
   }`;
 }
 
+const benchDiagnosticsEnabled = Deno.env.get("BENCH_DIAGNOSTICS") === "1";
+
 addEventListener("unload", () => {
+  if (!benchDiagnosticsEnabled) return;
   if (timingSummaries.size === 0) return;
 
-  console.log("\nSynthetic scheduler timing summaries:");
+  console.error("\nSynthetic scheduler timing summaries:");
   for (const [benchmarkName, summary] of timingSummaries) {
-    console.log(`- ${benchmarkName}`);
+    console.error(`- ${benchmarkName}`);
     for (const [label] of timingKeys) {
       const line = formatTimingDelta(label, summary[label]);
-      if (line) console.log(`  ${line}`);
+      if (line) console.error(`  ${line}`);
     }
   }
 });

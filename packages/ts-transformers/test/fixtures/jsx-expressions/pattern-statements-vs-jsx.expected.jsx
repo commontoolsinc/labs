@@ -42,11 +42,95 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() - 1);
 });
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 1);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value - 1);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value * 2);
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        value: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value > 10);
 // FIXTURE: pattern-statements-vs-jsx
 // Verifies: only JSX-context expressions are transformed; statement-context expressions are left alone
 //   const next = state.value + 1    → NOT transformed (statement context)
-//   <p>{state.value + 1}</p>        → derive({value}, ({state}) => state.value + 1) (JSX context)
-//   state.value > 10 ? "High":"Low" → ifElse(derive(...), "High", "Low") (JSX context)
+//   <p>{state.value + 1}</p>        → lift(({state}) => state.value + 1)({ value }) (JSX context)
+//   state.value > 10 ? "High":"Low" → ifElse(lift(...)(...), "High", "Low") (JSX context)
 // Context: Ensures the transformer distinguishes between statement and JSX expression contexts
 export default pattern((state) => {
     return {
@@ -58,75 +142,15 @@ export default pattern((state) => {
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.key("value")}
           <br />
-          Next number: {__cfHelpers.lift<{
-            state: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 1)({ state: {
+          Next number: {__cfLift_1({ state: {
                 value: state.key("value")
             } })}
           <br />
-          Previous: {__cfHelpers.lift<{
-            state: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value - 1)({ state: {
+          Previous: {__cfLift_2({ state: {
                 value: state.key("value")
             } })}
           <br />
-          Doubled: {__cfHelpers.lift<{
-            state: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value * 2)({ state: {
+          Doubled: {__cfLift_3({ state: {
                 value: state.key("value")
             } })}
           <br />
@@ -138,27 +162,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["High", "Low"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                value: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value > 10)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_4({ state: {
                 value: state.key("value")
             } }), "High", "Low")}
         </p>

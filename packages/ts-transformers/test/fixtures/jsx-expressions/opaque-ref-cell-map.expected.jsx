@@ -141,10 +141,76 @@ const goToCharm = handler({
     console.log("goToCharm clicked");
     return navigateTo(charm);
 });
+const __cfLift_1 = __cfHelpers.lift<{
+    cellRef: unknown[];
+}, boolean>({
+    type: "object",
+    properties: {
+        cellRef: {
+            type: "array",
+            items: {
+                type: "unknown"
+            }
+        }
+    },
+    required: ["cellRef"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ cellRef }) => !cellRef?.length);
+const __cfLift_2 = __cfHelpers.lift<{
+    charm: any;
+}, any>({
+    type: "object",
+    properties: {
+        charm: true
+    },
+    required: ["charm"]
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ charm }) => charm[__cfHelpers.NAME]);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const charm = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return (<li>
+                <cf-button onClick={goToCharm({ charm })}>
+                  Go to Charm {index + 1}
+                </cf-button>
+                <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ charm: charm }), "Unnamed")}</span>
+              </li>);
+}, {
+    type: "object",
+    properties: {
+        element: true,
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: opaque-ref-cell-map
 // Verifies: a reactive factory result still rewrites JSX ifElse predicates after
 //           the forbidden OpaqueRef cast is removed
-//   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., derive(...), <div>, <ul>)
+//   ifElse(!cellRef?.length, <div>, <ul>) → ifElse(schema..., lift(...)(...), <div>, <ul>)
 //   cellRef.map((charm, index) => <li>...) → mapWithPattern(...) even with
 //     `as { cellRef: any[] }`, because the cast does not change the reactive origin
 // Context: Real-world pattern using Cell.for<any[]>(), handler, lift, and navigateTo
@@ -175,71 +241,8 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            cellRef: unknown[];
-        }, boolean>({
-            type: "object",
-            properties: {
-                cellRef: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    }
-                }
-            },
-            required: ["cellRef"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ cellRef }) => !cellRef?.length)({ cellRef: cellRef }), <div>No charms created yet</div>, <ul>
-            {cellRef.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const charm = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                return (<li>
-                <cf-button onClick={goToCharm({ charm })}>
-                  Go to Charm {index + 1}
-                </cf-button>
-                <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    charm: any;
-                }, any>({
-                    type: "object",
-                    properties: {
-                        charm: true
-                    },
-                    required: ["charm"]
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ charm }) => charm[__cfHelpers.NAME])({ charm: charm }), "Unnamed")}</span>
-              </li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: true,
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ cellRef: cellRef }), <div>No charms created yet</div>, <ul>
+            {cellRef.mapWithPattern(__cfPattern_1, {})}
           </ul>)}
 
         <cf-button onClick={createSimplePattern({ cellRef })}>

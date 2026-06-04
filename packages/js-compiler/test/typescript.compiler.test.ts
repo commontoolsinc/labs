@@ -73,6 +73,31 @@ describe("TypeScriptCompiler", () => {
     expect(compiled.sourceMap).toBeDefined();
   });
 
+  it("compileToModules emits per-module CommonJS for each source", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx":
+        "import { sub } from './math/subtract.ts';export const run = () => sub(10,2);export default run;",
+      "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
+      "/math/subtract.ts":
+        "import { add } from '../utils.ts';export const sub = (x:number,y:number)=>add(x,y*-1)",
+    });
+    const resolved = await compiler.resolveProgram(program);
+    const modules = compiler.compileToModules(resolved);
+
+    // One compiled CommonJS body per source file (no bundle).
+    expect(new Set(modules.keys())).toEqual(
+      new Set(["/main.tsx", "/utils.ts", "/math/subtract.ts"]),
+    );
+    const main = modules.get("/main.tsx")!;
+    expect(main.js).toContain('require("./math/subtract.ts")');
+    expect(main.js).toContain("exports.run");
+    expect(main.sourceMap).toBeDefined();
+    // No AMD wrapper / define() — this is bare CommonJS.
+    expect(main.js).not.toContain("define(");
+    expect(modules.get("/utils.ts")!.js).toContain("exports.add");
+  });
+
   it("Typechecks a runtime dependency, providing typedefs", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {

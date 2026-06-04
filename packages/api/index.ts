@@ -184,7 +184,8 @@ export type CellKind =
   | "stream"
   | "comparable"
   | "readonly"
-  | "writeonly";
+  | "writeonly"
+  | "sqlite";
 
 export type CellScope = "space" | "user" | "session";
 export type SchemaScope = CellScope | "any";
@@ -254,15 +255,12 @@ export interface IAnyCell<T> {}
 /**
  * Readable cells provide a view onto stored data.
  *
- * **Frozenness contract (modern data model only):** `get()` and `sample()`
+ * **Frozenness contract:** `get()` and `sample()`
  * return a JS Proxy over the stored value. Writes through the proxy are
- * rejected with a "read-only" runtime error under both flag states (this
- * is independent of the data-model flag — the proxy itself enforces
- * non-mutation). Under `modernDataModel: true`, the underlying stored
+ * rejected with a "read-only" runtime error. The underlying stored
  * data is additionally a deep-frozen `FabricValue` tree, so callers that
  * escape the proxy (e.g. via `getRaw()`) see frozen data without an
- * extra clone. Under `modernDataModel: false` (legacy), only the proxy
- * trap protects against mutation; the underlying data may be unfrozen.
+ * extra clone.
  *
  * Note: `Object.isFrozen(proxy)` reports `false` regardless of the
  * underlying state — that's a property of how JS Proxy reports
@@ -271,8 +269,7 @@ export interface IAnyCell<T> {}
 export interface IReadable<T> {
   /**
    * Read the cell's current value as a Proxy view. See the
-   * {@link IReadable} interface docs for the modern-mode frozenness
-   * contract.
+   * {@link IReadable} interface docs for the frozenness contract.
    */
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
@@ -295,6 +292,7 @@ export interface IReadable<T> {
  */
 export type MetaField =
   | "pattern"
+  | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "argument"
   | "internal"
   | "schema"
@@ -310,19 +308,16 @@ export interface IMetaCell {
 /**
  * Writable cells can update their value.
  *
- * **Frozenness contract (modern data model only):** Values passed into
- * `set()`, `update()`, and `push()` flow through a write-boundary
- * normalization step that — under `modernDataModel: true` — shallowly
- * freezes any plain unfrozen Object/Array levels it visits. Inputs that
- * are already deep-frozen valid `FabricValue` trees are accepted
- * identity-preservingly with no further cloning. Under
- * `modernDataModel: false` (legacy), no freezing happens at the write
- * boundary; storage handles its own frozenness invariants on commit.
+ * **Frozenness contract:** Values passed into `set()`, `update()`, and `push()`
+ * flow through a write-boundary normalization step that shallowly freezes any
+ * plain unfrozen Object/Array levels it visits. Inputs that are already
+ * deep-frozen valid `FabricValue` trees are accepted identity-preservingly with
+ * no further cloning.
  */
 export interface IWritable<T, C extends AnyBrandedCell<any>> {
   /**
    * Set the cell's value. See the {@link IWritable} interface docs for
-   * the modern-mode frozenness contract on the input.
+   * the frozenness contract on the input.
    */
   set(value: T | AnyCellWrapping<T>): C;
   /**
@@ -336,8 +331,8 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
   ): C;
   /**
    * Append one or more values to an array cell. See the
-   * {@link IWritable} interface docs for the modern-mode frozenness
-   * contract on the inputs.
+   * {@link IWritable} interface docs for the frozenness contract on the
+   * inputs.
    */
   push(
     this: IsThisArray,
@@ -1276,36 +1271,9 @@ export type Opaque<T> =
     : T);
 
 /**
- * Helper type to extract the innermost Cell type from any number of OpaqueRef wrappers.
- * UnwrapOpaqueRefLayers<Cell<T>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<Cell<T>>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<OpaqueRef<Cell<T>>>> = Cell<T>
- *
- * Support for nested OpaqueRef layers is limited to 4 levels.
- */
-type UnwrapOpaqueRefLayers4<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers3<U>
-  : T;
-
-type UnwrapOpaqueRefLayers3<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers2<U>
-  : T;
-
-type UnwrapOpaqueRefLayers2<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers1<U>
-  : T;
-
-type UnwrapOpaqueRefLayers1<T> = T extends OpaqueRef<infer U> ? U
-  : T;
-
-/**
  * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
  * wrapped in any number of OpaqueRef layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
  */
-type AnyCellWrappedInOpaqueRef<T> = UnwrapOpaqueRefLayers4<T> extends
-  BrandedCell<any, "cell"> ? UnwrapOpaqueRefLayers4<T>
-  : never;
-
 /**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
  * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
@@ -1384,6 +1352,7 @@ export type PatternFactory<T, R> =
   & toJSON
   & {
     asScope(scope: CellScope): PatternFactory<T, R>;
+    inSpace(space?: string | AnyCell<unknown>): PatternFactory<T, R>;
   };
 
 export type ModuleFactory<T, R> =
@@ -1547,6 +1516,7 @@ export type JSONSchemaObj = {
     readonly addIntegrity?: readonly ImmutableJSONValue[];
     readonly requiredIntegrity?: readonly ImmutableJSONValue[];
     readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly ownerPrincipal?: string | { readonly __ctCurrentPrincipal: true };
     readonly writeAuthorizedBy?:
       | readonly string[]
       | {
@@ -1970,9 +1940,13 @@ export interface LiftFunction {
   ): ModuleFactory<StripCell<T>, StripCell<R>>;
 }
 
-// Helper type to make non-Cell and non-Stream properties readonly in handler state
+// Helper type to make non-Cell and non-Stream properties readonly in handler state.
+// Cell/Stream/SqliteDb are passed through whole (they are handle interfaces with
+// methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
+// to map over).
 export type HandlerState<T> = T extends Cell<any> ? T
   : T extends Stream<any> ? T
+  : T extends SqliteDb<any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
@@ -1999,12 +1973,13 @@ export interface HandlerFunction {
 /**
  * ActionFunction creates a handler that doesn't use the state parameter.
  *
- * This is to handler as computed is to lift/derive:
+ * This is to handler as computed is to lift:
  * - User writes: action((e) => count.set(e.data))
  * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
- * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ * computed(() => expr) becomes a lift-applied computation with closure
+ * extraction.
  */
 export type ActionFunction = {
   // Overload 1: Zero-parameter callback returns Stream<void>
@@ -2012,48 +1987,6 @@ export type ActionFunction = {
   // Overload 2: Parameterized callback returns Stream<T>
   <T>(fn: (event: T) => void): Stream<T>;
 };
-
-/**
- * DeriveFunction creates a reactive computation that transforms input values.
- *
- * Special overload ordering is critical for correct type inference:
- *
- * 1. Boolean literal overload: Widens `OpaqueRef<true> | OpaqueRef<false>` to `boolean`
- *    - Required because TypeScript infers boolean cells as a union of literal types
- *    - Without this, the callback would get `true | false` instead of `boolean`
- * 2. Cell preservation overload: Keeps Cell types wrapped consistently
- *    - Prevents unwrapping of Cell<T> to T, maintaining consistent behavior
- *    - Whether Cell is passed directly or nested in objects, it stays wrapped
- *    - Example: derive(cell<number>(), (c) => ...) gives c: Cell<number>, not number
- * 3. Generic overload: Handles all other cases, unwrapping Opaque types
- *
- * Note: Schema-based overload is available when importing from "commonfabric/schema"
- *
- * @deprecated Use compute() instead
- */
-export interface DeriveFunction {
-  // Overload 1: Boolean literal union -> boolean
-  // Fixes: cell<boolean>() returns OpaqueRef<true> | OpaqueRef<false>
-  // Without this, callback gets (input: true | false) instead of (input: boolean)
-  <In extends boolean, Out>(
-    input: OpaqueRef<true> | OpaqueRef<false>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 2: Preserve Cell types - unwrap OpaqueRef layers but keep Cell
-  // Ensures consistent behavior: Cell<T> stays Cell<T> whether passed directly or in objects
-  // Handles: Cell<T>, OpaqueRef<Cell<T>>, OpaqueRef<OpaqueRef<Cell<T>>>, etc.
-  <In, Out>(
-    input: AnyCellWrappedInOpaqueRef<In>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 3: Generic fallback - unwraps all Opaque types
-  <In, Out>(
-    input: Opaque<In>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-}
 
 export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
 
@@ -2140,6 +2073,90 @@ export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
 
+// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+
+declare const __sqliteDb: unique symbol;
+/**
+ * Opaque database handle. Empty to pattern code; a cell reference to the runtime
+ * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
+ * / sqliteExecute / reactOn), never read it.
+ */
+export type SqliteDatabase = { readonly [__sqliteDb]: true };
+
+/** Imperative write on a SqliteDb handle: records a SQLite write onto the
+ *  current transaction so it commits atomically with surrounding cell writes
+ *  (see docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md). */
+export interface ISqliteExecutable {
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void;
+}
+
+/** Reactive read on a SqliteDb handle: builds a `sqliteQuery` node. `<Row>` is
+ *  lowered by the transformer to an injected result schema. */
+export interface ISqliteQueryable {
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+}
+
+/**
+ * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing ONLY
+ * the SQLite method surface (`.exec`/`.query`), not the general value-cell
+ * read/write API. In particular it deliberately does **not** extend
+ * `IReadable<T>`: `.get()`/`.sample()` are meaningless on an opaque DB handle
+ * (the handle ref is an internal detail; pattern code reads rows via `.query`),
+ * so omitting them keeps `db.get()` from type-checking. The handle is also not
+ * writable (you can't `.set()` a DB handle). The runtime still reads the raw
+ * handle internally via `getRaw()` to fold writes onto the transaction.
+ */
+export interface ISqliteDb<T = SqliteDatabase>
+  extends IAnyCell<T>, ISqliteExecutable, ISqliteQueryable {}
+
+export interface SqliteDb<T = SqliteDatabase>
+  extends BrandedCell<T, "sqlite">, ISqliteDb<T> {}
+
+/** A map of table name -> one-row JSON Schema (see `table()`). */
+export type SqliteTableSchemas = Record<string, JSONSchema>;
+
+/** Non-default database source. Cell-derived (default) needs no source; on-disk
+ *  databases are injected as a pattern input, not selected here. */
+export type SqliteDatabaseSource = {
+  vm: OpaqueRef<unknown>;
+  path: string;
+};
+
+export type SqliteDatabaseFunction = (
+  options?: { tables?: SqliteTableSchemas },
+  source?: SqliteDatabaseSource,
+) => OpaqueRef<SqliteDb>;
+
+export type SqliteQueryParams = {
+  db: Opaque<SqliteDatabase | SqliteDb>;
+  sql: string;
+  params?: ReadonlyArray<unknown> | Record<string, unknown>;
+  reactOn?: unknown;
+};
+export type SqliteQueryFunction = <Row = Record<string, unknown>>(
+  params: Opaque<SqliteQueryParams>,
+) => OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
+
+// Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
+// folds a `sqlite` op into the caller's commit (atomic with cell writes). There
+// is no standalone reactive sqliteExecute builder.
+
+/** Column spec for `table()`: a shorthand SQL type string or a column schema. */
+export type SqliteColumnSpec = string | JSONSchema;
+export type SqliteTableFunction = (
+  columns: Record<string, SqliteColumnSpec>,
+) => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+
 export type WishTag = `/${string}` | `#${string}`;
 
 export type DID = `did:${string}:${string}`;
@@ -2150,10 +2167,11 @@ export type WishParams = {
   context?: Record<string, any>;
   schema?: JSONSchema;
   /**
-   * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space).
+   * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space),
+   * "profile" = current user's profile elements.
    * Default (undefined) = favorites only for backward compatibility.
    */
-  scope?: (DID | "~" | ".")[];
+  scope?: (DID | "~" | "." | "profile")[];
   /**
    * When true, skip the suggestion/picker UI pattern (suggestion.tsx).
    * Multiple candidates are returned as-is without disambiguation.
@@ -2185,16 +2203,49 @@ export declare const DEFAULT_MARKER: unique symbol;
 
 type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
 
+// True only for the empty tuple `[]` (a length-0 tuple), false for general
+// arrays like `string[]` (whose `length` is the wide `number`) and non-empty
+// tuples. Used by Default<> to special-case `Default<[]>` (see below).
+type IsEmptyTuple<T> = T extends readonly unknown[]
+  ? number extends T["length"] ? false
+  : T["length"] extends 0 ? true
+  : false
+  : false;
+
 // Default type for specifying default values in type definitions.
 // The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
 // have runtime-provided defaults and make them non-optional in pattern bodies.
 // Detection uses conditional type inference (not keyof) for performance.
 // Nullish-only defaults need a standalone marker because `null & Brand` and
 // `undefined & Brand` collapse to `never`.
-export type Default<T, V extends T = T> =
-  | ([T] extends [null | undefined] ? DefaultMarker<T>
-    : T & DefaultMarker<T>)
-  | T;
+//
+// Empty-tuple special case (CT-1640): for `Default<[]>` we keep ONLY the branded
+// arm and drop the bare `| T` arm. Without this, `Default<[]>` would contribute a
+// bare `[]` (i.e. `never[]`) member; in the documented `T[] | Default<[]>` shape
+// that bare member survives `.get()`'s brand-stripping, leaving `T[] | never[]`,
+// and TypeScript intersects parameter-position element types across the union so
+// `.includes(x)`/`.indexOf(x)` collapse their parameter to `never`. Dropping the
+// bare arm lets the sibling `T[]` member supply the value type while the brand is
+// still present for RequireDefaults<> detection. (The lone `Default<[]>` form —
+// no sibling array — is not used in practice; the docs always pair it as
+// `T[] | Default<[]>`.)
+//
+// Why ONLY the empty tuple, and not all tuples: a non-empty literal-tuple default
+// in a union (e.g. `string[] | Default<["seed"]>`) also narrows parameter-position
+// methods — but to the literal element type, which is a legible error, not the
+// confusing `never`. More importantly, the empty tuple is the unique tuple that
+// can never be a legitimate *standalone* field type, so dropping its plain arm is
+// unconditionally safe. Generalizing to all tuples would collapse a standalone
+// tuple default like `Default<[string, number], ["a", 0]>` to `never` (the lone
+// branded arm strips away), breaking that contract. Authors who want an array
+// field with an empty-ish/seed default and a precise element type should use the
+// two-arg form `Default<string[], []>` (T = the array, not the tuple).
+export type Default<T, V extends T = T> = IsEmptyTuple<T> extends true
+  ? T & DefaultMarker<T>
+  :
+    | ([T] extends [null | undefined] ? DefaultMarker<T>
+      : T & DefaultMarker<T>)
+    | T;
 
 /**
  * Marker for partial, recursive object defaults in `T | DeepDefault<V>` schema
@@ -2375,8 +2426,6 @@ export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;
-/** @deprecated Use compute() instead */
-export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
@@ -2391,6 +2440,10 @@ export declare const fetchData: FetchDataFunction;
 export declare const fetchProgram: FetchProgramFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;
+export declare const sqliteDatabase: SqliteDatabaseFunction;
+export declare const sqliteQuery: SqliteQueryFunction;
+export declare const table: SqliteTableFunction;
+export declare const cfLink: SqliteCfLinkFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;

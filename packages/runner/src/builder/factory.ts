@@ -16,7 +16,6 @@ import {
   FS,
   ID,
   ID_FIELD,
-  isPattern,
   NAME,
   schema as schemaIdentity,
   SELF,
@@ -26,7 +25,7 @@ import {
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
-import { action, byRef, computed, derive, handler, lift } from "./module.ts";
+import { action, byRef, computed, handler, lift } from "./module.ts";
 import {
   compileAndRun,
   fetchData,
@@ -38,16 +37,20 @@ import {
   llmDialog,
   navigateTo,
   patternTool,
+  sqliteDatabase,
+  sqliteQuery,
   str,
   streamData,
   unless,
   when,
   wish,
 } from "./built-in.ts";
+import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
 import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
+import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -112,10 +115,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     trustValue(
       (computed as (...args: any[]) => unknown)(...args),
     )) as typeof computed;
-  const trustedDerive = ((...args: any[]) =>
-    trustValue(
-      (derive as (...args: any[]) => unknown)(...args),
-    )) as typeof derive;
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
@@ -129,9 +128,13 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   // instantiated. This way they get saved with a way to rehydrate them.
   const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
     for (const [value, program] of exports) {
-      if (isPattern(value)) {
-        // This will associate the program with the pattern
-        value.program = program;
+      // `isTrustedPattern` (not the structural `isPattern`): only a value the
+      // trusted builder produced may acquire a rehydration program, so a
+      // `__cf_data`-forged pattern-shaped export cannot launder trust metadata.
+      if (isTrustedPattern(value)) {
+        // Associate the program with the pattern via the side-table so it works
+        // even when the exported pattern has been frozen by the loader.
+        setPatternProgram(value, program);
       }
     }
   };
@@ -145,7 +148,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     lift: trustedLift,
     handler: trustedHandler,
     action,
-    derive: trustedDerive,
     computed: trustedComputed,
 
     // Built-in modules
@@ -161,6 +163,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     fetchProgram,
     streamData,
     compileAndRun,
+    sqliteDatabase,
+    sqliteQuery,
+    table,
+    cfLink,
     navigateTo,
     wish,
 

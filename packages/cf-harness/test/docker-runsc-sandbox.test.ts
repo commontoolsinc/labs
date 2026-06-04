@@ -198,6 +198,43 @@ Deno.test("resolveDockerRunscSandboxConfig normalizes a Fabric FUSE mount", () =
   }]);
 });
 
+Deno.test("resolveDockerRunscSandboxConfig normalizes host bind mounts", () => {
+  const config = resolveDockerRunscSandboxConfig({
+    workspaceHostPath: "/host/project",
+    additionalMounts: [{
+      kind: "host-bind",
+      name: "file-cabinet",
+      hostPath: "/host/File Cabinet",
+      sandboxPath: "/file-cabinet/",
+    }],
+  });
+
+  assertEquals(config.additionalMounts, [{
+    kind: "host-bind",
+    name: "file-cabinet",
+    hostPath: "/host/File Cabinet",
+    sandboxPath: "/file-cabinet",
+    readOnly: true,
+  }]);
+});
+
+Deno.test("resolveDockerRunscSandboxConfig rejects empty host bind names", () => {
+  assertThrows(
+    () =>
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        additionalMounts: [{
+          kind: "host-bind",
+          name: "",
+          hostPath: "/host/data",
+          sandboxPath: "/data",
+        }],
+      }),
+    Error,
+    "host-bind name must not be empty",
+  );
+});
+
 Deno.test("resolveDockerRunscSandboxConfig rejects overlapping sandbox roots", () => {
   assertThrows(
     () =>
@@ -581,8 +618,18 @@ Deno.test("DockerRunscSandboxRuntime mounts Fabric separately and accepts Fabric
 
   const description = runtime.describe();
   assertEquals(description.cfc?.mounts, [
-    { kind: "workspace", sandboxPath: "/workspace", readOnly: false },
-    { kind: "fabric-fuse", sandboxPath: "/fabric", readOnly: true },
+    {
+      kind: "workspace",
+      hostPath: "/host/project",
+      sandboxPath: "/workspace",
+      readOnly: false,
+    },
+    {
+      kind: "fabric-fuse",
+      hostPath: "/tmp/cf-fuse",
+      sandboxPath: "/fabric",
+      readOnly: true,
+    },
   ]);
 
   await runtime.run({
@@ -605,6 +652,59 @@ Deno.test("DockerRunscSandboxRuntime mounts Fabric separately and accepts Fabric
     "type=bind,src=/tmp/cf-fuse,dst=/fabric,readonly",
     "-w",
     "/fabric/home",
+    "sandbox:latest",
+    "/bin/pwd",
+  ]);
+});
+
+Deno.test("DockerRunscSandboxRuntime mounts host bind roots with read/write modes", async () => {
+  const runner = new FakeProcessRunner(dockerLifecycleResults({ stdout: "" }));
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      image: "sandbox:latest",
+      additionalMounts: [{
+        kind: "host-bind",
+        name: "file-cabinet",
+        hostPath: "/host/File Cabinet",
+        sandboxPath: "/file-cabinet",
+        readOnly: false,
+      }],
+    }),
+    runner,
+  );
+
+  assertEquals(runtime.isPathWithinWorkspace("/file-cabinet/Inbox"), false);
+  assertEquals(runtime.isPathWithinAllowedRoots("/file-cabinet/Inbox"), true);
+  assertEquals(runtime.describe().cfc?.mounts?.[1], {
+    kind: "host-bind",
+    name: "file-cabinet",
+    hostPath: "/host/File Cabinet",
+    sandboxPath: "/file-cabinet",
+    readOnly: false,
+    mode: "writable",
+  });
+
+  await runtime.run({
+    argv: ["/bin/pwd"],
+    cwd: "/file-cabinet",
+  });
+
+  assertEquals(runner.requests[0]?.args, [
+    "create",
+    "--runtime",
+    "runsc-cfc",
+    "--network",
+    "bridge",
+    ...(runtime.config.containerUser !== undefined
+      ? ["--user", runtime.config.containerUser]
+      : []),
+    "--mount",
+    "type=bind,src=/host/project,dst=/workspace",
+    "--mount",
+    "type=bind,src=/host/File Cabinet,dst=/file-cabinet",
+    "-w",
+    "/file-cabinet",
     "sandbox:latest",
     "/bin/pwd",
   ]);

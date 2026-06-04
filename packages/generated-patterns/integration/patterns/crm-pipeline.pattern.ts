@@ -1,8 +1,8 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -481,30 +481,24 @@ export const crmPipeline = pattern<PipelineArgs>(
 
     const defaultAmountValue = liftSanitizeDefaultAmount(defaultAmount);
 
-    const dealView = derive(
-      { deals, stages: stageList },
-      ({ deals, stages }) => {
-        const stagesValue = ensureStages(stages);
-        return sanitizeDeals(deals, stagesValue);
-      },
-    );
+    const dealView = computed(() => {
+      const stagesValue = ensureStages(stageList);
+      return sanitizeDeals(deals, stagesValue);
+    });
 
-    const totals = derive(
-      { deals: dealView, stages: stageList },
-      ({ deals, stages }) => {
-        const stagesValue = ensureStages(stages);
-        const dealsValue = Array.isArray(deals) ? deals : [];
-        const result = computeStageTotals(stagesValue, dealsValue);
-        return result;
-      },
-    );
+    const totals = computed(() => {
+      const stagesValue = ensureStages(stageList);
+      const dealsValue = Array.isArray(dealView) ? dealView : [];
+      const result = computeStageTotals(stagesValue, dealsValue);
+      return result;
+    });
 
-    const stageStats = derive(totals, (value) => value.stats);
-    const totalForecast = derive(totals, (value) => value.weightedTotal);
-    const openPipeline = derive(totals, (value) => value.openTotal);
-    const stageForecastRecord = derive(stageStats, buildForecastRecord);
-    const stageCount = derive(stageStats, (stats) => stats.length);
-    const dealCount = derive(dealView, (list) => list.length);
+    const stageStats = totals.stats;
+    const totalForecast = totals.weightedTotal;
+    const openPipeline = totals.openTotal;
+    const stageForecastRecord = buildForecastRecord(stageStats);
+    const stageCount = stageStats.length;
+    const dealCount = dealView.length;
 
     const formattedForecast = liftFormatCurrency(totalForecast);
     const formattedOpen = liftFormatCurrency(openPipeline);

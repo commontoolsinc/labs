@@ -16,7 +16,6 @@ import type {
   CfDataFunction,
   CompileAndRunFunction,
   ComputedFunction,
-  DeriveFunction,
   EqualsFunction,
   FetchDataFunction,
   FetchProgramFunction,
@@ -45,6 +44,10 @@ import type {
   SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
+  SqliteCfLinkFunction,
+  SqliteDatabaseFunction,
+  SqliteQueryFunction,
+  SqliteTableFunction,
   StreamDataFunction,
   StrFunction,
   UiActionProps,
@@ -62,7 +65,6 @@ import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
-import { type RuntimeProgram } from "../harness/types.ts";
 import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
@@ -199,6 +201,8 @@ declare module "@commonfabric/api" {
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
     /** Input paths whose writable cells should become materializer envelopes */
     materializerWriteInputPaths?: readonly (readonly string[])[];
+    /** Run this module's result in a specific space. */
+    targetSpace?: MemorySpace;
   }
 }
 
@@ -218,7 +222,6 @@ export type Node = {
 
 // Used to get back to original pattern from a JSONified representation.
 export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
-export const unsafe_verifiedLoadId = Symbol("unsafe_verifiedLoadId");
 export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
 
 declare module "@commonfabric/api" {
@@ -229,9 +232,11 @@ declare module "@commonfabric/api" {
     initial?: JSONValue;
     result: JSONValue;
     nodes: Node[];
-    program?: RuntimeProgram;
+    // NOTE: `program` (rehydration source) and the verified-load id are no
+    // longer stored on the pattern object — they live in WeakMaps in
+    // ./pattern-metadata.ts so exported patterns can be frozen. Use
+    // get/setPatternProgram and get/setVerifiedLoadId.
     [unsafe_originalPattern]?: Pattern;
-    [unsafe_verifiedLoadId]?: string;
     [unsafe_parentPattern]?: Pattern;
   }
 }
@@ -273,6 +278,14 @@ export type Frame = {
   opaqueRefs: Set<OpaqueRef<any>>;
   unsafe_binding?: UnsafeBinding;
   sourceLocationContext?: SourceLocationContext;
+  /**
+   * Named/anonymous `PatternFactory.inSpace(...)` targets encountered during
+   * this frame whose space DID was not yet cached. The runner resolves these
+   * after the run and re-runs (see RetryImmediately).
+   */
+  pendingSpaceNames?: Set<string>;
+  /** Per-frame counter giving each anonymous `inSpace()` call a stable name. */
+  inSpaceCounter?: number;
 };
 
 // Builder functions interface
@@ -285,7 +298,6 @@ export interface BuilderFunctionsAndConstants {
   lift: LiftFunction;
   handler: HandlerFunction;
   action: ActionFunction;
-  derive: DeriveFunction;
   computed: ComputedFunction;
 
   // Built-in modules
@@ -301,6 +313,10 @@ export interface BuilderFunctionsAndConstants {
   fetchProgram: FetchProgramFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;
+  sqliteDatabase: SqliteDatabaseFunction;
+  sqliteQuery: SqliteQueryFunction;
+  table: SqliteTableFunction;
+  cfLink: SqliteCfLinkFunction;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
 

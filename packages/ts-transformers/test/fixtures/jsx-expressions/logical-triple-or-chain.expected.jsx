@@ -11,6 +11,42 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    primary: __cfHelpers.Cell<string>;
+    secondary: __cfHelpers.Cell<string>;
+}, number>({
+    type: "object",
+    properties: {
+        primary: {
+            type: "string",
+            asCell: ["readonly"]
+        },
+        secondary: {
+            type: "string",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["primary", "secondary"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ primary, secondary }) => primary.get().length || secondary.get().length);
+const __cfLift_2 = __cfHelpers.lift<{
+    items: __cfHelpers.Cell<string[]>;
+}, number | undefined>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["number", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get()[0]?.length || items.get()[1]?.length);
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
 // FIXTURE: logical-triple-or-chain
@@ -38,25 +74,7 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            primary: __cfHelpers.Cell<string>;
-            secondary: __cfHelpers.Cell<string>;
-        }, number>({
-            type: "object",
-            properties: {
-                primary: {
-                    type: "string",
-                    asCell: ["readonly"]
-                },
-                secondary: {
-                    type: "string",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["primary", "secondary"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ primary, secondary }) => primary.get().length || secondary.get().length)({
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
             primary: primary,
             secondary: secondary
         }), "no content")}</span>
@@ -68,23 +86,7 @@ export default pattern((_state) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: __cfHelpers.Cell<string[]>;
-        }, number | undefined>({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        type: "string"
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["items"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["number", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get()[0]?.length || items.get()[1]?.length)({ items: items }), 0)}</span>
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ items: items }), 0)}</span>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

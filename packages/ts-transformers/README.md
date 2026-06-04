@@ -104,13 +104,20 @@ CastValidation
 → OpaqueGetValidation
 → PatternContextValidation
 → JsxExpressionSiteRouter
-→ Computed
+→ LiftLowering
 → Closure
 → PatternOwnedExpressionSiteLowering
 → HelperOwnedExpressionSiteLowering
-→ CapabilityLowering
+→ WriteAuthorizedByValidation
+→ PatternCallbackLowering
+→ BuilderCallbackHoisting
 → SchemaInjection
+→ LiftHoisting
 → SchemaGenerator
+→ ReactiveVariableFor
+→ ModuleScopeShadowing
+→ ModuleScopeCfData
+→ ModuleScopeFunctionHardening
 ```
 
 The exact current order and behavior are documented normatively in

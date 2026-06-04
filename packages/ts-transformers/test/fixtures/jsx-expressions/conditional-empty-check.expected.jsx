@@ -11,9 +11,26 @@ import { cell, NAME, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    items: __cfHelpers.Cell<string[]>;
+}, boolean>({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["items"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ items }) => !items.get().length);
 // FIXTURE: conditional-empty-check
-// Verifies: !cell.get().length && <JSX> is transformed to when() with derive() predicate
-//   !items.get().length && <span> → when(derive({items}, ({items}) => !items.get().length), <span>)
+// Verifies: !cell.get().length && <JSX> is transformed to when() with a lift-applied predicate
+//   !items.get().length && <span> → when(lift(({items}) => !items.get().length)({items}), <span>)
 // Context: Negated length check on a cell array used as conditional guard
 export default pattern(() => {
     const items = cell<string[]>([], {
@@ -39,23 +56,7 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: __cfHelpers.Cell<string[]>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["items"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => !items.get().length)({ items: items }), <span>No items</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ items: items }), <span>No items</span>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

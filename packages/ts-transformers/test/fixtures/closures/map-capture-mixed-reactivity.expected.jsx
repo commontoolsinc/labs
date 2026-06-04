@@ -17,6 +17,63 @@ interface State {
     }>;
     threshold: number;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const label = __cf_pattern_input.params.label;
+    const derived = __cf_pattern_input.key("params", "derived");
+    const limit = __cf_pattern_input.key("params", "limit");
+    return (<span>{label}: {item.key("value")} / {derived} / {limit}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                derived: {
+                    type: "number"
+                },
+                limit: {
+                    type: "number",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["label", "derived", "limit"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-capture-mixed-reactivity
 // Verifies: captures of different reactivity kinds are annotated distinctly in the schema
 //   label (plain string) → params.label (type: "string", accessed via .params)
@@ -31,63 +88,7 @@ export default pattern((state) => {
     const derived = state.key("threshold");
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const label = __cf_pattern_input.params.label;
-                const derived = __cf_pattern_input.key("params", "derived");
-                const limit = __cf_pattern_input.key("params", "limit");
-                return (<span>{label}: {item.key("value")} / {derived} / {limit}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["value"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            label: {
-                                type: "string"
-                            },
-                            derived: {
-                                type: "number"
-                            },
-                            limit: {
-                                type: "number",
-                                asCell: ["cell"]
-                            }
-                        },
-                        required: ["label", "derived", "limit"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 label: label,
                 derived: derived,
                 limit: limit

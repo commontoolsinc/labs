@@ -20,124 +20,126 @@ interface State {
     prefix: string;
     suffix: string;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        prefix: string;
+        suffix: string;
+    };
+    item: {
+        name: string;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                prefix: {
+                    type: "string"
+                },
+                suffix: {
+                    type: "string"
+                }
+            },
+            required: ["prefix", "suffix"]
+        },
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    },
+    required: ["state", "item"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>{__cfLift_1({
+        state: {
+            prefix: state.key("prefix"),
+            suffix: state.key("suffix")
+        },
+        item: {
+            name: item.key("name")
+        }
+    })}</div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        prefix: {
+                            type: "string"
+                        },
+                        suffix: {
+                            type: "string"
+                        }
+                    },
+                    required: ["prefix", "suffix"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-template-literal
 // Verifies: .map() on reactive array is transformed when callback uses a template literal with captures
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {prefix, suffix}})
-//   `${state.prefix} ${item.name} ${state.suffix}` → derive() wrapping the template
+//   `${state.prefix} ${item.name} ${state.suffix}` → lift-applied computation wrapping the template
 // Context: Template literal interpolations reference both element and captured state properties
 export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Template literal with captures */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<div>{__cfHelpers.lift<{
-                    state: {
-                        prefix: string;
-                        suffix: string;
-                    };
-                    item: {
-                        name: string;
-                    };
-                }, string>({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                prefix: {
-                                    type: "string"
-                                },
-                                suffix: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["prefix", "suffix"]
-                        },
-                        item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["state", "item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)({
-                    state: {
-                        prefix: state.key("prefix"),
-                        suffix: state.key("suffix")
-                    },
-                    item: {
-                        name: item.key("name")
-                    }
-                })}</div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    prefix: {
-                                        type: "string"
-                                    },
-                                    suffix: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["prefix", "suffix"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     prefix: state.key("prefix"),
                     suffix: state.key("suffix")

@@ -21,6 +21,9 @@ declare interface Stream<T> extends BrandedCell<T, "stream"> {}
 declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
 declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
 declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
+declare type SqliteDatabase = { readonly __sqliteDb: true };
+declare interface SqliteDb<T = SqliteDatabase>
+  extends BrandedCell<T, "sqlite"> {}
 
 declare const SCOPE_BRAND: unique symbol;
 declare type PerSpace<T> = T & { readonly [SCOPE_BRAND]?: "space" };

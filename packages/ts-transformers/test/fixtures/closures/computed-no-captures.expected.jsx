@@ -11,13 +11,12 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift(false, () => 42);
 // FIXTURE: computed-no-captures
-// Verifies: computed(() => expr) with no external captures is transformed to derive() with empty captures
-//   computed(() => 42) → derive({ type: "object", properties: {} }, resultSchema, {}, () => 42)
-// Context: The capture schema has no properties and the captures object is empty {}.
-//   The callback parameter list is also empty (no destructuring needed).
+// Verifies: computed(() => expr) with no external captures is transformed to
+// lift(false, fn)() with no input object.
 export default pattern(() => {
-    const result = __cfHelpers.lift(false, () => 42)().for("result", true);
+    const result = __cfLift_1().for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

@@ -298,7 +298,8 @@ export function rewriteExpressionSite(
     if (containerKind === "jsx-expression") {
       context.reportDiagnostic({
         type: "opaque-ref:jsx-expression",
-        message: "JSX expression with OpaqueRef computation should use derive",
+        message:
+          "JSX expression with OpaqueRef computation should use computed()",
         node: expression,
       });
     }
@@ -375,7 +376,8 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
   if (context.options.mode === "error") {
     context.reportDiagnostic({
       type: "opaque-ref:jsx-expression",
-      message: "JSX expression with OpaqueRef computation should use derive",
+      message:
+        "JSX expression with OpaqueRef computation should use computed()",
       node: expression,
     });
     return expression;

@@ -1,12 +1,4 @@
-import {
-  type Cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface GroupedSummaryArgs {
   entries: Default<GroupEntryInput[], []>;
@@ -205,14 +197,14 @@ export const counterWithGroupedSummary = pattern<GroupedSummaryArgs>(
     const defaultAmountValue = liftDefaultAmountValue(defaultAmount);
 
     const entryList = liftEntryList(entries);
-    const summaries = derive(entryList, computeSummaries);
-    const totals = derive(summaries, totalsRecord);
-    const dominant = derive(summaries, dominantSummary);
-    const overallTotal = derive(
-      summaries,
-      (items) => items.reduce((sum, entry) => sum + entry.total, 0),
+    const summaries = computeSummaries(entryList);
+    const totals = totalsRecord(summaries);
+    const dominant = dominantSummary(summaries);
+    const overallTotal = summaries.reduce(
+      (sum, entry) => sum + entry.total,
+      0,
     );
-    const groupCount = derive(summaries, (items) => items.length);
+    const groupCount = summaries.length;
     const labelPieces = liftLabelPieces(summaries);
     const summaryLabel = str`Group totals ${labelPieces}`;
 

@@ -610,79 +610,93 @@ describe("default-app flow test", () => {
       return await setSchedulerPullMode(page, true);
     });
 
-    await waitFor(async () => {
-      return !!(await clickButtonWithText(page, "Notes"));
-    });
-    await waitFor(async () => {
-      return !!(await clickButtonWithText(page, "New Notebook"));
-    });
     try {
       await waitFor(async () => {
-        const state = await collectNotebookRenderState(page);
-        return state.isNotebook;
+        return !!(await clickButtonWithText(page, "Notes"));
       });
-    } catch (error) {
-      console.log(
-        "Notebook navigation diagnostics:",
-        JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
-      );
-      throw error;
-    }
+      await waitFor(async () => {
+        return !!(await clickButtonWithText(page, "New Notebook"));
+      });
+      try {
+        await waitFor(async () => {
+          const state = await collectNotebookRenderState(page);
+          return state.isNotebook;
+        });
+      } catch (error) {
+        console.log(
+          "Notebook navigation diagnostics:",
+          JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
+        );
+        throw error;
+      }
 
-    await waitFor(async () => {
-      return !!(await clickButtonWithTitle(page, "New Note"));
-    });
-    await waitFor(async () => {
-      return !!(await findButtonWithText(page, "Create Another"));
-    });
-    await waitFor(async () => await resetEventInvocationTrace(page));
+      await waitFor(async () => {
+        return !!(await clickButtonWithTitle(page, "New Note"));
+      });
+      await waitFor(async () => {
+        return !!(await findButtonWithText(page, "Create Another"));
+      });
+      await waitFor(async () => await resetEventInvocationTrace(page));
 
-    const noteCreates = 7;
-    for (let i = 0; i < noteCreates - 1; i++) {
+      const noteCreates = 7;
+      for (let i = 0; i < noteCreates - 1; i++) {
+        assert(
+          await clickButtonWithText(page, "Create Another"),
+          `Expected Create Another click ${i + 1} to succeed`,
+        );
+      }
       assert(
-        await clickButtonWithText(page, "Create Another"),
-        `Expected Create Another click ${i + 1} to succeed`,
+        await clickButtonWithExactText(page, "Create"),
+        "Expected final Create click to succeed",
+      );
+
+      try {
+        await waitFor(async () => {
+          await waitForRuntimeIdle(page);
+          const state = await collectNotebookSourceState(page);
+          return state.argumentNotesLength === noteCreates &&
+            state.noteCount === noteCreates &&
+            state.showNewNotePrompt === false &&
+            state.usedCreateAnotherNote === false;
+        });
+      } catch (_) {
+        // Keep the final assertions below so failures include diagnostics.
+      }
+
+      const summary = await collectNotebookSourceState(page);
+      if (
+        summary.argumentNotesLength !== noteCreates ||
+        summary.noteCount !== noteCreates
+      ) {
+        console.log(
+          "Notebook rapid create source diagnostics:",
+          JSON.stringify(summary, null, 2),
+        );
+        console.log(
+          "Notebook rapid create render diagnostics:",
+          JSON.stringify(await collectNotebookRenderState(page), null, 2),
+        );
+        console.log(
+          "Notebook rapid create event/action diagnostics:",
+          JSON.stringify(
+            await collectNotebookCreateTraceSummary(page),
+            null,
+            2,
+          ),
+        );
+      }
+
+      assertEquals(summary.argumentNotesLength, noteCreates);
+      assertEquals(summary.noteCount, noteCreates);
+    } finally {
+      await waitFor(async () => await setSchedulerPullMode(page, false)).catch(
+        (error) =>
+          console.warn(
+            "Failed to restore scheduler push mode after notebook regression",
+            error,
+          ),
       );
     }
-    assert(
-      await clickButtonWithExactText(page, "Create"),
-      "Expected final Create click to succeed",
-    );
-
-    try {
-      await waitFor(async () => {
-        await waitForRuntimeIdle(page);
-        const state = await collectNotebookSourceState(page);
-        return state.argumentNotesLength === noteCreates &&
-          state.noteCount === noteCreates &&
-          state.showNewNotePrompt === false &&
-          state.usedCreateAnotherNote === false;
-      });
-    } catch (_) {
-      // Keep the final assertions below so failures include diagnostics.
-    }
-
-    const summary = await collectNotebookSourceState(page);
-    if (
-      summary.argumentNotesLength !== noteCreates ||
-      summary.noteCount !== noteCreates
-    ) {
-      console.log(
-        "Notebook rapid create source diagnostics:",
-        JSON.stringify(summary, null, 2),
-      );
-      console.log(
-        "Notebook rapid create render diagnostics:",
-        JSON.stringify(await collectNotebookRenderState(page), null, 2),
-      );
-      console.log(
-        "Notebook rapid create event/action diagnostics:",
-        JSON.stringify(await collectNotebookCreateTraceSummary(page), null, 2),
-      );
-    }
-
-    assertEquals(summary.argumentNotesLength, noteCreates);
-    assertEquals(summary.noteCount, noteCreates);
   });
 });
 

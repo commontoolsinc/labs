@@ -1,4 +1,4 @@
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { cell, computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
 
 const multiplier = cell(2);
 const offset = cell(10);
@@ -20,7 +20,7 @@ type Output = {
 export default pattern<Record<string, never>, Output>(() => {
   const tool = patternTool(
     ({ value, offset }: { value: number; offset: number }) => {
-      return derive({ value, offset }, ({ value, offset }) => {
+      return computed(() => {
         return value * multiplier.get() + offset;
       });
     },

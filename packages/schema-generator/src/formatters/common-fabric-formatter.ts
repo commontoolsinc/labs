@@ -311,6 +311,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       "OpaqueCell",
       "Cell",
       "Stream",
+      "SqliteDb",
       "ReadonlyCell",
       "WriteonlyCell",
       "ComparableCell",
@@ -547,9 +548,15 @@ export class CommonFabricFormatter implements TypeFormatter {
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
+        // Pass the inner node even when it isn't used to build the inner schema
+        // (shouldPassTypeNode=false): the override only reads the element's
+        // capability from it. For an expanded `Default<[]> | Item[]` union the
+        // element's `comparable` capability lives ONLY on the synthetic node
+        // (the resolved union type can't express it), so the node is required to
+        // recover it. (CT-1639 Gap B)
         const itemsOverride = this.createArrayItemsOverride(
           innerType,
-          shouldPassTypeNode ? innerTypeNode : undefined,
+          innerTypeNode,
           context,
         );
         childContext = { ...context, arrayItemsOverride: itemsOverride };
@@ -598,19 +605,73 @@ export class CommonFabricFormatter implements TypeFormatter {
       context.typeChecker,
       arrayTypeNode,
     );
-    if (!elementInfo) {
-      return base;
+
+    let resolvedElementWrapperKind: "Default" | WrapperKind | undefined;
+    if (elementInfo) {
+      resolvedElementWrapperKind = elementInfo.elementNode
+        ? resolveWrapperNode(elementInfo.elementNode, context.typeChecker)?.kind
+        : getCellWrapperInfo(elementInfo.elementType, context.typeChecker)
+          ?.kind;
+    } else {
+      // No element info — e.g. an expanded `Default<[]> | Item[]` union, whose
+      // type is not array-like so getArrayElementInfo can't reach the element.
+      // The real array member's element capability (e.g. `comparable`) lives on
+      // the synthetic NODE, not the resolved union type, so recover it from the
+      // node by descending to the real array member's element. (CT-1639 Gap B)
+      resolvedElementWrapperKind = this.elementWrapperFromUnionNode(
+        arrayTypeNode,
+        context.typeChecker,
+      );
     }
 
-    const resolvedElementWrapperKind = elementInfo.elementNode
-      ? resolveWrapperNode(elementInfo.elementNode, context.typeChecker)?.kind
-      : getCellWrapperInfo(elementInfo.elementType, context.typeChecker)?.kind;
     const elementWrapperKind = resolvedElementWrapperKind === "Default"
       ? undefined
       : resolvedElementWrapperKind;
     return elementWrapperKind
       ? this.applyWrapperSemantics(base, elementWrapperKind)
       : base;
+  }
+
+  /**
+   * For a synthetic union type node like `ComparableCell<unknown>[] | Default<[]>`
+   * (the expanded form of `Writable<Item[] | Default<[]>>`'s inner), find the
+   * single real-array member and return the wrapper kind of its element node.
+   * Empty-array / `Default<...>` members are skipped. Returns undefined when the
+   * node is not a union, has no real array member, or the element is unwrapped.
+   */
+  private elementWrapperFromUnionNode(
+    node: ts.TypeNode | undefined,
+    checker: ts.TypeChecker,
+  ): "Default" | WrapperKind | undefined {
+    if (!node || !ts.isUnionTypeNode(node)) return undefined;
+    let elementNode: ts.TypeNode | undefined;
+    for (const member of node.types) {
+      const arrayElement = this.arrayElementNode(member);
+      if (!arrayElement) continue; // non-array member (e.g. Default<[]>) — skip
+      // Skip degenerate empty-array members (`never[]`) — they're the unbranded
+      // arm of an expanded `Default<[]>` and carry no real element. (The branded
+      // `[] & DefaultMarker` arm and the empty tuple `[]` are not ArrayTypeNodes,
+      // so arrayElementNode already returned undefined for them.)
+      if (arrayElement.kind === ts.SyntaxKind.NeverKeyword) continue;
+      if (elementNode) return undefined; // more than one real array member
+      elementNode = arrayElement;
+    }
+    if (!elementNode) return undefined;
+    return resolveWrapperNode(elementNode, checker)?.kind;
+  }
+
+  /** The element TypeNode of `T[]` or `Array<T>`/`ReadonlyArray<T>`, else undefined. */
+  private arrayElementNode(node: ts.TypeNode): ts.TypeNode | undefined {
+    if (ts.isArrayTypeNode(node)) return node.elementType;
+    if (
+      ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) &&
+      (node.typeName.text === "Array" ||
+        node.typeName.text === "ReadonlyArray") &&
+      node.typeArguments && node.typeArguments.length > 0
+    ) {
+      return node.typeArguments[0];
+    }
+    return undefined;
   }
 
   private isUnusableInnerType(type: ts.Type): boolean {

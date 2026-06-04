@@ -1,3 +1,5 @@
+import { validateBrowserAccessLeaseFreshness } from "../contracts/browser-access.ts";
+
 export interface BrowserHostCommandPolicyResult {
   allowed: boolean;
   reason?: string;
@@ -11,6 +13,7 @@ export interface BrowserHostCommandPlan {
 
 export interface BrowserHostCommandPolicyOptions {
   browserAccessCdpUrl?: string;
+  browserAccessExpiresAt?: string;
 }
 
 export const BROWSER_HOST_COMMAND_DENIED_EXIT_CODE = 126;
@@ -74,6 +77,12 @@ const validateAgentBrowserCommand = (
   args: readonly string[],
   options: BrowserHostCommandPolicyOptions,
 ): BrowserHostCommandPolicyResult => {
+  const expiryError = validateBrowserAccessLeaseFreshness(
+    options.browserAccessExpiresAt,
+  );
+  if (expiryError !== undefined) {
+    return deny(expiryError);
+  }
   const expectedCdpOrigin = normalizeCdpOrigin(options.browserAccessCdpUrl);
   if (
     options.browserAccessCdpUrl !== undefined && expectedCdpOrigin === undefined
@@ -132,6 +141,8 @@ const AGENT_BROWSER_LOCAL_COMMANDS = new Set([
 const AGENT_BROWSER_PAGE_COMMANDS = new Set([
   "check",
   "click",
+  "console",
+  "errors",
   "fill",
   "get",
   "open",
@@ -290,6 +301,9 @@ const validateAgentBrowserPageCommand = (
       return validateAgentBrowserSnapshot(args);
     case "get":
       return validateAgentBrowserGet(args);
+    case "console":
+    case "errors":
+      return validateAgentBrowserReadOnlyDiagnostic(commandName, args);
     case "wait":
       return validateAgentBrowserWait(args);
     case "click":
@@ -348,6 +362,14 @@ const validateAgentBrowserGet = (
   }
   return "agent-browser get only allows title, url, or text";
 };
+
+const validateAgentBrowserReadOnlyDiagnostic = (
+  commandName: string,
+  args: readonly string[],
+): string | undefined =>
+  args.length === 0
+    ? undefined
+    : `agent-browser ${commandName} only allows read-only inspection without flags`;
 
 const validateAgentBrowserWait = (
   args: readonly string[],

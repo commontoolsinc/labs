@@ -7,8 +7,8 @@ const identity = <T,>(value: T) => value;
 //   ifElse(show, count + 1, 0)         → compute-wrapped branch
 //   ifElse(show, cell.get(), 0)        → reactive branch lowering around Writable.get()
 //   ifElse(show, name.trim(), "x")     → reactive receiver-method branch
-//   name.trim()                        → top-level receiver-method root lowered via derive
-//   identity(name.trim())             → derive-wrapped local-helper root
+//   name.trim()                        → top-level receiver-method root lowered to lift-applied
+//   identity(name.trim())             → lift-applied local-helper root
 export default pattern<{
   count: number;
   show: boolean;

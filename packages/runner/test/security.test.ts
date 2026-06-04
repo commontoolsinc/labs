@@ -297,7 +297,19 @@ describe("SES security regressions", () => {
     cancel();
   });
 
-  it("blesses nested callbacks created during verified callback execution", async () => {
+  // CT-1644: this test compiles
+  //   handler((_e, _s) => [computed(() => format('a'))][0])
+  // The nested `computed(...)` is a callback that must be verified/blessed so
+  // it can run in trusted compartments. Before Phase 2 the computed lowered to
+  // a lift INSIDE the handler body, so it was blessed at INVOCATION time, and
+  // this test asserted the verified-function registry GREW when the handler
+  // ran. After Phase 2 the computed lowers to a module-scope
+  // `const __cfLift_N = lift(false, fn)` blessed ONCE AT LOAD; the handler body
+  // just calls `__cfLift_N()`. Berni confirmed (2026-06-02) load-time blessing
+  // is sufficient, so the assertion is updated to the load-time shape: the
+  // nested computation is already in the registry after load, and invoking the
+  // handler succeeds without needing (or losing) an invocation-time entry.
+  it("blesses nested callbacks at load (CT-1644: hoisted to module scope)", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",
       files: [
@@ -325,26 +337,36 @@ describe("SES security regressions", () => {
           verifiedFunctions: Map<string, Map<string, unknown>>;
         };
       }).executableRegistry.verifiedFunctions.get(loadId!)?.size) ?? 0;
-    const verifiedRegistry = countVerifiedFunctionsForLoad();
 
-    (runtime.runner as unknown as {
-      invokeJavaScriptImplementation(
-        module: { wrapper?: string },
-        fn: (...args: any[]) => unknown,
-        argument: unknown,
-        verifiedLoadId?: string,
-      ): unknown;
-    }).invokeJavaScriptImplementation(
-      main?.makeNested as { wrapper?: string },
-      (main?.makeNested as { implementation: (...args: any[]) => unknown })
-        .implementation,
-      { $event: undefined, $ctx: undefined },
-      loadId,
+    // The nested computation (now the module-scope `__cfLift_N`) and the
+    // handler are blessed at load: the registry is already populated before any
+    // invocation.
+    const verifiedAtLoad = countVerifiedFunctionsForLoad();
+    expect(verifiedAtLoad).toBeGreaterThan(0);
+
+    // Invoking the verified handler runs against the load-blessed functions and
+    // succeeds — no invocation-time blessing is needed, and the registry stays
+    // consistent (load-time blessing covered every nested callback).
+    expect(() =>
+      (runtime.runner as unknown as {
+        invokeJavaScriptImplementation(
+          module: { wrapper?: string },
+          fn: (...args: any[]) => unknown,
+          argument: unknown,
+          verifiedLoadId?: string,
+        ): unknown;
+      }).invokeJavaScriptImplementation(
+        main?.makeNested as { wrapper?: string },
+        (main?.makeNested as { implementation: (...args: any[]) => unknown })
+          .implementation,
+        { $event: undefined, $ctx: undefined },
+        loadId,
+      )
+    ).not.toThrow();
+
+    expect(countVerifiedFunctionsForLoad()).toBeGreaterThanOrEqual(
+      verifiedAtLoad,
     );
-
-    const updatedRegistry = countVerifiedFunctionsForLoad();
-
-    expect(updatedRegistry).toBeGreaterThan(verifiedRegistry);
   });
 
   it("freezes callback compartment globalThis bindings", () => {

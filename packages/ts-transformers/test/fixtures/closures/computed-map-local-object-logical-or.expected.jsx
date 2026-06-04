@@ -17,116 +17,118 @@ interface Item {
 interface State {
     items: Item[];
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: Item[];
+    };
+}, Item[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    const view = { status: __cfHelpers.unless({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            "enum": [true, "Pending"]
+        } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Pending").for(["view", "status"], true) };
+    return <span>{view.status}</span>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-local-object-logical-or
 // Verifies: nested || inside a callback-local object initializer within a
 //   computed-array .map() callback is lowered to unless().
 //   const view = { status: row.done || "Pending" }
 //   → const view = { status: unless(row.done, "Pending") }
 export default pattern((state) => {
-    const rows = __cfHelpers.lift<{
-        state: {
-            items: Item[];
-        };
-    }, Item[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Item"
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Item"
-        },
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items)({ state: {
+    const rows = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("rows", true);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const row = __cf_pattern_input.key("element");
-                const view = { status: __cfHelpers.unless({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        "enum": [true, "Pending"]
-                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Pending").for(["view", "status"], true) };
-                return <span>{view.status}</span>;
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["done"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+        {rows.mapWithPattern(__cfPattern_1, {})}
+      </div>),
     };
 }, {
     type: "object",

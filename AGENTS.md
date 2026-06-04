@@ -28,6 +28,11 @@ If you are developing patterns, use the repo-local `pattern-dev` skill at
 discovers the repo-local skill mirror through `.agents/skills/`, and Claude
 compatibility continues to use `.claude/skills/`.
 
+When authoring or reviewing a skill itself, read
+`docs/development/skill-authoring.md` — what belongs in a skill (non-derivable
+map & values) versus what just constrains the agent (procedure a capable model
+already does).
+
 ### Useful Pattern documentation
 
 **Start here:**
