@@ -311,6 +311,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       "OpaqueCell",
       "Cell",
       "Stream",
+      "SqliteDb",
       "ReadonlyCell",
       "WriteonlyCell",
       "ComparableCell",
