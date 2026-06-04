@@ -32,8 +32,9 @@ const exists = (p: string): boolean => {
   try {
     Deno.statSync(`${ROOT}/${p}`);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return false;
+    throw e; // unexpected I/O error — surface it
   }
 };
 
@@ -57,14 +58,21 @@ export async function collectErrors(): Promise<string[]> {
   const root = JSON.parse(await read("deno.json")) as { workspace?: string[] };
   const exportsByName = new Map<string, unknown>();
   for (const member of root.workspace ?? []) {
+    const path = `${member.replace(/^\.\//, "")}/deno.json`;
+    let raw: string;
     try {
-      const pkg = JSON.parse(
-        await read(`${member.replace(/^\.\//, "")}/deno.json`),
-      ) as { name?: string; exports?: unknown };
-      if (pkg.name) exportsByName.set(pkg.name, pkg.exports);
-    } catch {
-      // workspace member without a readable deno.json — skip
+      raw = await read(path);
+    } catch (e) {
+      if (e instanceof Deno.errors.NotFound) continue; // member has no deno.json
+      throw e; // real I/O failure — surface it, don't hide config breakage
     }
+    let pkg: { name?: string; exports?: unknown };
+    try {
+      pkg = JSON.parse(raw);
+    } catch (e) {
+      throw new Error(`invalid JSON in ${path}: ${(e as Error).message}`);
+    }
+    if (pkg.name) exportsByName.set(pkg.name, pkg.exports);
   }
 
   // Every `@commonfabric/...` specifier the skill names must resolve. Subpath
