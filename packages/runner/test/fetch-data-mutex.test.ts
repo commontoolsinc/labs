@@ -498,14 +498,13 @@ describe("fetch-data mutex mechanism", () => {
     // class-stripping bug, which made errors round-trip back as `{ ... }`
     // with message/stack lost.
     expect(data.error).toBeDefined();
-    expect((data.error as { "@Error"?: unknown })["@Error"]).toBeUndefined();
     const fe = data.error as {
-      typeTag: string;
+      wireTypeTag: string;
       name: string;
       message: string;
       stack: string;
     };
-    expect(fe.typeTag).toBe("Error@1");
+    expect(fe.wireTypeTag).toBe("Error@1");
     expect(fe.name).toBe("Error");
     expect(fe.message).toMatch(/HTTP 404/);
     expect(typeof fe.stack).toBe("string");
