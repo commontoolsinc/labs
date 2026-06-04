@@ -18,6 +18,10 @@ import { shallowFabricFromNativeValue } from "../../src/fabric-value.ts";
  * `BaseReconstructionContext` (defaults to `true`).
  */
 class TestReconstructionContext extends BaseReconstructionContext {
+  constructor() {
+    super(true);
+  }
+
   override getCell(): never {
     throw new Error("getCell not implemented in test runtime");
   }

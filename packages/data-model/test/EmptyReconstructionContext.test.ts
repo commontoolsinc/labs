@@ -43,9 +43,8 @@ describe("EmptyReconstructionContext", () => {
   });
 
   describe("`EmptyReconstructionContext` (exported class)", () => {
-    it("reports `shouldDeepFreeze` as `true` with the historical verbatim throw message (default ctor)", () => {
-      const ctx = new EmptyReconstructionContext();
-      expect(ctx.shouldDeepFreeze).toBe(true);
+    it("throws the expected default message (default ctor)", () => {
+      const ctx = new EmptyReconstructionContext(true);
       expect(() =>
         ctx.getCell({ id: "of:bafyDEFAULT", path: [], space: "did:key:z1" })
       ).toThrow(
