@@ -41,6 +41,30 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ value, offset }) => {
     return value * multiplier.get() + offset;
 });
+const __cfPattern_1 = pattern((__cf_pattern_input: {
+    value: number;
+    offset: number;
+}) => {
+    const value = __cf_pattern_input.key("value");
+    const offset = __cf_pattern_input.key("offset");
+    return __cfLift_1({
+        value: value,
+        offset: offset
+    }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        offset: {
+            type: "number"
+        }
+    },
+    required: ["value", "offset"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: patternTool-with-existing-params
 // Verifies: patternTool's first arg is an explicit pattern() (CT-1655). The
 //   author supplies `offset` via extraParams (a genuine per-call input); the
@@ -50,30 +74,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 //   began requiring an explicit pattern.
 //   patternTool(pattern(({ value, offset }) => …multiplier.get()…), { offset })
 export default pattern(() => {
-    const tool = patternTool(pattern((__cf_pattern_input: {
-        value: number;
-        offset: number;
-    }) => {
-        const value = __cf_pattern_input.key("value");
-        const offset = __cf_pattern_input.key("offset");
-        return __cfLift_1({
-            value: value,
-            offset: offset
-        });
-    }, {
-        type: "object",
-        properties: {
-            value: {
-                type: "number"
-            },
-            offset: {
-                type: "number"
-            }
-        },
-        required: ["value", "offset"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema), { offset: offset.for(["tool", 1, "offset"], true) });
+    const tool = patternTool(__cfPattern_1, { offset: offset.for(["tool", 1, "offset"], true) });
     return { tool };
 }, {
     type: "object",

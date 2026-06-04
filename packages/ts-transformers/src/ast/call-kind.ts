@@ -84,15 +84,12 @@ const CELL_SCOPED_CONSTRUCTOR_NAMES = new Set([
 ]);
 const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
-export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
 /**
  * Prefix for the module-scope const a hoisted `lift(...)` call is bound to
  * (CT-1644, Phase 2 of derive→lift→selfcontained). The whole lift call —
  * schemas + callback — is hoisted to `const __cfLift_N = __cfHelpers.lift(...)`
- * and the original site becomes `__cfLift_N(captures)`. Distinct from
- * `SYNTHETIC_MODULE_CALLBACK_PREFIX` (which names a hoisted *callback*, the
- * CT-1585 mechanic that no longer applies to lift).
+ * and the original site becomes `__cfLift_N(captures)`.
  */
 export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
 
@@ -390,6 +387,42 @@ export function getWithPatternHoistablePatternCall(
   return patternCall;
 }
 
+/**
+ * If `call` is a `patternTool(pattern(...), extraParams?)` call whose FIRST
+ * argument is a bare `pattern(...)` builder call, return that inner pattern call
+ * (the hoistable unit). Otherwise return undefined.
+ *
+ * Sibling of {@link getWithPatternHoistablePatternCall}: same hoist mechanic
+ * (relocate the bare pattern call sitting in argument 0, leaving the enclosing
+ * call's callee and remaining arguments intact), different enclosing call shape.
+ * Per-instance values flow through patternTool's SECOND argument (`extraParams`)
+ * and module-scoped reactive reads are absorbed by the pattern itself, so the
+ * bare `pattern(...)` is capture-free and safe to evaluate once at module scope.
+ * As of CT-1655 patternTool's first argument must be a pattern (enforced by
+ * PatternContextValidation), so this recognizer covers every reactive
+ * patternTool.
+ */
+export function getPatternToolHoistablePatternCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.CallExpression | undefined {
+  if (detectCallKind(call, checker)?.kind !== "pattern-tool") {
+    return undefined;
+  }
+  const firstArg = call.arguments[0];
+  if (!firstArg) {
+    return undefined;
+  }
+  const patternCall = stripWrappers(firstArg);
+  if (
+    !ts.isCallExpression(patternCall) ||
+    !isPatternBuilderCall(patternCall, checker)
+  ) {
+    return undefined;
+  }
+  return patternCall;
+}
+
 export function getCapabilitySummaryCallbackArgument(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -647,8 +680,7 @@ function resolveCallbackFunctionExpression(
     return undefined;
   }
 
-  const initializer = getVariableInitializer(target, checker) ??
-    getSyntheticModuleCallbackInitializer(target);
+  const initializer = getVariableInitializer(target, checker);
   return initializer
     ? resolveCallbackFunctionExpression(initializer, checker, seen)
     : undefined;
@@ -670,47 +702,6 @@ function unwrapHardenedCallbackExpression(
   }
 
   return expression.arguments[0];
-}
-
-function getSyntheticModuleCallbackInitializer(
-  identifier: ts.Identifier,
-): ts.Expression | undefined {
-  if (!identifier.text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX)) {
-    return undefined;
-  }
-
-  const sourceFile = findContainingSourceFile(identifier);
-  if (!sourceFile) {
-    return undefined;
-  }
-
-  for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) {
-      continue;
-    }
-
-    for (const declaration of statement.declarationList.declarations) {
-      if (
-        ts.isIdentifier(declaration.name) &&
-        declaration.name.text === identifier.text
-      ) {
-        return declaration.initializer;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
-  let current: ts.Node | undefined = node;
-  while (current) {
-    if (ts.isSourceFile(current)) {
-      return current;
-    }
-    current = current.parent ?? ts.getOriginalNode(current).parent;
-  }
-  return undefined;
 }
 
 export function isWildcardTraversalCall(

@@ -74,6 +74,34 @@ const __cfLift_3 = __cfHelpers.lift<{
         return undefined;
     return genResult.result;
 });
+const __cfPattern_1 = pattern((__cf_pattern_input: {
+    language: string;
+    content: string;
+}) => {
+    const language = __cf_pattern_input.key("language");
+    const content = __cf_pattern_input.key("content");
+    const genResult = generateText({
+        system: __cfLift_1({ language: language }).for(["genResult", "system"], true),
+        prompt: __cfLift_2({ content: content }).for(["genResult", "prompt"], true)
+    }).for("genResult", true);
+    return __cfLift_3({ genResult: {
+            pending: genResult.key("pending"),
+            result: genResult.key("result")
+        } }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        language: {
+            type: "string"
+        },
+        content: {
+            type: "string"
+        }
+    },
+    required: ["language", "content"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: patternTool-local-var
 // Verifies: patternTool's first arg is a pattern() (CT-1655); `content` is a
 //   genuine pattern input supplied via extraParams, while the pattern-local
@@ -81,34 +109,7 @@ const __cfLift_3 = __cfHelpers.lift<{
 //   extraParams).
 //   patternTool(pattern(({ language, content }) => …genResult…), { content })
 export default pattern(() => {
-    const tool = patternTool(pattern((__cf_pattern_input: {
-        language: string;
-        content: string;
-    }) => {
-        const language = __cf_pattern_input.key("language");
-        const content = __cf_pattern_input.key("content");
-        const genResult = generateText({
-            system: __cfLift_1({ language: language }).for(["genResult", "system"], true),
-            prompt: __cfLift_2({ content: content }).for(["genResult", "prompt"], true)
-        }).for("genResult", true);
-        return __cfLift_3({ genResult: {
-                pending: genResult.key("pending"),
-                result: genResult.key("result")
-            } });
-    }, {
-        type: "object",
-        properties: {
-            language: {
-                type: "string"
-            },
-            content: {
-                type: "string"
-            }
-        },
-        required: ["language", "content"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: ["string", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema), { content: content.for(["tool", 1, "content"], true) });
+    const tool = patternTool(__cfPattern_1, { content: content.for(["tool", 1, "content"], true) });
     return { tool };
 }, {
     type: "object",

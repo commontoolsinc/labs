@@ -35,6 +35,22 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ value }) => {
     return prefix.get() + String(value * multiplier.get());
 });
+const __cfPattern_1 = pattern((__cf_pattern_input: {
+    value: number;
+}) => {
+    const value = __cf_pattern_input.key("value");
+    return __cfLift_1({ value: value }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        }
+    },
+    required: ["value"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: patternTool-multiple-captures
 // Verifies: patternTool's first arg is an explicit pattern() (CT-1655) with no
 //   explicit extraParams. The free module-scoped reactive captures `prefix` and
@@ -45,22 +61,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 // Context: Both `prefix` and `multiplier` are module-scoped new Writable() values;
 //   `value` is the pattern's only per-call input.
 export default pattern(() => {
-    const tool = patternTool(pattern((__cf_pattern_input: {
-        value: number;
-    }) => {
-        const value = __cf_pattern_input.key("value");
-        return __cfLift_1({ value: value });
-    }, {
-        type: "object",
-        properties: {
-            value: {
-                type: "number"
-            }
-        },
-        required: ["value"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema));
+    const tool = patternTool(__cfPattern_1);
     return { tool };
 }, {
     type: "object",
