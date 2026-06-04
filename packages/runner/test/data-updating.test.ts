@@ -195,6 +195,25 @@ describe("data-updating", () => {
       expect(testCell.get().a).toHaveLength(3);
       expect(testCell.getAsQueryResult().a).toEqual([1, 2, 3]);
     });
+
+    it("should overwrite an array with an object", () => {
+      const testCell = runtime.getCell<{ a: any }>(
+        space,
+        "should overwrite an array with an object 1",
+        undefined,
+        tx,
+      );
+      testCell.set({ a: [{ type: "x" }] });
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        { type: "cf-text" },
+      );
+      expect(success).toBeTruthy();
+      expect(testCell.get()).toHaveProperty("a");
+      expect(testCell.getAsQueryResult().a).toEqual({ type: "cf-text" });
+    });
   });
 
   describe("normalizeAndDiff", () => {
