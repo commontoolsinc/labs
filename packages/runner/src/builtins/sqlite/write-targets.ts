@@ -84,6 +84,20 @@ function unquoteIdent(raw: string): string {
   return raw.trim().replace(/^["'`[]|["'`\]]$/g, "");
 }
 
+/** The single target table of a write (`INSERT INTO t`, `UPDATE t`,
+ *  `DELETE FROM t`), unquoted; undefined if it can't be confidently extracted
+ *  (e.g. a schema-qualified or unusual form). Used to resolve a column's `ifc`. */
+export function parseWriteTable(sql: string): string | undefined {
+  const b = blankStringsAndComments(sql);
+  const m = b.match(
+    /\b(?:insert|replace)\b[\s\S]*?\binto\b\s+("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)|\bupdate\b\s+("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)|\bdelete\b\s+from\s+("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)/i,
+  );
+  if (!m) return undefined;
+  const raw = m[1] ?? m[2] ?? m[3];
+  if (!raw || raw.includes(".")) return undefined; // qualified → fail closed
+  return unquoteIdent(raw);
+}
+
 export function parseWriteParamColumns(
   sql: string,
 ): (string | null)[] | undefined {

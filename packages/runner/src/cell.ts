@@ -21,6 +21,9 @@ import type { SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
+import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
+import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -979,6 +982,23 @@ export class CellImpl<T extends FabricValue>
         ".exec() is only available on a SqliteDb cell (invalid database handle)",
       );
     }
+    // CFC write-ceiling (Phase 2): a value bound to a labeled column must fit the
+    // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
+    // or any carried-label value); fail closed when a labeled value's target
+    // column can't be determined. No-op until a column declares `ifc`.
+    const ceilingViolation = checkSqliteWriteCeiling(
+      sql,
+      params,
+      handle.tables as Parameters<typeof checkSqliteWriteCeiling>[2],
+      (value) => {
+        const view = cfcLabelViewForCell(value);
+        return view
+          ? cfcConfidentialityForObservationNode({ labelView: view })
+          : [];
+      },
+    );
+    if (ceilingViolation) throw new TypeError(ceilingViolation);
+
     this.tx.recordSqliteWrite(this.space, {
       op: "sqlite",
       db: {
