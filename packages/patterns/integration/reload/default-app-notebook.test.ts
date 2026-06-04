@@ -100,6 +100,7 @@ describe("default-app notebook reload integration test", () => {
     const reloadRenderState = await collectNotebookRenderState(page);
     assertEquals(reloadRenderState.noteCount, noteCreates);
     assertEquals(reloadRenderState.renderedNoteChips, noteCreates);
+    const browserMetrics = await collectBrowserLoadMetrics(page);
 
     const schedulerSummary = await collectSchedulerLoadSummary(page);
     assert(
@@ -108,6 +109,7 @@ describe("default-app notebook reload integration test", () => {
     );
     const reloadSummary = {
       reloadToRenderedMs: Number((performance.now() - startedAt).toFixed(3)),
+      browser: browserMetrics,
       ...schedulerSummary,
     };
     console.log(
@@ -129,6 +131,91 @@ describe("default-app notebook reload integration test", () => {
     );
   });
 });
+
+// Captures real, user-perceived reload render timing — paint metrics
+// (FCP/LCP = "time to pixel rendered"), long-task pressure, and a DOM
+// quiet-period settle time — so reload perf is observable independently of
+// scheduler action counts.
+async function collectBrowserLoadMetrics(page: Page): Promise<{
+  domContentLoadedEventEndMs?: number;
+  loadEventEndMs?: number;
+  firstPaintMs?: number;
+  firstContentfulPaintMs?: number;
+  largestContentfulPaintMs?: number;
+  longTaskCount?: number;
+  longTaskTotalMs?: number;
+  postRenderStableMs: number;
+}> {
+  return await page.evaluate(async () => {
+    const round = (value: number | undefined) =>
+      value === undefined ? undefined : Number(value.toFixed(3));
+    const supported = PerformanceObserver.supportedEntryTypes ?? [];
+    const observeBuffered = async (type: string) => {
+      if (!supported.includes(type)) return [] as PerformanceEntry[];
+      const entries: PerformanceEntry[] = [];
+      const observer = new PerformanceObserver((list) => {
+        entries.push(...list.getEntries());
+      });
+      observer.observe({ type, buffered: true });
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      observer.disconnect();
+      return entries;
+    };
+
+    const navigation = performance.getEntriesByType("navigation")
+      .at(-1) as PerformanceNavigationTiming | undefined;
+    const paint = performance.getEntriesByType("paint");
+    const firstPaint = paint.find((entry) => entry.name === "first-paint");
+    const firstContentfulPaint = paint.find((entry) =>
+      entry.name === "first-contentful-paint"
+    );
+    const largestContentfulPaint = (await observeBuffered(
+      "largest-contentful-paint",
+    )).at(-1);
+    const longTasks = await observeBuffered("longtask");
+
+    const postRenderStableMs = await new Promise<number>((resolve) => {
+      let settled = false;
+      let quietTimer: number | undefined;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (quietTimer !== undefined) clearTimeout(quietTimer);
+        clearTimeout(maxTimer);
+        observer.disconnect();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => resolve(performance.now()))
+        );
+      };
+      const resetQuietTimer = () => {
+        if (quietTimer !== undefined) clearTimeout(quietTimer);
+        quietTimer = setTimeout(done, 100);
+      };
+      const observer = new MutationObserver(resetQuietTimer);
+      observer.observe(document.documentElement, {
+        attributes: true,
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+      resetQuietTimer();
+      const maxTimer = setTimeout(done, 1_000);
+    });
+
+    return {
+      domContentLoadedEventEndMs: round(navigation?.domContentLoadedEventEnd),
+      loadEventEndMs: round(navigation?.loadEventEnd),
+      firstPaintMs: round(firstPaint?.startTime),
+      firstContentfulPaintMs: round(firstContentfulPaint?.startTime),
+      largestContentfulPaintMs: round(largestContentfulPaint?.startTime),
+      longTaskCount: longTasks.length,
+      longTaskTotalMs: round(
+        longTasks.reduce((sum, entry) => sum + entry.duration, 0),
+      ),
+      postRenderStableMs: round(postRenderStableMs)!,
+    };
+  });
+}
 
 async function setSchedulerPullMode(
   page: Page,
