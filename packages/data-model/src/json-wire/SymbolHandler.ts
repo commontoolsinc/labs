@@ -20,7 +20,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * path instead of being silently coerced to a registry symbol.
  */
 export const SymbolHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.Symbol,
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Symbol;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return typeof value === "symbol" && Symbol.keyFor(value) !== undefined;

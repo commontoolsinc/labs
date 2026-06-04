@@ -21,7 +21,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * back to `Number.NaN`.
  */
 export const SpecialNumberHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.SpecialNumber,
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.SpecialNumber;
+  },
 
   canSerialize(value: FabricValue): boolean {
     if (typeof value !== "number") return false;

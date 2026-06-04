@@ -18,7 +18,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * Matches by `instanceof`. Same flat encoding approach as the epoch handlers.
  */
 export const BytesHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.Bytes,
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Bytes;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricBytes;

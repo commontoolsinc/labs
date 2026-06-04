@@ -12,13 +12,16 @@ export class TypeHandlerRegistry {
   /** Tag -> handler map for O(1) deserialization dispatch. */
   private readonly tagMap = new Map<string, TypeHandler>();
 
-  /** Registers a handler. Handlers with non-empty tags are indexed for
-   *  O(1) deserialization lookup. Handlers with empty tags (like
-   *  `FabricInstanceHandler`) participate in serialization matching only. */
+  /**
+   * Registers a handler. Handlers with non-empty tags are indexed for O(1)
+   * deserialization lookup. Handlers with empty tags (like
+   * `FabricInstanceHandler`) participate in serialization matching only.
+   */
   register(handler: TypeHandler): void {
     this.handlers.push(handler);
-    if (handler.tag !== "") {
-      this.tagMap.set(handler.tag, handler);
+    const wireTypeTag = handler.wireTypeTag;
+    if (wireTypeTag !== undefined) {
+      this.tagMap.set(wireTypeTag, handler);
     }
   }
 
@@ -37,7 +40,7 @@ export class TypeHandlerRegistry {
   }
 
   /** Looks up a handler by tag for deserialization. */
-  getDeserializer(tag: string): TypeHandler | undefined {
-    return this.tagMap.get(tag);
+  getDeserializer(wireTypeTag: string): TypeHandler | undefined {
+    return this.tagMap.get(wireTypeTag);
   }
 }

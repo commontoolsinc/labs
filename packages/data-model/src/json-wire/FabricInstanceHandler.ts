@@ -20,10 +20,14 @@ import type {
  * class registry for those tags.
  */
 export const FabricInstanceHandler: TypeHandler = {
-  // This tag is not used for deserialization dispatch -- `FabricInstance`
-  // types are looked up by their individual tags. The handler is registered
-  // for serialization matching only.
-  tag: "",
+  /**
+   * This tag is not used for deserialization dispatch: `FabricInstance`
+   * types are looked up by their individual tags. The handler is registered
+   * for serialization matching only.
+   */
+  get wireTypeTag() {
+    return undefined;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricInstance;

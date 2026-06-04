@@ -11,7 +11,9 @@ import type {
  * `null` state. See Section 1.4.1 of the formal spec.
  */
 export const UndefinedHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.Undefined,
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Undefined;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value === undefined;

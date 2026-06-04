@@ -25,7 +25,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * as needed.
  */
 export const BigIntHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.BigInt,
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.BigInt;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return typeof value === "bigint";

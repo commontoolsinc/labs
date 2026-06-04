@@ -23,7 +23,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * See Section 5.3 of the formal spec.
  */
 export const EpochNsecHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.EpochNsec,
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.EpochNsec;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricEpochNsec;
