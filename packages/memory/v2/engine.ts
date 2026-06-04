@@ -1483,12 +1483,25 @@ const migrateCoreTablesToSpaceScoped = (
   // the token from the DID each open and stores no marker). `_` is a LIKE
   // wildcard, so escape the literal `__`.
   const priorToken = ((): string | undefined => {
-    const row = database.prepare(
+    const rows = database.prepare(
       `SELECT name FROM sqlite_master WHERE type = 'table' ` +
-        `AND name LIKE 'commit\\_\\_%' ESCAPE '\\' LIMIT 1`,
-    ).get() as { name?: string } | undefined;
-    const old = row?.name?.slice("commit__".length);
-    return old && old !== token ? old : undefined;
+        `AND name LIKE 'commit\\_\\_%' ESCAPE '\\'`,
+    ).all() as Array<{ name: string }>;
+    const tokens = [
+      ...new Set(rows.map((r) => r.name.slice("commit__".length))),
+    ].filter((t) => t.length > 0 && t !== token);
+    if (tokens.length > 1) {
+      // More than one prior token in a single db means an inconsistent/
+      // unexpected state (one file is one space → one token). Re-scoping an
+      // arbitrary one would leave the others orphaned, so fail loudly rather
+      // than guess.
+      throw new Error(
+        `ambiguous core-table scoping: multiple prior tokens [${
+          tokens.join(", ")
+        }] in one database`,
+      );
+    }
+    return tokens[0];
   })();
 
   // `ALTER TABLE … RENAME TO` only auto-rewrites FK references in OTHER tables

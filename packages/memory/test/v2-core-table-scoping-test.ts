@@ -5,7 +5,7 @@
 // without a `space` keeps the legacy bare names (back-compat). A legacy bare-named
 // db is migrated in place on first scoped open.
 
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import { applyCommit, close, type Engine, open, read } from "../v2/engine.ts";
@@ -161,6 +161,23 @@ Deno.test("re-scopes in place if the token derivation changes (no orphaning)", a
     close(reopened);
     await Deno.remove(path);
   }
+});
+
+Deno.test("refuses to open if multiple prior-token core sets coexist", async () => {
+  // Two different `commit__<token>` families in one file is an inconsistent
+  // state (one file = one space = one token). Re-scoping an arbitrary one would
+  // orphan the other, so open() must fail loudly rather than guess.
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const raw = new Database(path);
+  raw.exec(`CREATE TABLE "commit__aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" (seq)`);
+  raw.exec(`CREATE TABLE "commit__bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" (seq)`);
+  raw.close();
+  await assertRejects(
+    () => open({ url: toFileUrl(path), space: SPACE_A }),
+    Error,
+    "ambiguous core-table scoping",
+  );
+  await Deno.remove(path);
 });
 
 Deno.test("two spaces' core tables are disjoint (cross-space attach ready)", async () => {
