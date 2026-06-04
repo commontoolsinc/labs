@@ -169,6 +169,9 @@ export class PatternContextValidationTransformer
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
 
+        // patternTool's first argument must be a pattern() (CT-1655)
+        this.validatePatternToolFirstArgument(node, context, checker);
+
         const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
           node,
           context,
@@ -663,6 +666,40 @@ export class PatternContextValidationTransformer
         node,
       });
     }
+  }
+
+  /**
+   * Validates that `patternTool(...)`'s first argument is a `pattern(...)`, not a
+   * bare callback (CT-1655). Passing a function directly used to be auto-wrapped
+   * (`pattern(fn)`) by the runtime and auto-captured by a transformer strategy;
+   * both were removed in favor of an explicit, addressable pattern. Authors now
+   * wrap the callback themselves: `patternTool(pattern(fn), extraParams?)`.
+   */
+  private validatePatternToolFirstArgument(
+    node: ts.CallExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (detectCallKind(node, checker)?.kind !== "pattern-tool") {
+      return;
+    }
+    const firstArg = node.arguments[0];
+    if (
+      !firstArg ||
+      !(ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg))
+    ) {
+      return;
+    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:patterntool-requires-pattern",
+      message:
+        `patternTool()'s first argument must be a pattern(), not a bare callback. ` +
+        `Wrap the callback in pattern(): patternTool(pattern(fn), extraParams?). ` +
+        `Module-scoped reactive values the callback reads are captured by the ` +
+        `pattern automatically; per-instance values go in extraParams.`,
+      node: firstArg,
+    });
   }
 
   private validateCallbackSelfContainment(

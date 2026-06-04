@@ -1,18 +1,14 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createNodeFactory, lift } from "./module.ts";
-import { pattern } from "./pattern.ts";
-import { isPattern } from "./types.ts";
 import type {
   JSONSchema,
   NodeFactory,
   Opaque,
   OpaqueRef,
   PatternFactory,
-  RequireDefaults,
   Schema,
 } from "./types.ts";
-import { SELF } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
 import type {
   BuiltInCompileAndRunParams,
@@ -395,38 +391,33 @@ declare function createCell<S extends JSONSchema = JSONSchema>(
 export type { createCell };
 
 /**
- * Helper function for creating LLM tool definitions from patterns with optional pre-filled parameters.
- * Creates a pattern with the given function and returns an object suitable for use as an LLM tool,
- * with proper TypeScript typing that reflects only the non-pre-filled parameters.
+ * Helper function for creating LLM tool definitions from patterns with optional
+ * pre-filled parameters. Returns an object suitable for use as an LLM tool, with
+ * proper TypeScript typing that reflects only the non-pre-filled parameters.
  *
- * @param fnOrPattern - Either a pattern function or an already-created PatternFactory
- * @param extraParams - Optional object containing parameter values to pre-fill
+ * The first argument must be a `pattern(...)` (CT-1655). A module-scoped reactive
+ * value the pattern's callback reads is captured by the pattern automatically (as
+ * a module-scope closure); per-instance values are pre-filled via `extraParams`.
+ *
+ * @param pattern - An already-created PatternFactory (wrap callbacks in pattern())
+ * @param extraParams - Optional object of parameter values to pre-fill
  * @returns An object with `pattern` and `extraParams` properties, typed to show only remaining params
  *
  * @example
  * ```ts
- * import { patternTool } from "commonfabric";
+ * import { pattern, patternTool } from "commonfabric";
  *
- * const content = cell("Hello world");
- *
- * // With a function - pattern will be created automatically
  * const grepTool = patternTool(
- *   ({ query, content }: { query: string; content: string }) => {
- *     return derive({ query, content }, ({ query, content }) => {
- *       return content.split("\n").filter((c) => c.includes(query));
- *     });
- *   },
- *   { content }
+ *   pattern(({ query, content }: { query: string; content: string }) => {
+ *     return content.split("\n").filter((c) => c.includes(query));
+ *   }),
+ *   { content },
  * );
  *
- * // With an existing pattern
- * const myPattern = pattern<{ query: string; content: string }>(
- *   "Grep",
- *   ({ query, content }) => { ... }
- * );
- * const grepTool2 = patternTool(myPattern, { content });
+ * // With a pattern declared elsewhere:
+ * const grepTool2 = patternTool(myGrepPattern, { content });
  *
- * // Both result in type: PatternToolResult<{ content: string }>
+ * // Result type: PatternToolResult<{ content: string }>
  * // which has { pattern: Pattern, extraParams: { content: string } }
  * ```
  */
@@ -434,19 +425,14 @@ export const patternTool = (<
   T,
   E extends Partial<T> = Record<PropertyKey, never>,
 >(
-  fnOrPattern:
-    | ((
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-    ) => any)
-    | PatternFactory<T, any>,
+  // CT-1655: must already be a pattern. Authors wrap callbacks explicitly —
+  // `patternTool(pattern(fn), extraParams?)` — so the unit is addressable and
+  // hoistable; the runtime no longer coerces a bare function into a pattern.
+  pattern: PatternFactory<T, any>,
   extraParams?: Opaque<E>,
 ): PatternToolResult<E> => {
-  const resolvedPattern = isPattern(fnOrPattern)
-    ? fnOrPattern
-    : pattern(fnOrPattern as unknown as Parameters<typeof pattern>[0]);
-
   return {
-    pattern: resolvedPattern,
+    pattern,
     extraParams: (extraParams ?? {}) as E,
   };
 }) as PatternToolFunction;

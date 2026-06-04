@@ -41,30 +41,39 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ value, offset }) => {
     return value * multiplier.get() + offset;
 });
-// Test: patternTool with an existing extraParam, and a new capture
-// The function has { value: number, offset: number } as input type
-// We provide offset via extraParams, and the transformer should capture multiplier
 // FIXTURE: patternTool-with-existing-params
-// Verifies: patternTool merges auto-captured vars into pre-existing extraParams
-//   patternTool(fn, { offset }) → patternTool(fn, { multiplier, offset })
-//   callback signature gains captured param: ({ value, offset }) → ({ value, offset, multiplier })
-// Context: `offset` is already provided as an explicit extraParam. The transformer
-//   detects that `multiplier` (module-scoped cell) is also captured and merges it
-//   into the existing extraParams without duplicating `offset`.
+// Verifies: patternTool's first arg is an explicit pattern() (CT-1655). The
+//   author supplies `offset` via extraParams (a genuine per-call input); the
+//   free module-scoped capture `multiplier` (read via .get()) is absorbed by the
+//   pattern into a module-scope lift closure rather than injected into
+//   extraParams — auto-capture-into-extraParams was removed when patternTool
+//   began requiring an explicit pattern.
+//   patternTool(pattern(({ value, offset }) => …multiplier.get()…), { offset })
 export default pattern(() => {
-    const tool = patternTool(({ value, offset, multiplier }: {
+    const tool = patternTool(pattern((__cf_pattern_input: {
         value: number;
         offset: number;
-        multiplier: __cfHelpers.Cell<number>;
     }) => {
+        const value = __cf_pattern_input.key("value");
+        const offset = __cf_pattern_input.key("offset");
         return __cfLift_1({
             value: value,
             offset: offset
         });
     }, {
-        multiplier: multiplier,
-        offset: offset.for(["tool", 1, "offset"], true)
-    });
+        type: "object",
+        properties: {
+            value: {
+                type: "number"
+            },
+            offset: {
+                type: "number"
+            }
+        },
+        required: ["value", "offset"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema), { offset: offset.for(["tool", 1, "offset"], true) });
     return { tool };
 }, {
     type: "object",

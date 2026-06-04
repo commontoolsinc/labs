@@ -1381,7 +1381,7 @@ export default pattern<
     isReady,
     // Pattern tools for omnibot
     searchEmails: patternTool(
-      ({ query, emails }: { query: string; emails: Email[] }) => {
+      pattern(({ query, emails }: { query: string; emails: Email[] }) => {
         return computed(() => {
           if (!query || !emails) return [];
           const lowerQuery = query.toLowerCase();
@@ -1392,17 +1392,17 @@ export default pattern<
               email.snippet?.toLowerCase().includes(lowerQuery),
           );
         });
-      },
+      }),
       { emails },
     ),
     getEmailCount: patternTool(
-      ({ emails }: { emails: Email[] }) => {
+      pattern(({ emails }: { emails: Email[] }) => {
         return emails?.length || 0;
-      },
+      }),
       { emails },
     ),
     getRecentEmails: patternTool(
-      ({ count, emails }: { count: number; emails: Email[] }) => {
+      pattern(({ count, emails }: { count: number; emails: Email[] }) => {
         return computed(() => {
           if (!emails || emails.length === 0) return "No emails";
           const recent = emails.slice(0, count || 5);
@@ -1417,7 +1417,7 @@ export default pattern<
             )
             .join("\n\n");
         });
-      },
+      }),
       { emails },
     ),
   };

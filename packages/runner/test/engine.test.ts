@@ -1347,8 +1347,8 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { patternTool } from "commonfabric";',
-            "export default patternTool(() => ({ ok: true }));",
+            'import { pattern, patternTool } from "commonfabric";',
+            "export default patternTool(pattern(() => ({ ok: true })));",
           ].join("\n"),
         },
       ],
