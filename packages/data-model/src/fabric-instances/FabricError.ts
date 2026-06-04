@@ -80,9 +80,6 @@ export type FabricErrorState = {
  * spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Error;
-
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
   type: string;
   /** The `.name` property (always a concrete string). */

@@ -20,12 +20,12 @@ export class ProblematicValue extends ExplicitTagValue {
   readonly #error;
 
   constructor(
-    typeTag: string,
+    wireTypeTag: string,
     state: FabricValue,
     /** Description of what went wrong. */
     error: string,
   ) {
-    super(typeTag, state);
+    super(wireTypeTag, state);
 
     this.#error = error;
   }

@@ -17,8 +17,6 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
   }

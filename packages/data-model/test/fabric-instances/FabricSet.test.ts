@@ -15,10 +15,10 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 describe("FabricSet", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
   // rule (doesn't fit a single member, isn't construction mechanics).
-  it("implements `FabricInstance` with tag `Set@1`", () => {
+  it("implements `FabricInstance` with the expected `.wireTypeTag`", () => {
     const ss = new FabricSet(new Set());
     expect(ss instanceof FabricInstance).toBe(true);
-    expect(ss.typeTag).toBe("Set@1");
+    expect(ss.wireTypeTag).toBe("Set@1");
   });
 
   describe("instance members", () => {

@@ -16,8 +16,6 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  * wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<FabricValue>) {
     super();
   }

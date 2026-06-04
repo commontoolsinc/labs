@@ -10,11 +10,10 @@ import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 
 /**
- * Container for an unrecognized type's data, used for round-tripping. When
- * the serialization system encounters an unknown tag during deserialization,
- * it wraps the tag and state here; on re-serialization, it uses the preserved
- * `typeTag` to produce the original wire format. See Section 3.3 of the
- * formal spec.
+ * Container for an unrecognized type's data, used for round-tripping. When the
+ * serialization system encounters an unknown tag during deserialization, it
+ * wraps the tag and state here; on re-serialization, it uses the preserved data
+ * to produce the original wire format. See Section 3.3 of the formal spec.
  */
 export class UnknownValue extends ExplicitTagValue {
   constructor(wireTypeTag: string, state: FabricValue) {
