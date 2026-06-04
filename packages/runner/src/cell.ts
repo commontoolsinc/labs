@@ -964,8 +964,13 @@ export class CellImpl<T extends FabricValue>
     // `"sqlite"` is a type-level kind (the public `SqliteDb` type restricts who
     // can call `.exec`); at runtime we validate the actual handle value rather
     // than `_kind`, since handler-input materialization doesn't always stamp the
-    // kind onto the delivered cell.
-    const handle = this.get() as
+    // kind onto the delivered cell. Read the handle with `getRaw()` (NOT `get()`):
+    // the delivered cell's schema is the `SqliteDatabase` shape (no declared
+    // properties), so `get()` would shape the handle down to `{}` and drop the
+    // `id`/`tables` fields. Use `lastNode: "value"` so the FINAL link is still
+    // resolved (a handler-delivered handle may sit behind a link at its target) —
+    // getRaw's default `"top"` would stop at the link object and miss `id`.
+    const handle = this.getRaw({ lastNode: "value" }) as
       | { id?: unknown; tables?: unknown }
       | undefined;
     if (!handle || typeof handle.id !== "string") {

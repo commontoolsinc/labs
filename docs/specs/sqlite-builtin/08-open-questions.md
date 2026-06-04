@@ -206,15 +206,21 @@ during design are marked **[resolved]** with the decision.
     one handler trip the limit only at commit time. A client-side assertion in the
     write seam (`recordSqliteWrite`) could surface this earlier with a clearer
     message. Nicety, not a correctness issue.
-20. **Two schema paths disagree on the `SqliteDb` brand.** The schema-generator's
-    object-formatter stamps `asCell: ["sqlite"]` for a `SqliteDb` field, but the
-    ts-transformer's capability analysis (used for handler-state schemas) infers
-    `asCell: ["readonly"]` from SqliteDb's read-only method surface — it does not
-    recognize the "sqlite" brand. This is **benign today**: `db.exec` reaches the
-    transaction via the materialized handle regardless of the wrapper brand
-    (proven e2e), and `db.query` is build-time only. But the inconsistency is a
-    latent trap; the capability analysis should learn the "sqlite" brand so both
-    paths agree.
+20. **[resolved] Two schema paths disagree on the `SqliteDb` brand.** The
+    schema-generator's object-formatter stamped `asCell: ["sqlite"]` for a
+    `SqliteDb` field, but the ts-transformer's capability analysis (handler-state
+    schemas) inferred `asCell: ["readonly"]` from SqliteDb's read-only method
+    surface. **Resolved** by teaching the transformer that the explicit `"sqlite"`
+    cell brand is authoritative and must survive capability shrinking — the same
+    mechanism that preserves `Stream` (`preservedWrapperFor` in
+    `type-shrinking.ts`); the schema generator now also recognizes the
+    `SqliteDb` wrapper name (`type-utils.ts`/`wrapperKindForName`). Both paths now
+    emit `["sqlite"]`. Making the brands agree surfaced two latent issues that are
+    also fixed: (a) the public `SqliteDb` type no longer extends `IReadable`, so
+    `db.get()`/`db.sample()` (meaningless on an opaque handle) no longer
+    type-check; (b) the runtime's `db.exec` reads the handle via `getRaw()` rather
+    than the schema-shaped `get()` (which, under the real `SqliteDatabase` schema,
+    shaped the handle down to `{}` and dropped `id`/`tables`).
 
 ## Code-review follow-ups (deferred hardening)
 

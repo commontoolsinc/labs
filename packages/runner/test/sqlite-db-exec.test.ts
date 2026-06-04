@@ -90,6 +90,40 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     await tx2.commit();
   });
 
+  it("reads the handle via getRaw even when the cell schema shapes it to {}", async () => {
+    // Real handler-input materialization delivers the handle cell with the
+    // `SqliteDatabase` schema (an object type with NO declared properties). A
+    // schema-shaped `get()` would project the handle down to `{}` and drop
+    // `id`/`tables`; `.exec` must read the raw handle (getRaw, lastNode:"value")
+    // and still fold the write. Regression guard for the get()->getRaw() fix.
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-shaped-${crypto.randomUUID()}`,
+      tables: { notes: table({ id: "integer primary key", body: "text" }) },
+    };
+    const tx = runtime.edit();
+    const handle = runtime.getCell(space, "db-shaped", undefined, tx);
+    handle.set(dbRef);
+    const db = createCell(
+      runtime,
+      {
+        ...handle.getAsNormalizedFullLink(),
+        schema: { type: "object", properties: {} },
+      },
+      tx,
+      false,
+      "sqlite",
+    ) as unknown as SqliteDbCell;
+    // Sanity: a schema-shaped read drops the handle fields...
+    expect(db.get()).toEqual({});
+    // ...but exec still records the write from the raw handle.
+    db.exec("INSERT INTO notes (body) VALUES (?)", ["hi"]);
+    const res = await tx.commit();
+    expect(res.error).toBeUndefined();
+    const provider = storageManager.open(space);
+    const r = await provider.sqliteQuery!(dbRef, "SELECT body FROM notes");
+    expect(r.rows).toEqual([{ body: "hi" }]);
+  });
+
   it("throws on an undefined param, allows null", async () => {
     const dbRef: SqliteDbRef = {
       id: `of:exec-undef-${crypto.randomUUID()}`,

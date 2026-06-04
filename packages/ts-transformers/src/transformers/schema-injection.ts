@@ -43,11 +43,10 @@ import {
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
-  isStreamTypeNode,
+  preservedWrapperFor,
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -138,13 +137,6 @@ function extractCellLikeInnerTypeNode(
   if (!ts.isTypeReferenceNode(node)) return undefined;
   if (!node.typeArguments || node.typeArguments.length === 0) return undefined;
   return node.typeArguments[0];
-}
-
-function isStreamCellType(
-  type: ts.Type | undefined,
-  checker: ts.TypeChecker,
-): boolean {
-  return !!type && getCellKind(type, checker) === "stream";
 }
 
 function parameterUsesCellLikeMethods(
@@ -266,8 +258,9 @@ function applyCapabilitySummaryToArgument(
       sourceFile,
     );
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(argumentNode) || isStreamCellType(argumentType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(argumentNode, argumentType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? argumentNode;
   let baseType = shouldWrap && argumentType
     ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
@@ -293,7 +286,7 @@ function applyCapabilitySummaryToArgument(
     mode === "defaults_only" ? "opaque" : paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
@@ -325,9 +318,9 @@ function applyCapabilitySummaryToParameter(
 
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(parameterNode) ||
-      isStreamCellType(parameterType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(parameterNode, parameterType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? parameterNode;
   let baseType = shouldWrap && parameterType
     ? (unwrapCellLikeType(parameterType, checker) ?? parameterType)
@@ -353,7 +346,7 @@ function applyCapabilitySummaryToParameter(
     paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
