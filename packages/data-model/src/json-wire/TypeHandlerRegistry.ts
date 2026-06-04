@@ -12,6 +12,9 @@ export class TypeHandlerRegistry {
   /** Tag -> handler map for O(1) deserialization dispatch. */
   readonly #tagMap = new Map<string, TypeHandler>();
 
+  /** Class -> handler map for O(1) serialization dispatch. */
+  readonly #classMap = new Map<Function, TypeHandler>();
+
   /**
    * Registers a handler. Handlers with non-empty tags are indexed for O(1)
    * deserialization lookup. Handlers with empty tags (like
@@ -19,6 +22,11 @@ export class TypeHandlerRegistry {
    */
   register(handler: TypeHandler): void {
     this.#handlers.push(handler);
+
+    const classSource = handler.classSource;
+    if (classSource !== undefined) {
+      this.#classMap.set(classSource, handler);
+    }
     const wireTypeTag = handler.wireTypeTag;
     if (wireTypeTag !== undefined) {
       this.#tagMap.set(wireTypeTag, handler);
@@ -31,6 +39,14 @@ export class TypeHandlerRegistry {
    * handling for primitives, arrays, and plain objects).
    */
   findSerializer(value: FabricValue): TypeHandler | undefined {
+    const constructorFn = value?.constructor;
+    if (constructorFn) {
+      const handler = this.#classMap.get(constructorFn);
+      if (handler && handler.canSerialize(value)) {
+        return handler;
+      }
+    }
+
     for (const handler of this.#handlers) {
       if (handler.canSerialize(value)) {
         return handler;
