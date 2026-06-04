@@ -239,15 +239,22 @@ during design are marked **[resolved]** with the decision.
     the attachment with `.has()` (no dead `alias` binding) and documents that the
     unqualified statement relies on the ≤1-cell-db invariant + core-table guard,
     not on alias qualification.
-24. **Codec / factory duplication (partly open).** The `toCell` divergence is
-    **fixed**: `encodeSqliteParams` now recovers a bound cell from a `toCell`
-    back-pointer too, matching the read side. Still open: `encodeSqliteParams`
-    inlines the cell→sigil encoding `encodeCfLinkValue` owns, `decodeCfLinkValue`
-    re-implements `parseCfLinkToSigil`'s prologue, and `cell.ts` rebuilds the
-    `sqliteQuery` node factory `builder/built-in.ts` exports. Consolidating these
-    is blocked by the cell.ts ↔ cf-link.ts import cycle (both need `isCell`);
-    resolve via a cycle-free helper module. The write/read codecs MUST stay
-    byte-identical until then.
+24. **[resolved] Codec / factory duplication.** All three are consolidated, with
+    the cell.ts ↔ cf-link.ts cycle broken via a cycle-free leaf module
+    (`builtins/sqlite/cf-link-codec.ts`, which depends only on `link-utils` +
+    types — no runtime `cell.ts` import).
+    - **Cell→sigil encode:** `encodeSqliteParams` (cell.ts) and `encodeCfLinkValue`
+      (cf-link.ts) both call the codec's `encodeCellToSigilString`, so write- and
+      read-path sigils are byte-identical by construction (no inlining).
+    - **Parse prologue:** `parseCfLinkToSigil` lives in the codec; `decodeCfLinkValue`
+      delegates to it (one prologue, not two). cf-link.ts re-exports it so importers
+      are unchanged.
+    - **Bound-cell recovery:** a single exported `asBoundCell` in cell.ts (where
+      `isCell`/`CellImpl` live), imported by cf-link.ts (the direction it already
+      imported `isCell`).
+    - **Factory:** the single `sqliteQuery` node factory lives in
+      `builtins/sqlite/query-node.ts`, imported by both `db.query` (cell.ts) and the
+      `sqliteQuery` builder export (built-in.ts).
 25. **[resolved]** `decodeRowLinkColumns` now copies a result row lazily — only
     when a link column actually decodes to a different value — so rows with no
     link columns (or null values) are returned as-is on the reactive read path,
