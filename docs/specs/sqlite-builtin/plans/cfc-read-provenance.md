@@ -116,6 +116,15 @@ labeling become sound and parser-free:
 - **D-prov-3 — capture cost:** three FFI calls per result column per query. Only
   needed when the queried db declares any `ifc`; skip entirely for unlabeled dbs
   (the common case) so there's zero overhead until CFC is actually used.
-- **D-prov-4 — non-SELECT-shape edge cases** (UNION/CTE/window/view): verify they
-  yield null origin (→ fail closed) rather than a wrong origin. Spike before
-  relying on it.
+- **D-prov-4 — [spiked, resolved] non-SELECT-shape edge cases.** A spike
+  (`v2-sqlite-column-origin-spike-test.ts`, run on a read-only connection opened
+  exactly as `ReadConnectionPool`) confirms soundness everywhere and is *better*
+  than expected: alias → true origin; spoof (`subject AS from_email`) → origin
+  `(emails, subject)` (defeated); expression/literal → `(null,null)` (fail
+  closed); JOIN → origin table disambiguates same-named columns; and **UNION,
+  CTE, view, and subquery all resolve to the TRUE origin** `(emails, from_email)`
+  — not null. So null-origin is rarer than feared (mostly just expressions),
+  and a non-null origin is never a *wrong* column. The FFI helper is
+  `v2/sqlite/column-origin.ts` (`columnOrigins(stmtHandle, count)` +
+  `columnOriginAvailable()`), with the lib resolved via `DENO_SQLITE_PATH` or the
+  plug-cached prebuilt.
