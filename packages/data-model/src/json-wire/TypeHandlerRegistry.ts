@@ -7,10 +7,10 @@ import type { TypeHandler } from "./interface.ts";
  */
 export class TypeHandlerRegistry {
   /** Ordered list of handlers for serialization matching. */
-  private readonly handlers: TypeHandler[] = [];
+  readonly #handlers: TypeHandler[] = [];
 
   /** Tag -> handler map for O(1) deserialization dispatch. */
-  private readonly tagMap = new Map<string, TypeHandler>();
+  readonly #tagMap = new Map<string, TypeHandler>();
 
   /**
    * Registers a handler. Handlers with non-empty tags are indexed for O(1)
@@ -18,10 +18,10 @@ export class TypeHandlerRegistry {
    * `FabricInstanceHandler`) participate in serialization matching only.
    */
   register(handler: TypeHandler): void {
-    this.handlers.push(handler);
+    this.#handlers.push(handler);
     const wireTypeTag = handler.wireTypeTag;
     if (wireTypeTag !== undefined) {
-      this.tagMap.set(wireTypeTag, handler);
+      this.#tagMap.set(wireTypeTag, handler);
     }
   }
 
@@ -31,7 +31,7 @@ export class TypeHandlerRegistry {
    * handling for primitives, arrays, and plain objects).
    */
   findSerializer(value: FabricValue): TypeHandler | undefined {
-    for (const handler of this.handlers) {
+    for (const handler of this.#handlers) {
       if (handler.canSerialize(value)) {
         return handler;
       }
@@ -41,6 +41,6 @@ export class TypeHandlerRegistry {
 
   /** Looks up a handler by tag for deserialization. */
   getDeserializer(wireTypeTag: string): TypeHandler | undefined {
-    return this.tagMap.get(wireTypeTag);
+    return this.#tagMap.get(wireTypeTag);
   }
 }
