@@ -3,6 +3,7 @@ import {
   detectCallKind,
   getHandlerAppliedInnerCall,
   getLiftAppliedInnerCall,
+  getPatternToolHoistablePatternCall,
   getWithPatternHoistablePatternCall,
   isHandlerAppliedCall,
   SYNTHETIC_HANDLER_HOIST_PREFIX,
@@ -55,26 +56,30 @@ import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
  * Result: every reactive computation is a named, addressable module-scope
  * const — the substrate Phase 3 wraps with `selfcontained(...)`.
  *
- * ## Why this owns lift hoisting (subsumes CT-1585 for lift)
+ * ## The sole module-scope hoisting phase (CT-1585 subsumed)
  *
- * CT-1585's `BuilderCallbackHoistingTransformer` hoists builder *callbacks*
- * (the function argument), not the whole call, and only when the callback
- * closes solely over module-level symbols. For `lift` (CT-1644) and `handler`
- * (CT-1655) that mechanic is now redundant and actively harmful: hoisting the
- * call here AND the callback there produces a double hoist whose two consts
- * reference each other out of declaration order (TDZ `ReferenceError` at module
- * load). So `lift` and `handler` are removed from CT-1585's hoistable set; this
- * stage is their sole owner. CT-1585 still owns `pattern`/`patternTool`.
+ * CT-1585 originally had a separate `BuilderCallbackHoistingTransformer` that
+ * hoisted builder *callbacks* (the function argument) when the callback closed
+ * solely over module-level symbols. That mechanic was redundant and actively
+ * harmful once a builder's whole call is hoisted here: hoisting the call AND the
+ * callback produced a double hoist whose two consts referenced each other out
+ * of declaration order (TDZ `ReferenceError` at module load). As each builder
+ * gained whole-call hoisting — `lift` (CT-1644), then `handler`, `pattern`, and
+ * `patternTool` (CT-1655) — it was removed from CT-1585's set; with the set
+ * emptied, `BuilderCallbackHoistingTransformer` was deleted. This stage is now
+ * the single module-scope hoisting phase.
  *
  * ## Generality
  *
  * The hoist mechanic is builder-agnostic: only "which call expression is the
- * hoistable unit" and "what name prefix to bind it to" are builder-specific.
- * Those live in {@link HOISTABLE_BUILDERS}. Today `lift` and `handler` are
- * registered (both the single-application `builder(...)(captures)` shape); when
- * `pattern`/`patternTool` get the same addressed/selfcontained treatment they
- * register here too, converging CT-1585 and this stage into one hoisting phase
- * without restructuring.
+ * hoistable unit", "how the original site references the hoisted name", and
+ * "what name prefix to bind it to" are builder-specific. Those live in
+ * {@link HOISTABLE_BUILDERS}. Two shapes are registered:
+ *   - applied builders (`lift`, `handler`): `builder(...)(captures)` — hoist the
+ *     inner call, leave `name(captures)` (the default callee-swap rewrite);
+ *   - argument-position builders (`pattern`): the bare `pattern(...)` sits in
+ *     argument 0 of an enclosing `*WithPattern` or `patternTool` call — hoist it
+ *     and rewrite that argument (via {@link HoistableBuilderSpec.rewriteSite}).
  */
 export class BuilderCallHoistingTransformer extends HelpersOnlyTransformer {
   override transform(context: TransformationContext): ts.SourceFile {
@@ -158,18 +163,25 @@ const PATTERN_BUILDER: HoistableBuilderSpec = {
   prefix: SYNTHETIC_PATTERN_HOIST_PREFIX,
   resolveHoistable: (call, context) => {
     // Pattern is NOT applied: the bare `__cfHelpers.pattern(cb, inSchema,
-    // outSchema)` call sits in the FIRST argument of an enclosing
-    // `receiver.mapWithPattern(pattern(...), { params })` call (per-instance
-    // captures flow through the params object, the second argument). The
-    // visited node here is the `*WithPattern` call; the hoistable unit is its
-    // first argument. Because captures live in the params object, the bare
-    // pattern call is capture-free and safe to relocate to module scope.
-    return getWithPatternHoistablePatternCall(call, context.checker);
+    // outSchema)` call sits in the FIRST argument of an enclosing call, with
+    // per-instance values flowing through that call's remaining argument(s).
+    // Two enclosing shapes carry a hoistable pattern (identical mechanic —
+    // relocate argument 0, keep the rest):
+    //   - `receiver.mapWithPattern(pattern(...), { params })` (and the other
+    //     lowered `*WithPattern` array methods); captures in the params object.
+    //   - `patternTool(pattern(...), extraParams?)` (CT-1655); per-instance
+    //     values in extraParams, module-scoped reads absorbed by the pattern.
+    // In both, the bare pattern call is capture-free and safe to relocate. The
+    // top-level `export default pattern(...)` is a direct call (not an argument
+    // to either), so it is naturally excluded.
+    return getWithPatternHoistablePatternCall(call, context.checker) ??
+      getPatternToolHoistablePatternCall(call, context.checker);
   },
   rewriteSite: (visited, hoistedName, _innerCall, factory) => {
     // Replace ONLY the first argument (the pattern call) with the hoisted name,
-    // keeping the `.mapWithPattern` callee and the trailing params argument(s)
-    // intact. (Applied builders take the default callee-swap instead.)
+    // keeping the enclosing call's callee (`.mapWithPattern` / `patternTool`)
+    // and the trailing argument(s) intact. (Applied builders take the default
+    // callee-swap instead.)
     return factory.updateCallExpression(
       visited,
       visited.expression,
@@ -208,9 +220,10 @@ function hoistBuilderCalls(
 
   // Per-file counters keyed by builder prefix. Explicit counters + literal
   // suffixes (NOT `factory.createUniqueName`, whose `.text` carries only the
-  // bare prefix and defers suffixing to emit — breaking the identity-by-text
-  // lookups later stages rely on; see SYNTHETIC_MODULE_CALLBACK_PREFIX's
-  // history in module-scope-callback-hoisting.ts).
+  // bare prefix and defers numeric suffixing to emit — so every hoisted
+  // identifier would share the same `.text`, breaking the identity-by-text
+  // lookups later stages rely on to match a `<prefix>_N` call site back to its
+  // hoisted const).
   const counters = new Map<string, number>();
 
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
