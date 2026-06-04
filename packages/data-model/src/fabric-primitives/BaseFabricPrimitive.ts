@@ -5,11 +5,12 @@ import { FabricPrimitive } from "../interface.ts";
  * subclasses. Concrete `FabricPrimitive` classes are intended to extend this,
  * not `FabricPrimitive` directly: `FabricPrimitive` is the pure abstract
  * contract that external code is written against, while `BaseFabricPrimitive`
- * is where shared implementation will live (mirroring the
- * `BaseFabricInstance` / `FabricInstance` split).
- *
- * It is currently empty -- a placeholder for that shared machinery, which lands
- * in a later change.
+ * is where shared implementation lives.
  */
 export abstract class BaseFabricPrimitive extends FabricPrimitive {
+  /**
+   * The type tag to use for this instance to identify it in wire protocols
+   * for which instances of this type do not have a protocol-specific form.
+   */
+  abstract get wireTypeTag(): string;
 }
