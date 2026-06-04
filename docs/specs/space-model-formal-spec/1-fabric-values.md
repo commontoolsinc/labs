@@ -250,7 +250,7 @@ they are `FabricPrimitive` subclasses (Section 1.4.6). `FabricPrimitive` extends
 members of `FabricValue`. They are always-frozen value types that bypass the
 `freeze` option in conversion functions. They have dedicated hash tags and
 dedicated `TypeHandler`s for wire format serialization, but they do
-not implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag`
+not implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `wireTypeTag`
 property.
 
 #### 1.4.1 Wrapper Class Summary
@@ -281,7 +281,7 @@ Each wrapper class above:
 - **Has `[DEEP_FREEZE]` and `[IS_DEEP_FROZEN]` methods plus a `deepClone(frozen)`
   method** per the `FabricInstance` protocol (Section 2.3); the deep-freeze
   pair participates in the generic `deepFreeze()` dispatch (Section 8.6).
-- **Carries a `typeTag` property** (e.g., `"Error@1"`) used by the
+- **Carries a `wireTypeTag` property** (e.g., `"Error@1"`) used by the
   serialization context for tag resolution, following the pattern established
   by `UnknownValue` and `ProblematicValue`.
 
@@ -303,7 +303,7 @@ to native form:
  */
 abstract class FabricNativeWrapper<T extends object>
   extends BaseFabricInstance {
-  abstract readonly typeTag: string;
+  abstract readonly wireTypeTag: string;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
   protected abstract get wrappedValue(): T;
@@ -379,7 +379,7 @@ import {
  * unwrapping paths.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
-  readonly typeTag = 'Error@1';
+  readonly wireTypeTag = 'Error@1';
 
   constructor(readonly error: Error) {
     super();
@@ -456,7 +456,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
 ```typescript
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
-  readonly typeTag = 'Map@1';
+  readonly wireTypeTag = 'Map@1';
 
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
@@ -480,7 +480,7 @@ export class FabricMap
 
 ```typescript
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
-  readonly typeTag = 'Set@1';
+  readonly wireTypeTag = 'Set@1';
 
   constructor(readonly set: Set<FabricValue>) {
     super();
@@ -509,7 +509,7 @@ JS `RegExp` carries mutable internal state (notably `lastIndex`), a
 `FabricRegExp` never hands out its stored `RegExp` un-cloned, so no mutable
 state is exposed. It therefore has a dedicated hash tag (`TAG_REGEXP`, Section
 6.3) and a dedicated wire-format `TypeHandler` (tag `RegExp@1`), and does not
-implement `[DECONSTRUCT]` / `[RECONSTRUCT]` or carry a `typeTag` property.
+implement `[DECONSTRUCT]` / `[RECONSTRUCT]` or carry a `wireTypeTag` property.
 
 ```typescript
 // file: packages/data-model/fabric-primitives/FabricRegExp.ts
@@ -847,7 +847,7 @@ export class FabricBytes extends FabricPrimitive {
 
 Unlike the previous `FabricUint8Array` (which was a `FabricInstance` wrapping
 `Uint8Array` via `FabricNativeWrapper`), `FabricBytes` is a `FabricPrimitive`.
-It does not implement `[DECONSTRUCT]`/`[RECONSTRUCT]` and has no `typeTag`
+It does not implement `[DECONSTRUCT]`/`[RECONSTRUCT]` and has no `wireTypeTag`
 property. The serialization system handles it via a dedicated `TypeHandler`
 (tag `Bytes@1`), similar to how it handles `FabricEpochNsec` and
 `FabricEpochDays`. The hashing system uses the dedicated `TAG_BYTES` primitive
@@ -1434,7 +1434,7 @@ handle both subtypes uniformly (e.g., serialization dispatch).
 export abstract class ExplicitTagValue extends BaseFabricInstance {
   constructor(
     /** The original type tag, e.g. `"FutureType@2"`. */
-    readonly typeTag: string,
+    readonly wireTypeTag: string,
     /** The raw state, already recursively processed by the deserializer. */
     readonly state: FabricValue,
   ) {
@@ -1463,11 +1463,11 @@ import { ExplicitTagValue } from './ExplicitTagValue';
  * Holds an unrecognized type's data for round-tripping. The serialization
  * system has special knowledge of this class: on deserialization of an unknown
  * tag, it wraps the tag and state here; on re-serialization, it uses the
- * preserved `typeTag` to produce the original wire format.
+ * preserved `wireTypeTag` to produce the original wire format.
  */
 export class UnknownValue extends ExplicitTagValue {
-  constructor(typeTag: string, state: FabricValue) {
-    super(typeTag, state);
+  constructor(wireTypeTag: string, state: FabricValue) {
+    super(wireTypeTag, state);
   }
 
   [DECONSTRUCT]() {
@@ -1489,7 +1489,7 @@ export class UnknownValue extends ExplicitTagValue {
   deserialization, it wraps the original tag and state into `{ type, state }`
   and passes that to `UnknownValue[RECONSTRUCT]`.
 - When re-serializing an `UnknownValue`, the system uses the preserved
-  `typeTag` to produce the original wire format.
+  type tag to produce the original wire format.
 - This allows data to round-trip through systems that don't understand it.
 
 ### 3.5 `ProblematicValue` (Recommended)
@@ -1516,16 +1516,16 @@ import { ExplicitTagValue } from './ExplicitTagValue';
  */
 export class ProblematicValue extends ExplicitTagValue {
   constructor(
-    typeTag: string,
+    wireTypeTag: string,
     state: FabricValue,
     /** A description of what went wrong. */
     readonly error: string,
   ) {
-    super(typeTag, state);
+    super(wireTypeTag, state);
   }
 
   [DECONSTRUCT]() {
-    return { type: this.typeTag, state: this.state, error: this.error };
+    return { type: this.wireTypeTag, state: this.state, error: this.error };
   }
 
   static [RECONSTRUCT](
@@ -1778,12 +1778,12 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
 > constructor registers native wrapper classes for deserialization:
 > `FabricError`, `FabricMap`, `FabricSet`. For tag
 > resolution (`getTagFor`), the context checks for
-> a `typeTag` property on the instance — the same pattern used by
+> a `wireTypeTag` property on the instance — the same pattern used by
 > `UnknownValue` and `ProblematicValue`. (`FabricRegExp`, like the other
 > `FabricPrimitive` subclasses, is handled by its own dedicated
-> `TypeHandler` rather than the `typeTag`-based wrapper path.)
+> `TypeHandler` rather than the `wireTypeTag`-based wrapper path.)
 > `ExplicitTagValue` instances
-> use their preserved `typeTag` directly. This avoids `instanceof` cascades
+> use their preserved `wireTypeTag` directly. This avoids `instanceof` cascades
 > and scales cleanly as new wrapper types are added.
 
 > **Previous design.** The earlier spec presented `serialize()` and
@@ -2110,7 +2110,7 @@ export function hashOf(value: unknown): FabricHash {
   //                        Keys sorted lexicographically by UTF-8.
   //                        Each pair: hashStr(key) + tagged value.
   //                        TAG_END marks the end of the pair sequence.
-  // - `FabricInstance`:  hash(TAG_INSTANCE, hashStr(typeTag),
+  // - `FabricInstance`:  hash(TAG_INSTANCE, hashStr(wireTypeTag),
   //                              hashOf(deconstructedState))
   //
   // The native object wrappers and temporal types are hashed as follows:
@@ -2118,7 +2118,7 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricError`, `FabricMap`, `FabricSet`,
   //   and other `FabricInstance`s with recursively-processable
   //   deconstructed state are hashed via TAG_INSTANCE:
-  //     hash(TAG_INSTANCE, hashStr(typeTag),
+  //     hash(TAG_INSTANCE, hashStr(wireTypeTag),
   //          hashOf(deconstructedState))
   //
   // - `FabricBytes` uses TAG_BYTES (dedicated primitive tag).
@@ -2276,8 +2276,7 @@ This applies at every point where deserialized data is consumed:
 
 - **Hashing** (Section 6.3) may operate on values that have been
   through a deserialization round-trip. Code that extracts properties from
-  `FabricInstance` values (e.g., casting to `{ typeTag: string }`) must
-  validate those properties at runtime.
+  `FabricInstance` values must validate those properties at runtime.
 
 - **Application code** that reads values from cells, IPC messages, or any other
   boundary listed in Section 4.7 should treat the values as untrusted until

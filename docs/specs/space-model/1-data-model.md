@@ -427,8 +427,8 @@ This requires a generic `FabricInstance` to hold unrecognized types:
 ```typescript
 class UnknownValue extends FabricInstance {
   constructor(
-    readonly typeTag: string,   // e.g., "FutureType@2"
-    readonly state: FabricValue, // the raw state, already recursively processed
+    readonly wireTypeTag: string, // e.g., "FutureType@2"
+    readonly state: FabricValue,  // the raw state, already recursively processed
   ) { super(); }
 
   [DECONSTRUCT]() {
@@ -447,7 +447,7 @@ class UnknownValue extends FabricInstance {
 The serialization system has special knowledge of `UnknownValue`: when it
 encounters an unknown type tag during deserialization, it wraps the original
 tag and state into `{ type, state }` and passes that to `[RECONSTRUCT]`. When
-re-serializing, it uses the preserved `typeTag` to produce the original wire
+re-serializing, it uses the preserved type tag to produce the original wire
 format, allowing data to round-trip through systems that don't understand it.
 
 #### Serialization Contexts
@@ -759,7 +759,7 @@ mapping between rich runtime types and their serialized form. The context is
 also responsible for:
 - Applying `/object` or `/quote` escaping when serializing plain objects that
   happen to have slash-prefixed keys
-- Wrapping unknown types using the `typeTag` preserved in `UnknownValue`
+- Wrapping unknown types using the `wireTypeTag` preserved in `UnknownValue`
 
 #### Open Questions
 
