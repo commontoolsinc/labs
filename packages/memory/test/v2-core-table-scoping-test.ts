@@ -7,6 +7,7 @@
 
 import { assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { Database } from "@db/sqlite";
 import { applyCommit, close, type Engine, open, read } from "../v2/engine.ts";
 import type { EntityDocument } from "../v2.ts";
 
@@ -120,6 +121,45 @@ Deno.test("DIDs that collided under the old 32-bit token now get disjoint names"
     close(y);
     await Deno.remove(pathX);
     await Deno.remove(pathY);
+  }
+});
+
+Deno.test("re-scopes in place if the token derivation changes (no orphaning)", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+
+  // 1. Scoped db with data under the current token.
+  const first = await open({ url: toFileUrl(path), space: SPACE_A });
+  writeEntity(first, "entity:keep", { n: 7 });
+  const curToken = tableNames(first).find((n) => /^commit__/.test(n))!
+    .slice("commit__".length);
+  close(first);
+
+  // 2. Simulate a CHANGED token derivation: rename the whole core family from
+  //    the current token to a fake "old" token, behind the engine's back.
+  const raw = new Database(path);
+  raw.exec("PRAGMA legacy_alter_table = OFF;");
+  const fakeOld = "0123456789abcdef0123456789abcdef";
+  for (
+    const r of raw.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_\\_' || ? ESCAPE '\\'`,
+    ).all(curToken) as Array<{ name: string }>
+  ) {
+    const base = r.name.slice(0, -(curToken.length + 2));
+    raw.exec(`ALTER TABLE "${r.name}" RENAME TO "${base}__${fakeOld}";`);
+  }
+  raw.close();
+
+  // 3. Reopen with the same space: the migration sees the prior-token tables and
+  //    re-scopes them to the current token; the data survives, no orphans.
+  const reopened = await open({ url: toFileUrl(path), space: SPACE_A });
+  try {
+    const names = tableNames(reopened);
+    assertExists(names.find((n) => n === `commit__${curToken}`));
+    assertEquals(names.some((n) => n.endsWith(`__${fakeOld}`)), false);
+    assertEquals(read(reopened, { id: "entity:keep" }), { value: { n: 7 } });
+  } finally {
+    close(reopened);
+    await Deno.remove(path);
   }
 });
 

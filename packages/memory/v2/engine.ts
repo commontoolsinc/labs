@@ -1476,20 +1476,39 @@ const migrateCoreTablesToSpaceScoped = (
     return;
   }
 
+  // Detect a core set scoped under a DIFFERENT token (a prior `commit__<old>`).
+  // This makes the rename SELF-HEALING: if the token derivation ever changes,
+  // we re-scope the existing tables to the current token in place instead of
+  // orphaning the data behind stale `<core>__<old>` names (the engine recomputes
+  // the token from the DID each open and stores no marker). `_` is a LIKE
+  // wildcard, so escape the literal `__`.
+  const priorToken = ((): string | undefined => {
+    const row = database.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' ` +
+        `AND name LIKE 'commit\\_\\_%' ESCAPE '\\' LIMIT 1`,
+    ).get() as { name?: string } | undefined;
+    const old = row?.name?.slice("commit__".length);
+    return old && old !== token ? old : undefined;
+  })();
+
   // `ALTER TABLE … RENAME TO` only auto-rewrites FK references in OTHER tables
   // when legacy_alter_table is OFF (the default). Pin it so a renamed parent
   // (e.g. `commit`) doesn't leave child FK clauses (`revision`, `scheduler_*`)
-  // pointing at the vanished bare name.
+  // pointing at the vanished source name.
   database.exec("PRAGMA legacy_alter_table = OFF;");
   database.exec("BEGIN TRANSACTION;");
   try {
     for (const key of CORE_TABLE_KEYS) {
-      const bare = key; // bare identifier (e.g. `commit`, `revision`)
       const scoped = `${key}__${token}`;
-      if (tableExists(bare) && !tableExists(scoped)) {
-        database.exec(
-          `ALTER TABLE "${bare}" RENAME TO "${scoped}";`,
-        );
+      if (tableExists(scoped)) continue;
+      // Rename from the legacy bare name, else from the prior-token name.
+      const source = tableExists(key)
+        ? key
+        : (priorToken && tableExists(`${key}__${priorToken}`))
+        ? `${key}__${priorToken}`
+        : undefined;
+      if (source !== undefined) {
+        database.exec(`ALTER TABLE "${source}" RENAME TO "${scoped}";`);
       }
     }
     database.exec("COMMIT;");
