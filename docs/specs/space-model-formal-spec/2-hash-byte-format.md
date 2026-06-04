@@ -317,8 +317,8 @@ so the two temporal types are always distinguishable.
 ### 4.11 `FabricHash`
 
 ```
-Bytes: TAG_CONTENT_ID  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
-       0x29            <string, §4.4>   <1+ bytes>       <varies>
+Bytes: TAG_HASH  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
+       0x29       <string, §4.4>   <1+ bytes>       <varies>
 ```
 
 `FabricHash` represents a content identifier — a hash with an algorithm
@@ -576,7 +576,7 @@ payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 29  24 04 66 69 64 31  04  DE AD BE EF
 ```
 
-- `TAG_CONTENT_ID` (`0x29`)
+- `TAG_HASH` (`0x29`)
 - Algorithm tag (string, §4.4 direct form): `TAG_STRING` (`0x24`), length 4
   (`0x04`), UTF-8 bytes `66 69 64 31`
 - Hash byte length 4 (`0x04`)
