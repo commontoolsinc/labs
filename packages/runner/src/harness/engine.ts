@@ -578,8 +578,15 @@ export class Engine extends EventTarget implements Harness {
   ): EvaluateResult {
     const prefix = `/${id}`;
     // Register module hashes up front so the canonical `cf:module/<hash>/<path>`
-    // sources are available for the verified set below.
-    this.registerModuleHashes(id, files);
+    // sources are available for the verified set below. Derive them from the
+    // graph's RESOLVED per-module identities (the same content-addressed
+    // `cf:module/<identity>` the cache + source-free reload use), NOT by
+    // re-hashing the raw `files` — those disagree (the resolved set folds the
+    // injected modules into each module's Merkle hash), which would make a
+    // function's `fn.src` (hence its implementationRef) differ between this
+    // source-based compile and a source-free by-identity reload, breaking
+    // `getExecutableFunction` for resumed callables (CT-1623).
+    this.registerModuleHashesFromGraph(id, graph);
     const verifiedSources = new Set<string>();
     const addVerifiedSource = (value: string | undefined) => {
       if (typeof value !== "string" || value.length === 0) return;
@@ -1069,6 +1076,41 @@ export class Engine extends EventTarget implements Harness {
       this.canonicalSourceByPrefixed.set(
         `/${id}${path}`,
         `cf:module/${hash}${path}`,
+      );
+    }
+  }
+
+  /**
+   * Like {@link registerModuleHashes}, but takes the RESOLVED per-module
+   * identities straight from the compiled graph (`cf:module/<identity>` in
+   * `graph.specifierByPath`) instead of re-hashing the raw program files.
+   *
+   * The two must agree: the cache key, the record-graph specifiers, and the
+   * source-free by-identity reload (`evaluateCachedModules`) all use the
+   * resolved identity (which folds the injected/resolved modules into each
+   * module's Merkle hash). Re-hashing the raw `program.files` here would yield a
+   * DIFFERENT hash for the same module, so a function's `fn.src` — and thus its
+   * minted `implementationRef` — would differ between this source-based compile
+   * and a source-free reload, and `getExecutableFunction` would miss when a
+   * resumed piece invokes a callable (CT-1623). Keying matches the source map's
+   * bundle paths (`/<id>/<authoredPath>`, plus injected modules under their own
+   * specifier path), and the canonical value matches the source-free form.
+   */
+  private registerModuleHashesFromGraph(
+    id: string,
+    graph: CompiledModuleGraph,
+  ): void {
+    const prefix = `/${id}`;
+    for (const [name, specifier] of graph.specifierByPath) {
+      if (!specifier.startsWith("cf:module/")) continue;
+      const identity = specifier.slice("cf:module/".length);
+      const authoredPath = name.startsWith(`${prefix}/`)
+        ? name.slice(prefix.length)
+        : name;
+      this.moduleHashByPrefixedSource.set(name, identity);
+      this.canonicalSourceByPrefixed.set(
+        name,
+        `cf:module/${identity}${authoredPath}`,
       );
     }
   }
