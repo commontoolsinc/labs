@@ -726,7 +726,7 @@ all possible downstream readers when an input changes, because that recreates
 the broad fanout that pull mode is trying to avoid.
 
 Materializer identity is explicit scheduler metadata. For generated
-`computed()`/`derive()` callbacks, the transformer emits
+`computed()` callbacks, the transformer emits
 `materializerWriteInputPaths` only when capability analysis observes actual
 writes through captured cell inputs; the runner resolves those input paths to
 `materializerWriteEnvelopes` for the concrete action instance. A generated
@@ -886,14 +886,14 @@ Current branch status:
 | Demand-targeted dirty recovery beyond subscription startup | Future work. |
 | Replication, retention, and mirror repair | Future work. |
 
-The version 1 implementation is gated by the same experimental-option plumbing
-as `EXPERIMENTAL_MODERN_DATA_MODEL`. With
+The version 1 implementation is gated by the project's common
+experimental-option plumbing. With
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false` or unset, the runner does not
 attach scheduler observations to transactions, memory clients do not request
 scheduler snapshots, and the memory server does not write scheduler observation
 rows, dirty rows, or cross-space mirrors. Snapshot-list requests intentionally
 return an empty result while the flag is off, even if a previous flagged run
-left scheduler rows in the SQLite database. Unlike `modernDataModel`, this flag
+left scheduler rows in the SQLite database. Unlike `modernCellRep`, this flag
 is not a required memory protocol compatibility flag: mismatched peers may still
 connect, and the server-side flag determines whether scheduler observation rows
 are accepted and served.

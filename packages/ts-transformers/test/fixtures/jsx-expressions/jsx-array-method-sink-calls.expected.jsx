@@ -16,84 +16,143 @@ interface State {
     threshold: number;
     factor: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", "));
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+        factor: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                factor: {
+                    type: "number"
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "factor", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).map((x) => x * state.factor).join(", "));
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase());
+const __cfLift_4 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
+    .trim());
 // FIXTURE: jsx-array-method-sink-calls
 // Verifies: direct JSX sink receiver-methods over structural array-method chains can use the shared post-closure path
-//   state.items.filter(fn).join(", ")                        → shared post-closure derive over the sink call
-//   state.items.filter(fn).map(fn).join(", ")                → shared post-closure derive over the sink call
-//   state.items.filter(fn).join(", ").toUpperCase()          → shared post-closure derive over the chained call
-//   state.items.filter(fn).join(", ").toUpperCase().trim()   → shared post-closure derive over the recursive chained call
+//   state.items.filter(fn).join(", ")                        → shared post-closure lift-applied computation over the sink call
+//   state.items.filter(fn).map(fn).join(", ")                → shared post-closure lift-applied computation over the sink call
+//   state.items.filter(fn).join(", ").toUpperCase()          → shared post-closure lift-applied computation over the chained call
+//   state.items.filter(fn).join(", ").toUpperCase().trim()   → shared post-closure lift-applied computation over the recursive chained call
 // Context: Verifies recursive receiver-method chaining above a shareable array-method sink base
 export default pattern((state) => {
     return {
         [UI]: (<div>
         <p>
           Filter joined:{" "}
-          {__cfHelpers.lift<{
-            state: {
-                items: number[];
-                threshold: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            }
-                        },
-                        threshold: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", "))({ state: {
+          {__cfLift_1({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
             } })}
         </p>
         <p>
           Filter map joined:{" "}
-          {__cfHelpers.lift<{
-            state: {
-                items: number[];
-                threshold: number;
-                factor: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            }
-                        },
-                        factor: {
-                            type: "number"
-                        },
-                        threshold: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "factor", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).map((x) => x * state.factor).join(", "))({ state: {
+          {__cfLift_2({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold"),
                 factor: state.key("factor")
@@ -101,69 +160,14 @@ export default pattern((state) => {
         </p>
         <p>
           Filter joined upper:{" "}
-          {__cfHelpers.lift<{
-            state: {
-                items: number[];
-                threshold: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            }
-                        },
-                        threshold: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase())({ state: {
+          {__cfLift_3({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
             } })}
         </p>
         <p>
           Filter joined upper trimmed:{" "}
-          {__cfHelpers.lift<{
-            state: {
-                items: number[];
-                threshold: number;
-            };
-        }, string>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            }
-                        },
-                        threshold: {
-                            type: "number"
-                        }
-                    },
-                    required: ["items", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
-            .trim())({ state: {
+          {__cfLift_4({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
             } })}

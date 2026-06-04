@@ -70,6 +70,32 @@ type PositionMapper = (
   | null
   | undefined;
 
+/**
+ * Wrap a harness into a {@link PositionMapper} that rewrites the mapped
+ * `source` into its reload-stable canonical form (`cf:module/<hash>/<path>`)
+ * when the harness can resolve it. This is what makes every `fn.src` (and thus
+ * scheduler action ids, fingerprints, CFC verified-source) stable across reloads
+ * irrespective of which bundle/entry-point compiled the module. Built-in or
+ * unmapped sources are left untouched.
+ */
+function canonicalizingMapPosition(
+  harness: {
+    mapPosition(
+      file: string,
+      line: number,
+      col: number,
+    ): ReturnType<PositionMapper>;
+    canonicalModuleSource?(source: string): string | undefined;
+  } | undefined,
+): PositionMapper {
+  return (file, line, col) => {
+    const mapped = harness?.mapPosition(file, line, col) ?? null;
+    if (!mapped?.source) return mapped;
+    const canonical = harness?.canonicalModuleSource?.(mapped.source);
+    return canonical ? { ...mapped, source: canonical } : mapped;
+  };
+}
+
 const INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS = [
   /\bgetExternalSourceLocation\b/,
   /\bannotateFunctionDebugMetadata\b/,
@@ -163,8 +189,7 @@ export function parseStackFrame(
  */
 function getExternalSourceLocation(): SourceLocationResult {
   const topFrame = getTopFrame();
-  const mapPosition = (file: string, line: number, col: number) =>
-    topFrame?.runtime?.harness?.mapPosition(file, line, col);
+  const mapPosition = canonicalizingMapPosition(topFrame?.runtime?.harness);
   const stackResult = resolveSourceLocationFromStack(
     new Error().stack,
     mapPosition,
@@ -491,12 +516,13 @@ export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
 /**
  * action: Creates a handler that doesn't use the state parameter.
  *
- * This is to handler as computed is to lift/derive:
+ * This is to handler as computed is to lift:
  * - User writes: action((e) => count.set(e.data))
  * - Transformer rewrites to: handler((e, { count }) => count.set(e.data))({ count })
  *
  * The transformer extracts closures and makes them explicit, just like how
- * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
+ * computed(() => expr) becomes a lift-applied computation with closure
+ * extraction.
  *
  * NOTE: This function should never be called directly at runtime because the
  * CTS transformer rewrites action() calls to handler() calls. If this function
@@ -612,7 +638,7 @@ export function resolveLocationFromFunctionSource(
     context.script,
     index,
     index + source.length,
-    harness.mapPosition.bind(harness),
+    canonicalizingMapPosition(harness),
   );
   if (mapped) {
     return mapped;

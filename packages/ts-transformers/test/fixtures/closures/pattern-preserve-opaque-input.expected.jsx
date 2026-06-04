@@ -15,42 +15,43 @@ interface State {
     foo: string;
     bar: string;
 }
-// FIXTURE: pattern-preserve-opaque-input
-// Verifies: Writable<T> pattern input is preserved as an opaque ref, with JSX .get() wrapped in derive
-//   input.key("foo").get() in JSX → derive({ input }, ({ input }) => input.key("foo").get())
-// Context: When the pattern parameter is typed as Writable<State>, the input
-//   schema uses asOpaque: true. The .get() call inside JSX is not in a safe
-//   reactive context, so it gets wrapped in a derive.
-export default pattern((input: Writable<State>) => {
-    return {
-        [UI]: <div>{__cfHelpers.lift<{
-            input: __cfHelpers.Writable<State>;
-        }, string>({
+const __cfLift_1 = __cfHelpers.lift<{
+    input: __cfHelpers.Writable<State>;
+}, string>({
+    type: "object",
+    properties: {
+        input: {
+            $ref: "#/$defs/State",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["input"],
+    $defs: {
+        State: {
             type: "object",
             properties: {
-                input: {
-                    $ref: "#/$defs/State",
-                    asCell: ["readonly"]
+                foo: {
+                    type: "string"
+                },
+                bar: {
+                    type: "string"
                 }
             },
-            required: ["input"],
-            $defs: {
-                State: {
-                    type: "object",
-                    properties: {
-                        foo: {
-                            type: "string"
-                        },
-                        bar: {
-                            type: "string"
-                        }
-                    },
-                    required: ["foo", "bar"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.key("foo").get())({ input: input })}</div>,
+            required: ["foo", "bar"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.key("foo").get());
+// FIXTURE: pattern-preserve-opaque-input
+// Verifies: Writable<T> pattern input is preserved as an opaque ref, with JSX .get() wrapped in a lift-applied computation
+//   input.key("foo").get() in JSX → lift(({ input }) => input.key("foo").get())({ input })
+// Context: When the pattern parameter is typed as Writable<State>, the input
+//   schema uses asOpaque: true. The .get() call inside JSX is not in a safe
+//   reactive context, so it gets wrapped in a lift-applied computation.
+export default pattern((input: Writable<State>) => {
+    return {
+        [UI]: <div>{__cfLift_1({ input: input })}</div>,
     };
 }, {
     $ref: "#/$defs/State",

@@ -12,7 +12,7 @@ import { __cfHelpers } from "commonfabric";
  *
  * When a ternary branch contains both a computed() value and an action() reference,
  * the nested computed expression should still lower locally in JSX without forcing
- * the whole JSX branch through an extra derive wrapper.
+ * the whole JSX branch through an extra lift-applied wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
@@ -25,9 +25,45 @@ interface Card {
 interface Input {
     card: Card;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        isEditing: {
+            type: "boolean",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["isEditing"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
+    isEditing.set(true);
+});
+const __cfLift_1 = __cfHelpers.lift<{
+    card: {
+        description: string;
+    };
+}, boolean | "">({
+    type: "object",
+    properties: {
+        card: {
+            type: "object",
+            properties: {
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["description"]
+        }
+    },
+    required: ["card"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    "enum": [false, true, ""]
+} as const satisfies __cfHelpers.JSONSchema, ({ card }) => {
+    const desc = card.description;
+    return desc && desc.length > 0;
+});
 // FIXTURE: action-in-ternary-branch
 // Verifies: action() result used in a ternary branch alongside computed() keeps
-//   local JSX rewrites instead of forcing a whole-branch derive
+//   local JSX rewrites instead of forcing a whole-branch lift-applied computation
 //   action(() => ...) → handler(eventSchema, captureSchema, (_, { isEditing }) => ...)({ isEditing })
 //   nested hasDescription ternary → local ifElse(...) inside the JSX branch
 // Context: Regression coverage for JSX-local rewriting with action references in the same branch
@@ -36,44 +72,10 @@ export default pattern((__cf_pattern_input) => {
     const isEditing = new Cell(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("isEditing", true);
-    const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            isEditing: {
-                type: "boolean",
-                asCell: ["writeonly"]
-            }
-        },
-        required: ["isEditing"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
-        isEditing.set(true);
-    })({
+    const startEditing = __cfHandler_1({
         isEditing: isEditing
     }).for({ stream: "startEditing" }, true);
-    const hasDescription = __cfHelpers.lift<{
-        card: {
-            description: string;
-        };
-    }, boolean | "">({
-        type: "object",
-        properties: {
-            card: {
-                type: "object",
-                properties: {
-                    description: {
-                        type: "string"
-                    }
-                },
-                required: ["description"]
-            }
-        },
-        required: ["card"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": [false, true, ""]
-    } as const satisfies __cfHelpers.JSONSchema, ({ card }) => {
-        const desc = card.description;
-        return desc && desc.length > 0;
-    })({ card: {
+    const hasDescription = __cfLift_1({ card: {
             description: card.key("description")
         } }).for("hasDescription", true);
     return {

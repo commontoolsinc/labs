@@ -126,5 +126,32 @@ describe("arrays", () => {
       sparse.foo = "bar";
       expect(isArrayWithOnlyIndexProperties(sparse)).toBe(false);
     });
+
+    it("returns `false` when a named property was added before any indices", () => {
+      // `Object.keys()` still orders indices first, so the named key is last:
+      // `["0", "1", "foo"]`. Pins the last-key optimization's reliance on that
+      // ordering rather than on insertion order.
+      const arr = [] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+      arr[0] = 1;
+      arr[1] = 2;
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    describe("returns `false` for non-canonical index-shaped named keys", () => {
+      // These keys are named properties, not array indices, but each has a
+      // `Number(key)` that is an in-range non-negative integer -- so a naive
+      // numeric coercion would misclassify the array as index-only.
+      for (const key of ["01", " 1", "1.0", "1e1", "-0", ""]) {
+        it(`rejects the named key ${JSON.stringify(key)}`, () => {
+          // A roomy all-holes array, so the named key sits below `length` and
+          // doesn't trip the `keys.length > length` quick check.
+          const arr: unknown[] = [];
+          arr.length = 1000;
+          (arr as unknown as Record<string, unknown>)[key] = "x";
+          expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+        });
+      }
+    });
   });
 });

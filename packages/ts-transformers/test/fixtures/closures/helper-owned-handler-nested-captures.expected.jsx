@@ -49,6 +49,55 @@ interface Input {
 interface Output {
     trigger: Stream<void>;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        timer: {
+            anyOf: [{
+                    type: "number"
+                }, {
+                    type: "null"
+                }],
+            asCell: ["cell"]
+        },
+        fileId: {
+            type: "string",
+            "default": "",
+            asCell: ["readonly"]
+        },
+        content: {
+            type: "string",
+            "default": "",
+            asCell: ["readonly"]
+        },
+        savedContent: {
+            type: "string",
+            "default": "",
+            asCell: ["readonly"]
+        },
+        onSaveFile: {
+            type: "object",
+            properties: {
+                fileId: {
+                    type: "string"
+                },
+                content: {
+                    type: "string"
+                }
+            },
+            required: ["fileId", "content"],
+            asCell: ["stream"]
+        }
+    },
+    required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { timer, fileId, content, savedContent, onSaveFile }) => {
+    const prev = timer.get();
+    if (prev !== null)
+        clearTimeout(prev);
+    timer.set(setTimeout(() => {
+        flushLater(fileId, content, savedContent, onSaveFile);
+    }, 10));
+});
 export default pattern((__cf_pattern_input) => {
     const fileId = __cf_pattern_input.key("fileId");
     const content = __cf_pattern_input.key("content");
@@ -61,55 +110,7 @@ export default pattern((__cf_pattern_input) => {
                 type: "null"
             }]
     } as const satisfies __cfHelpers.JSONSchema).for("timer", true);
-    const trigger = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            timer: {
-                anyOf: [{
-                        type: "number"
-                    }, {
-                        type: "null"
-                    }],
-                asCell: ["cell"]
-            },
-            fileId: {
-                type: "string",
-                "default": "",
-                asCell: ["readonly"]
-            },
-            content: {
-                type: "string",
-                "default": "",
-                asCell: ["readonly"]
-            },
-            savedContent: {
-                type: "string",
-                "default": "",
-                asCell: ["readonly"]
-            },
-            onSaveFile: {
-                type: "object",
-                properties: {
-                    fileId: {
-                        type: "string"
-                    },
-                    content: {
-                        type: "string"
-                    }
-                },
-                required: ["fileId", "content"],
-                asCell: ["stream"]
-            }
-        },
-        required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { timer, fileId, content, savedContent, onSaveFile }) => {
-        const prev = timer.get();
-        if (prev !== null)
-            clearTimeout(prev);
-        timer.set(setTimeout(() => {
-            flushLater(fileId, content, savedContent, onSaveFile);
-        }, 10));
-    })({
+    const trigger = __cfHandler_1({
         timer: timer,
         fileId: fileId,
         content: content,

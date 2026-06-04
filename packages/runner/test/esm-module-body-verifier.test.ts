@@ -53,6 +53,57 @@ describe("verifyCompiledModuleBody", () => {
     expect(() => verifyCompiledModuleBody(body, "/main.ts")).not.toThrow();
   });
 
+  it("accepts a named re-export (`export { x } from` — var require preamble)", () => {
+    // CT-1661: TypeScript's CommonJS emit declares the module reference for a
+    // named re-export with `var` (hoisted ahead of the live getter), unlike the
+    // `const` of a plain import. The import-preamble fast-path must accept the
+    // `var` form so the re-export verifies — matching the AMD verdict, which
+    // already accepts re-exports (imports arrive as factory params).
+    const body = compiledBody({
+      "/sibling.ts": `export const thatConst = (): number => 42;`,
+      "/main.ts":
+        `export { thatConst } from "./sibling.ts";\nexport const own = (): number => 2;`,
+    }, "/main.ts");
+    expect(body).toMatch(/var \w+ = require\(/); // sanity: TS emits `var`
+    expect(body).toContain('Object.defineProperty(exports, "thatConst"'); // getter
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).not.toThrow();
+  });
+
+  it("still rejects a non-import top-level `var` binding", () => {
+    // The `var` relaxation is scoped to the `= require(...)` import preamble.
+    // A plain mutable top-level binding must remain a SES violation.
+    const body =
+      `Object.defineProperty(exports, "__esModule", { value: true });\nvar leaked = 7;`;
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).toThrow(
+      /mutable bindings/,
+    );
+  });
+
+  it("rejects a `var` require of a trusted runtime module", () => {
+    // CT-1661 follow-up (Codex P1): the `var` relaxation must not extend to
+    // trusted runtime bindings. A `var` binding is mutable at runtime (only a
+    // `const` throws on reassignment), and the verifier does not inspect trusted
+    // builder-callback bodies — so a `var cf = require("commonfabric")` could be
+    // reassigned to attacker code from inside a callback yet still pass
+    // trusted-builder classification. Runtime imports must stay `const`.
+    const body = `var cf = require("commonfabric");\n` +
+      `const v = (0, cf.pattern)((s) => { cf = globalThis; return s; });\n` +
+      `exports.v = v;`;
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).toThrow(
+      /mutable bindings/,
+    );
+  });
+
+  it("rejects reassignment of a var import binding", () => {
+    // Safety guard for the `var` relaxation: accepting `var x = require(...)`
+    // relies on any later reassignment being independently rejected. A bare
+    // top-level assignment is not a recognized item, so it must throw.
+    const body =
+      `Object.defineProperty(exports, "__esModule", { value: true });\n` +
+      `var m = require("./sibling.ts");\nm = globalThis;`;
+    expect(() => verifyCompiledModuleBody(body, "/main.ts")).toThrow();
+  });
+
   it("rejects export-star require of a disallowed specifier", () => {
     // Hand-built body: __exportStar from a non-local, non-runtime specifier.
     const body =

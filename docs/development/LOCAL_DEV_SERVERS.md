@@ -17,6 +17,10 @@
 ./scripts/check-local-dev.sh          # Health check both servers
 ```
 
+`start-local-dev.sh` validates required commands before launching anything and
+waits for both servers to return HTTP 200 before reporting success. Set
+`LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in seconds.
+
 **URLs:**
 | What | URL |
 |------|-----|
@@ -27,9 +31,8 @@
 **Experimental flags:** Pass env vars to the start/restart scripts to enable
 experiments on both servers:
 ```bash
-EXPERIMENTAL_MODERN_DATA_MODEL=true \
-EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
-EXPERIMENTAL_EXAMPLE_EXPERIMENT=true \
+EXPERIMENTAL_EXAMPLE_NAME_1=true \
+EXPERIMENTAL_EXAMPLE_NAME_2=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
 The same env vars must also be set when running `cf` CLI commands against the

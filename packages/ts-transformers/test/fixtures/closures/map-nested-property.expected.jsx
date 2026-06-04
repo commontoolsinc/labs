@@ -23,6 +23,79 @@ interface State {
     items: Item[];
     currentUser: User;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>
+            {item.key("name")} - edited by {state.key("currentUser", "firstName")} {state.key("currentUser", "lastName")}
+          </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        currentUser: {
+                            type: "object",
+                            properties: {
+                                firstName: {
+                                    type: "string"
+                                },
+                                lastName: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["firstName", "lastName"]
+                        }
+                    },
+                    required: ["currentUser"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-nested-property
 // Verifies: .map() on reactive array captures nested property access on state
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {currentUser: {firstName, lastName}}})
@@ -30,79 +103,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<div>
-            {item.key("name")} - edited by {state.key("currentUser", "firstName")} {state.key("currentUser", "lastName")}
-          </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    currentUser: {
-                                        type: "object",
-                                        properties: {
-                                            firstName: {
-                                                type: "string"
-                                            },
-                                            lastName: {
-                                                type: "string"
-                                            }
-                                        },
-                                        required: ["firstName", "lastName"]
-                                    }
-                                },
-                                required: ["currentUser"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     currentUser: {
                         firstName: state.key("currentUser", "firstName"),

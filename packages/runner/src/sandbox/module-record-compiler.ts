@@ -188,6 +188,26 @@ export interface CompileSourcesOptions {
    * loader (the AMD path registers the bundle map via the isolate).
    */
   precompiledSourceMaps?: Map<string, SourceMap>;
+  /**
+   * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
+   * module's path *for content-addressed identity only*. The ESM compile path
+   * resolves a program whose files are prefixed with `/<computeId>/...` (a
+   * whole-program hash) so source locations match the AMD bundle. Folding that
+   * prefix into the per-module identity would make `cf:module/<hash>`
+   * whole-program-dependent — defeating cross-program dedup and diverging from
+   * the entry-point-independent identity the spec mandates
+   * (docs/specs/module-loading.md). Stripping it here yields stable, dedupable
+   * identities while every other artifact (record sourceUrls, source-map keys,
+   * `fn.src` resolution) keeps the prefixed path untouched.
+   */
+  idPrefix?: string;
+  /**
+   * Precomputed per-path module identities (from {@link computeModuleIdentities}).
+   * When the caller already derived these (e.g. the Engine, for its cache-hit
+   * check), passing them here avoids recomputing the hashes a second time. Must
+   * be consistent with `idPrefix` / `runtimeFingerprint`.
+   */
+  identityByPath?: Map<string, string>;
 }
 
 export interface CompiledModuleGraph {
@@ -200,21 +220,72 @@ export interface CompiledModuleGraph {
   moduleSourceMaps: Map<string, SourceMap>;
 }
 
+/**
+ * Strip the whole-program `/<idPrefix>` segment from a resolved module path, so
+ * its content-addressed identity is entry-point independent. Unprefixed modules
+ * (e.g. the injected `cfc.ts` helper) are returned unchanged.
+ */
+function stripIdentityPrefix(name: string, idPrefix?: string): string {
+  return idPrefix && name.startsWith(`${idPrefix}/`)
+    ? name.slice(idPrefix.length)
+    : name;
+}
+
+/**
+ * Per-module content-addressed identity (`cf:module/<hash>` minus the `cf:module/`
+ * scheme) for every source path, computed prefix-free so identities dedupe
+ * across programs. Shared by {@link compileSourcesToRecords} and the Engine's
+ * cache-hit check so both agree on the identity of each module. Keyed by the
+ * resolved (prefixed) path; the value is the prefix-free hash.
+ */
+export function computeModuleIdentities(
+  sources: Source[],
+  options: { idPrefix?: string; runtimeFingerprint?: string } = {},
+): Map<string, string> {
+  const hashes = computeModuleHashes(
+    {
+      main: "",
+      files: sources.map((s) => ({
+        ...s,
+        name: stripIdentityPrefix(s.name, options.idPrefix),
+      })),
+    },
+    options.runtimeFingerprint !== undefined
+      ? { runtimeFingerprint: options.runtimeFingerprint }
+      : {},
+  );
+  const identityByPath = new Map<string, string>();
+  for (const source of sources) {
+    identityByPath.set(
+      source.name,
+      hashes.get(stripIdentityPrefix(source.name, options.idPrefix))!,
+    );
+  }
+  return identityByPath;
+}
+
 export function compileSourcesToRecords(
   sources: Source[],
   options: CompileSourcesOptions = {},
 ): CompiledModuleGraph {
   const runtimeModules = options.runtimeModules ?? {};
-  const hashes = computeModuleHashes(
-    { main: "", files: sources },
-    options.runtimeFingerprint !== undefined
-      ? { runtimeFingerprint: options.runtimeFingerprint }
-      : {},
-  );
+  // Identities are computed prefix-free (see computeModuleIdentities) so
+  // `cf:module/<hash>` is entry-point independent and dedupes across programs.
+  // Reuse the caller's precomputed map when supplied (avoids a second hash pass).
+  const identityByPath = options.identityByPath ??
+    computeModuleIdentities(sources, {
+      ...(options.idPrefix !== undefined ? { idPrefix: options.idPrefix } : {}),
+      ...(options.runtimeFingerprint !== undefined
+        ? { runtimeFingerprint: options.runtimeFingerprint }
+        : {}),
+    });
   const fileNames = new Set(sources.map((s) => s.name));
   const specifierByPath = new Map<string, string>();
   for (const source of sources) {
-    specifierByPath.set(source.name, `cf:module/${hashes.get(source.name)}`);
+    specifierByPath.set(
+      source.name,
+      `cf:module/${identityByPath.get(source.name)}`,
+    );
   }
   const sourceByName = new Map(sources.map((s) => [s.name, s]));
 
@@ -277,7 +348,7 @@ export function compileSourcesToRecords(
   const moduleSourceMaps = new Map<string, SourceMap>();
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
-    const moduleHash = hashes.get(source.name)!;
+    const moduleHash = identityByPath.get(source.name)!;
     const sourceMap = options.precompiledSourceMaps?.get(source.name);
     if (sourceMap) moduleSourceMaps.set(specifier, sourceMap);
     const precompiled = options.precompiledBodies?.get(source.name);
@@ -387,6 +458,206 @@ export function compileSourcesToRecords(
   }
 
   return { records, specifierByPath, compiledBodies, moduleSourceMaps };
+}
+
+/** A compiled module loaded from the content-addressed cache (no TS source). */
+export interface CachedCompiledModule {
+  /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
+  identity: string;
+  /** Normalized authored path (e.g. `/main.tsx`); used for the eval sourceURL. */
+  filename: string;
+  /** Compiled CommonJS body. */
+  code: string;
+  /** Internal import edges: require specifier → dependency module identity. */
+  imports: { specifier: string; targetIdentity: string }[];
+  /** Per-module source map, if cached. */
+  sourceMap?: SourceMap;
+}
+
+/**
+ * Build a verified-able record graph **directly from cached compiled modules** —
+ * no TypeScript source, no `resolve`, no recompile. This is the warm load path:
+ * the content-addressed cache already holds each module's compiled body + its
+ * internal import edges (specifier → dependency identity), and the export
+ * **names** are recovered from the compiled body itself (see
+ * {@link extractCompiledExports}; `export *` is unioned transitively through the
+ * cached edges). Runtime (`cf:runtime/*`) records are registered by the caller.
+ *
+ * Returns the same {@link CompiledModuleGraph} shape as
+ * {@link compileSourcesToRecords}, keyed in identity space: `specifierByPath` is
+ * keyed by each module's normalized `filename`.
+ */
+export function buildRecordsFromCompiled(
+  modules: readonly CachedCompiledModule[],
+  options: { runtimeModules?: Record<string, string[]> } = {},
+): CompiledModuleGraph {
+  const runtimeModules = options.runtimeModules ?? {};
+  const specifierOf = (identity: string) => `cf:module/${identity}`;
+  const byIdentity = new Map(modules.map((m) => [m.identity, m]));
+
+  // Direct export names + `export *` edges (as dependency identities) per module.
+  const direct = new Map<
+    string,
+    { names: Set<string>; starTargets: string[] }
+  >();
+  for (const m of modules) {
+    const { names, starTargetSpecs } = extractCompiledExports(m.code);
+    const starTargets: string[] = [];
+    for (const spec of starTargetSpecs) {
+      const edge = m.imports.find((i) => i.specifier === spec);
+      if (edge) starTargets.push(edge.targetIdentity);
+      else {for (const n of runtimeModules[spec] ?? []) {
+          if (n !== "default") names.add(n);
+        }}
+    }
+    direct.set(m.identity, { names, starTargets });
+  }
+
+  // Full export set: own names ∪ transitively re-exported names (minus default).
+  const fullExportsMemo = new Map<string, string[]>();
+  const resolveFullExports = (identity: string): string[] => {
+    const memo = fullExportsMemo.get(identity);
+    if (memo) return memo;
+    const names = new Set<string>(direct.get(identity)?.names ?? []);
+    const walked = new Set<string>();
+    const stack = [...(direct.get(identity)?.starTargets ?? [])];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      if (walked.has(cur)) continue;
+      walked.add(cur);
+      for (const n of direct.get(cur)?.names ?? []) {
+        if (n !== "default") names.add(n);
+      }
+      stack.push(...(direct.get(cur)?.starTargets ?? []));
+    }
+    const result = [...names];
+    fullExportsMemo.set(identity, result);
+    return result;
+  };
+
+  const records = new Map<string, VirtualModuleRecord>();
+  const compiledBodies = new Map<string, string>();
+  const moduleSourceMaps = new Map<string, SourceMap>();
+  const specifierByPath = new Map<string, string>();
+
+  for (const m of modules) {
+    const specifier = specifierOf(m.identity);
+    specifierByPath.set(m.filename, specifier);
+    compiledBodies.set(specifier, m.code);
+    if (m.sourceMap) moduleSourceMaps.set(specifier, m.sourceMap);
+
+    const importSpecs = extractRuntimeImports(m.code);
+    const resolutions: Record<string, string> = {};
+    for (const spec of importSpecs) {
+      const edge = m.imports.find((i) => i.specifier === spec);
+      if (edge !== undefined) {
+        resolutions[spec] = specifierOf(edge.targetIdentity);
+      } else if (spec in runtimeModules) {
+        resolutions[spec] = `cf:runtime/${spec}`;
+      } else {
+        resolutions[spec] = spec;
+      }
+    }
+
+    const exportNames = resolveFullExports(m.identity);
+    const namespaceExports = [...exportNames, "__esModule"];
+    const sourceUrl = m.filename.replace(/[\r\n\u2028\u2029]/g, "_");
+    const compiled = m.code;
+    records.set(specifier, {
+      imports: importSpecs,
+      exports: namespaceExports,
+      resolutions,
+      execute: (moduleExports, compartment, resolvedImports) => {
+        const factory = compartment.evaluate(
+          `(function (exports, require, module) {\n${compiled}\n})\n//# sourceURL=${sourceUrl}`,
+        ) as (
+          exports: Record<string, unknown>,
+          require: (specifier: string) => Record<string, unknown>,
+          module: { exports: Record<string, unknown> },
+        ) => void;
+        const requireShim = (spec: string) =>
+          compartment.importNow(resolvedImports[spec] ?? spec);
+        populateModuleExports(moduleExports, exportNames, factory, requireShim);
+      },
+    });
+  }
+  // Silence unused in the rare all-internal case.
+  void byIdentity;
+
+  return { records, specifierByPath, compiledBodies, moduleSourceMaps };
+}
+
+/**
+ * Recover a compiled module's export surface by scanning its compiled CommonJS
+ * body (no TS source): `exports.<name> = …`, `Object.defineProperty(exports,
+ * "<name>", …)` (named re-exports), and `__exportStar(require("<spec>"), …)` for
+ * `export *`. Returns the directly-declared names (minus `__esModule`) plus the
+ * `export *` source specifiers (resolved to dependency identities by the caller).
+ */
+export function extractCompiledExports(
+  compiled: string,
+): { names: Set<string>; starTargetSpecs: string[] } {
+  const sourceFile = ts.createSourceFile(
+    "compiled.js",
+    compiled,
+    TARGET,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const names = new Set<string>();
+  const starTargetSpecs = new Set<string>();
+
+  const isExportsRef = (node: ts.Expression): boolean =>
+    ts.isIdentifier(node) && node.text === "exports";
+
+  const requireArg = (node: ts.Expression): string | undefined => {
+    if (
+      ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+      node.expression.text === "require" && node.arguments.length === 1 &&
+      ts.isStringLiteralLike(node.arguments[0])
+    ) {
+      return (node.arguments[0] as ts.StringLiteralLike).text;
+    }
+    return undefined;
+  };
+
+  function visit(node: ts.Node): void {
+    // exports.<name> = …
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(node.left) &&
+      isExportsRef(node.left.expression)
+    ) {
+      const name = node.left.name.text;
+      if (name !== "__esModule") names.add(name);
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const calleeName = ts.isIdentifier(callee)
+        ? callee.text
+        : ts.isPropertyAccessExpression(callee)
+        ? callee.name.text
+        : undefined;
+      // Object.defineProperty(exports, "<name>", …) — named re-export / getter.
+      if (
+        calleeName === "defineProperty" && node.arguments.length >= 2 &&
+        isExportsRef(node.arguments[0]) &&
+        ts.isStringLiteralLike(node.arguments[1])
+      ) {
+        const name = (node.arguments[1] as ts.StringLiteralLike).text;
+        if (name !== "__esModule") names.add(name);
+      }
+      // __exportStar(require("<spec>"), exports) — `export *`.
+      if (calleeName === "__exportStar" && node.arguments.length >= 1) {
+        const spec = requireArg(node.arguments[0]);
+        if (spec !== undefined) starTargetSpecs.add(spec);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return { names, starTargetSpecs: [...starTargetSpecs] };
 }
 
 /**

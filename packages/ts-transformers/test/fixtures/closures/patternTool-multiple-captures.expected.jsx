@@ -11,9 +11,6 @@ import { computed, pattern, patternTool, type PatternToolResult, Writable } from
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ value }) => {
-    return prefix.get() + String(value * multiplier.get());
-});
 const multiplier = __cfHelpers.__cf_data(new Writable(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
@@ -23,6 +20,21 @@ const prefix = __cfHelpers.__cf_data(new Writable("Result: ", {
 type Output = {
     tool: PatternToolResult<Record<string, never>>;
 };
+const __cfLift_1 = __cfHelpers.lift<{
+    value: number;
+}, string>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        }
+    },
+    required: ["value"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ value }) => {
+    return prefix.get() + String(value * multiplier.get());
+});
 // FIXTURE: patternTool-multiple-captures
 // Verifies: patternTool with no explicit extraParams auto-captures multiple module-scoped reactive vars
 //   patternTool(fn) → patternTool(fn, { prefix, multiplier })
@@ -36,19 +48,7 @@ export default pattern(() => {
         prefix: __cfHelpers.Cell<string>;
         multiplier: __cfHelpers.Cell<number>;
     }) => {
-        return __cfHelpers.lift<{
-            value: number;
-        }, string>({
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                }
-            },
-            required: ["value"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ value: value });
+        return __cfLift_1({ value: value });
     }, {
         prefix: prefix,
         multiplier: multiplier

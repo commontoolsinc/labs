@@ -1,6 +1,11 @@
 import ts from "typescript";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
-import { SYNTHETIC_MODULE_CALLBACK_PREFIX } from "../ast/call-kind.ts";
+import {
+  SYNTHETIC_HANDLER_HOIST_PREFIX,
+  SYNTHETIC_LIFT_HOIST_PREFIX,
+  SYNTHETIC_MODULE_CALLBACK_PREFIX,
+  SYNTHETIC_PATTERN_HOIST_PREFIX,
+} from "../ast/call-kind.ts";
 import {
   isDeclaredWithinFunction,
   isModuleScopedDeclaration,
@@ -9,10 +14,19 @@ import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
+// `lift`, `handler`, and `pattern` are intentionally absent. The whole-call
+// hoisting stage (`BuilderCallHoistingTransformer`) hoists the entire builder call to
+// a module-scope const: `lift` (CT-1644), then `handler` and `pattern`
+// (CT-1655). Hoisting the *callback* here too would double-hoist — the two
+// consts reference each other out of declaration order, a TDZ ReferenceError at
+// module load (observed directly: `const __cfPattern_1 = pattern(__cfModuleCallback_1, …)`
+// declared before `const __cfModuleCallback_1 = …`). Only `patternTool` remains:
+// its whole-call hoist is deferred because its per-instance captures thread
+// through the call's own second argument (unlike `pattern`, whose captures live
+// in the enclosing `mapWithPattern` params), so relocating the whole call to
+// module scope is not obviously capture-safe. When `patternTool` is resolved
+// this set empties and this hoister can be deleted.
 const HOISTABLE_BUILDER_NAMES = new Set([
-  "handler",
-  "lift",
-  "pattern",
   "patternTool",
 ]);
 
@@ -41,11 +55,26 @@ const HOISTABLE_BUILDER_NAMES = new Set([
  *     count as "uses module-scoped references" and incorrectly promote
  *     the outer callback to hoistable. The exclusion keeps the inner
  *     and outer hoist decisions independent.
+ *   - `__cfLift` / `__cfHandler` / `__cfPattern` (prefixes): the whole-call
+ *     hoisting stage's output (`BuilderCallHoistingTransformer`, CT-1644 lift /
+ *     CT-1655 handler + pattern). A hoisted `lift(...)` / `handler(...)` /
+ *     `pattern(...)` call leaves a `__cfLift_N(captures)` /
+ *     `__cfHandler_N(captures)` / `__cfPattern_N` reference at its original
+ *     site. If that site sits inside a callback this hoister analyzes (e.g. a
+ *     patternTool callback), the reference must not count as a user-authored
+ *     module-scoped reference — same independence rationale as
+ *     `__cfModuleCallback` above. (Today the hoisting stage runs *after* this
+ *     one, so these references don't yet exist when this hoister analyzes; the
+ *     exclusion is kept symmetric with the hoist prefixes so it stays correct
+ *     as the unified phase converges and is robust to any future re-ordering.)
  */
 function isTransformerInjectedIdentifier(text: string): boolean {
   return text === CF_HELPERS_IDENTIFIER ||
     text.startsWith(FUNCTION_HARDENING_HELPER_NAME) ||
-    text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX);
+    text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX) ||
+    text.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX) ||
+    text.startsWith(SYNTHETIC_HANDLER_HOIST_PREFIX) ||
+    text.startsWith(SYNTHETIC_PATTERN_HOIST_PREFIX);
 }
 
 export function hoistModuleScopedBuilderCallbacks(
@@ -151,34 +180,8 @@ export function hoistModuleScopedBuilderCallbacks(
     };
 
     const target = resolveHoistTarget(visited, context);
-    if (
-      target.kind === "plain" && target.callbackIndices.length === 0
-    ) {
+    if (target.callbackIndices.length === 0) {
       return visited;
-    }
-
-    if (target.kind === "lift-applied") {
-      // The callback lives on the inner lift call. Hoist it there, then
-      // rebuild: lift(...args with cb replaced by hoisted name)(input).
-      const original = target.innerCall.arguments[target.callbackIndex]!;
-      const replaced = tryHoistCallback(original);
-      if (replaced === original) {
-        return visited;
-      }
-      const newInnerArgs = [...target.innerCall.arguments];
-      newInnerArgs[target.callbackIndex] = replaced;
-      const newInnerCall = context.factory.updateCallExpression(
-        target.innerCall,
-        target.innerCall.expression,
-        target.innerCall.typeArguments,
-        newInnerArgs,
-      );
-      return context.factory.updateCallExpression(
-        visited,
-        newInnerCall,
-        visited.typeArguments,
-        visited.arguments,
-      );
     }
 
     let changed = false;
@@ -232,20 +235,14 @@ function getBuilderCallbackIndices(
     ? callee.name.text
     : undefined;
 
-  // After CT-1615 Phase 1, the hoister deliberately does NOT handle `derive`.
-  // LiftLoweringTransformer rewrites every supported derive shape (2-arg and
-  // 4-arg) into the lift-applied form well before this pass runs, so a
-  // canonically-shaped derive should never reach here. Malformed shapes
-  // (1-arg `derive(fn)` etc.) pass through to validation; refusing to hoist
-  // them is correct. `derive` is intentionally omitted from
-  // `HOISTABLE_BUILDER_NAMES` to enforce this.
+  // Only the builders in `HOISTABLE_BUILDER_NAMES` are hoisted; anything else
+  // (or a malformed call) passes through to validation untouched.
   if (!builderName || !HOISTABLE_BUILDER_NAMES.has(builderName)) {
     return [];
   }
 
   switch (builderName) {
     case "handler":
-    case "lift":
     case "pattern":
     case "patternTool":
       return call.arguments.length >= 1 ? [0] : [];
@@ -255,24 +252,13 @@ function getBuilderCallbackIndices(
 }
 
 /**
- * Result of analyzing a call expression for hoist eligibility.
- *
- * When `kind` is `"plain"`, the callbacks live on `call.arguments` at the
- * given indices — the historical hoist target shape.
- *
- * When `kind` is `"lift-applied"` (CT-1615 onward), the callback lives on
- * the *inner* lift call's arguments. The outer applied call has the input
- * object as its only argument and nothing to hoist. The caller substitutes
- * the hoisted name into the inner call's arguments, then rebuilds the
- * outer applied call around the modified inner.
+ * Result of analyzing a call expression for hoist eligibility: the argument
+ * indices whose function-like callbacks are candidates for hoisting (empty
+ * when the call is not a hoistable builder).
  */
-type HoistTarget =
-  | { kind: "plain"; callbackIndices: readonly number[] }
-  | {
-    kind: "lift-applied";
-    innerCall: ts.CallExpression;
-    callbackIndex: number;
-  };
+interface HoistTarget {
+  callbackIndices: readonly number[];
+}
 
 function resolveHoistTarget(
   call: ts.CallExpression,
@@ -280,74 +266,17 @@ function resolveHoistTarget(
 ): HoistTarget {
   const callee = unwrapExpression(call.expression);
 
-  // Lift-applied: the outer call's callee is itself a call expression
-  // (the inner __cfHelpers.lift(...) call carrying the callback).
+  // Lift-applied shape (`__cfHelpers.lift(...)(input)`): the outer call's
+  // callee is itself a call expression. As of CT-1644 this hoister no longer
+  // touches lift — `BuilderCallHoistingTransformer` (which runs after SchemaInjection)
+  // hoists the WHOLE lift call to module scope, callback inline. Hoisting the
+  // callback here as well would double-hoist into a TDZ at module load. Refuse
+  // all applied-call shapes.
   if (ts.isCallExpression(callee)) {
-    const innerCall = callee;
-    const innerCallee = unwrapExpression(innerCall.expression);
-    const innerName = ts.isIdentifier(innerCallee)
-      ? innerCallee.text
-      : ts.isPropertyAccessExpression(innerCallee)
-      ? innerCallee.name.text
-      : undefined;
-    if (innerName !== "lift") {
-      return { kind: "plain", callbackIndices: [] };
-    }
-
-    // Pre-schema-injection: lift(cb)(input). Callback at args[0].
-    // Schema-injected: lift(argSchema, resSchema, cb)(input). Callback
-    // at args[last]. Same gating as the legacy 2-arg derive case applies
-    // to the pre-injection form: synthetic-compute callbacks always
-    // hoistable; user-authored callbacks need self-describing types.
-    if (innerCall.arguments.length === 1) {
-      const cb = innerCall.arguments[0];
-      if (!isFunctionLikeExpression(cb)) {
-        return { kind: "plain", callbackIndices: [] };
-      }
-      if (
-        context.isSyntheticComputeCallback?.(cb) ||
-        hasSelfDescribingFunctionTypes(cb)
-      ) {
-        return { kind: "lift-applied", innerCall, callbackIndex: 0 };
-      }
-      return { kind: "plain", callbackIndices: [] };
-    }
-    if (innerCall.arguments.length >= 3) {
-      // The 3+-arg form is the schema-injected shape:
-      //   __cfHelpers.lift(argSchema, resSchema, cb)(input)
-      // Schema injection runs only AFTER capability analysis has determined
-      // the input shape — its presence means the callback's input is fully
-      // described by the injected `argSchema`, so the callback is by
-      // construction self-describing regardless of whether its parameter
-      // carries a TypeScript annotation. Hoisting is therefore unconditionally
-      // safe here (no `isSyntheticComputeCallback || hasSelfDescribingFunctionTypes`
-      // gate needed — the schema injection upstream is the gate). The 1-arg
-      // pre-injection branch above still needs the explicit check because
-      // schemas haven't been computed yet at that point.
-      const cbIndex = innerCall.arguments.length - 1;
-      const cb = innerCall.arguments[cbIndex];
-      if (!isFunctionLikeExpression(cb)) {
-        return { kind: "plain", callbackIndices: [] };
-      }
-      return { kind: "lift-applied", innerCall, callbackIndex: cbIndex };
-    }
-    return { kind: "plain", callbackIndices: [] };
+    return { callbackIndices: [] };
   }
 
-  return {
-    kind: "plain",
-    callbackIndices: getBuilderCallbackIndices(call, context),
-  };
-}
-
-function hasSelfDescribingFunctionTypes(
-  callback: ts.ArrowFunction | ts.FunctionExpression,
-): boolean {
-  if (callback.parameters.length === 0) {
-    return true;
-  }
-
-  return callback.parameters.every((parameter) => parameter.type !== undefined);
+  return { callbackIndices: getBuilderCallbackIndices(call, context) };
 }
 
 interface CallbackHoistAnalysis {

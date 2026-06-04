@@ -33,6 +33,7 @@ import type {
   WriterError,
 } from "./interface.ts";
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
+import type { SqliteOperation } from "@commonfabric/memory/v2";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -344,6 +345,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.getSchedulerObservation?.();
   }
 
+  recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    // A folded SQLite write is a write — honor the wrapper's read-only mode the
+    // same way cell writes do, instead of silently recording it.
+    this.assertWritable("recordSqliteWrite");
+    if (!this.tx.recordSqliteWrite) {
+      throw new Error(
+        "storage transaction does not support recordSqliteWrite()",
+      );
+    }
+    this.tx.recordSqliteWrite(space, op);
+  }
+
   getReadActivities(): Iterable<IReadActivity> {
     return getTransactionReadActivities(this.tx);
   }
@@ -458,12 +471,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        // When modernDataModel is ON, stored objects are deep-frozen by
-        // fabricFromNativeValueModern(). Clone before mutation to avoid
-        // TypeError on frozen objects: this always copies (the value may be the
-        // transaction's working copy, which must not be mutated in place), and
-        // it deep-freezes the bound children as inexpensive defense-in-depth
-        // against accidental deeper mutation of the shared input.
+        // Stored objects are deep-frozen by `fabricFromNativeValueModern()`.
+        // Clone before mutation to avoid `TypeError` on frozen objects: this
+        // always copies (the value may be the transaction's working copy, which
+        // must not be mutated in place), and it deep-freezes the bound children
+        // as inexpensive defense-in-depth against accidental deeper mutation of
+        // the shared input.
         valueObj = shallowMutableClone(
           currentValue as FabricValue,
         ) as FabricObject;
@@ -819,6 +832,15 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   getSchedulerObservation(): unknown {
     return this.wrapped.getSchedulerObservation?.();
+  }
+
+  recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    if (!this.wrapped.recordSqliteWrite) {
+      throw new Error(
+        "storage transaction does not support recordSqliteWrite()",
+      );
+    }
+    this.wrapped.recordSqliteWrite(space, op);
   }
 
   getReadActivities(): Iterable<IReadActivity> {

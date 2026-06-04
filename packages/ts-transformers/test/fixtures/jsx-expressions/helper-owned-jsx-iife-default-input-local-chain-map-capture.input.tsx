@@ -27,7 +27,7 @@ function findChildren(
   path: readonly string[],
 ): readonly Entry[] {
   let current: readonly Entry[] = tree;
-  for (const name of path) {
+  for (const name of Array.isArray(path) ? path : []) {
     const folder = current.find(
       (entry: Entry) => entry.name === name && entry.type === "folder",
     );

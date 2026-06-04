@@ -37,12 +37,15 @@ import {
   llmDialog,
   navigateTo,
   patternTool,
+  sqliteDatabase,
+  sqliteQuery,
   str,
   streamData,
   unless,
   when,
   wish,
 } from "./built-in.ts";
+import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
 import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
@@ -160,6 +163,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     fetchProgram,
     streamData,
     compileAndRun,
+    sqliteDatabase,
+    sqliteQuery,
+    table,
+    cfLink,
     navigateTo,
     wish,
 

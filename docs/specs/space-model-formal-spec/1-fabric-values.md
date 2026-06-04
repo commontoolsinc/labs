@@ -94,11 +94,12 @@ type FabricValue =
   | FabricEpochDays
   | FabricHash
   | FabricBytes
+  | FabricRegExp
 
   // (c) Branded fabric types (custom types implementing the fabric protocol)
   //     This arm covers:
   //       - Native object wrappers: `FabricError`, `FabricMap`,
-  //         `FabricSet`, `FabricRegExp` (Section 1.4)
+  //         `FabricSet` (Section 1.4)
   //       - User-defined types: `Cell`, `Stream`, etc.
   //       - System types: `UnknownValue`, `ProblematicValue`
   | FabricInstance
@@ -149,7 +150,7 @@ native JS object types that the conversion layer can handle:
  *
  * Primitives like `bigint` and `undefined` are NOT included — they are
  * directly part of `FabricValue`. The wrapper classes (`FabricError`,
- * `FabricMap`, `FabricRegExp`, etc.) are also NOT this type — they are `FabricInstance`
+ * `FabricMap`, etc.) are also NOT this type — they are `FabricInstance`
  * implementations that live inside `FabricValue`.
  */
 type FabricNativeObject =
@@ -244,13 +245,15 @@ member of `FabricValue`.
 
 ### 1.4 Native Object Wrapper Classes
 
-Certain built-in JS types (`Error`, `Map`, `Set`, `RegExp`) cannot
+Certain built-in JS types (`Error`, `Map`, `Set`) cannot
 have `Symbol`-keyed methods added via prototype patching in a reliable,
 cross-realm way. Rather than handling them with special-case logic in the
 serializer, the system defines **wrapper classes** — one per native type — that
 implement `FabricInstance`. The conversion layer (Section 8) wraps raw native
 objects into these classes when bridging from the JS wild west to `FabricValue`,
-and unwraps them when bridging back.
+and unwraps them when bridging back. (Native `RegExp` is also bridged by the
+conversion layer, but into the `FabricRegExp` **primitive** rather than a
+wrapper — see Section 1.4.5.)
 
 Because each wrapper genuinely implements `FabricInstance` (with real
 `[DECONSTRUCT]` and `[RECONSTRUCT]` methods), the serialization system
@@ -261,8 +264,8 @@ has a dedicated `TAG_BYTES` tag for content-level identity (see Section 6.3),
 but it is a `FabricPrimitive`, not a `FabricInstance`.
 
 The **special primitive** types (`FabricEpochNsec`, `FabricEpochDays`,
-`FabricHash`, `FabricBytes`) are **not** `FabricInstance`s — they are
-`FabricPrimitive` subclasses (Section 1.4.6). `FabricPrimitive` extends
+`FabricHash`, `FabricBytes`, `FabricRegExp`) are **not** `FabricInstance`s —
+they are `FabricPrimitive` subclasses (Section 1.4.6). `FabricPrimitive` extends
 `FabricSpecialObject`, and the `FabricValue` union includes
 `FabricSpecialObject`, so all `FabricPrimitive` subclasses are implicitly
 members of `FabricValue`. They are always-frozen value types that bypass the
@@ -278,7 +281,11 @@ property.
 | `FabricError` | `Error` | `Error@1` | `{ type, name, message, stack?, cause?, ...custom }` | `type` is the constructor name (e.g. `"TypeError"`). `name` is the `.name` property if it differs from `type`, or `null` if it matches (the common case). Includes `message`, `stack` (if present), `cause` (if present), and custom enumerable properties. The conversion layer (Section 8.2) recursively converts nested values (including `cause` and custom properties) before wrapping, ensuring all values are `FabricValue` when `[DECONSTRUCT]` runs. |
 | `FabricMap` | `Map` | `Map@1` | `[[key, value], ...]` | Entry pairs as an array of two-element arrays. Insertion order is preserved. Keys and values are recursively processed. |
 | `FabricSet` | `Set` | `Set@1` | `[value, ...]` | Elements as an array. Iteration order is preserved. Values are recursively processed. |
-| `FabricRegExp` | `RegExp` | `RegExp@1` | `{ source, flags, flavor }` | `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Extra enumerable properties cause rejection. |
+
+(Native `RegExp` is also bridged by the conversion layer, but into the
+`FabricRegExp` **primitive** — a `FabricPrimitive` subclass, not a wrapper. It
+is therefore listed in the special-primitive table below and detailed in
+Section 1.4.5, not here.)
 
 Each wrapper class above:
 
@@ -344,10 +351,10 @@ copying in the common case and centralizes the freeze-state logic for all
 wrapper types.
 
 Unlike the wrappers above, the special primitive types (`FabricEpochNsec`,
-`FabricEpochDays`, `FabricHash`, `FabricBytes`) are **`FabricPrimitive`
-subclasses** and do not extend `FabricInstance`. They are included in
-`FabricValue` via the `FabricSpecialObject` arm of the union (Section 1.4.6).
-See Sections 1.4.6 through 1.4.10.
+`FabricEpochDays`, `FabricHash`, `FabricBytes`, `FabricRegExp`) are
+**`FabricPrimitive` subclasses** and do not extend `FabricInstance`. They are
+included in `FabricValue` via the `FabricSpecialObject` arm of the union
+(Section 1.4.6). See Sections 1.4.5 through 1.4.10.
 
 | Special Primitive Type | Extends | Wire Tag | Stored Value | Notes |
 |------------------------|---------|----------|--------------|-------|
@@ -355,6 +362,7 @@ See Sections 1.4.6 through 1.4.10.
 | `FabricEpochDays` | `FabricPrimitive` | `EpochDays@1` | `bigint` (signed days from POSIX Epoch) | Day-precision temporal type. Anticipates `Temporal.PlainDate`. Mostly nascent — class and spec entry are defined, but full integration (Temporal types, calendar concerns) is deferred. |
 | `FabricHash` | `FabricPrimitive` | _(none — see Section 1.4.9)_ | `Uint8Array` (hash bytes, private) + `string` (algorithm tag) | Content identifier / hash. Stringifies as `<tag>:<base64urlhash>` (unpadded base64url, RFC 4648 Section 5). The first algorithm tag is `fid1` ("fabric ID, v1"). |
 | `FabricBytes` | `FabricPrimitive` | `Bytes@1` | `Uint8Array` (private byte storage) | Immutable byte sequence. Input bytes are copied at construction time. Callers access bytes via `slice()`, `copyInto()`, and `length`. |
+| `FabricRegExp` | `FabricPrimitive` | `RegExp@1` | `source` / `flags` / `flavor` strings | Regular-expression value. `source` is the pattern string (`regex.source`); `flags` is the flag string (`regex.flags`); `flavor` is the regex dialect identifier (e.g. `"es2025"`). Stores strings only; `value` returns a fresh native `RegExp` clone per call. Extra enumerable properties on a native `RegExp` cause rejection. |
 
 #### Extra Enumerable Properties
 
@@ -515,61 +523,59 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 
 #### 1.4.5 `FabricRegExp`
 
-```typescript
-// file: packages/data-model/fabric-instances/FabricRegExp.ts
+`FabricRegExp` is a `FabricPrimitive` subclass, not a native-object wrapper. A
+regular expression is a leaf type with respect to references (it holds no
+nested `FabricValue`s) and is reasonably conceived of as stateless: although a
+JS `RegExp` carries mutable internal state (notably `lastIndex`), a
+`FabricRegExp` never hands out its stored `RegExp` un-cloned, so no mutable
+state is exposed. It therefore has a dedicated hash tag (`TAG_REGEXP`, Section
+6.3) and a dedicated wire-format `TypeHandler` (tag `RegExp@1`), and does not
+implement `[DECONSTRUCT]` / `[RECONSTRUCT]` or carry a `typeTag` property.
 
-import {
-  DECONSTRUCT, RECONSTRUCT,
-  FabricInstance, type ReconstructionContext,
-} from './interface';
+```typescript
+// file: packages/data-model/fabric-primitives/FabricRegExp.ts
+
+import { FabricPrimitive } from './interface';
 
 /**
- * Wrapper for native `RegExp` values. Extends `FabricNativeWrapper<RegExp>`
- * so that regular expressions participate in the standard serialization,
- * hashing, and unwrapping paths.
+ * Immutable regular-expression value in the fabric type system.
  *
- * Essential state is the pattern `source` string, the `flags` string, and
- * the `flavor` string identifying the regex dialect. The only initially
- * defined flavor is `"es2025"` (ECMAScript 2025 regular expressions).
- * The `flavor` field is forward-looking for multi-runtime scenarios where
- * different regex engines may be in use.
+ * The essential state is `{ source, flags, flavor }` — the values needed to
+ * (re)construct an equivalent regex. The `flavor` string identifies the regex
+ * dialect; only `"es2025"` (the default) is currently representable as a
+ * native JS `RegExp`. The `flavor` field is forward-looking for multi-runtime
+ * scenarios where different regex engines may be in use.
  *
- * Extra enumerable properties on the wrapped `RegExp` cause rejection
+ * For the `"es2025"` flavor the constructor proactively builds and retains a
+ * private `RegExp` (validating the pattern eagerly and making `value` cheap);
+ * the retained instance is never handed out directly, so `value` returns a
+ * fresh clone on each call. Other flavors store their strings faithfully but
+ * cannot yet produce a native `RegExp`, so `value` throws for them.
+ *
+ * A native `RegExp` argument with extra enumerable own properties is rejected
  * (death before confusion).
- *
- * **Freeze behavior:** A frozen `RegExp` has an immutable `lastIndex`,
- * which prevents stateful use of `exec()` and `test()` with the `g`
- * (global) and `y` (sticky) flags. This is an inherent consequence of
- * `Object.freeze()` on `RegExp` objects and is consistent with the
- * immutable-forward design — callers who need stateful matching should
- * construct a new `RegExp` from the source and flags.
  */
-export class FabricRegExp extends FabricNativeWrapper<RegExp> {
-  readonly typeTag = 'RegExp@1';
+export class FabricRegExp extends FabricPrimitive {
+  // Constructed either from a native `RegExp` (implying the `"es2025"`
+  // flavor) or from explicit `flavor` / `source` / `flags`.
+  constructor(regex: RegExp);
+  constructor(flavor: string, source: string, flags: string);
 
-  constructor(
-    readonly regex: RegExp,
-    readonly flavor: string = 'es2025',
-  ) {
-    super();
-  }
+  /** The pattern source text. */
+  get source(): string;
 
-  [DECONSTRUCT](): FabricValue {
-    return {
-      source: this.regex.source,
-      flags: this.regex.flags,
-      flavor: this.flavor,
-    };
-  }
+  /** The flags string (e.g. `"gi"`). */
+  get flags(): string;
 
-  static [RECONSTRUCT](
-    state: FabricValue,
-    _context: ReconstructionContext,
-  ): FabricRegExp {
-    const s = state as { source: string; flags: string; flavor?: string };
-    const flavor = s.flavor ?? 'es2025';
-    return new FabricRegExp(new RegExp(s.source, s.flags), flavor);
-  }
+  /** Regex flavor/dialect identifier (e.g. `"es2025"`). */
+  get flavor(): string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws when the
+   * flavor has no native `RegExp` representation.
+   */
+  get value(): RegExp;
 }
 ```
 
@@ -610,7 +616,7 @@ union. It extends `FabricSpecialObject`.
   an explicit wire-format tag (`UnknownValue`, `ProblematicValue`).
 - `FabricPrimitive` is the base for types that behave like primitives but
   need a class wrapper (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`,
-  `FabricBytes`).
+  `FabricBytes`, `FabricRegExp`).
 
 ```typescript
 // file: packages/data-model/interface.ts
@@ -894,11 +900,12 @@ Section 4.5.
 >
 > **File organization.** Each fabric-instance and fabric-primitive class
 > lives in its own file: the `FabricInstance` subclasses (including the
-> native object wrappers `FabricError`, `FabricMap`, `FabricSet`,
-> `FabricRegExp` and the explicit-tag-value family) under
+> native object wrappers `FabricError`, `FabricMap`, `FabricSet`
+> and the explicit-tag-value family) under
 > `packages/data-model/fabric-instances/`; the `FabricPrimitive`
 > subclasses (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`,
-> `FabricBytes`) under `packages/data-model/fabric-primitives/`.
+> `FabricBytes`, `FabricRegExp`) under
+> `packages/data-model/fabric-primitives/`.
 
 ### 1.5 Recursive Containers
 
@@ -1050,13 +1057,13 @@ scaffolding lives on a separate abstract base class `BaseFabricInstance`
  * member; see Section 2.4).
  *
  * The native object wrapper classes (`FabricError`, `FabricMap`,
- * `FabricSet`, `FabricRegExp`) extend `BaseFabricInstance`, as do
+ * `FabricSet`) extend `BaseFabricInstance`, as do
  * user-defined types (`Cell`, `Stream`) and system types (`UnknownValue`,
  * `ProblematicValue`).
  *
  * Note: `FabricPrimitive` subclasses (`FabricEpochNsec`,
- * `FabricEpochDays`, `FabricHash`, `FabricBytes`) do NOT extend
- * this class — they extend `FabricPrimitive` instead.
+ * `FabricEpochDays`, `FabricHash`, `FabricBytes`, `FabricRegExp`) do NOT
+ * extend this class — they extend `FabricPrimitive` instead.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
@@ -1404,7 +1411,7 @@ aligns with the reactive system's assumption that values don't mutate in place.
 
 > **Immutability of native object wrappers.** Under the three-layer
 > architecture, deserialization produces `FabricInstance` wrappers
-> (`FabricMap`, `FabricSet`, `FabricRegExp`, etc.), not raw native types. Because the
+> (`FabricMap`, `FabricSet`, etc.), not raw native types. Because the
 > system controls the shape of these wrapper classes, they can be properly
 > frozen with `Object.freeze()` — unlike the native types they wrap (e.g.,
 > `Object.freeze()` on a `Map` does not prevent mutation via `set()`/`delete()`).
@@ -1734,6 +1741,7 @@ The built-in type handlers are:
 | `EpochNsecHandler` | `EpochNsec@1` | `FabricEpochNsec` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `EpochDaysHandler` | `EpochDays@1` | `FabricEpochDays` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `BytesHandler` | `Bytes@1` | `FabricBytes` | `FabricPrimitive` subclass; matched by `instanceof`. |
+| `RegExpHandler` | `RegExp@1` | `FabricRegExp` | `FabricPrimitive` subclass; matched by `instanceof`. |
 | `FabricInstanceHandler` | _(empty)_ | `FabricInstance` | Generic handler for all `FabricInstance` values. Uses `[DECONSTRUCT]` and the codec's tag methods. No tag for deserialization — individual instance types are deserialized via the class registry. |
 | `BigIntHandler` | `BigInt@1` | `bigint` | Encodes as unpadded base64url of minimal two's complement big-endian bytes. |
 | `UndefinedHandler` | `Undefined@1` | `undefined` | Stateless; state is `null`. |
@@ -1777,9 +1785,11 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
    is intentionally not covered. See Section 8.6 for the full deep-freeze
    protocol and the egress-freezing call sites.
 4. **Class registry fallback** — for tags not handled by type handlers (e.g.,
-   `Error@1`, `Map@1`, `Set@1`, `RegExp@1`), the context looks up
+   `Error@1`, `Map@1`, `Set@1`), the context looks up
    the `FabricClass` in its class registry, recursively deserializes the
    state, and calls `[RECONSTRUCT]`. Unknown tags produce `UnknownValue`.
+   (`RegExp@1` is handled by its own type handler in the step above, not this
+   fallback.)
 5. **Primitives** — pass through.
 6. **Arrays** — recursively deserialized; `hole` entries reconstructed as true
    holes (absent indices).
@@ -1787,10 +1797,13 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
 
 > **Implementation guidance: class registry.** The `JsonEncodingContext`
 > constructor registers native wrapper classes for deserialization:
-> `FabricError`, `FabricMap`, `FabricSet`, `FabricRegExp`. For tag
+> `FabricError`, `FabricMap`, `FabricSet`. For tag
 > resolution (`getTagFor`), the context checks for
 > a `typeTag` property on the instance — the same pattern used by
-> `UnknownValue` and `ProblematicValue`. `ExplicitTagValue` instances
+> `UnknownValue` and `ProblematicValue`. (`FabricRegExp`, like the other
+> `FabricPrimitive` subclasses, is handled by its own dedicated
+> `TypeHandler` rather than the `typeTag`-based wrapper path.)
+> `ExplicitTagValue` instances
 > use their preserved `typeTag` directly. This avoids `instanceof` cascades
 > and scales cleanly as new wrapper types are added.
 
@@ -1950,7 +1963,8 @@ The implementation is split across several files for separation of concerns:
 | `fabric-value-modern.ts` | Modern (flag-ON) conversion: `shallowFabricFromNativeValueModern`, `fabricFromNativeValueModern`, `isFabricValueModern`, `isFabricCompatibleModern` |
 | `fabric-value-legacy.ts` | Legacy (flag-OFF) conversion: `fabricFromNativeValueLegacy`, `isFabricValueLegacy`, `isFabricCompatibleLegacy` |
 | `array-utils.ts` | Pure utilities shared by both paths: `isArrayIndexPropertyName`, `isArrayWithOnlyIndexProperties` |
-| `fabric-instances/` | Native object wrapper classes, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `FabricRegExp.ts`, `ExplicitTagValue.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
+| `fabric-instances/` | `FabricInstance` subclasses, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `ExplicitTagValue.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
+| `fabric-primitives/` | `FabricPrimitive` subclasses, each in its own file: `BaseFabricPrimitive.ts`, `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
 
 In the `Cell` implementation:
 
@@ -2033,6 +2047,7 @@ organized into four categories by high nibble:
 | `TAG_EPOCH_DAYS`  | `0x28` | 40      | `FabricEpochDays`                 |
 | `TAG_HASH`        | `0x29` | 41      | `FabricHash`                      |
 | `TAG_SYMBOL`      | `0x2A` | 42      | `symbol` (registry-interned only) |
+| `TAG_REGEXP`      | `0x2B` | 43      | `FabricRegExp`                    |
 
 **Optimized tags (`0xFN`)** — hash-level substitutes that replace the raw
 payload of a primitive type with a digest, when doing so shortens the byte
@@ -2159,7 +2174,7 @@ export function hashOf(value: unknown): FabricHash {
   //
   // The native object wrappers and temporal types are hashed as follows:
   //
-  // - `FabricError`, `FabricMap`, `FabricSet`, `FabricRegExp`,
+  // - `FabricError`, `FabricMap`, `FabricSet`,
   //   and other `FabricInstance`s with recursively-processable
   //   deconstructed state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, hashStr(typeTag),
@@ -2168,7 +2183,12 @@ export function hashOf(value: unknown): FabricHash {
   // - `FabricBytes` uses TAG_BYTES (dedicated primitive tag).
   // - `FabricEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
   // - `FabricEpochDays` uses TAG_EPOCH_DAYS (dedicated primitive tag).
+<<<<<<< HEAD
   // - `FabricHash` uses TAG_HASH (dedicated primitive tag).
+=======
+  // - `FabricHash` uses TAG_CONTENT_ID (dedicated primitive tag).
+  // - `FabricRegExp` uses TAG_REGEXP (dedicated primitive tag).
+>>>>>>> main
   //
   // Examples (existing type tags are all short enough for the direct
   // string form, so `hashStr(tag)` below expands to
@@ -2178,11 +2198,12 @@ export function hashOf(value: unknown): FabricHash {
   //                         where entries are hashed in insertion order
   // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOf(elements))
   //                         where elements are hashed in insertion order
-  // - `FabricRegExp`:     hash(TAG_INSTANCE, hashStr("RegExp@1"), hashOf({source, flags, flavor}))
   // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `FabricEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `FabricHash`:  hash(TAG_HASH, hashStr(algTag), leb128(hashByteLen), hashBytes)
   // - `FabricBytes`:      hash(TAG_BYTES, leb128(byteLen), rawBytes)
+  // - `FabricRegExp`:     hash(TAG_REGEXP, hashStr(source), hashStr(flags),
+  //                               hashStr(flavor))
   //
   // Each type is tagged to prevent collisions between types with
   // identical content representations. In particular, holes (TAG_HOLE),
@@ -2410,7 +2431,7 @@ export function fabricFromNativeValue(
 | `Map` | Wrapped into `FabricMap`. Keys and values are recursively converted (deep variant only). Extra enumerable properties on the `Map` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Set` | Wrapped into `FabricSet`. Elements are recursively converted (deep variant only). Extra enumerable properties on the `Set` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Date` | Wrapped into `FabricEpochNsec`. The `Date`'s millisecond timestamp is converted to nanoseconds: `BigInt(date.getTime()) * 1_000_000n`. Note the millisecond precision limitation — sub-millisecond information is not available from `Date`. Extra enumerable properties on the `Date` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
-| `RegExp` | Wrapped into `FabricRegExp`. The `source` and `flags` are extracted from the native `RegExp`; `flavor` defaults to `"es2025"` (it is a wrapper-level property, not a native `RegExp` property). Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
+| `RegExp` | Converted into `FabricRegExp` (a `FabricPrimitive`, not a wrapper). The `source` and `flags` are extracted from the native `RegExp`; `flavor` defaults to `"es2025"` (it is a `FabricRegExp`-level property, not a native `RegExp` property). Extra enumerable properties on the `RegExp` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `Uint8Array` | Wrapped into `FabricBytes`. The input bytes are copied (the caller may mutate the original afterward). Extra enumerable properties on the `Uint8Array` object cause **rejection** (throw) — it is better to fail loudly than silently lose data. |
 | `FabricValue[]` | Shallow: returned as-is (frozen if `freeze` is true). Deep: elements recursively converted (frozen at each level if `freeze` is true). |
 | `{ [key: string]: FabricValue }` | Shallow: returned as-is (frozen if `freeze` is true). Deep: values recursively converted (frozen at each level if `freeze` is true). |
@@ -2589,11 +2610,12 @@ accepts non-finite numbers and registry-interned symbols.
  *                         recursively unwrapped)
  * - `FabricMap`        -> `FrozenMap` / `Map`
  * - `FabricSet`        -> `FrozenSet` / `Set`
- * - `FabricRegExp`     -> `RegExp`
  *
  * `FabricPrimitive` subclasses (`FabricEpochNsec`, `FabricEpochDays`,
- * `FabricHash`, `FabricBytes`) pass through unchanged — they are
- * always-frozen (Section 1.4.6).
+ * `FabricHash`, `FabricBytes`, `FabricRegExp`) pass through unchanged — they
+ * are always-frozen (Section 1.4.6). (`FabricRegExp` exposes its native form
+ * via `value`, which returns a fresh `RegExp` clone; it is not unwrapped to a
+ * native `RegExp` by this function.)
  *
  * **The `frozen` argument is always honored.** The freeze state of every
  * value in the output matches the `frozen` argument. When `frozen` is
@@ -2618,11 +2640,11 @@ export function nativeFromFabricValue(
 | `FabricError` | `Error` (original if already frozen; frozen copy otherwise) | `Error` (original if already unfrozen; mutable copy otherwise) |
 | `FabricMap` | `FrozenMap` (original if already `FrozenMap`; new wrapper otherwise) | `Map` (original if already plain `Map`; mutable copy otherwise) |
 | `FabricSet` | `FrozenSet` (original if already `FrozenSet`; new wrapper otherwise) | `Set` (original if already plain `Set`; mutable copy otherwise) |
-| `FabricRegExp` | `RegExp` (frozen via `Object.freeze()`; `lastIndex` immutable) | `RegExp` (original reference; mutable `lastIndex`) |
 | `FabricEpochNsec` | Passed through unchanged (`FabricPrimitive`; always-frozen) | Passed through unchanged (same) |
 | `FabricEpochDays` | Passed through unchanged (`FabricPrimitive`; always-frozen) | Passed through unchanged (same) |
 | `FabricHash` | Passed through unchanged (always-frozen; Section 1.4.6) | Passed through unchanged (same) |
 | `FabricBytes` | Passed through unchanged (always-frozen; Section 1.4.6) | Passed through unchanged (same) |
+| `FabricRegExp` | Passed through unchanged (`FabricPrimitive`; always-frozen) | Passed through unchanged (same) |
 | Other `FabricInstance` | Passed through unchanged | Passed through unchanged |
 | Primitives | Passed through unchanged | Passed through unchanged |
 | Arrays | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |

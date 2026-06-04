@@ -756,6 +756,21 @@ const buildSubagentSystemPrompt = (
               ? [
                 `Browser Access lease: ${options.browserAccess.leaseId}`,
                 `Browser Access CDP endpoint: ${options.browserAccess.cdpUrl}`,
+                `Browser Access profile mode: ${
+                  options.browserAccess.profileMode ?? "persistent"
+                }`,
+                `Browser Access account access: ${
+                  options.browserAccess.accountAccess ??
+                    (options.browserAccess.profileMode === "transient"
+                      ? "none"
+                      : "available")
+                }`,
+                ...(options.browserAccess.profileMode === "transient" ||
+                    options.browserAccess.accountAccess === "none"
+                  ? [
+                    "This Browser Access lease uses a temporary no-login profile. Do not assume cookies, logged-in accounts, saved sessions, or user account state are available.",
+                  ]
+                  : []),
                 `Use agent-browser --cdp ${options.browserAccess.cdpUrl} for page commands. Do not use any other CDP endpoint.`,
               ]
               : [

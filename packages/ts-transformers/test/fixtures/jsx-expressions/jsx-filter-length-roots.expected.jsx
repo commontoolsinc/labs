@@ -11,6 +11,90 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length);
+const __cfLift_2 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0);
+const __cfLift_3 = __cfHelpers.lift<{
+    state: {
+        items: number[];
+        threshold: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    }
+                },
+                threshold: {
+                    type: "number"
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0);
 // FIXTURE: jsx-filter-length-roots
 // Verifies: structural filter-length wrappers use the shared post-closure path
 //   instead of rewriting the filter callback itself to filterWithPattern().
@@ -20,65 +104,11 @@ const __cfAmdHooks = undefined;
 // Context: all three shapes should lower without leaking callback locals.
 export default pattern((state) => ({
     [UI]: (<div>
-      <p>{__cfHelpers.lift<{
-        state: {
-            items: number[];
-            threshold: number;
-        };
-    }, number>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "number"
-                        }
-                    },
-                    threshold: {
-                        type: "number"
-                    }
-                },
-                required: ["items", "threshold"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length)({ state: {
+      <p>{__cfLift_1({ state: {
             items: state.key("items"),
             threshold: state.key("threshold")
         } })}</p>
-      <p>{__cfHelpers.lift<{
-        state: {
-            items: number[];
-            threshold: number;
-        };
-    }, boolean>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "number"
-                        }
-                    },
-                    threshold: {
-                        type: "number"
-                    }
-                },
-                required: ["items", "threshold"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0)({ state: {
+      <p>{__cfLift_2({ state: {
             items: state.key("items"),
             threshold: state.key("threshold")
         } })}</p>
@@ -91,34 +121,7 @@ export default pattern((state) => ({
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["Yes", "No"]
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-        state: {
-            items: number[];
-            threshold: number;
-        };
-    }, boolean>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "number"
-                        }
-                    },
-                    threshold: {
-                        type: "number"
-                    }
-                },
-                required: ["items", "threshold"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0)({ state: {
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_3({ state: {
             items: state.key("items"),
             threshold: state.key("threshold")
         } }), "Yes", "No")}

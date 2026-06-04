@@ -2,10 +2,6 @@ import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
   applyCommit,
   close,
   createBranch,
@@ -1598,66 +1594,61 @@ Deno.test("memory v2 engine rejects branch reads before createdSeq", async () =>
   }
 });
 
-Deno.test("memory v2 engine persists rich patch values at the storage boundary", async () => {
-  setDataModelConfig(true);
+Deno.test("memory v2 engine persists fabric patch values at the storage boundary", async () => {
+  const { engine, path } = await createEngine();
+
   try {
-    const { engine, path } = await createEngine();
+    applyCommit(engine, {
+      sessionId: "session:rich-patch",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:rich-patch",
+          value: toEntityDocument({ counter: 1n }),
+        }],
+      },
+    });
 
-    try {
-      applyCommit(engine, {
-        sessionId: "session:rich-patch",
-        invocation: invocationFor(1),
-        authorization,
-        commit: {
-          localSeq: 1,
-          reads: { confirmed: [], pending: [] },
-          operations: [{
-            op: "set",
-            id: "entity:rich-patch",
-            value: toEntityDocument({ counter: 1n }),
+    applyCommit(engine, {
+      sessionId: "session:rich-patch",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:rich-patch",
+          patches: [{
+            op: "replace",
+            path: "/value/counter",
+            value: 2n,
           }],
-        },
-      });
+        }],
+      },
+    });
 
-      applyCommit(engine, {
-        sessionId: "session:rich-patch",
-        invocation: invocationFor(2),
-        authorization,
-        commit: {
-          localSeq: 2,
-          reads: { confirmed: [], pending: [] },
-          operations: [{
-            op: "patch",
-            id: "entity:rich-patch",
-            patches: [{
-              op: "replace",
-              path: "/value/counter",
-              value: 2n,
-            }],
-          }],
-        },
-      });
+    assertEquals(
+      read(engine, { id: "entity:rich-patch" }),
+      toEntityDocument({ counter: 2n }),
+    );
 
-      assertEquals(
-        read(engine, { id: "entity:rich-patch" }),
-        toEntityDocument({ counter: 2n }),
-      );
-
-      const patchRow = engine.database.prepare(
-        `SELECT data
+    const patchRow = engine.database.prepare(
+      `SELECT data
          FROM revision
          WHERE id = 'entity:rich-patch' AND seq = 2`,
-      ).get() as { data: string } | undefined;
-      assertEquals(decodeStored(patchRow?.data), [{
-        op: "replace",
-        path: "/value/counter",
-        value: 2n,
-      }]);
-    } finally {
-      close(engine);
-      await Deno.remove(path);
-    }
+    ).get() as { data: string } | undefined;
+    assertEquals(decodeStored(patchRow?.data), [{
+      op: "replace",
+      path: "/value/counter",
+      value: 2n,
+    }]);
   } finally {
-    resetDataModelConfig();
+    close(engine);
+    await Deno.remove(path);
   }
 });

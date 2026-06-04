@@ -36,11 +36,9 @@ export const internalSchema = internSchema(
  *     construction (e.g. `{ url, mode, options }`, or one level deeper
  *     `{ method, body }`), and the resulting hash needs to be the same
  *     regardless of whether an absent field is omitted entirely or
- *     present-but-`undefined`. This matches the JSON-style normalization
- *     that the legacy fabric-value layer applied implicitly; under the
- *     modern layer `undefined` properties are preserved, so this
- *     function must do the normalization itself to stay
- *     data-model-flag-agnostic.
+ *     present-but-`undefined`. The fabric-value layer preserves
+ *     `undefined`-valued properties, so this function must do the
+ *     JSON-style normalization itself.
  *
  * `hashStringOf()` itself is happy to hash `undefined` values; no
  * normalization for hashability per se is needed.

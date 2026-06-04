@@ -6,8 +6,8 @@ import { computed, fetchData, ifElse, pattern, UI } from "commonfabric";
 
 // FIXTURE: ifelse-undefined-value
 // Verifies: ifElse with explicit undefined as ifTrue or ifFalse branch is handled correctly
-//   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, derive(...), undefined, {result})
-//   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, derive(...), {data}, undefined)
+//   ifElse(cond, undefined, {result}) → ifElse(schema, schema, schema, schema, lift(...)(...), undefined, {result})
+//   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern<Record<string, never>>(() => {
   const { pending, result } = fetchData({

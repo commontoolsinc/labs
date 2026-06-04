@@ -17,7 +17,7 @@ import { FabricHash } from "./fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
 import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
-import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
+import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
@@ -328,7 +328,7 @@ function feedObjectValue(
     case NATIVE_TAGS.Uint8Array: {
       // Native instances that have a well-defined `FabricValue` conversion.
       // Convert on-the-fly and hash the converted value.
-      const converted = shallowFabricFromNativeValueModern(value, false);
+      const converted = shallowFabricFromNativeValue(value, false);
       feedValue(hasher, converted);
       return;
     }

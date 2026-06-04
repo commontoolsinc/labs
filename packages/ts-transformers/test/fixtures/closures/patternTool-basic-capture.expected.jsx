@@ -19,6 +19,28 @@ type Output = {
         content: string;
     }>;
 };
+const __cfLift_1 = __cfHelpers.lift<{
+    query: string;
+    content: string;
+}, string[]>({
+    type: "object",
+    properties: {
+        query: {
+            type: "string"
+        },
+        content: {
+            type: "string"
+        }
+    },
+    required: ["query", "content"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
+    return content.split("\n").filter((c: string) => c.includes(query));
+});
 // FIXTURE: patternTool-basic-capture
 // Verifies: patternTool captures a module-scoped cell as an extraParam
 //   patternTool(fn, { content }) → patternTool(fn, { content }) (content passed through)
@@ -29,28 +51,7 @@ export default pattern(() => {
         query: string;
         content: string;
     }) => {
-        return __cfHelpers.lift<{
-            query: string;
-            content: string;
-        }, string[]>({
-            type: "object",
-            properties: {
-                query: {
-                    type: "string"
-                },
-                content: {
-                    type: "string"
-                }
-            },
-            required: ["query", "content"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        } as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
-            return content.split("\n").filter((c: string) => c.includes(query));
-        })({
+        return __cfLift_1({
             content: content,
             query: query
         });

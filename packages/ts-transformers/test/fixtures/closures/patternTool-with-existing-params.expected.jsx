@@ -11,9 +11,6 @@ import { cell, computed, pattern, patternTool, type PatternToolResult } from "co
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ value, offset }) => {
-    return value * multiplier.get() + offset;
-});
 const multiplier = __cfHelpers.__cf_data(cell(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
@@ -25,6 +22,25 @@ type Output = {
         offset: number;
     }>;
 };
+const __cfLift_1 = __cfHelpers.lift<{
+    value: number;
+    offset: number;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        offset: {
+            type: "number"
+        }
+    },
+    required: ["value", "offset"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, offset }) => {
+    return value * multiplier.get() + offset;
+});
 // Test: patternTool with an existing extraParam, and a new capture
 // The function has { value: number, offset: number } as input type
 // We provide offset via extraParams, and the transformer should capture multiplier
@@ -41,23 +57,7 @@ export default pattern(() => {
         offset: number;
         multiplier: __cfHelpers.Cell<number>;
     }) => {
-        return __cfHelpers.lift<{
-            value: number;
-            offset: number;
-        }, number>({
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                },
-                offset: {
-                    type: "number"
-                }
-            },
-            required: ["value", "offset"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+        return __cfLift_1({
             value: value,
             offset: offset
         });

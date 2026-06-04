@@ -47,6 +47,23 @@ const liftSummary = lift({
         difference: primaryValue - secondaryValue,
     };
 });
+const __cfLift_1 = __cfHelpers.lift<{
+    summary: {
+        difference: any;
+    };
+}, any>({
+    type: "object",
+    properties: {
+        summary: {
+            type: "object",
+            properties: {
+                difference: true
+            },
+            required: ["difference"]
+        }
+    },
+    required: ["summary"]
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.difference);
 // FIXTURE: context-lift-result-property-projection-shorthand
 // Verifies: shorthand object returns preserve the projected computed() result type
 //   return { difference } → result schema difference: number
@@ -54,23 +71,7 @@ export default pattern((__cf_pattern_input) => {
     const primary = __cf_pattern_input.key("primary");
     const secondary = __cf_pattern_input.key("secondary");
     const summary = liftSummary({ primary: primary.for(["summary", "primary"], true), secondary: secondary.for(["summary", "secondary"], true) }).for("summary", true);
-    const difference = __cfHelpers.lift<{
-        summary: {
-            difference: any;
-        };
-    }, any>({
-        type: "object",
-        properties: {
-            summary: {
-                type: "object",
-                properties: {
-                    difference: true
-                },
-                required: ["difference"]
-            }
-        },
-        required: ["summary"]
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.difference)({ summary: {
+    const difference = __cfLift_1({ summary: {
             difference: summary.key("difference")
         } }).for("difference", true);
     return { difference };

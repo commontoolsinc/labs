@@ -356,6 +356,45 @@ const recordRawBuiltinResultSchemaPolicyInput = (
   );
 };
 
+/**
+ * Find the first write-redirect link within an output binding and return its
+ * FULLY RESOLVED normalized link (`id` and `space` populated). The output spot
+ * a pattern node writes through is reserved for that node, so its resolved
+ * coordinates form a stable, position-derived, program-independent identity —
+ * suitable as the cause for the node's result cell instead of hashing the
+ * pattern object (which drags in the session-varying `program`). Returns
+ * undefined if the binding contains no write redirect.
+ */
+function firstResolvedOutputRedirect(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  binding: unknown,
+  baseCell: Cell<any>,
+): NormalizedFullLink | undefined {
+  if (isWriteRedirectLink(binding)) {
+    return resolveLink(
+      runtime,
+      tx,
+      parseLink(binding, baseCell),
+      "writeRedirect",
+    );
+  }
+  if (Array.isArray(binding)) {
+    for (const child of binding) {
+      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (isRecord(binding) && !isCellLink(binding)) {
+    for (const child of Object.values(binding)) {
+      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
 const recordSetupProjectionPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -780,11 +819,11 @@ export class Runner {
       meta: ignoreReadForScheduling,
     });
     // `fabricFromNativeValue()` below rebuilds a fresh tree from `internal`
-    // without mutating its inputs (true on both the modern and legacy paths),
-    // and `internal` isn't used after that. So the operands can be merged by
-    // reference: no defensive deep copy of `defaults` / `pattern.initial`, and
-    // no mutable (`frozen: false`) read of `previousInternal`, is needed --
-    // `Object.assign` only reads their top-level keys.
+    // without mutating its inputs, and `internal` isn't used after that. So the
+    // operands can be merged by reference: no defensive deep copy of `defaults`
+    // / `pattern.initial`, and no mutable (`frozen: false`) read of
+    // `previousInternal`, is needed -- `Object.assign` only reads their
+    // top-level keys.
     const internal = Object.assign(
       {},
       (defaults as unknown as { internal?: FabricValue })?.internal,
@@ -848,6 +887,23 @@ export class Runner {
 
     // Set the pattern in the resultCell as well
     resultCell.withTx(tx).setMetaRaw("pattern", getSigilLink(patternId));
+
+    // Also record the content-addressed {identity, symbol} reference when the
+    // pattern's entry identity is known (ESM cache path). On reload this lets
+    // the runtime load straight from the compiled cache by identity — no TS
+    // source pulled, no meta-cell roundtrip — falling back to the patternId
+    // load when the by-identity load is unavailable. See loadPatternByIdentity.
+    // The ref carries the authoritative export symbol (recorded at compile/load
+    // time); we never recompute it from `pattern`'s program here, since a
+    // source-free reloaded pattern only has a stub program (mainExport
+    // "default"), which would clobber a non-"default" export name.
+    const entryRef = this.runtime.patternManager.getPatternEntryRef(pattern);
+    if (entryRef) {
+      resultCell.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
+      });
+    }
 
     this.updateResultProjection(tx, pattern, resultCell.withTx(tx), {
       preserveName: previousPatternId === patternId,
@@ -1234,10 +1290,21 @@ export class Runner {
   ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
-      return this.runtime.patternManager.loadPattern(
-        patternId,
-        rootCell.space,
-      )
+      // Prefer the content-addressed {identity, symbol} reference when present:
+      // it loads straight from the compiled cache (no TS source, no meta-cell
+      // roundtrip). Fall back to the patternId load (which handles cold
+      // recovery from the stored source) when by-identity is unavailable.
+      const identityRef = getPatternIdentityRef(rootCell);
+      const pm = this.runtime.patternManager;
+      const loadPromise = identityRef
+        ? pm.loadPatternByIdentityAs(
+          patternId,
+          identityRef.identity,
+          identityRef.symbol,
+          rootCell.space,
+        ).then((byId) => byId ?? pm.loadPattern(patternId, rootCell.space))
+        : pm.loadPattern(patternId, rootCell.space);
+      return loadPromise
         .then((loaded) => {
           if (loaded) {
             return this.doStart(rootCell, seenCells);
@@ -3473,6 +3540,18 @@ export class Runner {
       tx,
     );
 
+    // CT-1623: the output spot this node writes through is reserved for this
+    // node, so its fully-resolved coordinates are a stable, position-derived,
+    // program-independent identity. Builtins that mint a result container
+    // (map/flatmap/filter) key it on this instead of the serialized op /
+    // inputs cell (both of which drag in the session-varying `program`).
+    const resolvedOutputSpot = firstResolvedOutputRedirect(
+      this.runtime,
+      tx,
+      mappedOutputBindings,
+      processCell,
+    );
+
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
@@ -3516,7 +3595,19 @@ export class Runner {
           );
         },
         addCancel,
-        { inputs: inputsCell, parents: processCell.entityId },
+        {
+          inputs: inputsCell,
+          parents: processCell.entityId,
+          ...(resolvedOutputSpot
+            ? {
+              outputSpot: {
+                space: resolvedOutputSpot.space,
+                id: resolvedOutputSpot.id,
+                path: [...resolvedOutputSpot.path],
+              },
+            }
+            : {}),
+        },
         processCell,
         this.runtime,
       );
@@ -3729,13 +3820,51 @@ export class Runner {
       const resultScope = patternDefaultScope(patternImpl) ??
         module.defaultScope;
       const targetSpace = module.targetSpace ?? resultCell.space;
+      // CT-1623: identify the result cell by the (fully resolved) output spot
+      // reserved for this node — a stable, position-derived, program-independent
+      // identity — rather than hashing the pattern object (which drags in the
+      // session-varying `program` and forces `materializeRuntimeProgram`). We
+      // still mint a NEW cell and point the binding at it (`sendToBindings`
+      // below); we only borrow the resolved output link's coordinates as the
+      // cause. A pattern node always writes through a write redirect, so the
+      // absence of one is a bug (the legacy non-redirect variants are removed).
+      //
+      // Bind the output bindings first (as `instantiateRawNode` does), so the
+      // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
+      // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
+      // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
+      // the base result cell and collide on one shared child cell.
+      // `bindPatterns: false` — output bindings never carry sub-patterns to
+      // instantiate, so skip that work; we only need the pseudo-cell aliases
+      // resolved to their concrete links.
+      const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
+        this.runtime.cfc,
+        outputBindings,
+        argumentCellLink,
+        internalCellLink,
+        resultCellLink,
+        { bindPatterns: false },
+      );
+      const outputRedirect = firstResolvedOutputRedirect(
+        this.runtime,
+        tx,
+        mappedOutputBindings,
+        resultCell,
+      );
+      if (!outputRedirect) {
+        throw new Error(
+          "instantiatePatternNode: result cell requires a write-redirect " +
+            "output binding to anchor a reload-stable identity",
+        );
+      }
       const baseResultCell = this.runtime.getCell(
         targetSpace,
         {
-          pattern: module.implementation,
-          parent: resultCell.entityId,
-          inputBindings,
-          outputBindings,
+          resultFor: {
+            space: outputRedirect.space,
+            id: outputRedirect.id,
+            path: [...outputRedirect.path],
+          },
         },
         patternImpl.resultSchema,
         tx,
@@ -3804,4 +3933,25 @@ function getTxDebugActionId(
  */
 function getPatternId(resultCell: Cell<unknown>): URI | undefined {
   return getMetaLink(resultCell, "pattern")?.id;
+}
+
+/**
+ * Read the content-addressed {identity, symbol} pattern reference from a result
+ * cell, if one was recorded at setup (ESM cache path). Lets the reload path
+ * load the pattern straight from the compiled cache by identity. Returns
+ * undefined for legacy result cells that only carry the patternId link.
+ */
+function getPatternIdentityRef(
+  resultCell: Cell<unknown>,
+): { identity: string; symbol: string } | undefined {
+  const raw = resultCell.getMetaRaw("patternIdentity", {
+    meta: ignoreReadForScheduling,
+  });
+  if (
+    isRecord(raw) && typeof raw.identity === "string" &&
+    typeof raw.symbol === "string"
+  ) {
+    return { identity: raw.identity, symbol: raw.symbol };
+  }
+  return undefined;
 }

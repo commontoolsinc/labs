@@ -11,9 +11,58 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    list: __cfHelpers.Cell<string[]>;
+}, boolean>({
+    type: "object",
+    properties: {
+        list: {
+            type: "array",
+            items: {
+                type: "unknown"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["list"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ list }) => list.get().length > 0);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const name = __cf_pattern_input.key("element");
+    return (<span>{name}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-array-length-conditional
 // Verifies: length-guard && map pattern is transformed to when() wrapping mapWithPattern()
-//   list.get().length > 0 && (<div>{list.map(...)}</div>) → when(derive(...length), <div>{list.mapWithPattern(...)}</div>)
+//   list.get().length > 0 && (<div>{list.map(...)}</div>) → when(lift(...)(...length), <div>{list.mapWithPattern(...)}</div>)
 export default pattern((_state) => {
     const list = cell(["apple", "banana", "cherry"], {
         type: "array",
@@ -37,55 +86,8 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            list: __cfHelpers.Cell<string[]>;
-        }, boolean>({
-            type: "object",
-            properties: {
-                list: {
-                    type: "array",
-                    items: {
-                        type: "unknown"
-                    },
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["list"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ list }) => list.get().length > 0)({ list: list }), <div>
-            {list.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const name = __cf_pattern_input.key("element");
-                return (<span>{name}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ list: list }), <div>
+            {list.mapWithPattern(__cfPattern_1, {})}
           </div>)}
       </div>),
     };

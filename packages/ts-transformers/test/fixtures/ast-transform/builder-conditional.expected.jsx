@@ -15,9 +15,30 @@ interface PatternState {
     count: Default<number, 0>;
     label: Default<string, "">;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0);
 // FIXTURE: builder-conditional
-// Verifies: ternary in JSX is transformed to ifElse() with derive() for the condition
-//   state.count > 0 ? <p>A</p> : <p>B</p> → __cfHelpers.ifElse(...schemas, derive(..., state.count > 0), <p>A</p>, <p>B</p>)
+// Verifies: ternary in JSX is transformed to ifElse() with a lift-applied condition
+//   state.count > 0 ? <p>A</p> : <p>B</p> → __cfHelpers.ifElse(...schemas, lift(...)({...}), <p>A</p>, <p>B</p>)
 //   pattern<PatternState>                  → pattern(..., inputSchema, outputSchema)
 //   state.label                            → state.key("label")
 export default pattern((state) => {
@@ -41,27 +62,7 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            state: {
-                count: number;
-            };
-        }, boolean>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        count: {
-                            type: "number"
-                        }
-                    },
-                    required: ["count"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ state: {
                 count: state.key("count")
             } }), <p>Positive</p>, <p>Non-positive</p>)}
       </section>),

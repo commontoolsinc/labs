@@ -723,6 +723,23 @@ function isStreamCellType(
   return !!type && getCellKind(type, checker) === "stream";
 }
 
+export function isSqliteTypeNode(node: ts.TypeNode): boolean {
+  return ts.isTypeReferenceNode(node) &&
+    getTypeReferenceNodeName(node) === "SqliteDb";
+}
+
+/** A `SqliteDb` handle carries an explicit "sqlite" cell brand. Like `Stream`,
+ *  that brand is authoritative and must survive capability shrinking — the
+ *  reactive read/write inference would otherwise collapse its read-only method
+ *  surface to an `asCell: ["readonly"]` wrapper, disagreeing with the schema
+ *  generator's object-formatter path (which stamps `["sqlite"]`). */
+function isSqliteCellType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  return !!type && getCellKind(type, checker) === "sqlite";
+}
+
 export function printTypeNode(
   node: ts.TypeNode,
   sourceFile: ts.SourceFile,
@@ -1929,14 +1946,36 @@ export function wrapTypeNodeWithCapability(
   return createHelperWrapperTypeNode(node, wrapperName, factory);
 }
 
+/** Cell wrappers whose explicit brand is authoritative and must survive
+ *  capability shrinking instead of being replaced by an inferred read/write
+ *  capability wrapper. `Stream` (a callable interface) and `SqliteDb` (a handle
+ *  with a read-only method surface that would otherwise collapse to `readonly`)
+ *  both fall here; the emitted `__cfHelpers.<name>` node is recognized by the
+ *  schema generator and lowered to the matching `asCell` brand. */
+export type PreservedWrapper = "Stream" | "SqliteDb";
+
+export function preservedWrapperFor(
+  node: ts.TypeNode,
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): PreservedWrapper | undefined {
+  if (isStreamTypeNode(node) || isStreamCellType(type, checker)) {
+    return "Stream";
+  }
+  if (isSqliteTypeNode(node) || isSqliteCellType(type, checker)) {
+    return "SqliteDb";
+  }
+  return undefined;
+}
+
 function wrapTypeNodeWithCapabilityOrStream(
   node: ts.TypeNode,
   capability: ReactiveCapability,
   factory: ts.NodeFactory,
-  preserveStream: boolean,
+  preservedWrapper: PreservedWrapper | undefined,
 ): ts.TypeNode {
-  return preserveStream
-    ? createHelperWrapperTypeNode(node, "Stream", factory)
+  return preservedWrapper
+    ? createHelperWrapperTypeNode(node, preservedWrapper, factory)
     : wrapTypeNodeWithCapability(node, capability, factory);
 }
 
@@ -2161,8 +2200,7 @@ function applyCellCapabilityPathsToTypeNode(
           inner,
           capability,
           factory,
-          isStreamTypeNode(updated) ||
-            isStreamCellType(memberSemanticType, checker),
+          preservedWrapperFor(updated, memberSemanticType, checker),
         );
         if (typeRegistry && isCellLikeType(memberSemanticType, checker)) {
           typeRegistry.set(updated, memberSemanticType);
@@ -2225,7 +2263,7 @@ function createIdentityOnlyReplacementTypeNode(
       unknownNode,
       forceComparable ? "comparable" : "opaque",
       factory,
-      isStreamTypeNode(node) || isStreamCellType(resolvedType, checker),
+      preservedWrapperFor(node, resolvedType, checker),
     );
     const wrappedType = resolveIdentitySemanticType(
       wrappedNode,
@@ -2980,7 +3018,7 @@ export function applyShrinkAndWrap(
   wrapCapability: ReactiveCapability = paramSummary.capability,
   context?: TransformationContext,
   fnNode?: ts.Node,
-  preserveStreamWrapper = false,
+  preservedWrapper: PreservedWrapper | undefined = undefined,
 ): ts.TypeNode {
   const shrinkPlan = deriveCapabilityShrinkPlan(paramSummary);
   const {
@@ -3048,7 +3086,7 @@ export function applyShrinkAndWrap(
       next,
       wrapCapability,
       factory,
-      preserveStreamWrapper,
+      preservedWrapper,
     );
   }
 
@@ -3211,7 +3249,7 @@ export function applyShrinkAndWrap(
     next,
     wrapCapability,
     factory,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
   return wrapped;
 }

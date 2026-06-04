@@ -13,6 +13,19 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // Simulates `any` leaking through a generic function (like generateObject)
 declare function fetchAny(): any;
+const __cfLift_1 = __cfHelpers.lift<{
+    result: any;
+    prompt: string;
+}, any>({
+    type: "object",
+    properties: {
+        result: true,
+        prompt: {
+            type: "string"
+        }
+    },
+    required: ["result", "prompt"]
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ result, prompt }) => result?.title || prompt || "Untitled");
 // FIXTURE: pattern-any-result-override
 // Verifies: explicit Output type parameter overrides inferred `any` return type for schema generation
 //   pattern<Input, string>() → output schema { type: "string" } instead of inferred any
@@ -22,19 +35,7 @@ declare function fetchAny(): any;
 export const TypedFromAny = pattern((__cf_pattern_input) => {
     const prompt = __cf_pattern_input.key("prompt");
     const result = fetchAny();
-    return __cfHelpers.lift<{
-        result: any;
-        prompt: string;
-    }, any>({
-        type: "object",
-        properties: {
-            result: true,
-            prompt: {
-                type: "string"
-            }
-        },
-        required: ["result", "prompt"]
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ result, prompt }) => result?.title || prompt || "Untitled")({
+    return __cfLift_1({
         result: result,
         prompt: prompt
     });

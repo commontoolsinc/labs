@@ -8,7 +8,7 @@ interface Item {
 // FIXTURE: filter-flatmap-fallback-chain
 // Verifies: fallback receiver chains keep structural array-method lowering
 //   (items ?? []).filter(fn).flatMap(fn).map(fn)
-//     → derive(...).filterWithPattern(...).flatMapWithPattern(...).mapWithPattern(...)
+//     → lift(...)(...).filterWithPattern(...).flatMapWithPattern(...).mapWithPattern(...)
 // Context: Top-level JSX fallback receiver with chained collection methods and a nested callback fallback
 export default pattern<{ items?: Item[] }>(({ items }) => {
   return {

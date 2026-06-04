@@ -14,7 +14,7 @@ The stages relevant to array-method callbacks are:
 3.  OpaqueGetValidationTransformer
 4.  PatternContextValidationTransformer
 5.  JsxExpressionSiteRouterTransformer
-6.  ComputedTransformer
+6.  LiftLoweringTransformer
 7.  ClosureTransformer                       ← lowers .map() to .mapWithPattern()
                                                 + immediately runs the per-callback
                                                 expression-site lowering
@@ -24,12 +24,18 @@ The stages relevant to array-method callbacks are:
 11. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
                                                 destructuring (ONLY for destructured
                                                 first params)
-12. SchemaInjectionTransformer
-13. SchemaGeneratorTransformer
-14. ReactiveVariableForTransformer
-15. ModuleScopeShadowingTransformer
-16. ModuleScopeCfDataTransformer
-17. ModuleScopeFunctionHardeningTransformer
+12. BuilderCallbackHoistingTransformer       ← hoists handler/pattern/patternTool
+                                                callbacks closing only over module
+                                                scope (NOT lift — see stage 14)
+13. SchemaInjectionTransformer
+14. LiftHoistingTransformer                  ← hoists each whole lift(...) call to
+                                                a module-scope const __cfLift_N
+                                                (after schema injection; CT-1644)
+15. SchemaGeneratorTransformer
+16. ReactiveVariableForTransformer
+17. ModuleScopeShadowingTransformer
+18. ModuleScopeCfDataTransformer
+19. ModuleScopeFunctionHardeningTransformer
 ```
 
 A common misconception worth flagging up front: stage 11

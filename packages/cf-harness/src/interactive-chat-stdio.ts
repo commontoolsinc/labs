@@ -9,7 +9,11 @@ import {
   type HarnessChatRequestMethod,
   type HarnessChatResponse,
 } from "./contracts/interactive-chat.ts";
-import { HARNESS_BROWSER_ACCESS_LEASE_TYPE } from "./contracts/browser-access.ts";
+import {
+  HARNESS_BROWSER_ACCESS_ACCOUNT_ACCESS,
+  HARNESS_BROWSER_ACCESS_LEASE_TYPE,
+  HARNESS_BROWSER_ACCESS_PROFILE_MODES,
+} from "./contracts/browser-access.ts";
 import { normalizePromptSlotBinding } from "./contracts/prompt-slot.ts";
 import {
   HARNESS_SUBAGENT_PROFILES,
@@ -175,6 +179,14 @@ const hasOptionalString = (
   key: string,
 ): boolean => value[key] === undefined || typeof value[key] === "string";
 
+const hasOptionalStringIn = (
+  value: Record<string, unknown>,
+  key: string,
+  allowedValues: readonly string[],
+): boolean =>
+  value[key] === undefined ||
+  (typeof value[key] === "string" && allowedValues.includes(value[key]));
+
 const hasOptionalNonNegativeInteger = (
   value: Record<string, unknown>,
   key: string,
@@ -226,7 +238,17 @@ const isValidBrowserAccessParam = (value: unknown): boolean =>
   isNonEmptyString(value.leaseId) &&
   isNonEmptyString(value.cdpUrl) &&
   hasOptionalString(value, "owner") &&
-  hasOptionalString(value, "expiresAt");
+  hasOptionalString(value, "expiresAt") &&
+  hasOptionalStringIn(
+    value,
+    "profileMode",
+    HARNESS_BROWSER_ACCESS_PROFILE_MODES,
+  ) &&
+  hasOptionalStringIn(
+    value,
+    "accountAccess",
+    HARNESS_BROWSER_ACCESS_ACCOUNT_ACCESS,
+  );
 
 const isValidChatPolicyParam = (value: unknown): boolean =>
   isRecord(value) &&

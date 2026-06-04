@@ -139,6 +139,7 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
             delegatedToCfc: false,
           },
         },
+        hostBinds: [],
       },
       protectedXattrs: {
         expectedSandboxVisible: false,
@@ -202,7 +203,75 @@ Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", a
         delegatedToCfc: false,
       },
     },
+    hostBinds: [],
   });
+});
+
+class FakeHostBindSandboxRuntime extends FakeSandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+      cfc: {
+        runtimeRequested: true,
+        runtimeName: "runsc-cfc",
+        workspaceMountPath: "/workspace",
+        mounts: [
+          {
+            kind: "workspace",
+            hostPath: "/host/workspace",
+            sandboxPath: "/workspace",
+            readOnly: false,
+          },
+          {
+            kind: "host-bind",
+            name: "file-cabinet",
+            hostPath: "/host/File Cabinet",
+            sandboxPath: "/file-cabinet",
+            readOnly: false,
+            mode: "writable",
+          },
+          {
+            kind: "host-bind",
+            name: "loom-ops",
+            hostPath: "/host/loom/.ops",
+            sandboxPath: "/loom/ops",
+            readOnly: true,
+            mode: "readonly",
+          },
+        ],
+      },
+    };
+  }
+}
+
+Deno.test("collectHarnessCapabilitySnapshot reports configured host bind mounts", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeHostBindSandboxRuntime(),
+    "/workspace",
+    "2026-06-02T23:00:00.000Z",
+  );
+
+  assertEquals(snapshot.cfc.mounts.hostBinds, [
+    {
+      kind: "host-bind",
+      status: "configured",
+      name: "file-cabinet",
+      hostPath: "/host/File Cabinet",
+      sandboxPath: "/file-cabinet",
+      readOnly: false,
+      mode: "writable",
+    },
+    {
+      kind: "host-bind",
+      status: "configured",
+      name: "loom-ops",
+      hostPath: "/host/loom/.ops",
+      sandboxPath: "/loom/ops",
+      readOnly: true,
+      mode: "readonly",
+    },
+  ]);
 });
 
 Deno.test("collectHarnessCapabilitySnapshot records strict CFC attestation for writable Fabric mounts", async () => {

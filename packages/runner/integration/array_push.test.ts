@@ -66,7 +66,7 @@ function createRuntime(identity: Identity, base: URL): Runtime {
       address: new URL("/api/storage/memory", base),
     }),
     experimental: {
-      modernDataModel: readExperimentalFlag("EXPERIMENTAL_MODERN_DATA_MODEL"),
+      modernCellRep: readExperimentalFlag("EXPERIMENTAL_MODERN_CELL_REP"),
       persistentSchedulerState: readExperimentalFlag(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),

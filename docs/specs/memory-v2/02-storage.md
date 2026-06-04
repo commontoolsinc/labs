@@ -82,7 +82,7 @@ Notes:
   them through `["value", ...path]`.
 - `data`, `original`, `resolution`, `invocation`, `authorization`, and
   `snapshot.value` are serialized at the persistence boundary with the shared
-  rich-value JSON codec, not with ad hoc `JSON.stringify` calls in the middle of
+  FabricValue JSON codec, not with ad hoc `JSON.stringify` calls in the middle of
   replica/transaction logic.
 
 ### 3.2 `head` — Current State Pointer

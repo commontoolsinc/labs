@@ -73,18 +73,25 @@ interface ModuleNode {
   externalDeps: string[];
 }
 
-/**
- * Compute a stable content hash for every module in `program`.
- * Returns a map from each file's path to its hash.
- */
-export function computeModuleHashes(
-  program: Program,
-  options: ModuleIdentityOptions = {},
-): Map<string, string> {
-  const runtimeFingerprint = options.runtimeFingerprint ?? "";
-  const fileNames = new Set(program.files.map((f) => f.name));
-  const nodes = new Map<string, ModuleNode>();
+/** Resolved import edges of a single module. */
+export interface ModuleImportEdges {
+  /** Imports resolving to another file in the program (specifier → target path). */
+  internalDeps: { specifier: string; target: string }[];
+  /** Imports that do not resolve to a program file (bare/runtime specifiers). */
+  externalDeps: string[];
+}
 
+/**
+ * Resolve every module's import edges against the program's file set, split into
+ * internal (program-file) and external (bare/runtime) deps. Shared by the
+ * identity hash and the content-addressed cache's import links so they agree on
+ * what counts as an internal edge. Self-imports are dropped.
+ */
+export function resolveModuleImports(
+  program: Program,
+): Map<string, ModuleImportEdges> {
+  const fileNames = new Set(program.files.map((f) => f.name));
+  const edges = new Map<string, ModuleImportEdges>();
   for (const file of program.files) {
     const internalDeps: { specifier: string; target: string }[] = [];
     const externalDeps: string[] = [];
@@ -98,6 +105,25 @@ export function computeModuleHashes(
       }
       // A self-import contributes nothing.
     }
+    edges.set(file.name, { internalDeps, externalDeps });
+  }
+  return edges;
+}
+
+/**
+ * Compute a stable content hash for every module in `program`.
+ * Returns a map from each file's path to its hash.
+ */
+export function computeModuleHashes(
+  program: Program,
+  options: ModuleIdentityOptions = {},
+): Map<string, string> {
+  const runtimeFingerprint = options.runtimeFingerprint ?? "";
+  const edges = resolveModuleImports(program);
+  const nodes = new Map<string, ModuleNode>();
+
+  for (const file of program.files) {
+    const { internalDeps, externalDeps } = edges.get(file.name)!;
     nodes.set(file.name, {
       path: file.name,
       src: normalizeSource(file.contents),

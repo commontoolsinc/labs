@@ -8,7 +8,7 @@ function __cfHardenFn(fn: Function) {
 }
 import { __cfHelpers } from "commonfabric";
 /**
- * computed() result property access in derive captures should use
+ * computed() result property access in lift-applied captures should use
  * .key("length"). The computed() return is an OpaqueRef, so
  * rewritePatternBody correctly rewrites summary.length to
  * summary.key("length").
@@ -20,62 +20,64 @@ const __cfAmdHooks = undefined;
 interface State {
     items: string[];
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        items: string[];
+    };
+}, string>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.join(", "));
+const __cfLift_2 = __cfHelpers.lift<{
+    summary: {
+        length: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        summary: {
+            type: "object",
+            properties: {
+                length: {
+                    type: "number"
+                }
+            },
+            required: ["length"]
+        }
+    },
+    required: ["summary"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length);
 // FIXTURE: computed-result-property-in-return
-// Verifies: .length on a computed() string result is captured via .key("length") in a subsequent derive
-//   computed(() => summary.length) → derive(..., { summary: { length: summary.key("length") } }, ({ summary }) => summary.length)
+// Verifies: .length on a computed() string result is captured via .key("length") in a subsequent lift-applied computation
+//   computed(() => summary.length) → lift(({ summary }) => summary.length)({ summary: { length: summary.key("length") } })
 // Context: The first computed() returns a string OpaqueRef (from .join()).
 //   When the second computed() accesses summary.length, the capture is rewritten
 //   to summary.key("length") because summary is an OpaqueRef, not a plain value.
 export default pattern((state) => {
-    const summary = __cfHelpers.lift<{
-        state: {
-            items: string[];
-        };
-    }, string>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    items: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    }
-                },
-                required: ["items"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.join(", "))({ state: {
+    const summary = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("summary", true);
     return {
         summary,
-        charCount: __cfHelpers.lift<{
-            summary: {
-                length: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                summary: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
-                }
-            },
-            required: ["summary"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ summary }) => summary.length)({ summary: {
+        charCount: __cfLift_2({ summary: {
                 length: summary.key("length")
             } }).for(["__patternResult", "charCount"], true)
     };

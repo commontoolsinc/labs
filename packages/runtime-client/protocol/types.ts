@@ -131,7 +131,7 @@ export interface InitializationData {
   timeoutMs?: number;
   // Experimental space-model feature flags.
   experimental?: {
-    modernDataModel?: boolean;
+    modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
     esmModuleLoader?: boolean;
   };

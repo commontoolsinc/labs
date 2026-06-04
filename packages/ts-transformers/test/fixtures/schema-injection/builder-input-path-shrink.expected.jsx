@@ -32,7 +32,8 @@ const deriveInput = __cfHelpers.__cf_data({} as Writable<{
     foo: string;
     bar: string;
 }>);
-const computedObserved = __cfHelpers.__cf_data(__cfHelpers.lift(false, () => deriveInput.key("foo").get())().for("computedObserved", true));
+const __cfLift_1 = __cfHelpers.lift(false, () => deriveInput.key("foo").get());
+const computedObserved = __cfHelpers.__cf_data(__cfLift_1().for("computedObserved", true));
 const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -126,26 +127,27 @@ const liftExplicit = lift({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, (input) => input.key("foo").get());
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        input: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                }
+            },
+            required: ["foo"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["input"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get());
 const actionPattern = pattern((input: Writable<{
     foo: string;
     bar: string;
 }>) => {
-    const a = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            input: {
-                type: "object",
-                properties: {
-                    foo: {
-                        type: "string"
-                    }
-                },
-                required: ["foo"],
-                asCell: ["readonly"]
-            }
-        },
-        required: ["input"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get())({
+    const a = __cfHandler_1({
         input: input
     }).for({ stream: "a" }, true);
     return a;

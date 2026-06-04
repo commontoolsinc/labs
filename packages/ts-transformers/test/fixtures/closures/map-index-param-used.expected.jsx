@@ -19,104 +19,106 @@ interface State {
     items: Item[];
     offset: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    index: number;
+    state: {
+        offset: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        index: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                offset: {
+                    type: "number"
+                }
+            },
+            required: ["offset"]
+        }
+    },
+    required: ["index", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ index, state }) => index + state.offset);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>
+            Item #{__cfLift_1({
+        index: index,
+        state: {
+            offset: state.key("offset")
+        }
+    })}: {item.key("name")}
+          </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        offset: {
+                            type: "number"
+                        }
+                    },
+                    required: ["offset"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-index-param-used
 // Verifies: .map() on reactive array is transformed when index param is used with a capture
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {offset: ...}})
-//   index + state.offset → derive() combining index and captured state
+//   index + state.offset → lift(...)(...) combining index and captured state
 // Context: Both index parameter and state.offset are used in an expression
 export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<div>
-            Item #{__cfHelpers.lift<{
-                    index: number;
-                    state: {
-                        offset: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        index: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                offset: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["offset"]
-                        }
-                    },
-                    required: ["index", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ index, state }) => index + state.offset)({
-                    index: index,
-                    state: {
-                        offset: state.key("offset")
-                    }
-                })}: {item.key("name")}
-          </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    offset: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["offset"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     offset: state.key("offset")
                 }

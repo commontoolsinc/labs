@@ -41,8 +41,8 @@ const config: Config = {
       "$ENVIRONMENT": ENVIRONMENT,
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
-      "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
-        "EXPERIMENTAL_MODERN_DATA_MODEL",
+      "$EXPERIMENTAL_MODERN_CELL_REP": Deno.env.get(
+        "EXPERIMENTAL_MODERN_CELL_REP",
       ),
       "$EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE": Deno.env.get(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",

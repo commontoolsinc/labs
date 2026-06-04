@@ -1,10 +1,7 @@
-import {
-  cloneIfNecessary,
-  getDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { unclaimed } from "@commonfabric/memory/fact";
-import type { PatchOp } from "@commonfabric/memory/v2";
+import type { PatchOp, SqliteOperation } from "@commonfabric/memory/v2";
 import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/memory/interface";
@@ -49,9 +46,7 @@ import { createReadOnlyTransactionError } from "./interface.ts";
 import {
   claim,
   load as loadInline,
-  NotFound,
   read as readAttestation,
-  TypeMismatchError,
 } from "./transaction/attestation.ts";
 import {
   applyMutablePathWrite,
@@ -745,6 +740,8 @@ export class V2StorageTransaction implements IStorageTransaction {
   #readActivities: IReadActivity[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
   #schedulerObservation?: unknown;
+  // Folded SQLite write ops per space, applied in the same commit as cell ops.
+  #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
   #writeSpace?: MemorySpace;
   // Multi-space write opt-in (see enableMultiSpaceWrites). When disabled the
   // transaction rejects writes to a second space; when enabled commit() splits
@@ -827,12 +824,33 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#schedulerObservation;
   }
 
+  recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    this.assertWritable("recordSqliteWrite()");
+    const ready = this.editable();
+    if (ready.error) {
+      throw ready.error;
+    }
+    // Claim `space` as a write target (sets #writeSpace, enforces single-space
+    // write isolation) so a sqlite-only commit still resolves a write space.
+    const claimed = this.claimWriteSpace(space);
+    if (claimed.error) {
+      throw claimed.error;
+    }
+    const existing = this.#sqliteOps.get(space);
+    if (existing) {
+      existing.push(op);
+    } else {
+      this.#sqliteOps.set(space, [op]);
+    }
+  }
+
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
     const schedulerObservation = this.schedulerObservationForNativeCommit(
       space,
     );
-    if (!branch && schedulerObservation === undefined) {
+    const sqliteOps = this.#sqliteOps.get(space);
+    if (!branch && schedulerObservation === undefined && !sqliteOps?.length) {
       return undefined;
     }
 
@@ -865,6 +883,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return {
       operations,
       ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+      ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
     };
   }
 
@@ -966,37 +985,6 @@ export class V2StorageTransaction implements IStorageTransaction {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
-    }
-    if (!getDataModelConfig()) {
-      const inspected = inspectPath(current.value, memoryAddress.path);
-      if (
-        !address.id.startsWith("data:") &&
-        !doc.validated
-      ) {
-        doc.validated = true;
-      }
-      if (inspected.kind === "notFound") {
-        return {
-          error: NotFound(current, memoryAddress, inspected.path).from(
-            address.space,
-          ),
-        };
-      }
-      if (inspected.kind === "typeMismatch") {
-        return {
-          error: TypeMismatchError(
-            { ...memoryAddress, path: inspected.path },
-            inspected.actualType,
-            "read",
-          ).from(address.space),
-        };
-      }
-      return {
-        ok: {
-          address: memoryAddress,
-          value: inspected.value,
-        },
-      };
     }
 
     if (isMutableTransactionReadAllowed(readMeta)) {
@@ -1456,7 +1444,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
     const operations = native?.operations ?? [];
     const hasSchedulerObservation = native?.schedulerObservation !== undefined;
-    if (operations.length === 0 && !hasSchedulerObservation) {
+    const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
+    if (operations.length === 0 && !hasSchedulerObservation && !hasSqliteOps) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
       return result;
@@ -1510,7 +1499,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       const operations = native?.operations ?? [];
       const hasSchedulerObservation =
         native?.schedulerObservation !== undefined;
-      if (!native || (operations.length === 0 && !hasSchedulerObservation)) {
+      const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
+      if (
+        !native ||
+        (operations.length === 0 && !hasSchedulerObservation && !hasSqliteOps)
+      ) {
         continue;
       }
       commits.push({ space, native });

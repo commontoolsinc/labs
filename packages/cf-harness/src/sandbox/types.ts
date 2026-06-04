@@ -5,27 +5,59 @@ export type HarnessSandboxKind = "docker-runsc-cfc";
 
 export type DockerNetworkMode = "none" | "bridge" | "host";
 
-export type SandboxRuntimeMountKind = "workspace" | "fabric-fuse";
+export type SandboxRuntimeMountKind =
+  | "workspace"
+  | "fabric-fuse"
+  | "host-bind";
+
+export type SandboxHostMountMode = "readonly" | "writable";
 
 export interface SandboxRuntimeMountDescription {
   kind: SandboxRuntimeMountKind;
+  name?: string;
+  hostPath?: string;
   sandboxPath: string;
   readOnly: boolean;
+  mode?: SandboxHostMountMode;
 }
 
-export interface DockerRunscAdditionalMountConfig {
+export interface DockerRunscFabricAdditionalMountConfig {
   kind: "fabric-fuse";
   hostPath: string;
   sandboxPath?: string;
   readOnly?: boolean;
 }
 
-export interface DockerRunscAdditionalMount {
+export interface DockerRunscHostBindAdditionalMountConfig {
+  kind: "host-bind";
+  name: string;
+  hostPath: string;
+  sandboxPath: string;
+  readOnly?: boolean;
+}
+
+export type DockerRunscAdditionalMountConfig =
+  | DockerRunscFabricAdditionalMountConfig
+  | DockerRunscHostBindAdditionalMountConfig;
+
+export interface DockerRunscFabricAdditionalMount {
   kind: "fabric-fuse";
   hostPath: string;
   sandboxPath: string;
   readOnly: boolean;
 }
+
+export interface DockerRunscHostBindAdditionalMount {
+  kind: "host-bind";
+  name: string;
+  hostPath: string;
+  sandboxPath: string;
+  readOnly: boolean;
+}
+
+export type DockerRunscAdditionalMount =
+  | DockerRunscFabricAdditionalMount
+  | DockerRunscHostBindAdditionalMount;
 
 export interface DockerRunscCfcInvocationContextSidecarTransport {
   kind: "sidecar";

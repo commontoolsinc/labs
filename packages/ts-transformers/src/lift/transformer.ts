@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { detectCallKind, getLiftAppliedInnerCall } from "../ast/call-kind.ts";
+import { detectCallKind } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
 import { registerLiftAppliedCallType } from "../ast/type-inference.ts";
 import { HelpersOnlyTransformer } from "../core/transformers.ts";
@@ -13,18 +13,10 @@ import type { TransformationContext } from "../core/mod.ts";
  * Handles:
  *   computed(() => expr)
  *     → __cfHelpers.lift(() => expr)({})
- *   derive(input, cb)
- *     → __cfHelpers.lift(cb)(input)
- *   derive(argSchema, resultSchema, input, cb)
- *     → __cfHelpers.lift(argSchema, resultSchema, cb)(input)
  *
- * Type arguments from the source call (e.g. derive<In, Out>(...)) carry to
- * the inner lift call where they belong (lift<In, Out>(...)).
- *
- * The empty-object input for computed mirrors the runtime semantics of
- * today's computed(fn) — verified that argumentSchema:false's only
- * observable effect (isValidArgument === true) is also satisfied when the
- * argument is a non-undefined object.
+ * Schema injection later rewrites no-input computed-origin calls to
+ * `__cfHelpers.lift(false, fn)()`, which avoids the older empty-object
+ * stopgap while preserving computed(fn)'s no-input runtime semantics.
  *
  * The lift-applied shape is recognized by detectCallKind as
  * { kind: "lift-applied" } so downstream dispatchers operate on the
@@ -168,13 +160,6 @@ function sourceContainsLowerableCall(
       if (
         callKind?.kind === "builder" &&
         callKind.builderName === "computed"
-      ) {
-        found = true;
-        return;
-      }
-      if (
-        callKind?.kind === "lift-applied" &&
-        !getLiftAppliedInnerCall(node)
       ) {
         found = true;
         return;

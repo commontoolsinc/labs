@@ -43,11 +43,10 @@ import {
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
-  isStreamTypeNode,
+  preservedWrapperFor,
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -89,7 +88,6 @@ const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
  * ## Pattern-Specific Behavior
  *
  * - **Handler**: Checks TypeRegistry for type arguments, uses `unknown` fallback
- * - **Derive**: Checks TypeRegistry for type arguments, preserves shorthand property types
  * - **Pattern**: Checks TypeRegistry before inferring, registers inferred types
  * - **Pattern**: Checks TypeRegistry for type arguments
  * - **Lift**: Checks TypeRegistry for type arguments and inferred types
@@ -139,13 +137,6 @@ function extractCellLikeInnerTypeNode(
   if (!ts.isTypeReferenceNode(node)) return undefined;
   if (!node.typeArguments || node.typeArguments.length === 0) return undefined;
   return node.typeArguments[0];
-}
-
-function isStreamCellType(
-  type: ts.Type | undefined,
-  checker: ts.TypeChecker,
-): boolean {
-  return !!type && getCellKind(type, checker) === "stream";
 }
 
 function parameterUsesCellLikeMethods(
@@ -267,8 +258,9 @@ function applyCapabilitySummaryToArgument(
       sourceFile,
     );
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(argumentNode) || isStreamCellType(argumentType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(argumentNode, argumentType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? argumentNode;
   let baseType = shouldWrap && argumentType
     ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
@@ -294,7 +286,7 @@ function applyCapabilitySummaryToArgument(
     mode === "defaults_only" ? "opaque" : paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
@@ -326,9 +318,9 @@ function applyCapabilitySummaryToParameter(
 
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(parameterNode) ||
-      isStreamCellType(parameterType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(parameterNode, parameterType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? parameterNode;
   let baseType = shouldWrap && parameterType
     ? (unwrapCellLikeType(parameterType, checker) ?? parameterType)
@@ -354,7 +346,7 @@ function applyCapabilitySummaryToParameter(
     paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
@@ -2299,42 +2291,27 @@ function resolveLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // See getLiftAppliedInputAndCallback in src/ast/call-kind.ts for the
-  // two recognized shapes (legacy derive vs lift-applied).
+  // Lift-applied `lift(...)(input)`: callback is the last arg of the inner lift
+  // call; input is the first arg of the outer applied call. The outer call's
+  // callee is always the inner CallExpression — that is the only shape
+  // detectCallKind classifies as lift-applied (see getLiftAppliedInputAndCallback
+  // in src/ast/call-kind.ts).
   const innerCall = getLiftAppliedInnerCall(call);
-  if (innerCall) {
-    // Lift-applied: callback is the last arg of the inner lift call; input
-    // is the first arg of the outer applied call.
-    const callbackIndex = innerCall.arguments.length - 1;
-    const callbackExpression = innerCall.arguments[callbackIndex];
-    const callback = callbackExpression
-      ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
-      : undefined;
-    if (!callback) {
-      return undefined;
-    }
-    const input = call.arguments[0];
-    if (!input) {
-      return undefined;
-    }
-    return { input, callback };
+  if (!innerCall) {
+    return undefined;
   }
-
-  const callbackIndex = call.arguments.length - 1;
-  const callbackExpression = call.arguments[callbackIndex];
+  const callbackIndex = innerCall.arguments.length - 1;
+  const callbackExpression = innerCall.arguments[callbackIndex];
   const callback = callbackExpression
     ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
     : undefined;
   if (!callback) {
     return undefined;
   }
-
-  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
-  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  const input = call.arguments[0];
   if (!input) {
     return undefined;
   }
-
   return { input, callback };
 }
 
@@ -3164,10 +3141,19 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           sourceFile,
         );
 
-        // For lift-applied shape (callee is itself a call), the generic
+        // For the lift-applied shape (callee is itself a call), the generic
         // type arguments live on the *inner* lift call, not on the outer
-        // applied call. The legacy derive shape kept them on the call
-        // itself. Read from whichever holds them.
+        // applied call — the lowering builds the outer call with `undefined`
+        // type args (see lift/transformer.ts). The `?? node.typeArguments`
+        // fallback reads them off the outer call defensively.
+        //
+        // UNCERTAIN whether the fallback is still reachable: dropping it kept
+        // the full fixture suite green (CT-1643), and the main lowering path
+        // never puts type args on the outer call. But this wasn't proven dead
+        // across all three lift-applied construction sites + schema-injection
+        // re-entry, so it's kept as a cheap robustness guard rather than
+        // removed. (It is NOT derive-specific; the prior comment misattributed
+        // it to the removed "legacy derive shape.")
         const innerLiftCall = getLiftAppliedInnerCall(node);
         const sourceTypeArguments = innerLiftCall?.typeArguments ??
           node.typeArguments;
@@ -3745,6 +3731,100 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.expression,
             node.typeArguments,
             [newOptions, ...args.slice(1)],
+          );
+          context.markSchemaInjected(updated);
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
+      // sqliteQuery<Row>({ db, sql, ... }) - lowers the Row type argument to an
+      // injected `rowSchema` property (mirrors generate-object's `schema`). The
+      // runtime builtin composes `result.items = rowSchema`, so a consumer's
+      // schema carries `asCell` for Cell<> Row fields and `*_cf_link` result
+      // columns rehydrate to live Cells (see
+      // docs/specs/sqlite-builtin/plans/sqlite-query-row-lowering.md).
+      if (
+        callKind?.kind === "runtime-call" &&
+        callKind.exportName === "sqliteQuery"
+      ) {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        // Only the typed form is injectable. Untyped sqliteQuery(...) /
+        // db.query(...) must compile and lower to NO schema (runtime falls back
+        // to suffix/table detection).
+        if (!typeArgs || typeArgs.length !== 1) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        // Two call shapes inject `rowSchema` into the OPTIONS object:
+        //  - free function `sqliteQuery<Row>({ db, sql, ... })` → options is arg 0
+        //  - method `db.query<Row>(sql, { ... })`              → options is arg 1
+        const isMethod = ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === "query";
+        const optIdx = isMethod ? 1 : 0;
+        const optArg = args[optIdx];
+
+        // Idempotency: skip if a `rowSchema` property is already present.
+        if (
+          optArg && ts.isObjectLiteralExpression(optArg) &&
+          optArg.properties.some(
+            (p: ts.ObjectLiteralElementLike) =>
+              p.name && ts.isIdentifier(p.name) && p.name.text === "rowSchema",
+          )
+        ) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        const resolved = resolveInjectableSchemaType(
+          typeArgs[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => undefined,
+        );
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
+
+        if (schemaCall) {
+          let newOptions: ts.Expression;
+          if (optArg && ts.isObjectLiteralExpression(optArg)) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                ...optArg.properties,
+                factory.createPropertyAssignment("rowSchema", schemaCall),
+              ],
+              true,
+            );
+          } else if (optArg) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                factory.createSpreadAssignment(optArg),
+                factory.createPropertyAssignment("rowSchema", schemaCall),
+              ],
+              true,
+            );
+          } else {
+            newOptions = factory.createObjectLiteralExpression(
+              [factory.createPropertyAssignment("rowSchema", schemaCall)],
+              true,
+            );
+          }
+
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [
+              ...args.slice(0, optIdx),
+              newOptions,
+              ...args.slice(optIdx + 1),
+            ],
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);

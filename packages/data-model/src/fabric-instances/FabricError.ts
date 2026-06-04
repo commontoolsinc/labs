@@ -11,7 +11,7 @@ import { TAGS } from "../fabric-type-tags.ts";
 import { FrozenSet } from "../frozen-builtins.ts";
 import { EmptyReconstructionContext } from "../EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
-import { errorClassFromType, UNSAFE_KEYS } from "../native-instance-utils.ts";
+import { errorClassFromType, UNSAFE_KEYS } from "../native-conversion.ts";
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the
@@ -106,11 +106,11 @@ export class FabricError extends FabricNativeWrapper<Error> {
   #nativeFrozen: Error | undefined;
 
   /**
-   * Constructs from a `FabricErrorState` record. All state values must
-   * already be in `FabricValue` form -- the conversion layer
-   * (`fabric-value-modern.ts`) is responsible for ensuring this when
-   * constructing from a native `Error`. Use `FabricError.fromNativeError()`
-   * for shallow conversion from a native `Error`.
+   * Constructs from a `FabricErrorState` record. All state values must already
+   * be in `FabricValue` form -- the conversion layer is responsible for
+   * ensuring this when constructing from a native `Error`. Use
+   * `FabricError.fromNativeError()` for shallow conversion from a native
+   * `Error`.
    */
   constructor(state: FabricErrorState) {
     super();

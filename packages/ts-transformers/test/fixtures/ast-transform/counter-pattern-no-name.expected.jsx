@@ -45,12 +45,33 @@ const decrement = handler(false as const satisfies __cfHelpers.JSONSchema, {
 }) => {
     state.value.set(state.value.get() - 1);
 });
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        value: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                }
+            },
+            required: ["value"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 1);
 // FIXTURE: counter-pattern-no-name
 // Verifies: same transforms as counter-pattern apply even when the file has no unique name
 //   handler<unknown, CounterState>(fn) → handler(true, stateSchema, fn)
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<PatternState>(fn)          → pattern(fn, inputSchema, outputSchema)
-//   state.value ? a : b (in JSX)      → __cfHelpers.ifElse(...schemas, state.key("value"), derive(...), "unknown")
+//   state.value ? a : b (in JSX)      → __cfHelpers.ifElse(...schemas, state.key("value"), lift(...)({...}), "unknown")
 // Context: Identical to counter-pattern; verifies no-name patterns still transform correctly
 export default pattern((state) => {
     return {
@@ -66,27 +87,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("value"), __cfHelpers.lift<{
-            state: {
-                value: number;
-            };
-        }, number>({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        }
-                    },
-                    required: ["value"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 1)({ state: {
+        } as const satisfies __cfHelpers.JSONSchema, state.key("value"), __cfLift_1({ state: {
                 value: state.key("value")
             } }), "unknown")}</li>
         </ul>

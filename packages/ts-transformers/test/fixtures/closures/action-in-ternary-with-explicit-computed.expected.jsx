@@ -12,7 +12,7 @@ import { __cfHelpers } from "commonfabric";
  *
  * Variation where the pattern author uses computed() explicitly inside JSX
  * (not encouraged, but should still work). The action is referenced INSIDE
- * the computed expression, so it must be captured in the derive wrapper.
+ * the computed expression, so it must be captured in the lift-applied wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
@@ -25,28 +25,75 @@ interface Card {
 interface Input {
     card: Card;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        isEditing: {
+            type: "boolean",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["isEditing"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
+    isEditing.set(true);
+});
+const __cfLift_1 = __cfHelpers.lift<{
+    card: {
+        description: string;
+    };
+    startEditing: __cfHelpers.Stream<void>;
+}, import("commonfabric").JSXElement>({
+    type: "object",
+    properties: {
+        card: {
+            type: "object",
+            properties: {
+                description: {
+                    type: "string"
+                }
+            },
+            required: ["description"]
+        },
+        startEditing: {
+            asCell: ["stream", "opaque"]
+        }
+    },
+    required: ["card", "startEditing"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ card, startEditing }) => (<div>
+                <span>{card.description}</span>
+                <cf-button onClick={startEditing}>Edit</cf-button>
+              </div>));
 // FIXTURE: action-in-ternary-with-explicit-computed
-// Verifies: action() referenced inside an explicit computed() in JSX is captured in the derive wrapper
+// Verifies: action() referenced inside an explicit computed() in JSX is captured in the lift-applied wrapper
 //   action(() => ...) → handler(...)({ isEditing })
-//   computed(() => JSX with action ref) → derive(captureSchema, ..., { card, startEditing }, fn)
-// Context: Action referenced inside computed expression must appear in the derive's capture object
+//   computed(() => JSX with action ref) → lift(fn)({ card, startEditing })
+// Context: Action referenced inside computed expression must appear in the lift-applied capture object
 export default pattern((__cf_pattern_input) => {
     const card = __cf_pattern_input.key("card");
     const isEditing = new Cell(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("isEditing", true);
-    const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            isEditing: {
-                type: "boolean",
-                asCell: ["writeonly"]
-            }
-        },
-        required: ["isEditing"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { isEditing }) => {
-        isEditing.set(true);
-    })({
+    const startEditing = __cfHandler_1({
         isEditing: isEditing
     }).for({ stream: "startEditing" }, true);
     return {
@@ -72,53 +119,8 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, isEditing, <div>Editing</div>, <div>
             <span>{card.key("title")}</span>
             {/* Explicit computed() wrapping JSX that references the action */}
-            {/* The action must be captured in the derive created for this computed */}
-            {__cfHelpers.lift<{
-                card: {
-                    description: string;
-                };
-                startEditing: __cfHelpers.Stream<void>;
-            }, import("commonfabric").JSXElement>({
-                type: "object",
-                properties: {
-                    card: {
-                        type: "object",
-                        properties: {
-                            description: {
-                                type: "string"
-                            }
-                        },
-                        required: ["description"]
-                    },
-                    startEditing: {
-                        asCell: ["stream", "opaque"]
-                    }
-                },
-                required: ["card", "startEditing"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, ({ card, startEditing }) => (<div>
-                <span>{card.description}</span>
-                <cf-button onClick={startEditing}>Edit</cf-button>
-              </div>))({
+            {/* The action must be captured in the lift-applied computation created for this computed */}
+            {__cfLift_1({
                 card: {
                     description: card.key("description")
                 },

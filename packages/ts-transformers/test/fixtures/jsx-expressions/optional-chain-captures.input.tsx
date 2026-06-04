@@ -10,9 +10,9 @@ interface State {
 }
 
 // FIXTURE: optional-chain-captures
-// Verifies: optional chaining (?.) in JSX is resolved to .key() or wrapped in derive()
+// Verifies: optional chaining (?.) in JSX is resolved to .key() or wrapped in a lift-applied computation
 //   state.maybe?.value         → state.key("maybe", "value")
-//   item.maybe?.value ?? 0     → derive({item}, ({item}) => item.maybe?.value ?? 0)
+//   item.maybe?.value ?? 0     → lift(({item}) => item.maybe?.value ?? 0)({ item })
 // Context: Optional chaining with nullish coalescing inside a map body
 export default pattern<State>((state) => {
   return {
