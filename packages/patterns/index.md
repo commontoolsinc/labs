@@ -632,6 +632,67 @@ interface Output {
 }
 ```
 
+## `fair-share/main.tsx`
+
+A shared group expense ledger (Splitwise-inspired). Track who paid for each
+expense and who shared it, see reactive net balances, and a minimal greedy
+"settle up" plan of who pays whom. Per-space ledger, per-user `myName` identity
+("you are owed / you owe"), per-session form drafts. Money is computed in
+integer cents with largest-remainder allocation so shares sum to the total and
+balances tie out exactly. Identity uses `equals()` (no synthetic id fields);
+people are referenced from expenses by their unique name.
+
+**Keywords:** expenses, split, settle up, balances, group, shared ledger,
+per-user, equals, money
+
+### Input Schema
+
+```ts
+interface Person {
+  name: string;
+}
+
+interface Expense {
+  description: string;
+  amount: number;
+  paidBy: string; // Person.name
+  sharedBy: string[]; // Person.name[]; empty => split among everyone
+  date: string; // YYYY-MM-DD
+}
+
+interface Input {
+  people: Writable<Person[] | Default<[]>>;
+  expenses: Writable<Expense[] | Default<[]>>;
+  myName: PerUser<string | Default<"">>;
+}
+```
+
+### Output Schema
+
+```ts
+interface Balance {
+  name: string;
+  paid: number;
+  share: number;
+  net: number; // positive => is owed, negative => owes
+}
+
+interface Settlement {
+  from: string;
+  to: string;
+  amount: number;
+}
+
+interface Output {
+  people: Person[];
+  expenses: Expense[];
+  myName: string;
+  balances: Balance[];
+  settlements: Settlement[];
+  total: number;
+}
+```
+
 ## `cfc-agent-prompt-injection-demo/main.tsx`
 
 Interactive side-by-side chatbot demo for the new observation ceiling and
