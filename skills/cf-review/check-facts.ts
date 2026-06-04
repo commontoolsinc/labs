@@ -21,7 +21,10 @@
  *   or: deno test --allow-read skills/cf-review/check-facts.ts
  */
 
-const HERE = import.meta.dirname ?? Deno.cwd();
+const HERE = import.meta.dirname;
+if (HERE === undefined) {
+  throw new Error("check-facts.ts must be run from a file path");
+}
 const ROOT = `${HERE}/../..`;
 
 const read = (p: string): Promise<string> => Deno.readTextFile(`${ROOT}/${p}`);
@@ -46,6 +49,8 @@ function resolves(exp: unknown, key: string): boolean {
 /** Facts in the cf-review skill that must resolve against the tree. */
 export async function collectErrors(): Promise<string[]> {
   const errors: string[] = [];
+  // Scope: gates the cf-review skill only. ~15 other skills have a SKILL.md;
+  // generalizing to all of `skills/**` (glob this read) is future work.
   const skill = await read("skills/cf-review/SKILL.md");
 
   // Build a name -> exports map for every workspace package.
@@ -62,9 +67,10 @@ export async function collectErrors(): Promise<string[]> {
     }
   }
 
-  // Every `@commonfabric/...` specifier the skill names must resolve.
+  // Every `@commonfabric/...` specifier the skill names must resolve. Subpath
+  // segments allow PascalCase / dots (e.g. data-model/BaseReconstructionContext).
   const specifiers = new Set(
-    skill.match(/@commonfabric\/[a-z0-9-]+(?:\/[a-z0-9-]+)*/g) ?? [],
+    skill.match(/@commonfabric\/[a-z0-9-]+(?:\/[\w.-]+)*/g) ?? [],
   );
   for (const spec of specifiers) {
     const m = spec.match(/^(@commonfabric\/[a-z0-9-]+)(?:\/(.+))?$/);
