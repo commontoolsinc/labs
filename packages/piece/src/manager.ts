@@ -310,8 +310,11 @@ export class PieceManager {
       );
 
     if (runIt) {
-      // start() handles sync, pattern loading, and running
-      // It's idempotent - no effect if already running
+      // Load persisted result/metadata before start() decides whether this is a
+      // resumed piece that needs dependency sync before scheduler wiring.
+      await timePiecePhase("get.piece.sync", () => piece.sync());
+      // start() handles pattern loading and running. It's idempotent - no
+      // effect if already running.
       await timePiecePhase(
         "get.runtime.start",
         () => this.runtime.start(piece),
