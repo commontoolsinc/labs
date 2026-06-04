@@ -119,7 +119,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Create a codec view that delegates to our private methods.
     this.codec = {
       wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) => this.getTagFor(value),
+      getTagFor: (value: FabricInstance) => BaseFabricInstance.wireTypeTagOf(value),
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
@@ -197,15 +197,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
   // Tag wrapping/unwrapping (private)
   //
-
-  /** Returns the wire format tag for a fabric instance's type. */
-  private getTagFor(value: FabricInstance): string {
-    if (value instanceof BaseFabricInstance) {
-      return value.wireTypeTag;
-    } else {
-      throw new Error("Shouldn't happen: Encountered a `FabricInstance` which is not a `BaseFabricInstance`.");
-    }
-  }
 
   /** Returns the class that can reconstruct instances for a given tag. */
   private getClassFor(
