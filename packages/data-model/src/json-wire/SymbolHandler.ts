@@ -1,5 +1,5 @@
 import type { FabricValue, ReconstructionContext } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,
@@ -20,7 +20,7 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * path instead of being silently coerced to a registry symbol.
  */
 export const SymbolHandler: TypeHandler = {
-  tag: TAGS.Symbol,
+  tag: WIRE_TYPE_TAGS.Symbol,
 
   canSerialize(value: FabricValue): boolean {
     return typeof value === "symbol" && Symbol.keyFor(value) !== undefined;
@@ -33,7 +33,7 @@ export const SymbolHandler: TypeHandler = {
   ): JsonWireValue {
     // `canSerialize()` already verified the symbol has a registry key.
     const key = Symbol.keyFor(value as symbol)!;
-    return codec.wrapTag(TAGS.Symbol, key);
+    return codec.wrapTag(WIRE_TYPE_TAGS.Symbol, key);
   },
 
   deserialize(
@@ -43,7 +43,7 @@ export const SymbolHandler: TypeHandler = {
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        TAGS.Symbol,
+        WIRE_TYPE_TAGS.Symbol,
         state,
         `Symbol: expected string state, got ${typeof state}`,
       );

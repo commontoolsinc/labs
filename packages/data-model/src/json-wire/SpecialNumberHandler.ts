@@ -1,5 +1,5 @@
 import type { FabricValue, ReconstructionContext } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,
@@ -21,7 +21,7 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * back to `Number.NaN`.
  */
 export const SpecialNumberHandler: TypeHandler = {
-  tag: TAGS.SpecialNumber,
+  tag: WIRE_TYPE_TAGS.SpecialNumber,
 
   canSerialize(value: FabricValue): boolean {
     if (typeof value !== "number") return false;
@@ -48,7 +48,7 @@ export const SpecialNumberHandler: TypeHandler = {
       // The remaining canSerialize case is `Object.is(num, -0)`.
       state = "-0";
     }
-    return codec.wrapTag(TAGS.SpecialNumber, state);
+    return codec.wrapTag(WIRE_TYPE_TAGS.SpecialNumber, state);
   },
 
   deserialize(
@@ -58,7 +58,7 @@ export const SpecialNumberHandler: TypeHandler = {
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        TAGS.SpecialNumber,
+        WIRE_TYPE_TAGS.SpecialNumber,
         state,
         `SpecialNumber: expected string state, got ${typeof state}`,
       );
@@ -74,7 +74,7 @@ export const SpecialNumberHandler: TypeHandler = {
         return NaN;
       default:
         return new ProblematicValue(
-          TAGS.SpecialNumber,
+          WIRE_TYPE_TAGS.SpecialNumber,
           state,
           `SpecialNumber: unknown literal ${JSON.stringify(state)}`,
         );

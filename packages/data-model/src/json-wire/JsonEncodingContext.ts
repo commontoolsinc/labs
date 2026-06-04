@@ -18,7 +18,7 @@ import {
   FabricMap,
   FabricSet,
 } from "../fabric-instances/index.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import { WIRE_META_TAGS } from "../wire-common/wire-meta-tags.ts";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
@@ -126,9 +126,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Register native wrapper classes for deserialization. Each wrapper's
     // static `[RECONSTRUCT]` method is used by the class registry fallback
     // path in `deserialize()`.
-    this.registry.set(TAGS.Error, FabricError);
-    this.registry.set(TAGS.Map, FabricMap);
-    this.registry.set(TAGS.Set, FabricSet);
+    this.registry.set(WIRE_TYPE_TAGS.Error, FabricError);
+    this.registry.set(WIRE_TYPE_TAGS.Map, FabricMap);
+    this.registry.set(WIRE_TYPE_TAGS.Set, FabricSet);
   }
 
   //

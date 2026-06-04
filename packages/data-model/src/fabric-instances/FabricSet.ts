@@ -6,7 +6,7 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import { FrozenSet } from "../frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
@@ -22,7 +22,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 
   /** @inheritDoc */
   get wireTypeTag(): string {
-    return TAGS.Set;
+    return WIRE_TYPE_TAGS.Set;
   }
 
   [DECONSTRUCT](): FabricValue {

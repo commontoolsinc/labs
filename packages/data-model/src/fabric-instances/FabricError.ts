@@ -7,7 +7,7 @@ import {
   type ReconstructionContext,
 } from "../interface.ts";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import { FrozenSet } from "../frozen-builtins.ts";
 import { EmptyReconstructionContext } from "../EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -134,7 +134,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
 
   /** @inheritDoc */
   get wireTypeTag(): string {
-    return TAGS.Error;
+    return WIRE_TYPE_TAGS.Error;
   }
 
   /**

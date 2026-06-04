@@ -6,7 +6,7 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import { FrozenMap } from "../frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
@@ -23,7 +23,7 @@ export class FabricMap
 
   /** @inheritDoc */
   get wireTypeTag(): string {
-    return TAGS.Map;
+    return WIRE_TYPE_TAGS.Map;
   }
 
   [DECONSTRUCT](): FabricValue {
