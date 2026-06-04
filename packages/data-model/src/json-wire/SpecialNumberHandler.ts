@@ -5,7 +5,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for the four "special" numeric values that JSON cannot represent
@@ -57,7 +57,7 @@ export const SpecialNumberHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.SpecialNumber,
         state,
         `SpecialNumber: expected string state, got ${typeof state}`,
@@ -73,7 +73,7 @@ export const SpecialNumberHandler: TypeHandler = {
       case "NaN":
         return NaN;
       default:
-        return makeProblematic(
+        return new ProblematicValue(
           TAGS.SpecialNumber,
           state,
           `SpecialNumber: unknown literal ${JSON.stringify(state)}`,

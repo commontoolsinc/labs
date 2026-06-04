@@ -5,7 +5,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for registry-interned symbols. Serializes the registry key as a
@@ -42,7 +42,7 @@ export const SymbolHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.Symbol,
         state,
         `Symbol: expected string state, got ${typeof state}`,

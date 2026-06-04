@@ -13,7 +13,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `bigint`. Serializes to `TAGS.BigInt` tag with an unpadded
@@ -47,7 +47,7 @@ export const BigIntHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.BigInt,
         state,
         `bigint: expected string state, got ${typeof state}`,
@@ -57,7 +57,7 @@ export const BigIntHandler: TypeHandler = {
       const bytes = fromBase64url(state);
       return bigintFromMinimalTwosComplement(bytes);
     } catch {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.BigInt,
         state,
         `bigint: invalid base64: ${state}`,
