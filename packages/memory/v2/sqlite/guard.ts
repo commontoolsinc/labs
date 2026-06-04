@@ -8,9 +8,12 @@
 // engine table names.
 //
 // This is intentionally conservative — it can have minor false positives (e.g.
-// a column literally named `commit`). That residual is documented in
-// docs/specs/sqlite-builtin/08-open-questions.md (Q8a). The full structural fix
-// is the space-DID core-table rename, deferred behind a flag.
+// a column literally named `commit`). The structural fix is now in place: core
+// engine tables are scoped per-space (`commit__<token>` etc. — see
+// engine.ts `coreTableNames`), so an attached cell-db's unqualified `commit`
+// can no longer resolve to a core table. This core-table-name rejection is kept
+// as a belt-and-suspenders backstop during the migration soak and can be
+// dropped once all live dbs are scoped (docs/specs/sqlite-builtin/08-open-questions.md Q8a).
 
 /** Core engine table names a pattern statement must never reference. */
 export const CORE_TABLE_NAMES: readonly string[] = [

@@ -2058,7 +2058,7 @@ export class Server {
       if (url.protocol === "file:") {
         await FS.ensureDir(Path.toFileUrl(Path.dirname(Path.fromFileUrl(url))));
       }
-      return await Engine.open({ url });
+      return await Engine.open({ url, space });
     })();
     opened.catch(() => {
       if (this.#engines.get(space) === opened) {

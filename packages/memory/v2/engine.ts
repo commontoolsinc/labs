@@ -83,6 +83,88 @@ const declaredScopeFromScopeKey = (scopeKey: string): CellScope => {
   return "space";
 };
 
+// Identifier-safe, stable-per-space token for scoping core table names (FNV-1a
+// 32-bit + length, hex). Empty space => "" (legacy bare names, back-compat).
+const scopeToken = (space: string | undefined): string => {
+  if (!space) return "";
+  let h = 0x811c9dc5;
+  for (let i = 0; i < space.length; i++) {
+    h ^= space.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${(h >>> 0).toString(16).padStart(8, "0")}${
+    space.length.toString(16)
+  }`;
+};
+
+/** The 14 core engine tables, scoped per-space so they never collide with an
+ *  attached pattern cell-db on the write path. */
+interface CoreTableNames {
+  authorization: string;
+  invocation: string;
+  commit: string;
+  revision: string;
+  head: string;
+  snapshot: string;
+  branch: string;
+  blob_store: string;
+  scheduler_observation: string;
+  scheduler_action_snapshot: string;
+  scheduler_observation_replay: string;
+  scheduler_read_index: string;
+  scheduler_write_index: string;
+  scheduler_action_state: string;
+}
+
+const CORE_TABLE_KEYS: readonly (keyof CoreTableNames)[] = [
+  "authorization",
+  "invocation",
+  "commit",
+  "revision",
+  "head",
+  "snapshot",
+  "branch",
+  "blob_store",
+  "scheduler_observation",
+  "scheduler_action_snapshot",
+  "scheduler_observation_replay",
+  "scheduler_read_index",
+  "scheduler_write_index",
+  "scheduler_action_state",
+];
+
+/**
+ * Maps each core table to the SQL identifier to emit. With an empty token the
+ * names are byte-identical to the legacy schema: `commit` is a reserved word so
+ * it stays `"commit"` (quoted), the rest are bare. With a non-empty token every
+ * table becomes the quoted scoped identifier `"<table>__<token>"`.
+ */
+const coreTableNames = (token: string): CoreTableNames => {
+  if (token === "") {
+    return {
+      authorization: "authorization",
+      invocation: "invocation",
+      commit: `"commit"`,
+      revision: "revision",
+      head: "head",
+      snapshot: "snapshot",
+      branch: "branch",
+      blob_store: "blob_store",
+      scheduler_observation: "scheduler_observation",
+      scheduler_action_snapshot: "scheduler_action_snapshot",
+      scheduler_observation_replay: "scheduler_observation_replay",
+      scheduler_read_index: "scheduler_read_index",
+      scheduler_write_index: "scheduler_write_index",
+      scheduler_action_state: "scheduler_action_state",
+    };
+  }
+  const scoped = {} as CoreTableNames;
+  for (const key of CORE_TABLE_KEYS) {
+    scoped[key] = `"${key}__${token}"`;
+  }
+  return scoped;
+};
+
 const PRAGMAS = `
   PRAGMA journal_mode = WAL;
   PRAGMA synchronous = NORMAL;
@@ -97,16 +179,16 @@ const NEW_DB_PRAGMAS = `
   PRAGMA page_size = 32768;
 `;
 
-const INIT = `
+const buildInit = (T: CoreTableNames): string => `
 BEGIN TRANSACTION;
 
-CREATE TABLE IF NOT EXISTS authorization (
+CREATE TABLE IF NOT EXISTS ${T.authorization} (
   ref            TEXT    NOT NULL PRIMARY KEY,
   authorization  JSON    NOT NULL,
   created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS invocation (
+CREATE TABLE IF NOT EXISTS ${T.invocation} (
   ref         TEXT    NOT NULL PRIMARY KEY,
   iss         TEXT    NOT NULL,
   aud         TEXT,
@@ -115,11 +197,11 @@ CREATE TABLE IF NOT EXISTS invocation (
   invocation  JSON    NOT NULL,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_invocation_sub ON invocation (sub);
-CREATE INDEX IF NOT EXISTS idx_invocation_cmd ON invocation (cmd);
-CREATE INDEX IF NOT EXISTS idx_invocation_iss ON invocation (iss);
+CREATE INDEX IF NOT EXISTS idx_invocation_sub ON ${T.invocation} (sub);
+CREATE INDEX IF NOT EXISTS idx_invocation_cmd ON ${T.invocation} (cmd);
+CREATE INDEX IF NOT EXISTS idx_invocation_iss ON ${T.invocation} (iss);
 
-CREATE TABLE IF NOT EXISTS "commit" (
+CREATE TABLE IF NOT EXISTS ${T.commit} (
   seq                INTEGER NOT NULL PRIMARY KEY,
   branch             TEXT    NOT NULL DEFAULT '',
   session_id         TEXT    NOT NULL,
@@ -129,16 +211,16 @@ CREATE TABLE IF NOT EXISTS "commit" (
   original           JSON    NOT NULL,
   resolution         JSON    NOT NULL,
   created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
-  FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
+  FOREIGN KEY (invocation_ref) REFERENCES ${T.invocation}(ref),
+  FOREIGN KEY (authorization_ref) REFERENCES ${T.authorization}(ref)
 );
-CREATE INDEX IF NOT EXISTS idx_commit_branch ON "commit" (branch);
+CREATE INDEX IF NOT EXISTS idx_commit_branch ON ${T.commit} (branch);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_commit_session_local_seq
-  ON "commit" (session_id, local_seq);
+  ON ${T.commit} (session_id, local_seq);
 CREATE INDEX IF NOT EXISTS idx_commit_invocation_ref
-  ON "commit" (invocation_ref);
+  ON ${T.commit} (invocation_ref);
 
-CREATE TABLE IF NOT EXISTS revision (
+CREATE TABLE IF NOT EXISTS ${T.revision} (
   branch      TEXT    NOT NULL DEFAULT '',
   id          TEXT    NOT NULL,
   scope_key   TEXT    NOT NULL DEFAULT 'space',
@@ -148,16 +230,16 @@ CREATE TABLE IF NOT EXISTS revision (
   data        JSON,
   commit_seq  INTEGER NOT NULL,
   PRIMARY KEY (branch, id, scope_key, seq, op_index),
-  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+  FOREIGN KEY (commit_seq) REFERENCES ${T.commit}(seq)
 );
 CREATE INDEX IF NOT EXISTS idx_revision_branch_id_seq
-  ON revision (branch, id, scope_key, seq, op_index);
+  ON ${T.revision} (branch, id, scope_key, seq, op_index);
 CREATE INDEX IF NOT EXISTS idx_revision_commit
-  ON revision (commit_seq);
+  ON ${T.revision} (commit_seq);
 CREATE INDEX IF NOT EXISTS idx_revision_branch
-  ON revision (branch, seq);
+  ON ${T.revision} (branch, seq);
 
-CREATE TABLE IF NOT EXISTS head (
+CREATE TABLE IF NOT EXISTS ${T.head} (
   branch    TEXT    NOT NULL,
   id        TEXT    NOT NULL,
   scope_key TEXT    NOT NULL DEFAULT 'space',
@@ -165,9 +247,9 @@ CREATE TABLE IF NOT EXISTS head (
   op_index  INTEGER NOT NULL,
   PRIMARY KEY (branch, id, scope_key)
 );
-CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
+CREATE INDEX IF NOT EXISTS idx_head_branch ON ${T.head} (branch);
 
-CREATE TABLE IF NOT EXISTS snapshot (
+CREATE TABLE IF NOT EXISTS ${T.snapshot} (
   branch  TEXT    NOT NULL DEFAULT '',
   id      TEXT    NOT NULL,
   scope_key TEXT  NOT NULL DEFAULT 'space',
@@ -175,9 +257,9 @@ CREATE TABLE IF NOT EXISTS snapshot (
   value   JSON    NOT NULL,
   PRIMARY KEY (branch, id, scope_key, seq)
 );
-CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, scope_key, seq);
+CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON ${T.snapshot} (branch, id, scope_key, seq);
 
-CREATE TABLE IF NOT EXISTS branch (
+CREATE TABLE IF NOT EXISTS ${T.branch} (
   name           TEXT    NOT NULL PRIMARY KEY,
   parent_branch  TEXT,
   fork_seq       INTEGER,
@@ -186,19 +268,19 @@ CREATE TABLE IF NOT EXISTS branch (
   status         TEXT    NOT NULL DEFAULT 'active',
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   deleted_at     TEXT,
-  FOREIGN KEY (parent_branch) REFERENCES branch(name)
+  FOREIGN KEY (parent_branch) REFERENCES ${T.branch}(name)
 );
-INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
+INSERT OR IGNORE INTO ${T.branch} (name, created_seq, head_seq, status)
 VALUES ('', 0, 0, 'active');
 
-CREATE TABLE IF NOT EXISTS blob_store (
+CREATE TABLE IF NOT EXISTS ${T.blob_store} (
   hash          TEXT    NOT NULL PRIMARY KEY,
   data          BLOB    NOT NULL,
   content_type  TEXT    NOT NULL,
   size          INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS scheduler_observation (
+CREATE TABLE IF NOT EXISTS ${T.scheduler_observation} (
   observation_id      INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   branch              TEXT    NOT NULL DEFAULT '',
   commit_seq          INTEGER,
@@ -210,10 +292,10 @@ CREATE TABLE IF NOT EXISTS scheduler_observation (
   process_generation  INTEGER NOT NULL,
   payload             JSON    NOT NULL,
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+  FOREIGN KEY (commit_seq) REFERENCES ${T.commit}(seq)
 );
 CREATE INDEX IF NOT EXISTS idx_scheduler_observation_action
-  ON scheduler_observation (
+  ON ${T.scheduler_observation} (
     branch,
     piece_id,
     process_generation,
@@ -221,10 +303,10 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_observation_action
     observation_id
   );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_observation_session_local
-  ON scheduler_observation (branch, session_id, local_seq)
+  ON ${T.scheduler_observation} (branch, session_id, local_seq)
   WHERE session_id IS NOT NULL AND local_seq IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS scheduler_action_snapshot (
+CREATE TABLE IF NOT EXISTS ${T.scheduler_action_snapshot} (
   branch              TEXT    NOT NULL DEFAULT '',
   owner_space         TEXT    NOT NULL DEFAULT '',
   piece_id            TEXT    NOT NULL,
@@ -242,10 +324,10 @@ CREATE TABLE IF NOT EXISTS scheduler_action_snapshot (
     action_id
   ),
   FOREIGN KEY (observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 
-CREATE TABLE IF NOT EXISTS scheduler_observation_replay (
+CREATE TABLE IF NOT EXISTS ${T.scheduler_observation_replay} (
   branch              TEXT    NOT NULL DEFAULT '',
   session_id          TEXT    NOT NULL,
   local_seq           INTEGER NOT NULL,
@@ -257,10 +339,10 @@ CREATE TABLE IF NOT EXISTS scheduler_observation_replay (
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (branch, session_id, local_seq),
   FOREIGN KEY (observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 
-CREATE TABLE IF NOT EXISTS scheduler_read_index (
+CREATE TABLE IF NOT EXISTS ${T.scheduler_read_index} (
   branch              TEXT    NOT NULL DEFAULT '',
   owner_space         TEXT,
   read_space          TEXT    NOT NULL,
@@ -273,19 +355,19 @@ CREATE TABLE IF NOT EXISTS scheduler_read_index (
   action_id           TEXT    NOT NULL,
   observation_id      INTEGER NOT NULL,
   FOREIGN KEY (observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_scheduler_read_index_lookup
-  ON scheduler_read_index (branch, read_space, read_id, read_scope);
+  ON ${T.scheduler_read_index} (branch, read_space, read_id, read_scope);
 CREATE INDEX IF NOT EXISTS idx_scheduler_read_index_action
-  ON scheduler_read_index (
+  ON ${T.scheduler_read_index} (
     branch,
     piece_id,
     process_generation,
     action_id
   );
 
-CREATE TABLE IF NOT EXISTS scheduler_write_index (
+CREATE TABLE IF NOT EXISTS ${T.scheduler_write_index} (
   branch              TEXT    NOT NULL DEFAULT '',
   owner_space         TEXT    NOT NULL DEFAULT '',
   write_space         TEXT    NOT NULL,
@@ -298,17 +380,17 @@ CREATE TABLE IF NOT EXISTS scheduler_write_index (
   action_id           TEXT    NOT NULL,
   observation_id      INTEGER NOT NULL,
   FOREIGN KEY (observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_scheduler_write_index_action
-  ON scheduler_write_index (
+  ON ${T.scheduler_write_index} (
     branch,
     piece_id,
     process_generation,
     action_id
   );
 
-CREATE TABLE IF NOT EXISTS scheduler_action_state (
+CREATE TABLE IF NOT EXISTS ${T.scheduler_action_state} (
   branch                 TEXT    NOT NULL DEFAULT '',
   owner_space            TEXT    NOT NULL DEFAULT '',
   piece_id               TEXT    NOT NULL,
@@ -326,24 +408,56 @@ CREATE TABLE IF NOT EXISTS scheduler_action_state (
     action_id
   ),
   FOREIGN KEY (latest_observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 
 COMMIT;
 `;
 
-const INSERT_AUTHORIZATION = `
-INSERT OR IGNORE INTO authorization (ref, authorization)
+interface StatementSql {
+  insertAuthorization: string;
+  insertInvocation: string;
+  insertCommit: string;
+  insertRevision: string;
+  upsertHead: string;
+  insertSnapshot: string;
+  deleteOldSnapshots: string;
+  updateBranchHead: string;
+  selectHead: string;
+  selectCurrentLocal: string;
+  selectAtSeqLocal: string;
+  selectLatestBase: string;
+  selectLatestSnapshot: string;
+  selectPatches: string;
+  selectPatchCount: string;
+  selectNextSeq: string;
+  selectServerSeq: string;
+  selectExistingCommit: string;
+  selectSetDeleteConflict: string;
+  selectPatchConflicts: string;
+  selectPendingResolution: string;
+  selectCommitRevisions: string;
+  selectBranch: string;
+  selectBranchStatus: string;
+  selectBranchHeadSeq: string;
+  selectBranches: string;
+  insertBranch: string;
+  deleteBranch: string;
+  insertBlob: string;
+  selectBlob: string;
+}
+
+const buildStatements = (T: CoreTableNames): StatementSql => ({
+  insertAuthorization: `
+INSERT OR IGNORE INTO ${T.authorization} (ref, authorization)
 VALUES (:ref, :authorization)
-`;
-
-const INSERT_INVOCATION = `
-INSERT OR IGNORE INTO invocation (ref, iss, aud, cmd, sub, invocation)
+`,
+  insertInvocation: `
+INSERT OR IGNORE INTO ${T.invocation} (ref, iss, aud, cmd, sub, invocation)
 VALUES (:ref, :iss, :aud, :cmd, :sub, :invocation)
-`;
-
-const INSERT_COMMIT = `
-INSERT INTO "commit" (
+`,
+  insertCommit: `
+INSERT INTO ${T.commit} (
   seq,
   branch,
   session_id,
@@ -363,10 +477,9 @@ VALUES (
   :original,
   :resolution
 )
-`;
-
-const INSERT_REVISION = `
-INSERT INTO revision (
+`,
+  insertRevision: `
+INSERT INTO ${T.revision} (
   branch,
   id,
   scope_key,
@@ -386,77 +499,69 @@ VALUES (
   :data,
   :commit_seq
 )
-`;
-
-const UPSERT_HEAD = `
-INSERT INTO head (branch, id, scope_key, seq, op_index)
+`,
+  upsertHead: `
+INSERT INTO ${T.head} (branch, id, scope_key, seq, op_index)
 VALUES (:branch, :id, :scope_key, :seq, :op_index)
 ON CONFLICT (branch, id, scope_key) DO UPDATE
 SET seq = :seq, op_index = :op_index
-`;
-
-const INSERT_SNAPSHOT = `
-INSERT OR REPLACE INTO snapshot (branch, id, scope_key, seq, value)
+`,
+  insertSnapshot: `
+INSERT OR REPLACE INTO ${T.snapshot} (branch, id, scope_key, seq, value)
 VALUES (:branch, :id, :scope_key, :seq, :value)
-`;
-
-const DELETE_OLD_SNAPSHOTS = `
-DELETE FROM snapshot
+`,
+  deleteOldSnapshots: `
+DELETE FROM ${T.snapshot}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
   AND seq NOT IN (
     SELECT seq
-    FROM snapshot
+    FROM ${T.snapshot}
     WHERE branch = :branch
       AND id = :id
       AND scope_key = :scope_key
     ORDER BY seq DESC
     LIMIT :retention
   )
-`;
-
-const UPDATE_BRANCH_HEAD = `
-UPDATE branch
+`,
+  updateBranchHead: `
+UPDATE ${T.branch}
 SET head_seq = CASE
   WHEN head_seq < :seq THEN :seq
   ELSE head_seq
 END
 WHERE name = :branch
-`;
-
-const SELECT_HEAD = `
+`,
+  selectHead: `
 SELECT seq, op_index
-FROM head
+FROM ${T.head}
 WHERE branch = :branch AND id = :id AND scope_key = :scope_key
-`;
-
-const SELECT_CURRENT_LOCAL = `
+`,
+  selectCurrentLocal: `
 SELECT r.seq, r.op_index, r.op, r.data
-FROM head h
-JOIN revision r
+FROM ${T.head} h
+JOIN ${T.revision} r
  ON r.branch = h.branch
  AND r.id = h.id
  AND r.scope_key = h.scope_key
  AND r.seq = h.seq
  AND r.op_index = h.op_index
 WHERE h.branch = :branch AND h.id = :id AND h.scope_key = :scope_key
-`;
-
-const SELECT_AT_SEQ_LOCAL = `
+`,
+  selectAtSeqLocal: `
 SELECT seq, op_index, op, data
-FROM revision
+FROM ${T.revision}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
   AND seq <= :seq
 ORDER BY seq DESC, op_index DESC
 LIMIT 1
-`;
-
-const SELECT_LATEST_BASE = `
+`,
+  selectLatestBase: `
 SELECT seq, op_index, op, data
-FROM revision
+FROM ${T.revision}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
@@ -467,22 +572,20 @@ WHERE branch = :branch
   )
 ORDER BY seq DESC, op_index DESC
 LIMIT 1
-`;
-
-const SELECT_LATEST_SNAPSHOT = `
+`,
+  selectLatestSnapshot: `
 SELECT seq, value
-FROM snapshot
+FROM ${T.snapshot}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
   AND seq <= :seq
 ORDER BY seq DESC
 LIMIT 1
-`;
-
-const SELECT_PATCHES = `
+`,
+  selectPatches: `
 SELECT seq, op_index, data
-FROM revision
+FROM ${T.revision}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
@@ -496,39 +599,34 @@ WHERE branch = :branch
     (seq = :seq AND op_index <= :op_index)
   )
 ORDER BY seq ASC, op_index ASC
-`;
-
-const SELECT_PATCH_COUNT = `
+`,
+  selectPatchCount: `
 SELECT COUNT(*) AS count
-FROM revision
+FROM ${T.revision}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
   AND op = 'patch'
   AND seq > :after_seq
   AND seq <= :seq
-`;
-
-const SELECT_NEXT_SEQ = `
+`,
+  selectNextSeq: `
 SELECT COALESCE(MAX(seq), 0) + 1 AS seq
-FROM "commit"
-`;
-
-const SELECT_SERVER_SEQ = `
+FROM ${T.commit}
+`,
+  selectServerSeq: `
 SELECT COALESCE(MAX(seq), 0) AS seq
-FROM "commit"
-`;
-
-const SELECT_EXISTING_COMMIT = `
+FROM ${T.commit}
+`,
+  selectExistingCommit: `
 SELECT seq, branch, original, resolution
-FROM "commit"
+FROM ${T.commit}
 WHERE session_id = :session_id
   AND local_seq = :local_seq
-`;
-
-const SELECT_SET_DELETE_CONFLICT = `
+`,
+  selectSetDeleteConflict: `
 SELECT seq
-FROM revision
+FROM ${T.revision}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
@@ -536,59 +634,51 @@ WHERE branch = :branch
   AND op IN ('set', 'delete')
 ORDER BY seq DESC, op_index DESC
 LIMIT 1
-`;
-
-const SELECT_PATCH_CONFLICTS = `
+`,
+  selectPatchConflicts: `
 SELECT seq, op_index, data
-FROM revision
+FROM ${T.revision}
 WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
   AND seq > :after_seq
   AND op = 'patch'
 ORDER BY seq DESC, op_index DESC
-`;
-
-const SELECT_PENDING_RESOLUTION = `
+`,
+  selectPendingResolution: `
 SELECT seq
-FROM "commit"
+FROM ${T.commit}
 WHERE session_id = :session_id
   AND local_seq = :local_seq
-`;
-
-const SELECT_COMMIT_REVISIONS = `
+`,
+  selectCommitRevisions: `
 SELECT branch, id, scope_key, seq, op_index, op, data, commit_seq
-FROM revision
+FROM ${T.revision}
 WHERE commit_seq = :commit_seq
 ORDER BY op_index ASC
-`;
-
-const SELECT_BRANCH = `
+`,
+  selectBranch: `
 SELECT name, parent_branch, fork_seq, created_seq, head_seq, status
-FROM branch
+FROM ${T.branch}
 WHERE name = :branch
-`;
-
-const SELECT_BRANCH_STATUS = `
+`,
+  selectBranchStatus: `
 SELECT status
-FROM branch
+FROM ${T.branch}
 WHERE name = :branch
-`;
-
-const SELECT_BRANCH_HEAD_SEQ = `
+`,
+  selectBranchHeadSeq: `
 SELECT head_seq
-FROM branch
+FROM ${T.branch}
 WHERE name = :branch
-`;
-
-const SELECT_BRANCHES = `
+`,
+  selectBranches: `
 SELECT name, parent_branch, fork_seq, created_seq, head_seq, status
-FROM branch
+FROM ${T.branch}
 ORDER BY name ASC
-`;
-
-const INSERT_BRANCH = `
-INSERT INTO branch (
+`,
+  insertBranch: `
+INSERT INTO ${T.branch} (
   name,
   parent_branch,
   fork_seq,
@@ -604,26 +694,24 @@ VALUES (
   :head_seq,
   'active'
 )
-`;
-
-const DELETE_BRANCH = `
-UPDATE branch
+`,
+  deleteBranch: `
+UPDATE ${T.branch}
 SET status = 'deleted',
     deleted_at = datetime('now')
 WHERE name = :branch
   AND name <> ''
-`;
-
-const INSERT_BLOB = `
-INSERT OR IGNORE INTO blob_store (hash, data, content_type, size)
+`,
+  insertBlob: `
+INSERT OR IGNORE INTO ${T.blob_store} (hash, data, content_type, size)
 VALUES (:hash, :data, :content_type, :size)
-`;
-
-const SELECT_BLOB = `
+`,
+  selectBlob: `
 SELECT data, content_type, size
-FROM blob_store
+FROM ${T.blob_store}
 WHERE hash = :hash
-`;
+`,
+});
 
 type PreparedStatement = ReturnType<Database["prepare"]>;
 
@@ -666,6 +754,9 @@ export interface Engine {
   snapshotInterval: number;
   snapshotRetention: number;
   legacyCommitMetadataRefsRequired: boolean;
+  /** Per-space scoped names for the 14 core tables; consumed by the inline SQL
+   *  helpers that don't go through prepared statements. */
+  tableNames: CoreTableNames;
   statements: PreparedStatements;
 }
 
@@ -685,6 +776,9 @@ export class ProtocolError extends Error {
 
 export interface OpenOptions {
   url: URL;
+  /** Space DID; scopes the core table names so they are globally unique and
+   *  can't be shadowed by an attached pattern cell-db on the write path. */
+  space?: string;
   snapshotInterval?: number;
   snapshotRetention?: number;
 }
@@ -922,52 +1016,60 @@ type BranchRow = {
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
 export const DEFAULT_SNAPSHOT_RETENTION = 2;
 
-const prepareStatements = (database: Database): PreparedStatements => ({
-  insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
-  insertBlob: database.prepare(INSERT_BLOB),
-  insertBranch: database.prepare(INSERT_BRANCH),
-  insertCommit: database.prepare(INSERT_COMMIT),
-  insertInvocation: database.prepare(INSERT_INVOCATION),
-  insertRevision: database.prepare(INSERT_REVISION),
-  insertSnapshot: database.prepare(INSERT_SNAPSHOT),
-  selectAtSeqLocal: database.prepare(SELECT_AT_SEQ_LOCAL),
-  selectBlob: database.prepare(SELECT_BLOB),
-  selectBranch: database.prepare(SELECT_BRANCH),
-  selectBranches: database.prepare(SELECT_BRANCHES),
-  selectBranchHeadSeq: database.prepare(SELECT_BRANCH_HEAD_SEQ),
-  selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
-  selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
-  selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
-  selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
-  selectHead: database.prepare(SELECT_HEAD),
-  selectLatestBase: database.prepare(SELECT_LATEST_BASE),
-  selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
-  selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
-  selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
-  selectPatchCount: database.prepare(SELECT_PATCH_COUNT),
-  selectPatches: database.prepare(SELECT_PATCHES),
-  selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
-  selectServerSeq: database.prepare(SELECT_SERVER_SEQ),
-  selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
-  upsertHead: database.prepare(UPSERT_HEAD),
-  updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
-  deleteBranch: database.prepare(DELETE_BRANCH),
-  deleteOldSnapshots: database.prepare(DELETE_OLD_SNAPSHOTS),
-});
+const prepareStatements = (
+  database: Database,
+  token: string,
+): PreparedStatements => {
+  const sql = buildStatements(coreTableNames(token));
+  return {
+    insertAuthorization: database.prepare(sql.insertAuthorization),
+    insertBlob: database.prepare(sql.insertBlob),
+    insertBranch: database.prepare(sql.insertBranch),
+    insertCommit: database.prepare(sql.insertCommit),
+    insertInvocation: database.prepare(sql.insertInvocation),
+    insertRevision: database.prepare(sql.insertRevision),
+    insertSnapshot: database.prepare(sql.insertSnapshot),
+    selectAtSeqLocal: database.prepare(sql.selectAtSeqLocal),
+    selectBlob: database.prepare(sql.selectBlob),
+    selectBranch: database.prepare(sql.selectBranch),
+    selectBranches: database.prepare(sql.selectBranches),
+    selectBranchHeadSeq: database.prepare(sql.selectBranchHeadSeq),
+    selectBranchStatus: database.prepare(sql.selectBranchStatus),
+    selectCommitRevisions: database.prepare(sql.selectCommitRevisions),
+    selectCurrentLocal: database.prepare(sql.selectCurrentLocal),
+    selectExistingCommit: database.prepare(sql.selectExistingCommit),
+    selectHead: database.prepare(sql.selectHead),
+    selectLatestBase: database.prepare(sql.selectLatestBase),
+    selectLatestSnapshot: database.prepare(sql.selectLatestSnapshot),
+    selectNextSeq: database.prepare(sql.selectNextSeq),
+    selectPatchConflicts: database.prepare(sql.selectPatchConflicts),
+    selectPatchCount: database.prepare(sql.selectPatchCount),
+    selectPatches: database.prepare(sql.selectPatches),
+    selectPendingResolution: database.prepare(sql.selectPendingResolution),
+    selectServerSeq: database.prepare(sql.selectServerSeq),
+    selectSetDeleteConflict: database.prepare(sql.selectSetDeleteConflict),
+    upsertHead: database.prepare(sql.upsertHead),
+    updateBranchHead: database.prepare(sql.updateBranchHead),
+    deleteBranch: database.prepare(sql.deleteBranch),
+    deleteOldSnapshots: database.prepare(sql.deleteOldSnapshots),
+  };
+};
 
+// `table` is an already-quoted core-table identifier (e.g. `"commit"` or
+// `"revision__<token>"`); PRAGMA table_info accepts a quoted name directly.
 const hasColumn = (
   database: Database,
   table: string,
   column: string,
 ): boolean => {
-  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+  const rows = database.prepare(`PRAGMA table_info(${table})`).all() as Array<
     { name: string }
   >;
   return rows.some((row) => row.name === column);
 };
 
 const primaryKeyColumns = (database: Database, table: string): string[] => {
-  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+  const rows = database.prepare(`PRAGMA table_info(${table})`).all() as Array<
     { name: string; pk: number }
   >;
   return rows
@@ -985,8 +1087,11 @@ const indexColumns = (database: Database, index: string): string[] => {
     .map((row) => row.name);
 };
 
-const migrateScopedEntityTables = (database: Database): void => {
-  if (hasColumn(database, "revision", "scope_key")) {
+const migrateScopedEntityTables = (
+  database: Database,
+  T: CoreTableNames,
+): void => {
+  if (hasColumn(database, T.revision, "scope_key")) {
     return;
   }
 
@@ -999,11 +1104,11 @@ DROP INDEX IF EXISTS idx_revision_branch;
 DROP INDEX IF EXISTS idx_head_branch;
 DROP INDEX IF EXISTS idx_snapshot_lookup;
 
-ALTER TABLE revision RENAME TO revision_unscoped_migration;
-ALTER TABLE head RENAME TO head_unscoped_migration;
-ALTER TABLE snapshot RENAME TO snapshot_unscoped_migration;
+ALTER TABLE ${T.revision} RENAME TO revision_unscoped_migration;
+ALTER TABLE ${T.head} RENAME TO head_unscoped_migration;
+ALTER TABLE ${T.snapshot} RENAME TO snapshot_unscoped_migration;
 
-CREATE TABLE revision (
+CREATE TABLE ${T.revision} (
   branch      TEXT    NOT NULL DEFAULT '',
   id          TEXT    NOT NULL,
   scope_key   TEXT    NOT NULL DEFAULT 'space',
@@ -1013,16 +1118,16 @@ CREATE TABLE revision (
   data        JSON,
   commit_seq  INTEGER NOT NULL,
   PRIMARY KEY (branch, id, scope_key, seq, op_index),
-  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+  FOREIGN KEY (commit_seq) REFERENCES ${T.commit}(seq)
 );
 CREATE INDEX idx_revision_branch_id_seq
-  ON revision (branch, id, scope_key, seq, op_index);
+  ON ${T.revision} (branch, id, scope_key, seq, op_index);
 CREATE INDEX idx_revision_commit
-  ON revision (commit_seq);
+  ON ${T.revision} (commit_seq);
 CREATE INDEX idx_revision_branch
-  ON revision (branch, seq);
+  ON ${T.revision} (branch, seq);
 
-CREATE TABLE head (
+CREATE TABLE ${T.head} (
   branch    TEXT    NOT NULL,
   id        TEXT    NOT NULL,
   scope_key TEXT    NOT NULL DEFAULT 'space',
@@ -1030,9 +1135,9 @@ CREATE TABLE head (
   op_index  INTEGER NOT NULL,
   PRIMARY KEY (branch, id, scope_key)
 );
-CREATE INDEX idx_head_branch ON head (branch);
+CREATE INDEX idx_head_branch ON ${T.head} (branch);
 
-CREATE TABLE snapshot (
+CREATE TABLE ${T.snapshot} (
   branch    TEXT    NOT NULL DEFAULT '',
   id        TEXT    NOT NULL,
   scope_key TEXT    NOT NULL DEFAULT 'space',
@@ -1041,17 +1146,17 @@ CREATE TABLE snapshot (
   PRIMARY KEY (branch, id, scope_key, seq)
 );
 CREATE INDEX idx_snapshot_lookup
-  ON snapshot (branch, id, scope_key, seq);
+  ON ${T.snapshot} (branch, id, scope_key, seq);
 
-INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq)
+INSERT INTO ${T.revision} (branch, id, scope_key, seq, op_index, op, data, commit_seq)
 SELECT branch, id, 'space', seq, op_index, op, data, commit_seq
 FROM revision_unscoped_migration;
 
-INSERT INTO head (branch, id, scope_key, seq, op_index)
+INSERT INTO ${T.head} (branch, id, scope_key, seq, op_index)
 SELECT branch, id, 'space', seq, op_index
 FROM head_unscoped_migration;
 
-INSERT INTO snapshot (branch, id, scope_key, seq, value)
+INSERT INTO ${T.snapshot} (branch, id, scope_key, seq, value)
 SELECT branch, id, 'space', seq, value
 FROM snapshot_unscoped_migration;
 
@@ -1063,38 +1168,47 @@ COMMIT;
 `);
 };
 
-const migrateSchedulerReadIndexOwnerSpace = (database: Database): void => {
-  if (hasColumn(database, "scheduler_read_index", "owner_space")) {
+const migrateSchedulerReadIndexOwnerSpace = (
+  database: Database,
+  T: CoreTableNames,
+): void => {
+  if (hasColumn(database, T.scheduler_read_index, "owner_space")) {
     return;
   }
 
   database.exec(`
-ALTER TABLE scheduler_read_index
+ALTER TABLE ${T.scheduler_read_index}
 ADD COLUMN owner_space TEXT;
 `);
 };
 
-const migrateSchedulerWriteIndexOwnerSpace = (database: Database): void => {
-  if (hasColumn(database, "scheduler_write_index", "owner_space")) {
+const migrateSchedulerWriteIndexOwnerSpace = (
+  database: Database,
+  T: CoreTableNames,
+): void => {
+  if (hasColumn(database, T.scheduler_write_index, "owner_space")) {
     return;
   }
 
   database.exec(`
-ALTER TABLE scheduler_write_index
+ALTER TABLE ${T.scheduler_write_index}
 ADD COLUMN owner_space TEXT NOT NULL DEFAULT '';
 `);
 };
 
-const migrateSchedulerActionSnapshotMetadata = (database: Database): void => {
-  if (!hasColumn(database, "scheduler_action_snapshot", "commit_seq")) {
+const migrateSchedulerActionSnapshotMetadata = (
+  database: Database,
+  T: CoreTableNames,
+): void => {
+  if (!hasColumn(database, T.scheduler_action_snapshot, "commit_seq")) {
     database.exec(`
-ALTER TABLE scheduler_action_snapshot
+ALTER TABLE ${T.scheduler_action_snapshot}
 ADD COLUMN commit_seq INTEGER;
 `);
   }
-  if (!hasColumn(database, "scheduler_action_snapshot", "observed_at_seq")) {
+  if (!hasColumn(database, T.scheduler_action_snapshot, "observed_at_seq")) {
     database.exec(`
-ALTER TABLE scheduler_action_snapshot
+ALTER TABLE ${T.scheduler_action_snapshot}
 ADD COLUMN observed_at_seq INTEGER NOT NULL DEFAULT 0;
 `);
   }
@@ -1102,9 +1216,10 @@ ADD COLUMN observed_at_seq INTEGER NOT NULL DEFAULT 0;
 
 const migrateSchedulerActionSnapshotOwnerSpaceKey = (
   database: Database,
+  T: CoreTableNames,
 ): void => {
   if (
-    primaryKeyColumns(database, "scheduler_action_snapshot").includes(
+    primaryKeyColumns(database, T.scheduler_action_snapshot).includes(
       "owner_space",
     )
   ) {
@@ -1113,7 +1228,7 @@ const migrateSchedulerActionSnapshotOwnerSpaceKey = (
 
   const ownerSpaceSelect = hasColumn(
       database,
-      "scheduler_action_snapshot",
+      T.scheduler_action_snapshot,
       "owner_space",
     )
     ? "COALESCE(owner_space, '')"
@@ -1122,10 +1237,10 @@ const migrateSchedulerActionSnapshotOwnerSpaceKey = (
   database.exec(`
 BEGIN TRANSACTION;
 
-ALTER TABLE scheduler_action_snapshot
+ALTER TABLE ${T.scheduler_action_snapshot}
 RENAME TO scheduler_action_snapshot_owner_space_migration;
 
-CREATE TABLE scheduler_action_snapshot (
+CREATE TABLE ${T.scheduler_action_snapshot} (
   branch              TEXT    NOT NULL DEFAULT '',
   owner_space         TEXT    NOT NULL DEFAULT '',
   piece_id            TEXT    NOT NULL,
@@ -1143,10 +1258,10 @@ CREATE TABLE scheduler_action_snapshot (
     action_id
   ),
   FOREIGN KEY (observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 
-INSERT OR REPLACE INTO scheduler_action_snapshot (
+INSERT OR REPLACE INTO ${T.scheduler_action_snapshot} (
   branch,
   owner_space,
   piece_id,
@@ -1177,9 +1292,10 @@ COMMIT;
 
 const migrateSchedulerActionStateOwnerSpaceKey = (
   database: Database,
+  T: CoreTableNames,
 ): void => {
   if (
-    primaryKeyColumns(database, "scheduler_action_state").includes(
+    primaryKeyColumns(database, T.scheduler_action_state).includes(
       "owner_space",
     )
   ) {
@@ -1188,7 +1304,7 @@ const migrateSchedulerActionStateOwnerSpaceKey = (
 
   const ownerSpaceSelect = hasColumn(
       database,
-      "scheduler_action_state",
+      T.scheduler_action_state,
       "owner_space",
     )
     ? "COALESCE(owner_space, '')"
@@ -1197,10 +1313,10 @@ const migrateSchedulerActionStateOwnerSpaceKey = (
   database.exec(`
 BEGIN TRANSACTION;
 
-ALTER TABLE scheduler_action_state
+ALTER TABLE ${T.scheduler_action_state}
 RENAME TO scheduler_action_state_owner_space_migration;
 
-CREATE TABLE scheduler_action_state (
+CREATE TABLE ${T.scheduler_action_state} (
   branch                 TEXT    NOT NULL DEFAULT '',
   owner_space            TEXT    NOT NULL DEFAULT '',
   piece_id               TEXT    NOT NULL,
@@ -1218,10 +1334,10 @@ CREATE TABLE scheduler_action_state (
     action_id
   ),
   FOREIGN KEY (latest_observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 
-INSERT OR REPLACE INTO scheduler_action_state (
+INSERT OR REPLACE INTO ${T.scheduler_action_state} (
   branch,
   owner_space,
   piece_id,
@@ -1250,7 +1366,10 @@ COMMIT;
 `);
 };
 
-const migrateSchedulerActionIndexes = (database: Database): void => {
+const migrateSchedulerActionIndexes = (
+  database: Database,
+  T: CoreTableNames,
+): void => {
   const readIndexHasOwnerSpace = indexColumns(
     database,
     "idx_scheduler_read_index_action",
@@ -1266,7 +1385,7 @@ const migrateSchedulerActionIndexes = (database: Database): void => {
   database.exec(`
 DROP INDEX IF EXISTS idx_scheduler_read_index_action;
 CREATE INDEX idx_scheduler_read_index_action
-  ON scheduler_read_index (
+  ON ${T.scheduler_read_index} (
     branch,
     owner_space,
     piece_id,
@@ -1276,7 +1395,7 @@ CREATE INDEX idx_scheduler_read_index_action
 
 DROP INDEX IF EXISTS idx_scheduler_write_index_action;
 CREATE INDEX idx_scheduler_write_index_action
-  ON scheduler_write_index (
+  ON ${T.scheduler_write_index} (
     branch,
     owner_space,
     piece_id,
@@ -1286,18 +1405,21 @@ CREATE INDEX idx_scheduler_write_index_action
 `);
 };
 
-const migrateSchedulerObservationReplayStatus = (database: Database): void => {
-  if (hasColumn(database, "scheduler_observation_replay", "status")) {
+const migrateSchedulerObservationReplayStatus = (
+  database: Database,
+  T: CoreTableNames,
+): void => {
+  if (hasColumn(database, T.scheduler_observation_replay, "status")) {
     return;
   }
 
   database.exec(`
 BEGIN TRANSACTION;
 
-ALTER TABLE scheduler_observation_replay
+ALTER TABLE ${T.scheduler_observation_replay}
 RENAME TO scheduler_observation_replay_legacy;
 
-CREATE TABLE scheduler_observation_replay (
+CREATE TABLE ${T.scheduler_observation_replay} (
   branch              TEXT    NOT NULL DEFAULT '',
   session_id          TEXT    NOT NULL,
   local_seq           INTEGER NOT NULL,
@@ -1309,10 +1431,10 @@ CREATE TABLE scheduler_observation_replay (
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (branch, session_id, local_seq),
   FOREIGN KEY (observation_id)
-    REFERENCES scheduler_observation(observation_id)
+    REFERENCES ${T.scheduler_observation}(observation_id)
 );
 
-INSERT INTO scheduler_observation_replay (
+INSERT INTO ${T.scheduler_observation_replay} (
   branch,
   session_id,
   local_seq,
@@ -1339,32 +1461,78 @@ COMMIT;
 `);
 };
 
+/**
+ * Bring a legacy (bare-named) core-table database up to space-scoped names. For
+ * each of the 14 core tables: when a non-empty token is in effect, if the bare
+ * table exists and the scoped one does not, rename it. SQLite auto-rewrites FK
+ * references on RENAME (legacy_alter_table=off), so pure renames suffice.
+ * Idempotent — already-scoped or absent tables are skipped.
+ */
+const migrateCoreTablesToSpaceScoped = (
+  database: Database,
+  token: string,
+): void => {
+  if (token === "") {
+    return;
+  }
+  const tableExists = (name: string): boolean =>
+    (database.prepare(`PRAGMA table_info("${name}")`).all() as unknown[])
+      .length > 0;
+
+  database.exec("BEGIN TRANSACTION;");
+  try {
+    for (const key of CORE_TABLE_KEYS) {
+      const bare = key; // bare identifier (e.g. `commit`, `revision`)
+      const scoped = `${key}__${token}`;
+      if (tableExists(bare) && !tableExists(scoped)) {
+        database.exec(
+          `ALTER TABLE "${bare}" RENAME TO "${scoped}";`,
+        );
+      }
+    }
+    database.exec("COMMIT;");
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+};
+
 export const open = async (
   {
     url,
+    space,
     snapshotInterval = DEFAULT_SNAPSHOT_INTERVAL,
     snapshotRetention = DEFAULT_SNAPSHOT_RETENTION,
   }: OpenOptions,
 ): Promise<Engine> => {
+  const token = scopeToken(space);
+  const tableNames = coreTableNames(token);
   const database = await new Database(toDatabaseAddress(url), { create: true });
   database.exec(NEW_DB_PRAGMAS);
   database.exec(PRAGMAS);
-  database.exec(INIT);
-  migrateScopedEntityTables(database);
-  migrateSchedulerReadIndexOwnerSpace(database);
-  migrateSchedulerWriteIndexOwnerSpace(database);
-  migrateSchedulerActionSnapshotMetadata(database);
-  migrateSchedulerActionSnapshotOwnerSpaceKey(database);
-  migrateSchedulerActionStateOwnerSpaceKey(database);
-  migrateSchedulerActionIndexes(database);
-  migrateSchedulerObservationReplayStatus(database);
+  // Bring legacy bare-named core tables to scoped names FIRST, so the scoped
+  // schema bootstrap and migrations below see the renamed tables.
+  migrateCoreTablesToSpaceScoped(database, token);
+  database.exec(buildInit(tableNames));
+  migrateScopedEntityTables(database, tableNames);
+  migrateSchedulerReadIndexOwnerSpace(database, tableNames);
+  migrateSchedulerWriteIndexOwnerSpace(database, tableNames);
+  migrateSchedulerActionSnapshotMetadata(database, tableNames);
+  migrateSchedulerActionSnapshotOwnerSpaceKey(database, tableNames);
+  migrateSchedulerActionStateOwnerSpaceKey(database, tableNames);
+  migrateSchedulerActionIndexes(database, tableNames);
+  migrateSchedulerObservationReplayStatus(database, tableNames);
   return {
     url,
     database,
     snapshotInterval,
     snapshotRetention,
-    legacyCommitMetadataRefsRequired: commitMetadataRefsRequired(database),
-    statements: prepareStatements(database),
+    tableNames,
+    legacyCommitMetadataRefsRequired: commitMetadataRefsRequired(
+      database,
+      tableNames,
+    ),
+    statements: prepareStatements(database, token),
   };
 };
 
@@ -1651,8 +1819,8 @@ export const getLatestSchedulerActionSnapshot = (
       COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
       s.observed_at_seq AS observed_at_seq,
       s.payload
-    FROM scheduler_action_snapshot s
-    JOIN scheduler_observation o
+    FROM ${engine.tableNames.scheduler_action_snapshot} s
+    JOIN ${engine.tableNames.scheduler_observation} o
       ON o.observation_id = s.observation_id
     WHERE s.branch = :branch
       AND s.owner_space = :owner_space
@@ -1713,10 +1881,10 @@ export const listSchedulerActionSnapshots = (
       a.direct_dirty_seq,
       a.stale_seq,
       a.unknown_reason
-    FROM scheduler_action_snapshot s
-    JOIN scheduler_observation o
+    FROM ${engine.tableNames.scheduler_action_snapshot} s
+    JOIN ${engine.tableNames.scheduler_observation} o
       ON o.observation_id = s.observation_id
-    LEFT JOIN scheduler_action_state a
+    LEFT JOIN ${engine.tableNames.scheduler_action_state} a
       ON a.branch = s.branch
       AND a.owner_space = s.owner_space
       AND a.piece_id = s.piece_id
@@ -1837,7 +2005,7 @@ export const findSchedulerReadersForWrite = (
       process_generation,
       action_id,
       observation_id
-    FROM scheduler_read_index
+    FROM ${engine.tableNames.scheduler_read_index}
     WHERE branch = :branch
       AND read_space = :read_space
       AND read_id = :read_id
@@ -1957,7 +2125,7 @@ export const getSchedulerActionState = (
       direct_dirty_seq,
       stale_seq,
       unknown_reason
-    FROM scheduler_action_state
+    FROM ${engine.tableNames.scheduler_action_state}
     WHERE branch = :branch
       AND owner_space = :owner_space
       AND piece_id = :piece_id
@@ -2007,7 +2175,7 @@ function markSchedulerActionDirectDirty(
   dirtySeq: number,
 ): void {
   engine.database.prepare(`
-    INSERT INTO scheduler_action_state (
+    INSERT INTO ${engine.tableNames.scheduler_action_state} (
       branch,
       owner_space,
       piece_id,
@@ -2052,7 +2220,7 @@ function markSchedulerActionStale(
   staleSeq: number,
 ): void {
   engine.database.prepare(`
-    INSERT INTO scheduler_action_state (
+    INSERT INTO ${engine.tableNames.scheduler_action_state} (
       branch,
       owner_space,
       piece_id,
@@ -2139,7 +2307,7 @@ function schedulerWritesForAction(
       write_id,
       write_scope,
       write_path
-    FROM scheduler_write_index
+    FROM ${engine.tableNames.scheduler_write_index}
     WHERE branch = :branch
       AND owner_space = :owner_space
       AND piece_id = :piece_id
@@ -2333,8 +2501,8 @@ function selectSchedulerSnapshotRow(
       COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
       s.observed_at_seq AS observed_at_seq,
       s.payload
-    FROM scheduler_action_snapshot s
-    JOIN scheduler_observation o
+    FROM ${engine.tableNames.scheduler_action_snapshot} s
+    JOIN ${engine.tableNames.scheduler_observation} o
       ON o.observation_id = s.observation_id
     WHERE s.branch = :branch
       AND s.owner_space = :owner_space
@@ -2383,7 +2551,7 @@ function insertSchedulerObservationRow(
 ): number {
   runSchedulerObservationStatement("insert observation row", () => {
     engine.database.prepare(`
-      INSERT INTO scheduler_observation (
+      INSERT INTO ${engine.tableNames.scheduler_observation} (
         branch,
         commit_seq,
         observed_at_seq,
@@ -2434,7 +2602,7 @@ function updateSchedulerObservationRow(
 ): void {
   runSchedulerObservationStatement("update observation row", () => {
     engine.database.prepare(`
-      UPDATE scheduler_observation
+      UPDATE ${engine.tableNames.scheduler_observation}
       SET
         commit_seq = :commit_seq,
         observed_at_seq = :observed_at_seq,
@@ -2470,7 +2638,7 @@ function recordSchedulerObservationReplay(
 ): void {
   runSchedulerObservationStatement("record observation replay", () => {
     engine.database.prepare(`
-      INSERT INTO scheduler_observation_replay (
+      INSERT INTO ${engine.tableNames.scheduler_observation_replay} (
         branch,
         session_id,
         local_seq,
@@ -2526,7 +2694,7 @@ function getSchedulerObservationReplay(
 } | undefined {
   return engine.database.prepare(`
     SELECT status, reason, observation_id, observed_at_seq, payload
-    FROM scheduler_observation_replay
+    FROM ${engine.tableNames.scheduler_observation_replay}
     WHERE branch = :branch
       AND session_id = :session_id
       AND local_seq = :local_seq
@@ -2555,7 +2723,7 @@ function upsertSchedulerSnapshot(
   },
 ): void {
   engine.database.prepare(`
-    INSERT INTO scheduler_action_snapshot (
+    INSERT INTO ${engine.tableNames.scheduler_action_snapshot} (
       branch,
       owner_space,
       piece_id,
@@ -2702,7 +2870,7 @@ function reconcileSchedulerReadRows(
       process_generation,
       action_id,
       observation_id
-    FROM scheduler_read_index
+    FROM ${engine.tableNames.scheduler_read_index}
     WHERE branch = :branch
       AND COALESCE(owner_space, '') = :owner_space
       AND piece_id = :piece_id
@@ -2716,7 +2884,7 @@ function reconcileSchedulerReadRows(
   );
 
   const deleteReadRow = engine.database.prepare(`
-    DELETE FROM scheduler_read_index
+    DELETE FROM ${engine.tableNames.scheduler_read_index}
     WHERE branch = :branch
       AND owner_space IS :owner_space
       AND read_space = :read_space
@@ -2730,7 +2898,7 @@ function reconcileSchedulerReadRows(
   `);
 
   const insertReadRow = engine.database.prepare(`
-    INSERT INTO scheduler_read_index (
+    INSERT INTO ${engine.tableNames.scheduler_read_index} (
       branch,
       owner_space,
       read_space,
@@ -2763,7 +2931,7 @@ function reconcileSchedulerReadRows(
     keyForRow: schedulerReadIndexKey,
     deleteAllRows: () => {
       engine.database.prepare(`
-        DELETE FROM scheduler_read_index
+        DELETE FROM ${engine.tableNames.scheduler_read_index}
         WHERE branch = :branch
           AND COALESCE(owner_space, '') = :owner_space
           AND piece_id = :piece_id
@@ -2868,7 +3036,7 @@ function reconcileSchedulerWriteRows(
       process_generation,
       action_id,
       observation_id
-    FROM scheduler_write_index
+    FROM ${engine.tableNames.scheduler_write_index}
     WHERE branch = :branch
       AND owner_space = :owner_space
       AND piece_id = :piece_id
@@ -2882,7 +3050,7 @@ function reconcileSchedulerWriteRows(
   );
 
   const deleteWriteRow = engine.database.prepare(`
-    DELETE FROM scheduler_write_index
+    DELETE FROM ${engine.tableNames.scheduler_write_index}
     WHERE branch = :branch
       AND owner_space = :owner_space
       AND write_space = :write_space
@@ -2896,7 +3064,7 @@ function reconcileSchedulerWriteRows(
   `);
 
   const insertWriteRow = engine.database.prepare(`
-    INSERT INTO scheduler_write_index (
+    INSERT INTO ${engine.tableNames.scheduler_write_index} (
       branch,
       owner_space,
       write_space,
@@ -2929,7 +3097,7 @@ function reconcileSchedulerWriteRows(
     keyForRow: schedulerWriteIndexKey,
     deleteAllRows: () => {
       engine.database.prepare(`
-        DELETE FROM scheduler_write_index
+        DELETE FROM ${engine.tableNames.scheduler_write_index}
         WHERE branch = :branch
           AND owner_space = :owner_space
           AND piece_id = :piece_id
@@ -2979,7 +3147,7 @@ function upsertSchedulerActionState(
   },
 ): void {
   engine.database.prepare(`
-    INSERT INTO scheduler_action_state (
+    INSERT INTO ${engine.tableNames.scheduler_action_state} (
       branch,
       owner_space,
       piece_id,
@@ -4169,11 +4337,17 @@ const LEGACY_EMPTY_INVOCATION: InvocationRecord = {
 };
 const LEGACY_EMPTY_AUTHORIZATION: AuthorizationRecord = {};
 
-const commitMetadataRefsRequired = (database: Database): boolean => {
-  const rows = database.prepare(`PRAGMA table_info("commit")`).all() as Array<{
-    name: string;
-    notnull: number;
-  }>;
+const commitMetadataRefsRequired = (
+  database: Database,
+  T: CoreTableNames,
+): boolean => {
+  // `T.commit` is already a quoted identifier (`"commit"` or `"commit__<tok>"`);
+  // PRAGMA table_info accepts a quoted table name directly.
+  const rows = database.prepare(`PRAGMA table_info(${T.commit})`)
+    .all() as Array<{
+      name: string;
+      notnull: number;
+    }>;
   const byName = new Map(rows.map((row) => [row.name, row.notnull] as const));
   return byName.get("invocation_ref") === 1 ||
     byName.get("authorization_ref") === 1;

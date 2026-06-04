@@ -928,6 +928,7 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
 
     const readEngine = await openEngine({
       url: resolveSpaceStoreUrl(store, readSpace),
+      space: readSpace,
     });
     try {
       const readers = findSchedulerReadersForWrite(readEngine, {
@@ -1102,6 +1103,7 @@ Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", 
 
     const readEngine = await openEngine({
       url: resolveSpaceStoreUrl(store, readSpace),
+      space: readSpace,
     });
     try {
       const readers = findSchedulerReadersForWrite(readEngine, {
