@@ -32,6 +32,15 @@ export const WIRE_TYPE_TAGS = Object.freeze(
     // classes do not have a protocol-specific forms.
     //
 
+    /** Constant for class `FabricBytes`. */
+    Bytes: "Bytes@1",
+
+    /** Constant for class `FabricEpochNsec`. */
+    EpochNsec: "EpochNsec@1",
+
+    /** Constant for class `FabricEpochDays`. */
+    EpochDays: "EpochDays@1",
+
     /** Constant for class `FabricRegExp`. */
     RegExp: "RegExp@1",
 
@@ -51,15 +60,6 @@ export const WIRE_TYPE_TAGS = Object.freeze(
 
     /** Constant for class `FabricSet`. */
     Set: "Set@1",
-
-    /** Constant for class `FabricEpochNsec`. */
-    EpochNsec: "EpochNsec@1",
-
-    /** Constant for class `FabricEpochDays`. */
-    EpochDays: "EpochDays@1",
-
-    /** Constant for class `FabricBytes`. */
-    Bytes: "Bytes@1",
 
     //
     // Tags for non-primary versions of built-in non-primitive classes. These
