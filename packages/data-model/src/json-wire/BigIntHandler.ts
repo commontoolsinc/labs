@@ -30,7 +30,8 @@ export const BigIntHandler: TypeHandler = {
     return BigInt;
   },
 
-  get wireTypeTag(): string {
+  /** @inheritDoc */
+  get wireTypeTag() {
     return WIRE_TYPE_TAGS.BigInt;
   },
 

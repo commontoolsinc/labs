@@ -23,7 +23,8 @@ export const BytesHandler: TypeHandler = {
     return FabricBytes;
   },
 
-  get wireTypeTag(): string {
+  /** @inheritDoc */
+  get wireTypeTag() {
     return WIRE_TYPE_TAGS.Bytes;
   },
 

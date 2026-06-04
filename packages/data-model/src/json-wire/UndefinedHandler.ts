@@ -19,7 +19,8 @@ export const UndefinedHandler: TypeHandler = {
     return undefined;
   },
 
-  get wireTypeTag(): string {
+  /** @inheritDoc */
+  get wireTypeTag() {
     return WIRE_TYPE_TAGS.Undefined;
   },
 

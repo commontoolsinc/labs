@@ -26,7 +26,8 @@ export const SpecialNumberHandler: TypeHandler = {
     return Number;
   },
 
-  get wireTypeTag(): string {
+  /** @inheritDoc */
+  get wireTypeTag() {
     return WIRE_TYPE_TAGS.SpecialNumber;
   },
 

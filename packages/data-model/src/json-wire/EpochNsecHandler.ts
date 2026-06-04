@@ -28,7 +28,8 @@ export const EpochNsecHandler: TypeHandler = {
     return FabricEpochNsec;
   },
 
-  get wireTypeTag(): string {
+  /** @inheritDoc */
+  get wireTypeTag() {
     return WIRE_TYPE_TAGS.EpochNsec;
   },
 

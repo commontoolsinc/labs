@@ -29,7 +29,8 @@ export const EpochDaysHandler: TypeHandler = {
     return FabricEpochDays;
   },
 
-  get wireTypeTag(): string {
+  /** @inheritDoc */
+  get wireTypeTag() {
     return WIRE_TYPE_TAGS.EpochDays;
   },
 
