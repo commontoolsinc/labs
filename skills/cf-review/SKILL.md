@@ -1,389 +1,250 @@
 ---
 name: cf-review
-description: Review a changeset for the Common Fabric repo — the local branch diff vs main, or a GitHub PR. Flags correctness and regression bugs loudly, checks that runtime-semantics changes stay coherent across docs/comments/examples, catches duplicated hashing/ID/serialization logic and LLM "fighting the framework" anti-patterns, and scrutinizes which tests are the right tests. Produces a ranked, report-first review. Use when asked to review code, review a PR, review the current branch or diff, or self-review before pushing. Invoke as /cf-review, /cf-review <PR#>, or add --comment to post inline PR comments.
+description: Review a changeset for the Common Fabric repo — the local branch diff vs main, or a GitHub PR. Flags correctness and regression bugs loudly, checks that runtime-semantics changes stay coherent across docs/comments/examples, catches duplicated core machinery (hashing, serialization, cloning, identity) and code fighting the transformer/reactive model, and scrutinizes whether the tests guard the right principles. Report-first; offers to post a self-signed PR review. Use when asked to review code, review a PR, review the current branch or diff, or self-review before pushing. Invoke as /cf-review or /cf-review <PR#>.
 ---
 
 # Common Fabric Code Review
 
-This skill frames **what we care about** when reviewing changes in this repo. It
-assumes you already know how to read code — it does not teach review mechanics.
-It tells you where this repo's value and its footguns actually are.
+This skill is a **map and a statement of values**, not a recipe. It assumes you
+already know how to read and review code; it tells you the things about _this_
+repo you cannot derive — where its value and its footguns are, and how we like
+review done. (For why skills are written this way, see
+`docs/development/skill-authoring.md`.)
 
-All paths below are relative to the repo root.
+All paths are relative to the repo root.
 
-## What this review is (and is not)
+## What we value in a review
 
-- It is **changeset-scoped**: review the diff and its immediate ripple — which
-  for a big change can mean fanning out to trace _that change's_ blast radius —
-  but never an open-ended repo audit. This review is fast.
-- It is **loud on what matters** and **quiet on what doesn't**. Flag bugs,
-  regressions, and broken principles unmistakably. Keep nits to a short,
-  clearly-optional list — or omit them when there are real issues to focus on.
-- It is **report-first**. Produce the ranked report. Only touch the PR when the
-  invoker passes `--comment`, and only after showing the report.
-- It accepts that **the codebase is in semi-coherence under churn**. The goal is
-  not a pristine merge on the first cycle. The goal is: no regressions, no
-  silent principle violations, and nobody gets misled later by stale docs the
-  change should have updated.
+- **Changeset-scoped.** Review the diff and its immediate ripple — which for a
+  big change can mean fanning out to trace _that change's_ blast radius — never
+  an open-ended repo audit. This review is fast.
+- **Loud on what matters, quiet on what doesn't.** Bugs, regressions, and broken
+  principles, unmistakably; don't pad with nits. We ship many PRs and don't
+  demand a pristine first cycle — the bar is no regressions, no silent principle
+  breaks, and no one misled later by a stale doc this change should have
+  updated.
+- **Report-first, then offer to post.** Always show the report. Then offer to
+  post it to the PR — **signed as yourself** (the agent and model, on behalf of
+  the human), never impersonating them. Skip posting when it isn't worth it.
 
 ## The north star for coherence
 
 > When someone — human or LLM — searches for the words they've heard and lands
-> on a doc, comment, or example, they must not be **misled** and trip over
-> something that no longer matches how the runtime actually works.
+> on a doc, comment, or example, they must not be **misled** by something that
+> no longer matches how the runtime works.
 
-That is the bar. It is **not** "every file uses identical vocabulary." Line-by-
-line vocabulary unification is a slow, opportunistic, Boy-Scout activity — nudge
-nearby drift with small edits, propose big sweeps as follow-ups, never block a
-PR on it. Block only when a change leaves an authoritative source actively
-wrong.
+That is the bar — not uniform vocabulary. Wording drift is a slow Boy-Scout fix:
+nudge what you touch, propose big sweeps as follow-ups. Block only when a change
+leaves an authoritative source _actively wrong_.
 
 ## Why this repo is easy to get wrong
 
-Programs ("patterns") are authored as TypeScript, **transformed** by a custom
-TS-transformer toolchain (CTS) into plain JS that **builds a reactive graph**
-evaluated under live subscriptions. So the source you read is two abstraction
-levels above what runs. The principles are logical once read end-to-end, but
-miss a piece and the behavior looks inexplicable. Two consequences drive this
-review:
+A change is authored as TypeScript, **transformed** by a custom toolchain (CTS)
+into JS that **builds a reactive graph** evaluated under live subscriptions — so
+a change can span many abstraction levels and its implications are not obvious
+in isolation. Two failure modes follow. They are what happens when anyone on a
+high-velocity team moves fast without the whole picture — not AI's fault in
+particular, just easy to do:
 
-1. **LLMs fight the framework** when they can't find the idiom — they reach for
+1. **Fighting the framework** — when the idiom is hard to find, code reaches for
    try/catch, singletons, manual subscriptions, `async/await` in handlers, or
-   `/// <cf-disable-transform />`. See Dimension 4.
-2. **LLMs duplicate core machinery** — re-deriving hashing, serialization, or
-   cloning instead of reusing the one canonical home. These are the subtle,
-   expensive footguns. See Dimension 3.
+   `/// <cf-disable-transform />`. (Dimension 4.)
+2. **Re-forking core machinery** — re-deriving hashing, serialization, cloning,
+   or identity instead of reusing the one canonical home. The subtle, expensive
+   footguns. (Dimension 3.)
 
 ---
 
-## Step 1 — Establish scope and context
+## Step 1 — Establish scope, then pick your depth
 
-**Auto-detect the target.**
+Auto-detect the target: no argument → the local branch vs `main`
+(`BASE=$(git merge-base HEAD origin/main)`, then read `git diff "$BASE"` and
+`git log "$BASE"..HEAD` for intent); a number → that PR (`gh pr view <N>`,
+`gh pr diff <N>`). Say in a couple of lines what the change does and why, and
+whether its scope is coherent or has leaked. Unclear motivation is a **question
+for the author**, not a defect.
 
-- No argument → review the **local branch** against `main`:
-  ```bash
-  git fetch origin main --quiet
-  BASE=$(git merge-base HEAD origin/main)
-  git log --oneline "$BASE"..HEAD     # commit messages = stated motivation
-  git diff --stat "$BASE"             # what changed (incl. working tree)
-  git diff "$BASE"                     # full diff to read
-  git status --short                   # stray/uncommitted files
-  ```
-- A number argument (`/cf-review 3789`) → review that **PR**:
-  ```bash
-  gh pr view <N> --json title,body,files,additions,deletions,headRefName,baseRefName,author
-  gh pr diff <N>
-  # gh pr checkout <N>   # only if you need to run checks/tests locally
-  ```
+**Then pick depth from the diff size** — reading a large change set file-by-file
+burns context and loses the forest:
 
-**Understand before judging.** From the commit messages / PR body, state in 2–3
-lines: _what does this change do, and why?_ Then assess **scope**: does the diff
-do one coherent thing, or has unrelated work leaked in?
-
-If the motivation is genuinely unclear, do **not** block — add a short
-**Questions for the author** list. Missing context is a question, not a defect.
-
-### Triage — pick your depth before you start reading
-
-Decide how to read _from the diff stat_, before opening files. Reading a large
-change set file-by-file burns context and loses the forest for the trees.
-
-- **Detail mode** (default — small/medium: roughly < 15 files / < 800 added
-  lines, one or two packages): read the changed code directly, per Step 2.
-- **Scope-and-theory mode** (large: many files, thousands of lines, 3+ packages
-  or pace layers, or simply too big to hold in your head): **do not try to read
-  every file.** Switch strategy:
-  1. **Map the shape.** Cluster the files from the stat + commits + PR body —
-     core / new abstraction · integration & wiring · tests · docs · generated /
-     mechanical — and note which pace layers it crosses.
-  2. **Form a theory of intent.** In a few lines, state what the change set is
-     _trying to achieve_ and its **blast radius** (its integration surface).
-     Build the theory top-down and probe to confirm it; don't reconstruct it
-     bottom-up from every line.
-  3. **Deep-read only the load-bearing files** — the core new abstraction,
-     public API / signature changes, and any hash / serialize / clone / identity
-     touchpoints (Dimension 3). Sample the rest; skim generated / mechanical
-     edits.
-  4. **Fan out with subagents** for the search-heavy, parallelizable parts —
-     this is where they earn their keep. Prefer read-only explore / search
-     agents; give each a tight, specific question and take back the conclusion,
-     not file dumps. Spawn parallel agents to:
-     - **trace blast radius** — callers / consumers of the changed surface that
-       are _not_ in the diff but should have been updated (the classic large-PR
-       coherence miss);
-     - **sweep coherence** — docs / examples / comments for each touched concept
-       (Dimension 2);
-     - **review a cluster** — hand one logical slice to a subagent and have it
-       return findings in this skill's format;
-     - **check anti-duplication** — search the repo for prior art the change may
-       be forking (Dimension 3).
-  5. **Synthesize, don't concatenate.** Merge results into one ranked report,
-     and test the change set against its own theory: flag pieces that don't fit
-     (scope creep, half-finished migration, leftover cruft) and gaps the theory
-     implies are missing (an un-updated caller or doc, a missing test for a new
-     seam).
-
-  **Coverage honesty (no silent caps).** State what you deep-read vs. sampled
-  vs. delegated, so the verdict's depth is legible. Never imply whole-diff
-  coverage you didn't do.
+- **Detail mode** (small/medium — a package or two): read the changed code.
+- **Scope-and-theory mode** (large — many files, thousands of lines, several
+  packages or pace layers): don't read every file. Map the file clusters; form a
+  top-down **theory of intent and blast radius**; deep-read only the
+  load-bearing files (the core new abstraction, public API / signature changes,
+  and any hashing / serialization / cloning / identity touchpoints); and **fan
+  out read-only subagents** for the search-heavy parts — tracing callers not in
+  the diff that should have changed, sweeping docs / examples for touched
+  concepts, reviewing a cluster, hunting prior art the change may be forking.
+  Give each a tight question; take back the conclusion, not file dumps.
+  Synthesize into one report and test the change against its own theory (scope
+  creep, half-finished migration, a missing caller / doc / test). **Say what you
+  deep-read vs. sampled vs. delegated** — never imply coverage you didn't do.
 
 ---
 
-## Step 2 — Review across these dimensions
+## Step 2 — Where to look
 
-Order findings by impact, not by dimension. The dimensions are a checklist of
-where to look, not the structure of the report.
+Order findings by impact. Each dimension is a generative principle plus _seed_
+tells — examples to prime you, not a checklist to stop at. The space is larger
+than any list here.
 
-### 1. Correctness & regressions
+### 1. Correctness & regressions — the loudest category
 
-The loudest category. A confirmed bug or regression is **Blocking**.
+A confirmed bug or regression is Blocking. Watch especially for:
 
-- Logic errors, wrong conditionals, off-by-one, unhandled empty/error states.
-- **Regression smell in tests**: was an existing test _weakened or retrofitted_
-  to make new (possibly wrong) behavior pass? Diff the test changes against the
-  behavior change and check they agree on purpose. Tests edited to assert a bug
-  are Blocking.
-- **Reactivity correctness** (this repo): reactive self-feedback loops (a `cf-*`
-  control already bound via `$value`/`$checked` whose handler writes the same
-  cell back), `.get()` on computed/lift results, `new Writable(reactiveValue)`,
-  nested `Writable`. Defer to `docs/common/ai/pattern-critique-guide.md` for the
-  full pattern ruleset — don't restate it; cite it.
-- **Determinism / SES**: direct `Date.now()`, `Math.random()`, or authored
-  timers in pattern code; `safeDateNow()`/`nonPrivateRandom()` used inside a
-  re-running `computed()`/`lift()`.
+- **Tests bent to fit a regression** — an existing test weakened or retrofitted
+  so new (possibly wrong) behavior passes. A test edited to assert a bug is
+  Blocking.
+- **Reactivity hazards** — reactive self-feedback (a `cf-*` control bound via
+  `$value` / `$checked` whose handler writes the same cell back), `.get()` on
+  computed / lift results, `new Writable(reactiveValue)`. Defer to
+  `docs/common/ai/pattern-critique-guide.md` for the full ruleset; cite it.
+- **Non-determinism** — `Date.now()` / `Math.random()` / authored timers in
+  pattern code (use `safeDateNow()` / `nonPrivateRandom()`, never inside a
+  re-running computation); and **time-based waits** — `sleep` / `setTimeout`
+  used to "wait for" a result instead of awaiting the actual event or signal.
+  The latter is almost never justified (animations aside) and is a prime source
+  of CI flakiness: what takes X today takes 10X under load someday.
 
 ### 2. Coherence ripple
 
-Apply the north-star test above. Bounded to what the diff touches.
-
-- If the change alters **runtime semantics** — a primitive's behavior, a
-  transformer rule, a public API signature, the name/meaning of a core concept —
-  find the sources that still describe the OLD behavior and flag them:
-  - `docs/common/` (concepts, capabilities, patterns, conventions)
-  - example patterns in `packages/patterns/` and the catalog index
-    `packages/patterns/index.md`
-  - catalog + stories under `packages/patterns/catalog/`
-  - **JSDoc on the changed symbols** and the package `README.md`
-  - normative specs, e.g. `docs/specs/ts-transformer/` and
-    `docs/common/concepts/reactivity.md`
-- If the change **violates a documented invariant** (transformer target-language
-  boundary, module-graph cleanliness, "make invalid states unrepresentable"),
-  flag it **loudly** with the doc reference. A silent principle break is
-  Blocking even if the code "works."
-- **Don't boil the ocean.** Fix what the diff touches. Propose wider doc sweeps
-  as follow-ups; never balloon the PR chasing every minor mention.
+Apply the north-star test, bounded to what the diff touches. If the change moves
+**runtime semantics** — a primitive's behavior, a transformer rule, a public
+signature, the meaning of a core concept — find what still describes the old
+behavior (docs under `docs/common/`, example patterns and the catalog, JSDoc on
+the changed symbols, package READMEs, normative specs) and flag it. A change
+that **violates a documented invariant** (transformer target-language boundary,
+module-graph cleanliness, "make invalid states unrepresentable") is a loud,
+Blocking finding even if the code "works." Fix what the diff touches; propose
+wider sweeps as follow-ups — don't boil the ocean.
 
 ### 3. Anti-duplication
 
-LLM-generated code silently forks core machinery. In a few domains this is a
-hard footgun because divergence is brutal to debug. **Re-implementing one of
-these is Blocking; reuse the canonical home.**
+We move fast; under that pressure core machinery gets silently re-forked, and in
+a few domains that is brutal to debug because divergence stays invisible until
+it isn't. **Re-implementing one of these is Blocking; reuse the canonical
+home.** Point to the module rather than trusting a symbol name remembered here —
+names drift, so confirm against the package's actual exports when you rely on it
+(this table is the highest-value _and_ highest-rot content in the skill):
 
-| Concern                                   | Canonical home                                                                                                             | Do not                                                                                                                                                                                         |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SHA-256 bytes/hex (content addressing)    | `@commonfabric/content-hash` (`sha256`, `createHasher`)                                                                    | hand-roll, call `crypto.subtle.digest("SHA-256", …)` directly, or import `@noble/hashes` / `hash-wasm` / `node:crypto` / `@std/crypto`                                                         |
-| hash of a fabric value or schema          | `@commonfabric/data-model` → `hashOf` / `hashStringOf` / `taggedHashStringOf` (`value-hash`), `hashSchema` (`schema-hash`) | re-derive value or schema hashing                                                                                                                                                              |
-| clone a fabric value                      | `@commonfabric/data-model` `value-clone` (`cloneIfNecessary`, `cloneForMutation`, `shallowMutableClone`)                   | `structuredClone()` or `JSON.parse(JSON.stringify(...))` on fabric/cell data — it drops cell links and dies on circular `$UI` trees                                                            |
-| (de)serialize fabric values / wire format | `@commonfabric/data-model` `json-wire` (+ `fabric-value`, `fabric-type-tags`, `deep-freeze`)                               | invent a parallel `serialize` / `toJSON` for fabric values                                                                                                                                     |
-| cell ↔ link conversion                    | `convertCellsToLinks` in `packages/runner/src/cell.ts`                                                                     | re-implement link conversion (note: `traverseAndSerialize`/`traverseAndCellify` in `packages/runner/src/builtins/llm-dialog.ts` are private and a known smell — see CT-1205 — don't copy them) |
-| identity / DID / keypairs                 | `@commonfabric/identity`                                                                                                   | generate DIDs or keys ad hoc                                                                                                                                                                   |
-| LEB128 varint encoding                    | `@commonfabric/leb128`                                                                                                     | hand-roll varint encode/decode                                                                                                                                                                 |
-| merkle references                         | `refer()` in `packages/memory/consumer.ts`                                                                                 | re-derive reference hashing                                                                                                                                                                    |
+| Concern                                     | Canonical home                                                                                                | Do not                                                                                                                                            |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SHA-256 / content addressing                | `@commonfabric/content-hash`                                                                                  | hand-roll, call `crypto.subtle.digest("SHA-256", …)` directly, or import `@noble/hashes` / `hash-wasm` / `node:crypto` / `@std/crypto`            |
+| hashing a fabric value or schema            | `@commonfabric/data-model` (`value-hash` / `schema-hash` exports)                                             | re-derive value / schema hashing, or use `JSON.stringify()` to "simulate" a hash — it erases type identity and most contents of non-plain objects |
+| cloning a fabric value                      | `@commonfabric/data-model` (`value-clone` export)                                                             | `structuredClone()` or `JSON.parse(JSON.stringify(...))` on fabric / cell data — drops cell links, dies on circular `$UI` trees                   |
+| (de)serializing fabric values / wire format | `@commonfabric/data-model` (`json-wire` export)                                                               | invent a parallel serializer / `toJSON` for fabric values                                                                                         |
+| cell ↔ link conversion                      | `convertCellsToLinks` (`packages/runner/src/cell.ts`)                                                         | re-implement link conversion (the `traverse*` helpers in `llm-dialog.ts` are private and a known smell — CT-1205 — don't copy them)               |
+| identity / DID / keypairs                   | `@commonfabric/identity`                                                                                      | mint DIDs or keys ad hoc                                                                                                                          |
+| variable-length integer encoding            | `@commonfabric/leb128` (LEB128 or similar)                                                                    | hand-roll varint encode / decode                                                                                                                  |
+| Merkle-tree hashing                         | **N/A — we don't do Merkle-tree hashing** (we have content hashes in `data-model`, not a classic Merkle tree) | invent or import a Merkle-tree library unless specifically asked                                                                                  |
 
-**`hash`, `serialize`, and `clone` are the three we re-fork most**, and
-divergence in any of them yields bugs that are miserable to trace. The tree
-_already_ contains several SHA-256 implementations (e.g. `content-hash` vs
-`packages/toolshed/lib/sha2.ts` vs inline `crypto.subtle.digest` calls) — so
-steer new code to the canonical home; **do not cargo-cult a nearby fork**. When
-the diff adds or edits any of these, scan it explicitly:
-
-```bash
-# new hash/serialize/clone defs, or raw crypto / structuredClone / JSON-clone
-PATTERN='^\+.*((export )?(async )?(function|const) (hash|sha256|serialize|deserialize|clone|deepClone)\b|crypto\.subtle\.digest|structuredClone\(|JSON\.parse\(JSON\.stringify)'
-git diff "$BASE" -- '*.ts' '*.tsx' | grep -nE "$PATTERN"                                # local branch
-gh pr diff <N> | awk '/^\+\+\+ b\//{ts=($0 ~ /\.(ts|tsx)$/)} ts' | grep -nE "$PATTERN"  # PR (scoped to .ts/.tsx)
-```
-
-A new definition is not automatically wrong — but the PR must justify why the
-canonical home doesn't fit. A **silent** fork of hashing, serialization, or
-cloning is Blocking. Beyond these three: before any new helper lands, grep for
-an existing one; a util that duplicates an existing concept is at least an
-**Improvement** finding — point at the instance to reuse or the abstraction to
-extract.
+`hash`, `serialize`, and `clone` are the three we re-fork most — the tree
+_already_ carries several SHA-256s (e.g. `content-hash` vs
+`packages/toolshed/lib/sha2.ts` vs inline `crypto.subtle.digest`), so steer new
+code to the canonical home rather than cargo-culting a neighbor. A new such
+definition isn't automatically wrong, but the PR must justify why the canonical
+home doesn't fit; a _silent_ fork is Blocking.
 
 ### 4. Framework-fit
 
-Spot code where the author (often an LLM) is **fighting the framework**. Each
-finding has two outputs: (a) the code fix toward the idiom, and (b) — when the
-confusion was avoidable — _the doc or structure gap that caused it_, proposed as
-a follow-up. (b) is how we stop the same mistake recurring.
+Spot code fighting the framework instead of using it, and give two outputs: the
+fix toward the idiom, and — when the confusion was avoidable — _the doc or
+structure gap that caused it_ (a follow-up; that is how the mistake stops
+recurring). Tells (seeds, drawn from `docs/development/DEVELOPMENT.md`):
 
-Tells, drawn from `docs/development/DEVELOPMENT.md`:
-
-- **Over-eager try/catch** that swallows errors. Throwing is fine here; fatal
-  errors (invalidated assumption, missing capability) _should_ propagate. LLMs
-  over-handle.
-- **New singletons / module-global mutable state** — infectious; breaks multiple
-  instances and tests.
-- **Ambiguous `any`** away from serialization boundaries; **representable
-  invalid states** (optional fields that admit invalid intermediates).
-- **Working around the transformer**: stray `/// <cf-disable-transform />`,
-  manual graph wiring CTS would do, imperative escapes from the target language.
-- **Async escapes in patterns**: `async/await` in handlers,
+- over-eager try/catch that swallows errors a caller should see (throwing is
+  fine; fatal errors _should_ propagate);
+- new singletons / module-global mutable state (breaks multiple instances +
+  tests);
+- ambiguous `any` away from a serialization boundary; types that admit invalid
+  intermediate states;
+- working around the transformer (stray `/// <cf-disable-transform />`, manual
+  graph wiring CTS would do, imperative escapes from the target language);
+- async escapes in patterns (`async/await` in handlers;
   `await
-  generateText/Object(...)` (use `.result`), `new Stream()` /
-  `.subscribe()`, manual subscription bookkeeping instead of
-  `computed`/`lift`/`handler`.
+  generateText/Object` instead of `.result`; `new Stream()` /
+  `.subscribe()`).
 
-When a transformer behavior is in question, inspect the **emitted output**
-before reasoning from source:
-
-```bash
-deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
-```
+When a transformer behavior is in doubt, read the **emitted output** before
+reasoning from source:
+`deno task cf check <file>.tsx --show-transformed --no-run`.
 
 ### 5. Changeset hygiene
 
-Fast pass; stray cruft is **Blocking** to merge but trivial to fix.
-
-- Dev-time leftovers: `console.log`/debug logging, `*.log` files, scratch design
-  notes / planning markdown committed by accident, commented-out code, `.only`
-  on tests, "temp"/"HACK" workarounds added to get green.
-- New TODO/FIXME — is it tracked, or abandoned?
-- New workspace package added correctly? It **must** register in root
-  `deno.json` `workspace` and have its own `tasks.test` — a missing test task
-  makes the root runner recurse and time out CI. (See DEVELOPMENT.md.)
-- Formatting: `deno fmt --check` on touched files.
+Stray cruft is trivial to fix but shouldn't merge: leftover debug logging /
+`*.log` / scratch notes, commented-out code, `.only` on tests, "temp" / "HACK"
+stopgaps, abandoned TODOs. A new workspace package must register in the root
+`deno.json` and carry its own `tasks.test` (a missing one makes the root runner
+recurse and time out CI). Run `deno fmt` on touched files.
 
 ### 6. Craft & conventions
 
-Mostly Improvement / Nit. Don't drown the report in these.
-
-- Dead code, unused exports/imports, superfluous abstraction, unclear names.
-- Types: no needless `any`; export types with `export type { ... }`; JSDoc on
-  public interfaces; **named exports over default**.
-- Imports grouped (std → external → internal); import from `@commonfabric/api`
-  **xor** `@commonfabric/api/interface`, not both.
-- Module-graph hygiene: leaf utils stay dependency-light; no new cycles;
-  module-specific deps go in that module's `deno.json`, not the root.
+Mostly Improvement / Nit — don't drown the report in these. Dead code, unused
+exports, superfluous abstraction, unclear names. Types: no needless `any`; no
+needless casts (an `as Something` that isn't required for correctness) and no
+unjustified `as unknown as Something`, especially one erasing `Immutable<T>` /
+`Readonly<T>`. For the rest — named exports, JSDoc on exports and public
+members, import grouping, `@commonfabric/api` xor `/interface`, module-graph
+hygiene — follow `docs/development/DEVELOPMENT.md` and point to it rather than
+relisting it.
 
 ### 7. Test rigor — the special-attention area
 
-We have many tests and modify them often, but frequently can't say _why_ a given
-test exists. Bring rigor here:
-
-- For each touched or added test, ask: **what principle or behavior does this
-  guard?** If you can't name it, that's a finding — it may be testing an
-  implementation detail or be incidental.
-- Are these the **right cases**? Do they cover the actual semantic change and
-  its edge/empty/error states — not just the happy path?
-- Right **level**? Behavior over internals; integration where integration is the
-  real contract.
-- **Removed** tests: justified (dead feature) or a silent coverage drop?
-- Reference `docs/common/ai/pattern-testing-guide.md`, and run targeted tests
-  rather than the whole suite while reviewing: `deno test path/to/file.test.ts`.
+We modify tests constantly but often can't say _why_ a given test exists. For
+each touched or added test, name the principle it guards; if you can't, that's a
+finding (it may be incidental or testing an implementation detail). Check the
+cases cover the actual semantic change and its edge / empty / error states, sit
+at the right level (behavior over internals), and that a removed test dropped
+dead coverage, not real coverage. Follow the repo's testing conventions
+(`docs/common/ai/pattern-testing-guide.md`); run targeted tests, not the whole
+suite, while reviewing.
 
 ---
 
-## Step 3 — Verify claims, don't speculate
+## Step 3 — Verify, don't speculate
 
-Run only what's needed to confirm a finding. CI already guarantees `main`
-type-checks and passes, so you're checking the _delta_.
-
-- Types: `deno task check`
-- Lint: `deno lint`
-- Targeted tests: `deno test path/to/file.test.ts` (whole suite:
-  `deno task
-  test` — NOT `deno test`)
-- Integration (needs servers): `deno task integration <package> [filter]`
-- Transformer output: `deno task cf check <f>.tsx --show-transformed --no-run`
-
-Label each finding as **verified** (you ran it / read the exact line) or
-**suspected** (needs the author to confirm). Never present a guess as a bug.
+Run only what confirms a finding (CI already keeps `main` green, so you're
+checking the delta): `deno task check` (types), `deno lint`, `deno test <file>`
+(targeted; whole suite is `deno task test`), `deno task integration <pkg>`, and
+`--show-transformed` for transformer questions. Tag each finding **verified**
+(you ran it / read the line) or **suspected** (needs author confirmation). Never
+present a guess as a bug.
 
 ---
 
-## Step 4 — Rank and report
+## Step 4 — Rank, report, offer to post
 
-Reuse the canonical severity taxonomy from
-`docs/common/ai/pattern-critique-guide.md`: `critical` / `major` / `minor` /
-`info`. Present findings in three buckets so bugs are never confused with taste:
+Use the repo's severity taxonomy (`docs/common/ai/pattern-critique-guide.md`:
+critical / major / minor / info). The report's only required shape:
 
-- **🔴 Blocking (must-fix)** — `critical`/`major`: correctness bugs,
-  regressions, weakened tests hiding a regression, broken documented principles,
-  duplicated hashing/serialization/cloning, semantic changes that leave an
-  authoritative doc actively wrong, stray dev cruft.
-- **🟡 Improvements (noted, non-blocking)** — `major`/`minor`: reuse over
-  duplication, framework-fit fixes, simplifications, better abstractions, test
-  coverage gaps.
-- **⚪ Nits / Boy-Scout (optional)** — `minor`/`info`: small vocabulary drift,
-  polish. Keep this list short. Omit it entirely if there are Blocking items.
+- a one-line header — scope · coverage (deep-read / sampled / delegated) ·
+  checks run;
+- **🔴 Blocking** (must-fix), **🟡 Improvements** (non-blocking), **⚪ Nits**
+  (optional; omit if Blocking exists) — each finding gives location · what · why
+  it matters · concrete fix · verified/suspected;
+- **Questions for the author** only if motivation or scope is unclear;
+- **Possible follow-ups** as proposals, never tickets you file;
+- a one-line **verdict**.
 
-**Report shape:**
+Let the findings drive the format — don't pad to fill a template. Lead with the
+worst thing; if the change is clean, say so in two lines and stop.
 
-```
-## cf-review: <branch or PR #N>
-
-**Change:** <2–3 lines: what it does — in scope-and-theory mode, the theory of intent + blast radius>
-**Scope:** <clean / creep> · **Coverage:** <deep-read vs. sampled vs. delegated> · **Verification:** <checks run>
-
-### 🔴 Blocking
-1. [file.ts:line] <what> — <why it matters>. Fix: <concrete>. (verified)
-
-### 🟡 Improvements
-- [file.ts:line] <what> — <why>. Suggest: <concrete>.
-
-### ⚪ Nits  (omit if Blocking items exist)
-- [file.ts:line] <one-liner>
-
-### Questions for the author
-- <only if motivation/scope is genuinely unclear>
-
-### Possible follow-ups (proposals, not tickets)
-- <larger doc sweeps / framework-fit doc gaps that depend on a human answer>
-
-**Verdict:** <Ready to merge / Merge after Blocking fixed / Needs a conversation>
-```
-
-**Bandwidth discipline (read this every time):**
-
-- Lead with the worst thing. If there are Blocking issues, trim or drop Nits.
-- Don't manufacture findings to look thorough. **If the change is clean, say so
-  in two lines and stop.**
-- Don't demand pristine. We ship many PRs; iterative improvement is expected.
-- Follow-up suggestions are **proposals contingent on human answers**, never
-  tickets you create. If you have Linear access, offer to file — don't
-  auto-file.
-
----
-
-## Step 5 — Optional: post to the PR (`--comment` only)
-
-Only when the invoker passed `--comment`, and only after presenting the report.
-Prefer one structured review carrying inline comments:
-
-```bash
-gh api --method POST repos/{owner}/{repo}/pulls/<N>/reviews \
-  -f event=COMMENT \
-  -f body='<the summary + verdict>' \
-  -f 'comments[][path]=path/to/file.ts' -F 'comments[][line]=42' \
-  -f 'comments[][body]=<finding + fix>'
-  # repeat the comments[][...] triple per inline finding
-```
-
-Fallback for a single summary comment: `gh pr comment <N> --body '<report>'`.
-Map only Blocking and Improvements to inline comments; leave Nits in the summary
-body. Never post without the report shown first.
+**Then offer to post** (after showing the report), signed as yourself: a body
+opening with self-attribution — e.g. _"cf-review via Claude `<model>`, on behalf
+of @`<human>`"_ — via `gh pr review --comment`, or inline comments through the
+reviews API for Blocking / Improvements with Nits left in the summary. Don't
+impersonate the human, and skip posting when it isn't worth it.
 
 ---
 
 ## Canonical references
 
-- Pattern rules / severity taxonomy: `docs/common/ai/pattern-critique-guide.md`
+- Skill-authoring philosophy (why this skill is shaped this way):
+  `docs/development/skill-authoring.md`
+- Pattern rules + severity taxonomy: `docs/common/ai/pattern-critique-guide.md`
 - Design principles & idioms: `docs/development/DEVELOPMENT.md`
 - Transformer semantics:
   `docs/specs/ts-transformer/ts_transformers_review_guide.md`
 - Reactivity model: `docs/common/concepts/reactivity.md`
-- Pattern intro & catalog: `docs/common/INTRODUCTION.md`,
-  `packages/patterns/index.md`
 - Debugging & gotchas: `docs/development/debugging/README.md`
