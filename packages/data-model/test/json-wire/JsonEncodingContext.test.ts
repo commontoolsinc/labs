@@ -1294,7 +1294,9 @@ describe("JsonEncodingContext", () => {
         const data = { "/Future@7": { id: "x" } } as JsonWireValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
-        expect((result as unknown as UnknownValue).wireTypeTag).toBe("Future@7");
+        expect((result as unknown as UnknownValue).wireTypeTag).toBe(
+          "Future@7",
+        );
       });
 
       it("decoder strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {

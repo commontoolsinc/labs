@@ -22,7 +22,7 @@ export abstract class BaseFabricInstance extends FabricInstance {
    */
   abstract get wireTypeTag(): string;
 
-   /**
+  /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
@@ -56,13 +56,17 @@ export abstract class BaseFabricInstance extends FabricInstance {
    */
   static wireTypeTagOf(value: FabricInstance): string {
     if (!(value instanceof BaseFabricInstance)) {
-      throw new Error("Shouldn't happen: Encountered a `FabricInstance` which is not a `BaseFabricInstance`.");
+      throw new Error(
+        "Shouldn't happen: Encountered a `FabricInstance` which is not a `BaseFabricInstance`.",
+      );
     }
 
     const result = value.wireTypeTag;
 
     if (typeof result !== "string") {
-      throw new Error("Shouldn't happen: Encountered a `BaseFabricInstance` with a non-string `wireTypeTag`.");
+      throw new Error(
+        "Shouldn't happen: Encountered a `BaseFabricInstance` with a non-string `wireTypeTag`.",
+      );
     }
 
     return result;

@@ -119,7 +119,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Create a codec view that delegates to our private methods.
     this.codec = {
       wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) => BaseFabricInstance.wireTypeTagOf(value),
+      getTagFor: (value: FabricInstance) =>
+        BaseFabricInstance.wireTypeTagOf(value),
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
