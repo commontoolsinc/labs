@@ -51,3 +51,10 @@ cited path may be skill-local rather than repo-root, a token may be illustrative
 (`cf-{name}.figma.ts`), and the worst case — "the home moved but both old and
 new names still exist" — is invisible to a grep. The tripwire stays narrow on
 purpose; the audit carries the judgment.
+
+One row it cannot cover by construction: the cf-review anti-dup table's
+cell↔link entry names a **bare internal symbol** (`convertCellsToLinks` in
+`packages/runner/src/cell.ts`) — an internal runner function with no package
+export, so there's nothing for the resolvability check to resolve. That symbol's
+accuracy is the audit's job, not the tripwire's. (Noted from @mpsalisbury's
+review of #3829.)
