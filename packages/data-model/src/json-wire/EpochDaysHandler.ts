@@ -14,7 +14,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricEpochDays`. Serializes to a flat base64 string encoding
@@ -47,7 +47,7 @@ export const EpochDaysHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.EpochDays,
         state,
         `EpochDays: expected string state, got ${typeof state}`,
@@ -58,7 +58,7 @@ export const EpochDaysHandler: TypeHandler = {
       const bigint = bigintFromMinimalTwosComplement(bytes);
       return new FabricEpochDays(bigint) as unknown as FabricValue;
     } catch {
-      return makeProblematic(
+      return new ProblematicValue(
         TAGS.EpochDays,
         state,
         `EpochDays: invalid base64: ${state}`,
