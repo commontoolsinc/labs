@@ -25,6 +25,11 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * as needed.
  */
 export const BigIntHandler: TypeHandler = {
+  /** @inheritDoc */
+  get classSource() {
+    return BigInt;
+  },
+
   get wireTypeTag(): string {
     return WIRE_TYPE_TAGS.BigInt;
   },

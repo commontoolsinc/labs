@@ -14,6 +14,11 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * `{ "/RegExp@1": { "flags": "<flags>", "flavor": "<flavor>", "source": "<source>" } }`.
  */
 export const RegExpHandler: TypeHandler = {
+  /** @inheritDoc */
+  get classSource() {
+    return RegExp;
+  },
+
   get wireTypeTag(): string {
     return WIRE_TYPE_TAGS.RegExp;
   },

@@ -11,6 +11,14 @@ import type {
  * `null` state. See Section 1.4.1 of the formal spec.
  */
 export const UndefinedHandler: TypeHandler = {
+  /**
+   * `undefined` doesn't have a corresponding class, so this is `undefined` and
+   * not a would-be `Undefined`.
+   */
+  get classSource() {
+    return undefined;
+  },
+
   get wireTypeTag(): string {
     return WIRE_TYPE_TAGS.Undefined;
   },

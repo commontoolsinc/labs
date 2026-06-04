@@ -20,6 +20,11 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * path instead of being silently coerced to a registry symbol.
  */
 export const SymbolHandler: TypeHandler = {
+  /** @inheritDoc */
+  get classSource() {
+    return Symbol;
+  },
+
   get wireTypeTag(): string {
     return WIRE_TYPE_TAGS.Symbol;
   },

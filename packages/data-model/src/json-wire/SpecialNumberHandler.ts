@@ -21,6 +21,11 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * back to `Number.NaN`.
  */
 export const SpecialNumberHandler: TypeHandler = {
+  /** @inheritDoc */
+  get classSource() {
+    return Number;
+  },
+
   get wireTypeTag(): string {
     return WIRE_TYPE_TAGS.SpecialNumber;
   },

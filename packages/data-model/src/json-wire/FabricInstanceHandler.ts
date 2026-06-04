@@ -21,6 +21,14 @@ import type {
  */
 export const FabricInstanceHandler: TypeHandler = {
   /**
+   * This is not used for serialization dispatch, as it represents an abstract
+   * base class.
+   */
+  get classSource() {
+    return undefined;
+  },
+
+  /**
    * This tag is not used for deserialization dispatch: `FabricInstance`
    * types are looked up by their individual tags. The handler is registered
    * for serialization matching only.

@@ -51,6 +51,14 @@ export interface TypeHandlerCodec {
  */
 export interface TypeHandler {
   /**
+   * The unique class (constructor function) whose direct instances this handler
+   * serializes from, if any. This _can_ be the non-`new`-able "constructor"
+   * function for a primitive type (e.g., `BigInt`). **Note:** If this is a base
+   * class, this will not cause its subclasses to be matched.
+   */
+  get classSource(): Function | undefined;
+
+  /**
    * The unique wire format tag this handler deserializes from, if any.
    */
   get wireTypeTag(): string | undefined;
