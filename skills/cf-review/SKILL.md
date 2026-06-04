@@ -26,6 +26,10 @@ All paths are relative to the repo root.
 - **Report-first, then offer to post.** Always show the report. Then offer to
   post it to the PR — **signed as yourself** (the agent and model, on behalf of
   the human), never impersonating them. Skip posting when it isn't worth it.
+- **An aid to thinking, not a gate.** This review helps people decide with eyes
+  open; it does not police merges. Surface what matters — especially a spec or
+  principle a change violates — loudly and unmistakably so the author _knows_;
+  they own the merge and may proceed regardless. Don't posture as a gatekeeper.
 
 ## The north star for coherence
 
@@ -34,24 +38,36 @@ All paths are relative to the repo root.
 > no longer matches how the runtime works.
 
 That is the bar — not uniform vocabulary. Wording drift is a slow Boy-Scout fix:
-nudge what you touch, propose big sweeps as follow-ups. Block only when a change
-leaves an authoritative source _actively wrong_.
+nudge what you touch, propose big sweeps as follow-ups. When a change leaves an
+authoritative source _actively wrong_ — a normative spec especially — surface it
+loudly; that it is known matters more than which bucket it lands in.
 
-## Why this repo is easy to get wrong
+## Two kinds of change — know which you're reviewing
 
-A change is authored as TypeScript, **transformed** by a custom toolchain (CTS)
-into JS that **builds a reactive graph** evaluated under live subscriptions — so
-a change can span many abstraction levels and its implications are not obvious
-in isolation. Two failure modes follow. They are what happens when anyone on a
-high-velocity team moves fast without the whole picture — not AI's fault in
-particular, just easy to do:
+This repo holds both the **platform** (the runtime and packages that execute
+programs — ordinary, untransformed TypeScript) and **patterns** (the programs
+themselves, the semantic equivalent of apps). They review differently:
 
-1. **Fighting the framework** — when the idiom is hard to find, code reaches for
-   try/catch, singletons, manual subscriptions, `async/await` in handlers, or
-   `/// <cf-disable-transform />`. (Dimension 4.)
-2. **Re-forking core machinery** — re-deriving hashing, serialization, cloning,
-   or identity instead of reusing the one canonical home. The subtle, expensive
-   footguns. (Dimension 3.)
+- **Patterns** are authored in TypeScript, then **transformed** by an extensive
+  pipeline of custom transformers into a much more complex form that satisfies
+  the framework's structure, so the pattern can build a reactive graph evaluated
+  under live subscriptions. The source is far from what runs, so a change — to a
+  pattern _or to the runtime code that executes it_ — can span many abstraction
+  levels with implications that aren't obvious in isolation.
+- **Platform code** (most of `packages/**`) is plain TypeScript: review it as
+  you would any TS codebase, plus this repo's conventions and the
+  anti-duplication map below.
+
+Two failure modes recur on a high-velocity team — not AI's fault in particular,
+just easy to do when moving fast without the whole picture:
+
+1. **Fighting the framework** (patterns, and the runtime that serves them) —
+   when the idiom is hard to find, code reaches for try/catch, singletons,
+   manual subscriptions, `async/await` in handlers, or a transformer escape
+   hatch. (Dimension 4.)
+2. **Re-forking core machinery** (platform and patterns alike) — re-deriving
+   hashing, serialization, cloning, or identity instead of reusing the one
+   canonical home. The subtle, expensive footguns. (Dimension 3.)
 
 ---
 
@@ -96,16 +112,17 @@ A confirmed bug or regression is Blocking. Watch especially for:
 - **Tests bent to fit a regression** — an existing test weakened or retrofitted
   so new (possibly wrong) behavior passes. A test edited to assert a bug is
   Blocking.
-- **Reactivity hazards** — reactive self-feedback (a `cf-*` control bound via
-  `$value` / `$checked` whose handler writes the same cell back), `.get()` on
-  computed / lift results, `new Writable(reactiveValue)`. Defer to
+- **Reactivity hazards _(patterns)_** — reactive self-feedback (a `cf-*` control
+  bound via `$value` / `$checked` whose handler writes the same cell back),
+  `.get()` on computed / lift results, `new Writable(reactiveValue)`. Defer to
   `docs/common/ai/pattern-critique-guide.md` for the full ruleset; cite it.
-- **Non-determinism** — `Date.now()` / `Math.random()` / authored timers in
-  pattern code (use `safeDateNow()` / `nonPrivateRandom()`, never inside a
-  re-running computation); and **time-based waits** — `sleep` / `setTimeout`
-  used to "wait for" a result instead of awaiting the actual event or signal.
-  The latter is almost never justified (animations aside) and is a prime source
-  of CI flakiness: what takes X today takes 10X under load someday.
+- **Determinism _(patterns)_** — `Date.now()` / `Math.random()` / authored
+  timers in pattern code; use `safeDateNow()` / `nonPrivateRandom()`, never
+  inside a re-running computation.
+- **Time-based waits _(any code)_** — `sleep` / `setTimeout` used to "wait for"
+  a result instead of awaiting the actual event or signal. Almost never
+  justified (animations aside) and a prime source of CI flakiness: what takes X
+  today takes 10X under load someday.
 
 ### 2. Coherence ripple
 
@@ -160,15 +177,15 @@ recurring). Tells (seeds, drawn from `docs/development/DEVELOPMENT.md`):
 - ambiguous `any` away from a serialization boundary; types that admit invalid
   intermediate states;
 - working around the transformer (stray `/// <cf-disable-transform />`, manual
-  graph wiring CTS would do, imperative escapes from the target language);
-- async escapes in patterns (`async/await` in handlers;
-  `await
-  generateText/Object` instead of `.result`; `new Stream()` /
+  graph wiring the transformers would do, imperative escapes from the target
+  language);
+- async escapes in patterns (`async/await` in handlers; awaiting `generateText`
+  / `generateObject` instead of using `.result`; `new Stream()` /
   `.subscribe()`).
 
 When a transformer behavior is in doubt, read the **emitted output** before
 reasoning from source:
-`deno task cf check <file>.tsx --show-transformed --no-run`.
+`deno task cf check <file>.tsx --show-transformed [--no-run]`.
 
 ### 5. Changeset hygiene
 
@@ -176,7 +193,7 @@ Stray cruft is trivial to fix but shouldn't merge: leftover debug logging /
 `*.log` / scratch notes, commented-out code, `.only` on tests, "temp" / "HACK"
 stopgaps, abandoned TODOs. A new workspace package must register in the root
 `deno.json` and carry its own `tasks.test` (a missing one makes the root runner
-recurse and time out CI). Run `deno fmt` on touched files.
+recurse and time out CI). Run `deno fmt` and `deno lint` on touched files.
 
 ### 6. Craft & conventions
 
@@ -220,9 +237,10 @@ critical / major / minor / info). The report's only required shape:
 
 - a one-line header — scope · coverage (deep-read / sampled / delegated) ·
   checks run;
-- **🔴 Blocking** (must-fix), **🟡 Improvements** (non-blocking), **⚪ Nits**
-  (optional; omit if Blocking exists) — each finding gives location · what · why
-  it matters · concrete fix · verified/suspected;
+- **🔴 Blocking** (resolve or consciously accept before merge), **🟡
+  Improvements** (non-blocking), **⚪ Nits** (optional; omit if Blocking exists)
+  — each finding gives location · what · why it matters · concrete fix ·
+  verified/suspected;
 - **Questions for the author** only if motivation or scope is unclear;
 - **Possible follow-ups** as proposals, never tickets you file;
 - a one-line **verdict**.
@@ -232,9 +250,11 @@ worst thing; if the change is clean, say so in two lines and stop.
 
 **Then offer to post** (after showing the report), signed as yourself: a body
 opening with self-attribution — e.g. _"cf-review via Claude `<model>`, on behalf
-of @`<human>`"_ — via `gh pr review --comment`, or inline comments through the
-reviews API for Blocking / Improvements with Nits left in the summary. Don't
-impersonate the human, and skip posting when it isn't worth it.
+of @`<handle>`"_ (use the human's real GitHub handle from `gh` / the PR context;
+omit the `@` if unsure — never guess) — via `gh pr review --comment`, or inline
+comments through the reviews API for Blocking / Improvements with Nits left in
+the summary. Don't impersonate the human, and skip posting when it isn't worth
+it.
 
 ---
 
