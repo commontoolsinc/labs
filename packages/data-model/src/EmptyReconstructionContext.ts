@@ -37,7 +37,7 @@ export class EmptyReconstructionContext extends BaseReconstructionContext {
 }
 
 /**
- * Shared `EmptyReconstructionContext` instance whith `.shouldDeepFreeze ===
+ * Shared `EmptyReconstructionContext` instance with `.shouldDeepFreeze ===
  * true` and whose `getCell()` always throws. Pass this when a decoder wants a
  * context object but isn't expected to need cell reconstruction; if a cell ref
  * does turn up, the throw makes the unexpected reconstruction obvious instead
