@@ -663,15 +663,21 @@ export class Scheduler {
     });
     const snapshot = result.snapshots[0];
     if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
+      // Health counter: no persisted snapshot matched this action's id. On
+      // reload this is the common reason an action re-runs instead of
+      // rehydrating. Counts surface in getLoggerCounts().counts.scheduler.
+      logger.debug("rehydrate/miss/no-snapshot", () => []);
       return false;
     }
     if (!this.observationMatchesCurrentAction(action, snapshot.observation)) {
       return false;
     }
     if (options.shouldApply && !options.shouldApply()) {
+      logger.debug("rehydrate/skip/should-not-apply", () => []);
       return false;
     }
 
+    logger.debug("rehydrate/ok", () => []);
     return this.rehydrateActionFromObservation(action, {
       observation: snapshot.observation,
       ...(snapshot.directDirtySeq !== undefined
@@ -692,14 +698,17 @@ export class Scheduler {
   ): boolean {
     const actionId = this.getActionId(action);
     if (observation.actionId !== actionId) {
+      logger.debug("rehydrate/miss/action-id", () => []);
       return false;
     }
 
     const telemetry = getSchedulerActionTelemetryInfo(action);
-    return observation.implementationFingerprint ===
+    const matches = observation.implementationFingerprint ===
         schedulerImplementationFingerprint(action, actionId, telemetry) &&
       observation.runtimeFingerprint ===
         schedulerRuntimeFingerprint(this.pullMode ? "pull" : "push");
+    if (!matches) logger.debug("rehydrate/miss/fingerprint", () => []);
+    return matches;
   }
 
   private setActionObservationIdentity(
@@ -736,6 +745,7 @@ export class Scheduler {
             options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
           ]);
           this.initialRehydrationTokens.delete(action);
+          logger.debug("rehydrate/fallback-run/timeout", () => []);
           this.scheduleInitialActionRun(action);
         }
         return;
@@ -744,6 +754,7 @@ export class Scheduler {
         return;
       }
       if (!rehydrated) {
+        logger.debug("rehydrate/fallback-run/no-match", () => []);
         this.scheduleInitialActionRun(action);
       }
     })().catch((error) => {
