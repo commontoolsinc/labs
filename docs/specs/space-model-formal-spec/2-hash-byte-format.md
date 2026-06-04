@@ -133,10 +133,9 @@ four special values that JSON cannot represent natively (`-0`, `NaN`,
   at the language level.
 
 > **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity`
-> reach this layer in a given run depends on the `modernDataModel` flag at
-> the fabric-value conversion gate; see `1-fabric-values.md` Section 4.9.
-> The byte-level encoding above is the hasher's contract regardless of how
-> the values arrived.
+> reach this layer depends on the fabric-value conversion gate; see
+> `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
+> hasher's contract regardless of how the values arrived.
 
 ### 4.4 `string`
 
@@ -243,10 +242,9 @@ hashes, while inheriting the short/long string-encoding delegation
 unchanged.
 
 > **Conversion-gate cross-reference.** Whether a symbol value reaches this
-> layer in a given run depends on the `modernDataModel` flag at the
-> fabric-value conversion gate; see `1-fabric-values.md` Section 4.9. The
-> byte-level encoding above is the hasher's contract regardless of how the
-> value arrived.
+> layer depends on the fabric-value conversion gate; see
+> `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
+> hasher's contract regardless of how the value arrived.
 
 ### 4.7 `undefined`
 
