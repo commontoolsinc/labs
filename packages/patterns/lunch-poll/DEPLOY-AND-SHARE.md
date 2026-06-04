@@ -1,11 +1,22 @@
 # Deploying & sharing lunch-poll state
 
-This pattern's data lives in **`PerSpace` cells** (`users`, `options`, `votes`,
-`history`, `adminName`, `question`). That state belongs to **one deployed piece
-instance** in one space — addressed by `(space, causal-cell-id)` — not to "the
-pattern" in the abstract. So "share the state" means "everyone points at the
-same piece," and "copy the state" means "move those cell values into a new
-piece." This doc covers both, plus the identity caveat that bites first.
+> **⚠️ The SQLite migration is NOT live-deployable yet (as of 2026-06-04).** The
+> visit history + vote-history were moved into SQLite (`sqliteDatabase`), and
+> the pattern is correct and green in `cf test`, BUT on a _deployed_ piece
+> `db.exec` throws "invalid database handle" — an open sqlite-builtin bug (see
+> `session_outputs/2026-06-04_lunch-poll-sqlite/`). **Keep the canonical piece
+> on the previous array-based-history build** until that's fixed. The notes
+> below about `history: PerSpace` describe that previous build; the migrated
+> build replaces `history` with SQLite tables and adds a `sqliteRev` PerSpace
+> counter.
+
+This pattern's durable data lives in **`PerSpace` cells** (`users`, `options`,
+`votes`, `adminName`, `question`; the previous build also had `history`). That
+state belongs to **one deployed piece instance** in one space — addressed by
+`(space, causal-cell-id)` — not to "the pattern" in the abstract. So "share the
+state" means "everyone points at the same piece," and "copy the state" means
+"move those cell values into a new piece." This doc covers both, plus the
+identity caveat that bites first.
 
 ## The canonical piece
 

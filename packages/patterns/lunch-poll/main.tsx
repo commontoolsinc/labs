@@ -22,14 +22,29 @@
  * "We went here" history (Lunch Coordinator roadmap #1): the host logs where
  * the group actually ate via each option's "we went here" button. A host date
  * field backdates the next log (blank = today; `logVisit` also takes an
- * explicit `wentAt`). Each entry is a per-space `HistoryEntry` (place + date);
- * the stored log is capped at the MAX_HISTORY most recent. The log shows as a
- * "Recently eaten" list below the options (8 most recent); the host can delete
- * a single mistaken entry (`removeHistoryEntry`) or clear the whole log.
+ * explicit `wentAt`). The log shows as a "Recently eaten" list below the
+ * options (8 most recent); the host can delete a single mistaken entry
+ * (`removeHistoryEntry`) or clear the whole log.
+ *
+ * Storage (dogfooding the SQLite builtins, PRs #3776/#3848): visits live in a
+ * SQLite `visits` table — not the former `PerSpace<HistoryEntry[]>` array — so
+ * there's no MAX_HISTORY cap and "Recently eaten" is a `db.query` (the read
+ * bounds itself with LIMIT). Each `logVisit` also snapshots everyone's current
+ * vote into a `vote_history` table tied to that visit; the "📊 Lunch stats"
+ * card surfaces per-place visit + green/red tallies from it. Live voting stays
+ * on the in-cell `votes` array — only the durable record is in SQLite. Both
+ * tables carry a frozen TEXT name plus a `cfLink<User>` live profile pointer.
+ *
+ * KNOWN ISSUE (open): correct + green in the emulated `cf test` runner, but on a
+ * *deployed* piece `db.exec` throws "invalid database handle" (a sqlite-builtin
+ * × scoped-pattern interaction, reliably reproduced, root cause still open —
+ * see the session finding doc). Don't cut over the live canonical piece yet.
  * See `LUNCH-COORDINATOR-TODO.md`.
  */
 
 import {
+  type Cell,
+  cfLink,
   computed,
   Default,
   fetchData,
@@ -41,7 +56,10 @@ import {
   type PerSpace,
   type PerUser,
   safeDateNow,
+  sqliteDatabase,
+  type SqliteDb,
   Stream,
+  table,
   UI,
   type VNode,
   wish,
@@ -136,12 +154,49 @@ export interface CastVoteEvent {
 
 export type ResetVotesEvent = Record<PropertyKey, never>;
 
-/** A place the group actually ate, logged by the host. */
+/**
+ * A place the group actually ate, logged by the host. Persisted in the SQLite
+ * `visits` table (replacing the former `history: PerSpace<HistoryEntry[]>`
+ * array). Column names are snake_case to read naturally in SQL; this interface
+ * documents the logical shape.
+ */
 export interface HistoryEntry {
   id: string;
   title: string;
   loggedByName: string;
   wentAt: number;
+}
+
+/**
+ * A row of the `visits` query result. `logged_by` is a frozen name snapshot
+ * (what the "Recently eaten" card renders); `logged_by_cf_link` is a live
+ * pointer to the logging user's profile (dogfoods the cfLink feature). See the
+ * KNOWN ISSUE note on the `sqliteDatabase(...)` call about deployed pieces.
+ */
+export interface VisitRow {
+  id: string;
+  title: string;
+  logged_by: string;
+  logged_by_cf_link: Cell<User>;
+  // Stored as zero-padded TEXT (see encodeTs) — decode with Number() / decodeTs.
+  went_at: string;
+}
+
+/**
+ * A row of the `vote_history` table — a snapshot of one person's vote at the
+ * moment a visit was logged. `option_title` is denormalized (options get
+ * removed; the title is the meaningful record). `voter` is a frozen name (no
+ * cfLink — same deployed-piece reason as VisitRow).
+ */
+export interface VoteHistoryRow {
+  id: string;
+  visit_id: string;
+  voter: string;
+  voter_cf_link: Cell<User>;
+  option_title: string;
+  vote_color: VoteColor;
+  // Stored as zero-padded TEXT (see encodeTs) — decode with Number() / decodeTs.
+  went_at: string;
 }
 
 /**
@@ -167,9 +222,15 @@ type LinkTargetCell = Writable<string | null>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
 type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
-type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
 type HomePageRefreshCell = Writable<number>;
+// A monotonic write counter bumped by the sqlite-mutating handlers; the
+// db.query calls react on THIS rather than on `db`. In the test runner,
+// `reactOn: db` does not reliably re-run a query after a committed db.exec,
+// whereas bumping a plain PerSpace counter and reacting on it does. (The spec's
+// in-commit `rev`-bump model is meant to make `reactOn: db` work; until it does
+// here, the counter is the dependable trigger.)
+type RevCell = Writable<number | Default<0>>;
 
 const PLAYER_COLORS = [
   "#2f8a64",
@@ -325,10 +386,6 @@ const DAY_NAMES = [
   "Saturday",
 ];
 
-// Cap on the stored visit log so a long-lived poll's PerSpace array can't grow
-// without bound. The "Recently eaten" card shows fewer (the 8 most recent).
-const MAX_HISTORY = 50;
-
 const newHistoryId = () =>
   `h_${safeDateNow().toString(36)}_${
     Math.floor(nonPrivateRandom() * 1e6).toString(36)
@@ -343,6 +400,20 @@ const parseVisitDate = (draft: string | undefined): number => {
   const t = new Date(`${s}T00:00:00`).getTime();
   return Number.isNaN(t) ? safeDateNow() : t;
 };
+
+// We store ms-epoch timestamps as zero-padded TEXT, not as SQLite `integer`.
+// Why: the @db/sqlite binding the runtime uses truncates a bound JS number to
+// 32 bits, so a real ms-epoch (~1.7e12) round-trips as a negative garbage value
+// (and passing a BigInt doesn't help in this version). TEXT round-trips the
+// value losslessly; 16-digit zero-padding keeps lexicographic ORDER BY equal to
+// numeric order for every non-negative timestamp (covers dates well past 3000).
+// If/when the integer-binding bug is fixed upstream, this can revert to a plain
+// `integer` column. (Surfaced while dogfooding the SQLite builtin — worth
+// reporting upstream.)
+const TS_WIDTH = 16;
+const encodeTs = (ms: number): string =>
+  Math.max(0, Math.trunc(ms)).toString().padStart(TS_WIDTH, "0");
+const decodeTs = (s: string | undefined): number => Number(s ?? 0);
 
 // Label for a visit derived purely from its own timestamp — never from the
 // current clock, so it stays idempotent inside reactive computations (timestamps
@@ -607,17 +678,25 @@ const clearMyVote = handler<ClearVoteEvent, {
 });
 
 // Host-only, same gate as the other mutating admin actions. Logs where the
-// group actually ate — by option id (resolved to its title) or a free title.
+// group actually ate — by option id (resolved to its title) or a free title —
+// into the SQLite `visits` table, and snapshots everyone's current vote into
+// `vote_history`. All db.exec writes here fold into the one handler commit.
+//
+// SQLite carries the cap that the old in-cell array needed: no MAX_HISTORY
+// pruning — the table grows fine, and the read query bounds what's shown.
 const logVisit = handler<LogVisitEvent, {
-  history: HistoryCell;
+  db: SqliteDb;
   options: OptionsCell;
+  votes: VotesCell;
+  users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
   visitDate: NameCell;
+  rev: RevCell;
 }>(
   (
     { optionId, title, wentAt },
-    { history, options, myName, adminName, visitDate },
+    { db, options, votes, users, myName, adminName, visitDate, rev },
   ) => {
     const me = trimmedName(myName.get());
     const admin = trimmedName(adminName.get());
@@ -631,44 +710,79 @@ const logVisit = handler<LogVisitEvent, {
     const when = typeof wentAt === "number"
       ? wentAt
       : parseVisitDate(visitDate.get());
-    const entry: HistoryEntry = {
-      id: newHistoryId(),
-      title: place,
-      loggedByName: me,
-      wentAt: when,
+    const whenText = encodeTs(when); // see encodeTs: timestamps stored as TEXT
+    const visitId = newHistoryId();
+
+    // Resolve a name → that user's live Cell<User> in the directory, for the
+    // `*_cf_link` columns. users.key(i) is a stable, toCell-bearing cell; a
+    // cell may only be bound to a _cf_link column (binding elsewhere throws).
+    const us = users.get();
+    const cellForName = (name: string): Cell<User> | null => {
+      const idx = us.findIndex((u) => u.name === name);
+      return idx >= 0 ? users.key(idx) : null;
     };
-    // Cap the stored log at the MAX_HISTORY most recent visits (by date).
-    const next = [...history.get(), entry];
-    history.set(
-      next.length > MAX_HISTORY
-        ? [...next].sort((a, b) => b.wentAt - a.wentAt).slice(0, MAX_HISTORY)
-        : next,
+    const hostCell = cellForName(me);
+
+    db.exec(
+      "INSERT INTO visits (id, title, logged_by, logged_by_cf_link, went_at) VALUES (?, ?, ?, ?, ?)",
+      // a _cf_link param must never be undefined; pass null for an absent cell.
+      [visitId, place, me, hostCell ?? null, whenText],
     );
+
+    // Snapshot the current live votes tied to this visit. Denormalize the
+    // option title (options can be removed later; the title is the record).
+    const titleById = new Map(options.get().map((o) => [o.id, o.title]));
+    for (const v of votes.get()) {
+      const optTitle = trimmedName(titleById.get(v.optionId));
+      if (!optTitle) continue; // vote for an already-removed option → skip
+      db.exec(
+        "INSERT INTO vote_history (id, visit_id, voter, voter_cf_link, option_title, vote_color, went_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+          `${visitId}_${v.voterName}_${v.optionId}`,
+          visitId,
+          v.voterName,
+          cellForName(v.voterName) ?? null,
+          optTitle,
+          v.voteType,
+          whenText,
+        ],
+      );
+    }
+
     // Reset the date draft so the next log defaults back to today.
     visitDate.set("");
+    // Bump the write counter so the reactOn:rev queries re-run (see RevCell).
+    rev.set((rev.get() ?? 0) + 1);
   },
 );
 
 const removeHistoryEntry = handler<RemoveHistoryEntryEvent, {
-  history: HistoryCell;
+  db: SqliteDb;
   myName: NameCell;
   adminName: NameCell;
-}>(({ id }, { history, myName, adminName }) => {
+  rev: RevCell;
+}>(({ id }, { db, myName, adminName, rev }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  history.set(history.get().filter((h) => h.id !== id));
+  db.exec("DELETE FROM visits WHERE id = ?", [id]);
+  // Drop the vote snapshot for that visit too, so the two tables stay aligned.
+  db.exec("DELETE FROM vote_history WHERE visit_id = ?", [id]);
+  rev.set((rev.get() ?? 0) + 1);
 });
 
 const clearHistory = handler<ClearHistoryEvent, {
-  history: HistoryCell;
+  db: SqliteDb;
   myName: NameCell;
   adminName: NameCell;
-}>((_, { history, myName, adminName }) => {
+  rev: RevCell;
+}>((_, { db, myName, adminName, rev }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
-  history.set([]);
+  db.exec("DELETE FROM visits", []);
+  db.exec("DELETE FROM vote_history", []);
+  rev.set((rev.get() ?? 0) + 1);
 });
 
 interface OptionTally {
@@ -724,10 +838,14 @@ export interface CozyPollInput {
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
-  history?: PerSpace<HistoryEntry[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
   webSearchUrl?: PerSpace<string | Default<typeof WEB_SEARCH_URL>>;
+  // Write counter bumped by the sqlite-mutating handlers; the db.query calls
+  // react on this rather than on `db` directly (see RevCell for why).
+  sqliteRev?: PerSpace<number | Default<0>>;
+  // Visit history + the vote-history snapshots now live in a SQLite database
+  // owned by the pattern body (`sqliteDatabase(...)`), not a PerSpace input.
   // optionDraft etc. are internal form drafts, declared as local
   // per-session cells in the pattern body (parking-coordinator idiom).
 }
@@ -740,13 +858,20 @@ export interface CozyPollOutput {
   options: readonly Option[];
   votes: readonly Vote[];
   users: readonly User[];
-  history: readonly HistoryEntry[];
   adminName: string;
   myName: string;
   userCount: number;
   optionCount: number;
   voteCount: number;
   historyCount: number;
+  // The "Recently eaten" SQLite query result ({ pending, result, error }).
+  // Exposed so tests and consumers can read the durable visit log.
+  recentVisits: { pending: boolean; result?: VisitRow[]; error?: unknown };
+  // Title of the most-recent visit ("" when empty) — a plain scalar that's the
+  // most reliable signal for tests (vs. asserting on the result array shape).
+  mostRecentTitle: string;
+  // Count of rows in the vote_history snapshot table.
+  voteHistoryCount: number;
   isJoined: boolean;
   isAdmin: boolean;
   homePageLookupUrls: readonly string[];
@@ -770,7 +895,6 @@ export interface CozyPollOutput {
 const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
-const EMPTY_HISTORY: HistoryEntry[] = [];
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
@@ -780,12 +904,46 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options,
       votes,
       users,
-      history,
       adminName,
       myName,
       webSearchUrl,
+      sqliteRev,
     },
   ) => {
+    // SQLite database owned by this pattern (default cell-derived source). The
+    // visit log and the per-visit vote snapshots live here; the runtime owns
+    // table creation/migration from this declaration. `*_cf_link` columns store
+    // a live Cell<User> reference alongside the frozen TEXT name.
+    //
+    // KNOWN ISSUE (open): on a *deployed* piece (not the emulated test runner),
+    // `db.exec` in these handlers throws "invalid database handle". It is NOT
+    // the cf-link alone (removing it didn't fix it) — it's a subtler interaction
+    // of this scoped (PerUser+PerSpace) pattern's multiple db.query calls with
+    // the write handle. Reliably reproduced; root cause still open; filed for
+    // the sqlite-builtin owner. The pattern is correct + green in `cf test`
+    // (emulated MemoryV2Server). Do NOT cut over the live canonical piece until
+    // it's fixed. See session_outputs/2026-06-04_lunch-poll-sqlite/.
+    const db = sqliteDatabase({
+      tables: {
+        visits: table({
+          id: "text primary key",
+          title: "text",
+          logged_by: "text",
+          logged_by_cf_link: cfLink<User>(),
+          // ms-epoch as zero-padded TEXT, not integer — see encodeTs.
+          went_at: "text",
+        }),
+        vote_history: table({
+          id: "text primary key",
+          visit_id: "text",
+          voter: "text",
+          voter_cf_link: cfLink<User>(),
+          option_title: "text",
+          vote_color: "text",
+          went_at: "text",
+        }),
+      },
+    });
     // Internal per-session form drafts — local to each browser session,
     // not exposed as pattern inputs. Uses the scoped-constructor idiom
     // introduced by parking-coordinator (PR #3610).
@@ -854,18 +1012,27 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const boundClearMyVote = clearMyVote({ votes, myName });
     const boundResetVotes = resetVotes({ votes, myName, adminName });
     const boundLogVisit = logVisit({
-      history,
+      db,
       options,
+      votes,
+      users,
       myName,
       adminName,
       visitDate,
+      rev: sqliteRev,
     });
     const boundRemoveHistoryEntry = removeHistoryEntry({
-      history,
+      db,
       myName,
       adminName,
+      rev: sqliteRev,
     });
-    const boundClearHistory = clearHistory({ history, myName, adminName });
+    const boundClearHistory = clearHistory({
+      db,
+      myName,
+      adminName,
+      rev: sqliteRev,
+    });
     const boundSetCity = setCity({ city, myName, adminName, cityDraft });
     const boundEnrichHomePages = enrichHomePages({
       myName,
@@ -891,13 +1058,55 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const userCount = users.length;
     const optionCount = options.length;
     const voteCount = votes.length;
-    const historyCount = history.length;
-    const hasHistory = history.length > 0;
-    // Most-recent-first, capped — the "Recently eaten" card stays compact.
-    // Whole-array transform over a reactive array → computed (a single lift
-    // over the array), not bare; see 04-finding-map-on-reactive-array.md.
-    const recentHistory = computed(() =>
-      [...history].sort((a, b) => b.wentAt - a.wentAt).slice(0, 8)
+    // The "Recently eaten" card, now a SQLite query. It re-runs when the
+    // sqliteRev counter changes — the mutating handlers bump it after each
+    // db.exec (we react on the counter, not `db`; see RevCell). The read bounds
+    // itself with LIMIT 8 — no stored cap needed.
+    const recentVisits = db.query<VisitRow>(
+      "SELECT id, title, logged_by, logged_by_cf_link, went_at FROM visits ORDER BY went_at DESC LIMIT 8",
+      { reactOn: sqliteRev },
+    );
+    // `recentVisits.result` is `VisitRow[] | undefined`. Coercing with `?? []`
+    // inside a computed yields an OpaqueRef<VisitRow[]> structurally identical
+    // to the old `recentHistory` array — so the "Recently eaten" card keeps its
+    // existing plain-JSX `.map(...)` with interactive onClick handlers, which
+    // must NOT live inside a lift-returned VNode (they'd mis-lower as lifts —
+    // "$event in inputs" / non-idempotent write). This is the key to migrating
+    // the card without reintroducing that bug.
+    const recentRows = computed(() => recentVisits.result ?? []);
+    const visitCount = db.query<{ n: number }>(
+      "SELECT count(*) AS n FROM visits",
+      { reactOn: sqliteRev },
+    );
+    const historyCount = computed(() => visitCount.result?.[0]?.n ?? 0);
+    const hasHistory = computed(() => (visitCount.result?.[0]?.n ?? 0) > 0);
+    const mostRecentTitle = computed(() =>
+      recentVisits.result?.[0]?.title ?? ""
+    );
+    // 📊 Lunch stats: per-place visit count + green/red tallies across the
+    // whole durable record, joining visits to their vote snapshots. Read-only
+    // (no handlers), so it's free of the lift hazard above.
+    const placeStats = db.query<
+      { title: string; visits: number; greens: number; reds: number }
+    >(
+      `SELECT v.title AS title,
+              count(DISTINCT v.id) AS visits,
+              sum(CASE WHEN vh.vote_color = 'green' THEN 1 ELSE 0 END) AS greens,
+              sum(CASE WHEN vh.vote_color = 'red' THEN 1 ELSE 0 END) AS reds
+       FROM visits v
+       LEFT JOIN vote_history vh ON vh.visit_id = v.id
+       GROUP BY v.title
+       ORDER BY visits DESC, greens DESC
+       LIMIT 5`,
+      { reactOn: sqliteRev },
+    );
+    const placeStatsRows = computed(() => placeStats.result ?? []);
+    const voteHistoryCountQuery = db.query<{ n: number }>(
+      "SELECT count(*) AS n FROM vote_history",
+      { reactOn: sqliteRev },
+    );
+    const voteHistoryCount = computed(() =>
+      voteHistoryCountQuery.result?.[0]?.n ?? 0
     );
     // Resolve the viewer's name ONCE here at the top level. PerUser `myName`
     // resolves in this scope, but NOT inside the per-option `options.map(...)`
@@ -1997,7 +2206,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             ))
                           : null}
                       </div>
-                      {recentHistory.map((entry) => {
+                      {recentRows.map((entry) => {
                         const entryId = entry.id;
                         return (
                           <div
@@ -2024,7 +2233,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                               <span
                                 style={{ fontSize: "12px", color: "#a08552" }}
                               >
-                                {visitLabel(entry.wentAt)}
+                                {visitLabel(decodeTs(entry.went_at))}
                               </span>
                               {isAdmin
                                 ? (
@@ -2054,6 +2263,74 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           </div>
                         );
                       })}
+                    </div>
+                  )
+                  : null}
+
+                {
+                  /* Lunch stats — a read-only recap from the vote_history
+                  snapshots: per-place visit count + how the group leaned
+                  (greens / reds) across every logged visit. Shown to everyone
+                  whenever there's any history. No interactive handlers, so the
+                  whole-array `.map` is plain and free of the lift hazard the
+                  "Recently eaten" card has to dodge. */
+                }
+                {hasHistory
+                  ? (
+                    <div
+                      style={{
+                        marginBottom: "16px",
+                        padding: "12px 16px",
+                        backgroundColor: "#f3f0fb",
+                        border: "1px solid #ddd2f0",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          letterSpacing: "0.05em",
+                          textTransform: "uppercase",
+                          color: "#5b3fa3",
+                          marginBottom: "10px",
+                        }}
+                      >
+                        📊 Lunch stats
+                      </div>
+                      {placeStatsRows.map((stat) => (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "baseline",
+                            justifyContent: "space-between",
+                            gap: "8px",
+                            padding: "4px 0",
+                            fontSize: "13px",
+                            color: "#473266",
+                          }}
+                        >
+                          <span style={{ fontWeight: 500 }}>{stat.title}</span>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "baseline",
+                              gap: "10px",
+                              fontSize: "12px",
+                            }}
+                          >
+                            <span style={{ color: "#8a7bb0" }}>
+                              {stat.visits}×
+                            </span>
+                            <span style={{ color: "#2f8a64" }}>
+                              🟢 {stat.greens}
+                            </span>
+                            <span style={{ color: "#a33b35" }}>
+                              🔴 {stat.reds}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   )
                   : null}
@@ -2190,17 +2467,21 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       // didn't write them, and a computed that RETURNS undefined is
       // indistinguishable from "not yet computed" for cross-runtime readers —
       // so every snapshot yields a real, stable value (the shared EMPTY
-      // constants keep the fallback idempotent across recomputes).
+      // constants keep the fallback idempotent across recomputes). The visit
+      // history is no longer a PerSpace input — it lives in SQLite now and is
+      // surfaced via `recentVisits`/`mostRecentTitle` below.
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
-      history: computed(() => history ?? EMPTY_HISTORY),
       adminName: computed(() => trimmedName(adminName)),
       myName: computed(() => trimmedName(myName)),
       userCount,
       optionCount,
       voteCount,
       historyCount,
+      recentVisits,
+      mostRecentTitle,
+      voteHistoryCount,
       isJoined,
       isAdmin,
       homePageLookupUrls,

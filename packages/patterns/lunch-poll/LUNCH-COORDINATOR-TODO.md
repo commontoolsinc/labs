@@ -10,36 +10,74 @@ rest are still backlog.
 
 ## Planned features
 
-### 1. "Last days we went" history ✅ (shipped)
+### 1. "Last days we went" history ✅ (shipped; reworked onto SQLite)
 
 Keep a per-space log of where the group actually ended up eating, with dates, so
 nobody suggests the same place three days running.
 
-- ✅ `history: PerSpace<HistoryEntry[]>`
-  (`{ id, title, loggedByName, wentAt }`), appended via a host-only `logVisit`
-  handler. Each option has a "✓ we went here" button that logs that place. The
-  stored log is capped at the 50 most recent visits so the PerSpace array can't
-  grow without bound.
+- ✅ Stored in a **SQLite `visits` table** (`sqliteDatabase(...)` in the pattern
+  body), reworked from the original `history: PerSpace<HistoryEntry[]>` array as
+  the team's first dogfood of the SQLite builtins (PRs #3776/#3848). Columns:
+  `id, title, logged_by (TEXT name snapshot), logged_by_cf_link (cfLink<User>
+  live pointer), went_at`.
+  **No more 50-entry cap** — a table grows fine; the read query bounds itself
+  with `LIMIT 8`. Appended via the host-only `logVisit` (`db.exec` INSERT). Each
+  option still has a "✓ we went here" button.
 - ✅ **Backdating:** a host "Log 'we went here' as of:" date field (blank =
   today) backdates the entry; `logVisit` also accepts an explicit `wentAt`. The
   date draft clears after each log so it defaults back to today.
-- ✅ **Editing:** `removeHistoryEntry({ id })` deletes a single mistaken entry
-  ("we didn't actually eat there") via a per-row ✕; `clearHistory` (two-step
-  confirm) wipes the whole log. Both host-only.
+- ✅ **Editing:** `removeHistoryEntry({ id })` (`db.exec` DELETE) drops a single
+  mistaken entry via a per-row ✕; `clearHistory` (two-step confirm) truncates
+  the table. Both host-only, and both also clear the matching `vote_history`
+  rows.
 - ✅ Shown as a **"Recently eaten" list below the options** (8 most recent,
-  most-recent-first), labelled with each visit's own date ("Tuesday, May 20").
-  No per-option nudge — history lives in this one section.
-- Implementation notes (hard-won; see also `scoped-cells-field-notes.md`):
-  - Visit labels derive **only from the stored `wentAt`**, never from the
-    current clock — calling `safeDateNow()` inside a `derive`/`computed` is
-    non-idempotent (it belongs in handlers, like the backdate parse). This is
-    also why there's no live "within the last N days" window; we show the
-    visit's own date and let the human judge.
+  most-recent-first), a `db.query` rendered with the SAME plain-JSX `.map`
+  idiom, labelled with each visit's own date ("Tuesday, May 20").
+- Implementation notes (hard-won):
+  - Visit labels derive **only from the stored `went_at`**, never from the
+    current clock — `safeDateNow()` inside a `derive`/`computed` is
+    non-idempotent (it belongs in handlers, like the backdate parse).
   - Interactive `onClick` handlers must live in **plain-ternary JSX**, not
-    inside a `computed(() => …)`-returned VNode, or they mis-lower as lifts
-    (`$event in inputs` → non-idempotent write).
-  - Don't name a `.map((h) => …)` callback `h` when the body contains JSX — `h`
-    is the JSX factory; shadowing it yields `TypeError: h is not a function`.
+    inside a `computed/lift`-returned VNode, or they mis-lower as lifts
+    (`$event in inputs`). The `db.query` result is fed to the card via
+    `computed(() => recentVisits.result ?? [])` — an OpaqueRef<row[]> shaped
+    exactly like the old `recentHistory` array, so the plain-JSX `.map` (where
+    the handlers live) is preserved unchanged.
+  - **SQLite issues found while dogfooding** (see
+    `session_outputs/2026-06-04_lunch-poll-sqlite/` for full writeups):
+    1. _(worked around)_ The `@db/sqlite` binding truncates a bound JS number to
+       32 bits, so a ms-epoch `went_at` round-trips as garbage. Workaround:
+       store timestamps as zero-padded TEXT (`encodeTs`/`decodeTs`); 16-digit
+       padding keeps `ORDER BY` correct.
+    2. _(worked around, test-runner only)_ `reactOn: db` left the `recentVisits`
+       query stale after writes in the emulated test runner; reacting on a
+       `PerSpace<number>` `sqliteRev` counter the handlers bump is reliable.
+    3. **⚠️ OPEN, blocks live deploy:** on a _deployed_ piece, `db.exec` in the
+       mutating handlers throws "invalid database handle" — the `SqliteDb`
+       handle isn't materialized on the deployed handler-input path (works fine
+       in the emulated `cf test` runner). Reliably reproduced; root cause not
+       yet isolated (it is NOT the cfLink column, NOT any single query — likely
+       an emergent interaction in this scoped pattern). **Filed for the
+       sqlite-builtin owner; the live canonical piece stays on the previous
+       array-based history until this is fixed.** The migration here is complete
+       and green in tests, ready to deploy once the bug is resolved.
+
+### 1b. Durable vote-history snapshot ✅ (shipped)
+
+When the host logs a visit, snapshot **who voted what** at that moment into a
+SQLite `vote_history` table tied to the visit. Live voting stays on the in-cell
+`votes` array — only the durable record is in SQLite.
+
+- ✅ `vote_history`
+  (`id, visit_id, voter, voter_cf_link, option_title,
+  vote_color, went_at`).
+  `logVisit` loops the current votes and writes one row each (option title
+  denormalized; voter as both a frozen name and a live `cfLink<User>`). All
+  INSERTs fold into the one handler commit.
+- ✅ Surfaced as a read-only **"📊 Lunch stats"** card (a `GROUP BY` query):
+  per-place visit count + green/red tallies across the whole record.
+- Future: a per-option "last N times we did X: 🟢🟢🟡" inline recap (needs a
+  per-option query inside `options.map`) — deferred.
 
 ### 2. People's favorite foods
 
