@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import {
   fabricFromNativeValue,
   FabricInstance,
@@ -898,17 +898,15 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_OBJECT] Processing object at path=${pathStr}`,
     );
-    // If the current value is not a (regular) object, set it to an empty object
+    // If the current value is not a (regular) object, set it to an empty object.
     // Note that the alias case is handled above.
-    // `isRecord` is true for arrays (`typeof [] === "object"`), so we must
-    // reset explicitly on an array→object transition; otherwise per-key writes
-    // land in a slot whose stored parent is still an array and storage rejects
-    // them with a TypeMismatchError. This mirrors the array branch above, which
-    // resets a mismatched container via `value: []`.
-    if (
-      !isRecord(currentValue) || Array.isArray(currentValue) ||
-      isPrimitiveCellLink(currentValue)
-    ) {
+    // We use `isObject` (not `isRecord`) here deliberately: `isRecord` is true
+    // for arrays (`typeof [] === "object"`), whereas `isObject` excludes them.
+    // Resetting on an array→object transition is required; otherwise per-key
+    // writes land in a slot whose stored parent is still an array and storage
+    // rejects them with a TypeMismatchError. This mirrors the array branch
+    // above, which resets a mismatched container via `value: []`.
+    if (!isObject(currentValue) || isPrimitiveCellLink(currentValue)) {
       diffLogger.debug(
         "diff",
         () =>
