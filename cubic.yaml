@@ -24,10 +24,10 @@ reviews:
         from skills/cf-review/SKILL.md). Repo-specific lenses to apply even if
         the text below is truncated: (1) Anti-duplication — never re-fork
         hashing, serialization, cloning, or identity; reuse the canonical
-        @commonfabric modules instead of hand-rolling. (2) Framework-fit — flag
-        code fighting the TS-transformer / reactive-graph model
-        (error-swallowing try/catch, singletons, async/await in handlers,
-        transformer escape hatches). (3) Coherence — a change to runtime
+        @commonfabric modules instead of hand-rolling. (2) Framework-fit — in
+        patterns and the runtime that serves them, flag code fighting the
+        transformer pipeline / reactive-graph model (error-swallowing try/catch,
+        singletons, async/await in handlers, transformer escape hatches). (3) Coherence — a change to runtime
         semantics must update the docs, comments, and examples it makes stale,
         so someone searching later is not misled. (4) Test rigor — each touched
         test should guard a nameable principle. (5) Bandwidth — separate
