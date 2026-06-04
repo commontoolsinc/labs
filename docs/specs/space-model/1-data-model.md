@@ -25,28 +25,21 @@ Fabric values are JSON-compatible with specific constraints:
 |------|-------|
 | `null` | JSON null |
 | `boolean` | `true` or `false` |
-| `number` | Legacy path: finite only; `NaN` and `Infinity` rejected. Modern path: any IEEE 754 binary64 (see Numbers below). |
+| `number` | Any IEEE 754 binary64 value, including `-0`, `NaN`, and `±Infinity` (see Numbers below). |
 | `string` | Unicode text |
 | `array` | Ordered sequence of fabric values |
 | `object` | String-keyed map of fabric values |
 
 #### Numbers
 
-Number handling is bifurcated by the `modernDataModel` flag at the
-fabric-value conversion gate:
+All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
+`+Infinity`, and `-Infinity`:
 
-- **Legacy path (`modernDataModel: false`):**
-  - Only finite numbers are fabric-compatible
-  - `-0` is normalized to `0` during conversion
-  - `NaN` and `Infinity` throw errors
-- **Modern path (`modernDataModel: true`):**
-  - All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
-    `+Infinity`, and `-Infinity`
-  - `-0` retains its sign
-  - `NaN` and `±Infinity` round-trip via the `SpecialNumber@1` JSON
-    envelope (see `space-model-formal-spec/3-json-encoding.md` Section 3)
-    and via the byte-level forms in
-    `space-model-formal-spec/2-hash-byte-format.md` Section 4.3
+- `-0` retains its sign
+- `NaN` and `±Infinity` round-trip via the `SpecialNumber@1` JSON
+  envelope (see `space-model-formal-spec/3-json-encoding.md` Section 3)
+  and via the byte-level forms in
+  `space-model-formal-spec/2-hash-byte-format.md` Section 4.3
 
 #### Arrays
 
@@ -77,34 +70,28 @@ fabric-value conversion gate:
 
 These types cannot be stored directly:
 
-- `bigint` — throws error
-- `symbol` — bifurcated by the `modernDataModel` flag (see Symbols below)
+- `symbol` — only registry-interned symbols are storable; unique symbols
+  throw (see Symbols below)
 - `function` — throws error unless it has a `toJSON()` method
 - Class instances — throws error unless they have `toJSON()` or special handling
 
 #### Symbols
 
-Symbol handling is bifurcated by the `modernDataModel` flag at the
-fabric-value conversion gate:
+Symbol handling at the fabric-value conversion gate:
 
-- **Legacy path (`modernDataModel: false`):**
-  - All symbols throw errors during conversion
-- **Modern path (`modernDataModel: true`):**
-  - Registry-interned symbols (`Symbol.for(key)`, where
-    `Symbol.keyFor(s)` returns a string) are first-class fabric values,
-    portable across realms and processes via their registry key
-  - Unique symbols (`Symbol(desc)`) throw with the message
-    `"Cannot store unique (uninterned) symbol"`
-  - Round-trip via the `Symbol@1` JSON envelope (see
-    `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
-    byte-level form in `space-model-formal-spec/2-hash-byte-format.md`
-    Section 4.6, both of which describe the lower-layer behavior
-    unconditionally; the formal `1-fabric-values.md` Section 4.9 carries
-    the conversion-gate flag-bifurcation language
+- Registry-interned symbols (`Symbol.for(key)`, where `Symbol.keyFor(s)`
+  returns a string) are first-class fabric values, portable across realms
+  and processes via their registry key
+- Unique symbols (`Symbol(desc)`) throw with the message
+  `"Cannot store unique (uninterned) symbol"`
+- Round-trip via the `Symbol@1` JSON envelope (see
+  `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
+  byte-level form in `space-model-formal-spec/2-hash-byte-format.md`
+  Section 4.6
 
 Note: this is about symbol *values*. Symbol-keyed *properties* on plain
-objects continue to cause rejection regardless of the flag (see "Objects"
-above), because plain-object keys must be strings.
+objects continue to cause rejection (see "Objects" above), because
+plain-object keys must be strings.
 
 ### Special Object Shapes
 
