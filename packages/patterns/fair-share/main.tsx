@@ -259,9 +259,15 @@ export default pattern<State>(({ people, expenses, myName }) => {
                     const cleaned: Expense[] = [];
                     for (const e of expenses.get()) {
                       if (e.paidBy === name) continue;
-                      const shared = [...(e.sharedBy ?? [])].filter((s) =>
-                        s !== name
-                      );
+                      const had = [...(e.sharedBy ?? [])];
+                      // Empty sharedBy means "split among everyone" — it stays
+                      // implicit-everyone (now a smaller group), so keep it as-is.
+                      if (had.length === 0) {
+                        cleaned.push({ ...e });
+                        continue;
+                      }
+                      const shared = had.filter((s) => s !== name);
+                      // An explicit split emptied by this removal is dropped.
                       if (shared.length === 0) continue;
                       cleaned.push({ ...e, sharedBy: shared });
                     }
@@ -359,7 +365,11 @@ export default pattern<State>(({ people, expenses, myName }) => {
                 const amount = toCents(parseFloat(amountDraft.get())) / 100;
                 const paidBy = paidByDraft.get();
                 const ppl = people.get();
-                if (!description || isNaN(amount) || amount <= 0) return;
+                // Number.isFinite rejects NaN AND ±Infinity (e.g. "1e999"),
+                // which would otherwise poison totals/splits.
+                if (!description || !Number.isFinite(amount) || amount <= 0) {
+                  return;
+                }
                 if (!ppl.some((p) => p.name === paidBy)) return;
 
                 const everyone = ppl.map((p) => p.name);
