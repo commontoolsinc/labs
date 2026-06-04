@@ -1827,9 +1827,9 @@ version requirements.
 
 ### 4.8 JSON Encoding
 
-The storage boundary in `space.ts` routes through functions that bridge
-between the storage layer (JSON strings) and the runtime layer
-(`FabricValue`). These functions live in a dedicated module
+The storage boundary routes through functions that bridge between the
+storage layer (JSON strings) and the runtime layer (`FabricValue`). These
+functions live in a dedicated module
 (`packages/data-model/json-wire/json-encoding.ts`).
 
 ```typescript
@@ -1857,13 +1857,12 @@ export function valueFromJson(
 The module creates a single stateless `JsonEncodingContext` instance at
 module load time and reuses it for all encode/decode operations.
 
-In `space.ts`, these functions replace direct `JSON.stringify` /
-`JSON.parse` calls at three sites:
+The `memory` package wraps these at its serialization boundary
+(`packages/memory/v2.ts`):
 
-- **Write path:** `jsonFromValue(datum)` replaces `JSON.stringify(datum)` in
-  `importDatum()`.
-- **Read path:** `valueFromJson(json, context)` replaces `JSON.parse(json)` at
-  `recall()`, `getFact()`, and `toFact()`.
+- **Write path:** `encodeMemoryBoundary(value)` calls `jsonFromValue(value)`.
+- **Read path:** `decodeMemoryBoundary(source)` calls
+  `valueFromJson(source, context)` with a memory `ReconstructionContext`.
 
 ### 4.9 Fabric Value Conversion
 
