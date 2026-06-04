@@ -37,6 +37,7 @@
   ],
   "tasks": {
     "check": "./tasks/check.sh",
+    "check-skill-facts": "deno test --allow-read skills/cf-review/check-facts.ts",
     "cf": "deno run --allow-run --allow-env --allow-read ./packages/cli/launcher.ts",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
