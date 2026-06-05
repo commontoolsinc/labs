@@ -61,11 +61,11 @@ describe("labelResultSchema (pure)", () => {
     expect(schema).toBeUndefined();
   });
 
-  it("null-origin column carries join(conf)/meet(integrity) of the db's sources", () => {
+  it("null-origin column carries the merged label of the db's sources", () => {
     // An expression / aggregate (COUNT(*), upper(x)) has no single origin. We
     // can't cheaply know which columns it derives from, so it conservatively
-    // inherits the JOIN (union) of confidentiality and the MEET (intersection)
-    // of integrity across every declared labeled column in the db.
+    // inherits the combined label (the runtime's mergeLabel: union of BOTH
+    // confidentiality and integrity) across every declared labeled column.
     const t = {
       emails: {
         properties: {
@@ -87,7 +87,7 @@ describe("labelResultSchema (pure)", () => {
     const ifc = (schema as Record<string, any>).properties.result.items
       .properties.n.ifc;
     expect([...ifc.confidentiality].sort()).toEqual(["body-secret", "sender"]);
-    expect(ifc.integrity).toEqual(["b"]); // meet: {a,b} ∩ {b,c}
+    expect([...ifc.integrity].sort()).toEqual(["a", "b", "c"]); // union {a,b}∪{b,c}
   });
 
   it("refuses a query with duplicate output column names (ambiguous label)", () => {

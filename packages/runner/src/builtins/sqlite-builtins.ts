@@ -30,8 +30,7 @@ import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
-import { uniqueCfcAtoms } from "../cfc/observation.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { columnDeclaresIfc } from "@commonfabric/memory/v2";
 
@@ -155,48 +154,27 @@ type LabelTables =
 /**
  * Conservative `ifc` for a result column with NO single source (`null` origin —
  * an expression, literal, or aggregate like `COUNT(*)`/`upper(x)`). We can't
- * cheaply know which columns such a value derives from, so it inherits the JOIN
- * (union) of confidentiality and the MEET (intersection) of integrity across
- * EVERY declared labeled column in the db schema. This is a sound
- * over-approximation — it never under-labels confidentiality and never
- * over-trusts integrity — at the cost of possible over-restriction (we bound by
- * the whole schema rather than parsing the query's FROM tables). A column
- * without declared integrity is treated as top (it does not tighten the meet).
- * Returns undefined when the db declares no confidentiality/integrity at all.
+ * cheaply know which columns such a value derives from, so it inherits the
+ * combined label of EVERY declared labeled column in the db schema, merged with
+ * the runtime's own `mergeLabel` (union of confidentiality AND integrity — the
+ * same accumulation the runtime uses everywhere). A sound over-approximation:
+ * never under-labels, at the cost of possible over-restriction (we bound by the
+ * whole schema rather than parsing the query's FROM tables). `mergeLabel` reads
+ * only the label-bearing keys, so a column's `maxConfidentiality` is ignored,
+ * and it returns fresh arrays (no frozen-proxy aliasing). Returns undefined when
+ * the db declares no confidentiality/integrity at all.
  */
-function deriveNullOriginIfc(
-  tables: LabelTables,
-): { confidentiality?: unknown[]; integrity?: unknown[] } | undefined {
-  const conf: unknown[] = [];
-  const integritySets: unknown[][] = [];
+function deriveNullOriginIfc(tables: LabelTables): IFCLabel | undefined {
+  let merged: IFCLabel = {};
   for (const table of Object.values(tables ?? {})) {
     for (const col of Object.values(table?.properties ?? {})) {
-      const ifc =
-        (col as { ifc?: { confidentiality?: unknown; integrity?: unknown } })
-          ?.ifc;
-      if (!ifc || typeof ifc !== "object") continue;
-      if (
-        Array.isArray(ifc.confidentiality) && ifc.confidentiality.length > 0
-      ) {
-        conf.push(...ifc.confidentiality);
-      }
-      if (Array.isArray(ifc.integrity) && ifc.integrity.length > 0) {
-        integritySets.push(ifc.integrity);
-      }
+      const ifc = (col as { ifc?: IFCLabel })?.ifc;
+      if (ifc && typeof ifc === "object") merged = mergeLabel(merged, ifc);
     }
   }
-  const confidentiality = uniqueCfcAtoms(conf);
-  // Meet (intersection) over the columns that DECLARE integrity; an undeclared
-  // column is top and does not tighten it. No integrity anywhere → empty.
-  const integrity = integritySets.length > 0
-    ? integritySets.reduce((acc, set) =>
-      acc.filter((a) => set.some((b) => deepEqual(a, b)))
-    )
-    : [];
-  const out: { confidentiality?: unknown[]; integrity?: unknown[] } = {};
-  if (confidentiality.length > 0) out.confidentiality = confidentiality;
-  if (integrity.length > 0) out.integrity = integrity;
-  return out.confidentiality || out.integrity ? out : undefined;
+  return (merged.confidentiality?.length || merged.integrity?.length)
+    ? merged
+    : undefined;
 }
 
 /**
