@@ -267,8 +267,8 @@ export default pattern<State>(({ people, expenses, myName }) => {
                 variant="solid"
                 disabled={computed(() => !hasProfile)}
                 onClick={joinWithProfile({
-                  people: people as any,
-                  myName: myName as any,
+                  people,
+                  myName,
                   name: myProfileName,
                   avatar: myProfileAvatar,
                 })}
