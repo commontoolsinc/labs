@@ -10,12 +10,37 @@ const avatarSizes = ["xs", "sm", "md", "lg", "xl"] as const;
 const avatarShapes = ["circle", "square"] as const;
 
 /**
- * Returns true when `src` looks like something an `<img>` can load (http(s):,
- * data:, blob:, or a root-relative path). A non-URL string (e.g. an emoji or a
- * couple of letters) is rendered as a glyph instead.
+ * Returns true only when `src` is a `data:` URI — an inline, self-contained
+ * image with NO network fetch.
+ *
+ * The UI library forbids external resource loading (see packages/ui/README.md,
+ * "No External Resources"): `cf-avatar` runs on the trusted main thread and its
+ * `src` is often supplied by a sandboxed pattern, so rendering an `<img>` that
+ * points at `http(s):`, a protocol-relative `//host`, `blob:`, or any other
+ * remote/opaque scheme would silently fetch an external resource — a privacy /
+ * exfil beacon and tracking vector. Those values are therefore treated as NOT
+ * an image so the caller falls back to the inline glyph / initials path.
+ *
+ * Only `data:` URIs are inline and safe to render as an `<img>`. Anything else
+ * (emoji, initials text, relative paths, remote URLs) returns false.
  */
 export const isAvatarImageUrl = (src: string): boolean =>
-  /^(https?:|data:|blob:|\/)/i.test(src.trim());
+  /^data:/i.test(src.trim());
+
+/**
+ * Returns true when `src` looks like a URL / path / scheme rather than a typed
+ * glyph (emoji or a couple of letters). Such values are NOT fetched (only
+ * `data:` URIs render as images), and rendering the raw URL text inside the
+ * avatar would look broken — so they degrade to initials instead of the glyph
+ * path. Matches any `scheme:` prefix or leading `/` (covers `http(s):`, `blob:`,
+ * `ftp:`, protocol-relative `//host`, and root/relative paths), excluding the
+ * inline `data:` case handled by `isAvatarImageUrl`.
+ */
+export const isRemoteLikeSource = (src: string): boolean => {
+  const trimmed = src.trim();
+  return !/^data:/i.test(trimmed) &&
+    /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(trimmed);
+};
 
 /** Up to two uppercase initials derived from a display name. */
 export const initialsForName = (name: string | undefined): string => {
@@ -37,12 +62,15 @@ export const initialsForName = (name: string | undefined): string => {
  * identity presentation lives in `<cf-profile-badge>`, which composes this.
  *
  * Rendering precedence:
- *   1. `src` that looks like a URL  → `<img>` (falls back to initials on error)
- *   2. `src` that is a short glyph  → the glyph as-is (e.g. an emoji)
- *   3. otherwise                    → initials derived from `name`
+ *   1. `src` that is a `data:` URI   → `<img>` (falls back to initials on error)
+ *   2. a short typed glyph (emoji)   → the glyph as-is
+ *   3. otherwise                     → initials derived from `name`.
+ *      Remote URL/path-like `src` (http(s):, //host, blob:, /path, …) is never
+ *      fetched and is not shown as raw text — it degrades to initials here
+ *      (see `isAvatarImageUrl` / `isRemoteLikeSource`).
  *
  * @element cf-avatar
- * @attr {string} src   - Image URL, or a glyph/emoji string
+ * @attr {string} src   - A `data:` image URI, or a glyph/emoji string
  * @attr {string} name  - Display name; drives the initials fallback + alt text
  * @attr {string} alt   - Explicit alt text (defaults to `name`)
  * @attr {string} size  - xs | sm | md | lg | xl (default md)
@@ -149,7 +177,10 @@ export class CFAvatar extends BaseElement {
     const name = this.name;
     const showImage = src.length > 0 && isAvatarImageUrl(src) &&
       !this._imgError;
-    const showGlyph = src.length > 0 && !isAvatarImageUrl(src);
+    // Short typed glyphs (emoji / a couple of letters) render as-is; URL/path
+    // -like sources are neither fetched nor shown as raw text — they fall
+    // through to initials.
+    const showGlyph = src.length > 0 && !showImage && !isRemoteLikeSource(src);
 
     return html`
       <span
