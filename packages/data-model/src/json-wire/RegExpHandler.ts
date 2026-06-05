@@ -13,7 +13,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 export const RegExpHandler: TypeHandler = {
   /** @inheritDoc */
   get classSource() {
-    return RegExp;
+    return FabricRegExp;
   },
 
   /** @inheritDoc */
