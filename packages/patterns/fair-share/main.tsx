@@ -24,11 +24,13 @@ import {
   computed,
   Default,
   equals,
+  handler,
   NAME,
   pattern,
   type PerUser,
   safeDateNow,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -36,6 +38,10 @@ import {
 
 interface Person {
   name: string;
+  // Optional avatar snapshot (image URL or emoji/glyph), sourced from the
+  // person's shared profile when they "join with your profile". Display-only —
+  // `name` stays the natural key, so the money/balance logic is unaffected.
+  avatar?: string;
 }
 
 interface Expense {
@@ -48,6 +54,7 @@ interface Expense {
 
 interface Balance {
   name: string;
+  avatar?: string;
   paid: number;
   share: number;
   net: number; // paid - share; positive => is owed, negative => owes
@@ -114,6 +121,34 @@ const computeSettlements = (balances: Balance[]): Settlement[] => {
   return result;
 };
 
+// Snapshot the current viewer's shared profile (name + avatar) into the shared
+// `people` ledger and select them as "you". This is the participant/roster
+// idiom: each viewer contributes their own #profile snapshot on join, rather
+// than the app querying everyone's private profile state (see
+// docs/specs/shared-profile-rosters.md). `name` stays the natural key.
+const joinWithProfile = handler<
+  unknown,
+  {
+    people: Writable<Person[]>;
+    myName: Writable<string>;
+    name: string;
+    avatar: string;
+  }
+>((_event, { people, myName, name, avatar }) => {
+  const n = (name ?? "").trim();
+  if (!n) return;
+  const av = (avatar ?? "").trim();
+  const cur = people.get();
+  const idx = cur.findIndex((p) => p.name === n);
+  if (idx < 0) {
+    people.push(av ? { name: n, avatar: av } : { name: n });
+  } else if (av && !cur[idx].avatar) {
+    // Backfill the avatar snapshot if this name was added by hand earlier.
+    people.set(cur.toSpliced(idx, 1, { ...cur[idx], avatar: av }));
+  }
+  myName.set(n);
+});
+
 // ============ PATTERN ============
 
 export default pattern<State>(({ people, expenses, myName }) => {
@@ -126,6 +161,21 @@ export default pattern<State>(({ people, expenses, myName }) => {
 
   // --- Identity (resolve per-user name once at top level) ---
   const me = (myName ?? "").trim();
+
+  // The current viewer's *shared profile* (resolved via wish). `#profile` is the
+  // live cell bound to <cf-profile-badge>; the field targets give the name/avatar
+  // we snapshot into the ledger on "join". Profile-count-agnostic: resolves the
+  // viewer's default profile.
+  const profileWish = wish({ query: "#profile" });
+  const profileNameWish = wish<string>({ query: "#profileName" });
+  const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+  const myProfileName = computed(() => (profileNameWish.result ?? "").trim());
+  const myProfileAvatar = computed(() =>
+    (profileAvatarWish.result ?? "").trim()
+  );
+  const hasProfile = computed(() =>
+    (profileNameWish.result ?? "").trim() !== ""
+  );
 
   // --- Derived data ---
   const peopleOptions = computed(() =>
@@ -165,7 +215,13 @@ export default pattern<State>(({ people, expenses, myName }) => {
     return ppl.map((p) => {
       const paid = (paidCents.get(p.name) ?? 0) / 100;
       const share = (shareCents.get(p.name) ?? 0) / 100;
-      return { name: p.name, paid, share, net: paid - share };
+      return {
+        name: p.name,
+        avatar: p.avatar ?? "",
+        paid,
+        share,
+        net: paid - share,
+      };
     });
   });
 
@@ -198,35 +254,59 @@ export default pattern<State>(({ people, expenses, myName }) => {
 
         {/* ===== You ===== */}
         <cf-card>
-          <cf-hstack gap="3" align="center" wrap>
-            <cf-label>You are</cf-label>
-            <cf-select
-              $value={myName}
-              items={peopleOptions}
-              style={{ minWidth: "160px" }}
-            />
-            {computed(() => {
-              const net = myNet;
-              if (net === null) {
+          <cf-vstack gap="3">
+            {
+              /* Identity via shared profile: the trusted badge shows who you are,
+                and "Join" snapshots your profile name+avatar into the ledger. */
+            }
+            <cf-hstack gap="3" align="center" wrap>
+              <cf-label>You are</cf-label>
+              <cf-profile-badge $profile={profileWish.result} size="sm" />
+              <cf-button
+                color="primary"
+                variant="solid"
+                disabled={computed(() => !hasProfile)}
+                onClick={joinWithProfile({
+                  people: people as any,
+                  myName: myName as any,
+                  name: myProfileName,
+                  avatar: myProfileAvatar,
+                })}
+              >
+                Join with your profile
+              </cf-button>
+            </cf-hstack>
+            {/* Fallback: pick yourself from the people added by hand. */}
+            <cf-hstack gap="3" align="center" wrap>
+              <cf-label>or pick</cf-label>
+              <cf-select
+                $value={myName}
+                items={peopleOptions}
+                style={{ minWidth: "160px" }}
+              />
+              {computed(() => {
+                const net = myNet;
+                if (net === null) {
+                  return (
+                    <cf-text tone="muted">
+                      Pick who you are to see your balance.
+                    </cf-text>
+                  );
+                }
                 return (
-                  <cf-text tone="muted">
-                    Pick who you are to see your balance.
-                  </cf-text>
+                  <cf-badge
+                    color={net > 0 ? "accent" : net < 0 ? "danger" : "neutral"}
+                  >
+                    {net > 0
+                      ? `You are owed ${money(net)}`
+                      : net < 0
+                      ? `You owe ${money(-net)}`
+                      : "You're settled up"}
+                  </cf-badge>
                 );
-              }
-              return (
-                <cf-badge
-                  color={net > 0 ? "accent" : net < 0 ? "danger" : "neutral"}
-                >
-                  {net > 0
-                    ? `You are owed ${money(net)}`
-                    : net < 0
-                    ? `You owe ${money(-net)}`
-                    : "You're settled up"}
-                </cf-badge>
-              );
-            })}
-          </cf-hstack>
+              })}
+            </cf-hstack>
+          </cf-vstack>
         </cf-card>
 
         {/* ===== People ===== */}
@@ -241,40 +321,47 @@ export default pattern<State>(({ people, expenses, myName }) => {
             }
             <cf-hstack gap="2" wrap>
               {people.map((person) => (
-                <cf-chip
-                  label={person.name}
-                  removable
-                  oncf-remove={() => {
-                    const cur = people.get();
-                    const idx = cur.findIndex((p) => equals(person, p));
-                    if (idx < 0) return;
-                    const name = { ...cur[idx] }.name;
-                    // Cascade-clean so balances stay zero-sum: drop expenses
-                    // they paid (money has no creditor now) and remove them
-                    // from every other split. Built with a plain for-loop and
-                    // explicit array spreads — chaining .filter()/.map() on the
-                    // reactive .get() array makes the transformer rewrite them
-                    // to .filterWithPattern()/.mapWithPattern(), which throw at
-                    // runtime here.
-                    const cleaned: Expense[] = [];
-                    for (const e of expenses.get()) {
-                      if (e.paidBy === name) continue;
-                      const had = [...(e.sharedBy ?? [])];
-                      // Empty sharedBy means "split among everyone" — it stays
-                      // implicit-everyone (now a smaller group), so keep it as-is.
-                      if (had.length === 0) {
-                        cleaned.push({ ...e });
-                        continue;
+                <cf-hstack gap="1" align="center">
+                  <cf-avatar
+                    src={person.avatar}
+                    name={person.name}
+                    size="xs"
+                  />
+                  <cf-chip
+                    label={person.name}
+                    removable
+                    oncf-remove={() => {
+                      const cur = people.get();
+                      const idx = cur.findIndex((p) => equals(person, p));
+                      if (idx < 0) return;
+                      const name = { ...cur[idx] }.name;
+                      // Cascade-clean so balances stay zero-sum: drop expenses
+                      // they paid (money has no creditor now) and remove them
+                      // from every other split. Built with a plain for-loop and
+                      // explicit array spreads — chaining .filter()/.map() on the
+                      // reactive .get() array makes the transformer rewrite them
+                      // to .filterWithPattern()/.mapWithPattern(), which throw at
+                      // runtime here.
+                      const cleaned: Expense[] = [];
+                      for (const e of expenses.get()) {
+                        if (e.paidBy === name) continue;
+                        const had = [...(e.sharedBy ?? [])];
+                        // Empty sharedBy means "split among everyone" — it stays
+                        // implicit-everyone (now a smaller group), so keep it as-is.
+                        if (had.length === 0) {
+                          cleaned.push({ ...e });
+                          continue;
+                        }
+                        const shared = had.filter((s) => s !== name);
+                        // An explicit split emptied by this removal is dropped.
+                        if (shared.length === 0) continue;
+                        cleaned.push({ ...e, sharedBy: shared });
                       }
-                      const shared = had.filter((s) => s !== name);
-                      // An explicit split emptied by this removal is dropped.
-                      if (shared.length === 0) continue;
-                      cleaned.push({ ...e, sharedBy: shared });
-                    }
-                    people.set(cur.toSpliced(idx, 1));
-                    expenses.set(cleaned);
-                  }}
-                />
+                      people.set(cur.toSpliced(idx, 1));
+                      expenses.set(cleaned);
+                    }}
+                  />
+                </cf-hstack>
               ))}
             </cf-hstack>
             {computed(() =>
@@ -476,7 +563,10 @@ export default pattern<State>(({ people, expenses, myName }) => {
                     fontWeight: b.name === me ? "700" : "400",
                   }}
                 >
-                  <span>{b.name === me ? `${b.name} (you)` : b.name}</span>
+                  <cf-hstack gap="2" align="center">
+                    <cf-avatar src={b.avatar} name={b.name} size="xs" />
+                    <span>{b.name === me ? `${b.name} (you)` : b.name}</span>
+                  </cf-hstack>
                   <cf-badge
                     color={b.net > 0
                       ? "accent"
