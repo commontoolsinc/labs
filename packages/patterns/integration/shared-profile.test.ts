@@ -269,8 +269,10 @@ async function readProfileCreateProbe(page: Page) {
         const homeCell = await rt?.getHomeSpaceCell?.();
         const defaultPattern = await homeCell?.key?.("defaultPattern")
           .resolveAsCell?.();
-        const profile = defaultPattern?.key?.("profile");
-        const resolvedProfile = await profile?.resolveAsCell?.().catch((
+        // Multi-profile model: profiles[] + defaultProfile + mru (no single
+        // `profile`/`profileName`). Best-effort diagnostic only.
+        const defaultProfile = defaultPattern?.key?.("defaultProfile");
+        const resolvedDefault = await defaultProfile?.resolveAsCell?.().catch((
           error: unknown,
         ) => ({
           ref: () => undefined,
@@ -279,27 +281,14 @@ async function readProfileCreateProbe(page: Page) {
               error instanceof Error ? error.message : String(error),
             ),
         }));
-        const profileValue = profile?.key?.("value");
-        const resolvedProfileValue = await profileValue?.resolveAsCell?.()
-          .catch((error: unknown) => ({
-            ref: () => undefined,
-            sync: () =>
-              Promise.resolve(
-                error instanceof Error ? error.message : String(error),
-              ),
-          }));
         return {
           defaultPattern: defaultPattern?.ref?.(),
-          profile: await profile?.sync?.(),
-          profileName: await defaultPattern?.key?.("profileName").sync?.(),
-          resolvedProfile: {
-            ref: resolvedProfile?.ref?.(),
-            value: await resolvedProfile?.sync?.(),
-          },
-          profileValue: await profileValue?.sync?.(),
-          resolvedProfileValue: {
-            ref: resolvedProfileValue?.ref?.(),
-            value: await resolvedProfileValue?.sync?.(),
+          profiles: await defaultPattern?.key?.("profiles").sync?.(),
+          defaultProfile: await defaultProfile?.sync?.(),
+          mru: await defaultPattern?.key?.("mru").sync?.(),
+          resolvedDefault: {
+            ref: resolvedDefault?.ref?.(),
+            value: await resolvedDefault?.sync?.(),
           },
         };
       } catch (error) {
