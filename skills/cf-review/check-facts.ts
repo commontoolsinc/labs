@@ -76,7 +76,7 @@ export async function collectErrors(): Promise<string[]> {
   }
 
   // Every `@commonfabric/...` specifier the skill names must resolve. Subpath
-  // segments allow PascalCase / dots (e.g. data-model/BaseReconstructionContext).
+  // segments allow PascalCase / dots (e.g. data-model/SchemaAndHash).
   const specifiers = new Set(
     skill.match(/@commonfabric\/[a-z0-9-]+(?:\/[\w.-]+)*/g) ?? [],
   );

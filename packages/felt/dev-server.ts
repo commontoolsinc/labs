@@ -37,7 +37,13 @@ export class DevServer {
     this.html = this.getHtml({ useReloadSocket, outDir });
     this.socketScript = this.getSocketScript({ hostname, port });
     this._server = Deno.serve(
-      { port, hostname, onListen() {} },
+      {
+        port,
+        hostname,
+        onListen() {
+          console.log(`Dev server listening on http://${hostname}:${port}`);
+        },
+      },
       this.onRequest.bind(this),
     );
   }

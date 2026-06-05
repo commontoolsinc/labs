@@ -1,13 +1,11 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../interface.ts";
+} from "@/wire-common/interface.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
-import { deepFreeze } from "../deep-freeze.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 
 /**
  * Container for a value whose deconstruction or reconstruction failed.

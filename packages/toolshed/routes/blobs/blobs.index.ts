@@ -8,7 +8,7 @@ import { isDID } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { JsonEncodingContext } from "@commonfabric/data-model/json-wire";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,

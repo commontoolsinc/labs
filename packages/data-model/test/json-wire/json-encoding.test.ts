@@ -1,14 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
   jsonFromValue,
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "../../src/json-wire/json-encoding.ts";
-import { FabricError } from "../../src/fabric-instances/FabricError.ts";
-import type { FabricValue } from "../../src/fabric-value.ts";
-import { BaseReconstructionContext } from "../../src/BaseReconstructionContext.ts";
+} from "@/json-wire/json-encoding.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import type { FabricValue } from "@/fabric-value.ts";
+import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {

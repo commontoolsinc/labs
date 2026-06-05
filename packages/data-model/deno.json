@@ -1,5 +1,8 @@
 {
   "name": "@commonfabric/data-model",
+  "imports": {
+    "@/": "./src/"
+  },
   "tasks": {
     "check": "deno check .",
     "just-test": {
@@ -24,10 +27,8 @@
     ]
   },
   "exports": {
-    "./BaseReconstructionContext": "./src/BaseReconstructionContext.ts",
     "./cell-rep": "./src/cell-rep.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
-    "./EmptyReconstructionContext": "./src/EmptyReconstructionContext.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-value": "./src/fabric-value.ts",
@@ -38,7 +39,9 @@
     "./native-type-tags": "./src/native-type-tags.ts",
     "./schema-hash": "./src/schema-hash.ts",
     "./schema-utils": "./src/schema-utils.ts",
+    "./SchemaAndHash": "./src/SchemaAndHash.ts",
     "./value-debug": "./src/value-debug.ts",
-    "./value-hash": "./src/value-hash.ts"
+    "./value-hash": "./src/value-hash.ts",
+    "./wire-common": "./src/wire-common/index.ts"
   }
 }

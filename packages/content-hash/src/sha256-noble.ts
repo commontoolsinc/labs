@@ -3,10 +3,10 @@
  */
 
 import { sha256 } from "@noble/hashes/sha2.js";
-import type { IncrementalHasher } from "./interface.ts";
+import type { IncrementalHasher } from "@/interface.ts";
 import {
   BaseSmallChunkUpdatingHasher,
-} from "./BaseSmallChunkUpdatingHasher.ts";
+} from "@/BaseSmallChunkUpdatingHasher.ts";
 
 /**
  * Noble-specific incremental hasher. Noble notably only has a one-shot digest

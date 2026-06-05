@@ -2,19 +2,13 @@
 // canonical public surface for all type declarations and the `FabricInstance`
 // base class.
 export {
-  DECONSTRUCT,
   type FabricArray,
-  type FabricClass,
   FabricInstance,
   type FabricNativeObject,
   type FabricObject,
   FabricPrimitive,
   type FabricValue,
-  type FabricValueConverter,
   type FabricValueLayer,
-  RECONSTRUCT,
-  type ReconstructionContext,
-  type SerializationContext,
 } from "./interface.ts";
 
 export {

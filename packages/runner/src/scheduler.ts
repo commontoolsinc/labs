@@ -225,6 +225,11 @@ type SchedulerStorageRehydrationOptions =
   & {
     space: MemorySpace;
     timeoutMs?: number;
+    // When the pattern is (re)started from a synced/resumed state, wait for the
+    // space's storage to finish syncing before attempting rehydration / the
+    // initial run. This avoids running consumers (map/filter/computed) against
+    // not-yet-synced data and then re-running once it streams in.
+    awaitSync?: boolean;
   };
 
 // Re-export types that tests expect from scheduler
@@ -732,9 +737,25 @@ export class Scheduler {
     const token = Symbol("scheduler-initial-rehydration");
     this.initialRehydrationTokens.set(action, token);
     const task = (async () => {
+      // The sync wait and the rehydration lookup share ONE timeout budget, so a
+      // stuck sync can't double the resumed startup delay: each step is bounded
+      // by the time remaining until this common deadline.
+      const deadline = performance.now() +
+        Math.max(
+          0,
+          options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+        );
+      const remainingMs = () => Math.max(0, deadline - performance.now());
+      if (options.awaitSync) {
+        // Resumed from a synced state: hold the initial rehydration/run until
+        // the space has finished syncing so consumers don't race the data.
+        await this.awaitSpaceSyncedWithTimeout(options.space, remainingMs());
+        // The action may have been superseded while we waited for sync.
+        if (!this.canApplyInitialActionRehydration(action, token)) return;
+      }
       const rehydrated = await this.runInitialActionRehydrationWithTimeout(
         action,
-        options,
+        options.awaitSync ? { ...options, timeoutMs: remainingMs() } : options,
         token,
       );
       if (rehydrated === "timeout") {
@@ -776,6 +797,31 @@ export class Scheduler {
         this.initialRehydrationTokens.delete(action);
       }
     });
+  }
+
+  // Wait for the space's storage replica to finish syncing, bounded by the
+  // rehydration timeout so a stuck sync can't wedge the initial run forever.
+  private async awaitSpaceSyncedWithTimeout(
+    space: MemorySpace,
+    timeoutMs?: number,
+  ): Promise<void> {
+    const provider = this.runtime.storageManager.open(space);
+    const synced = provider?.synced?.bind(provider);
+    if (!synced) return;
+    const ms = Math.max(0, timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timeoutId = setTimeout(resolve, ms);
+    });
+    const syncedPromise = synced();
+    // If the timeout wins the race the sync promise is left pending; swallow a
+    // later rejection so it doesn't surface as an unhandled promise rejection.
+    syncedPromise.catch(() => {});
+    try {
+      await Promise.race([syncedPromise, timeout]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
   }
 
   private async runInitialActionRehydrationWithTimeout(

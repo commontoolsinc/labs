@@ -1,13 +1,11 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../interface.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
-import { FrozenSet } from "../frozen-builtins.ts";
+} from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**

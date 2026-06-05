@@ -40,6 +40,27 @@ Deno.test("HandleMap clears pending truncates when content arrives", () => {
   assertEquals(handleHasPendingChanges(handle), true);
 });
 
+Deno.test("HandleMap clears sibling pending truncates when content arrives", () => {
+  const handles = new HandleMap();
+  const writer = handles.open(1n, O_RDWR, encoder.encode("hello"));
+  const duplicate = handles.open(1n, O_RDWR, encoder.encode("hello"));
+
+  handles.truncateByIno(1n, 0, { pendingFh: writer });
+  handles.truncateByIno(1n, 0, { pendingFh: duplicate });
+  handles.write(writer, encoder.encode("fresh"), 0);
+
+  const writerHandle = handles.get(writer);
+  assertEquals(new TextDecoder().decode(writerHandle?.buffer), "fresh");
+  assertEquals(writerHandle?.dirty, true);
+  assertEquals(writerHandle?.truncatePending, false);
+  assertEquals(handleHasPendingChanges(writerHandle), true);
+
+  const duplicateHandle = handles.get(duplicate);
+  assertEquals(duplicateHandle?.dirty, false);
+  assertEquals(duplicateHandle?.truncatePending, false);
+  assertEquals(handleHasPendingChanges(duplicateHandle), false);
+});
+
 Deno.test("HandleMap truncates every open handle for an inode", () => {
   const handles = new HandleMap();
   const first = handles.open(1n, O_RDWR, encoder.encode("first"));

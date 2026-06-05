@@ -5,7 +5,7 @@ import {
 } from "@commonfabric/data-model/json-wire";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;

@@ -1,6 +1,6 @@
-import { BaseReconstructionContext } from "../../src/BaseReconstructionContext.ts";
-import type { FabricValue } from "../../src/interface.ts";
-import { deepFreeze, isDeepFrozen } from "../../src/deep-freeze.ts";
+import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
+import type { FabricValue } from "@/interface.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
 /** Dummy reconstruction context for tests. */
 export class DummyReconstructionContext extends BaseReconstructionContext {

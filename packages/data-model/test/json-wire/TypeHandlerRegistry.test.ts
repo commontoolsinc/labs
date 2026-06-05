@@ -1,19 +1,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { toCompactDebugString } from "../../src/value-debug.ts";
-import { TypeHandlerRegistry } from "../../src/json-wire/TypeHandlerRegistry.ts";
+
+import { toCompactDebugString } from "@/value-debug.ts";
+import { TypeHandlerRegistry } from "@/json-wire/TypeHandlerRegistry.ts";
 import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
-} from "../../src/json-wire/interface.ts";
-import { UnknownValue } from "../../src/fabric-instances/UnknownValue.ts";
-import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
-import {
-  FabricInstance,
-  type FabricValue,
-  type ReconstructionContext,
-} from "../../src/interface.ts";
+} from "@/json-wire/interface.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricInstance, type FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
 
 /** Handy no-op `TypeHandler` base class for use in tests. */
 class TestTypeHandler implements TypeHandler {

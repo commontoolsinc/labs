@@ -505,7 +505,16 @@ type SchedulerRehydrationSubscriptionOptions = {
     space: MemorySpace;
     pieceId: string;
     processGeneration: number;
+    awaitSync?: boolean;
   };
+};
+
+// Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
+type RunnerRunOptions = {
+  doNotUpdateOnPatternChange?: boolean;
+  // Resumed-from-synced-state: hold each action's initial rehydration/run until
+  // the space has finished syncing, so consumers don't race the data.
+  awaitSyncBeforeInitialRun?: boolean;
 };
 
 function dedupeNormalizedLinks(
@@ -1052,6 +1061,9 @@ export class Runner {
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
       rehydrateSchedulerFromStorage?: boolean;
+      // Resumed-from-synced-state: hold each action's initial rehydration/run
+      // until the space has finished syncing, so consumers don't race the data.
+      awaitSyncBeforeInitialRun?: boolean;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
@@ -1091,7 +1103,10 @@ export class Runner {
       const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
           false
         ? {}
-        : this.schedulerRehydrationOptions(resultCell);
+        : this.schedulerRehydrationOptions(
+          resultCell,
+          options.awaitSyncBeforeInitialRun,
+        );
       try {
         for (const node of pattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
@@ -1350,6 +1365,11 @@ export class Runner {
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
+            // This pattern is resumed from a synced state (it just awaited
+            // syncCellsForRunningPattern): hold each action's initial run until
+            // the space finishes syncing so we don't race the data (e.g. maps
+            // reconciling an empty array, then re-running once it streams in).
+            awaitSyncBeforeInitialRun: true,
           });
         } catch (err) {
           return Promise.reject(err);
@@ -1363,7 +1383,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: { doNotUpdateOnPatternChange?: boolean } = {},
+    options: RunnerRunOptions = {},
   ): void {
     const key = this.getDocKey(resultCell);
     if (this.cancels.has(key)) return;
@@ -1372,6 +1392,7 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
+      awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
     });
   }
 
@@ -1379,7 +1400,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: { doNotUpdateOnPatternChange?: boolean } = {},
+    options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
@@ -1508,21 +1529,21 @@ export class Runner {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { doNotUpdateOnPatternChange?: boolean },
+    options?: RunnerRunOptions,
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { doNotUpdateOnPatternChange?: boolean },
+    options?: RunnerRunOptions,
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options: { doNotUpdateOnPatternChange?: boolean } = {},
+    options: RunnerRunOptions = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
     const sourceKey = getTxDebugActionId(tx) ?? "none";
@@ -1663,13 +1684,10 @@ export class Runner {
     return `${space}/${scope}/${id}`;
   }
 
-  private schedulerRehydrationOptions(resultCell: Cell<any>): {
-    rehydrateFromStorage?: {
-      space: MemorySpace;
-      pieceId: string;
-      processGeneration: number;
-    };
-  } {
+  private schedulerRehydrationOptions(
+    resultCell: Cell<any>,
+    awaitSync?: boolean,
+  ): SchedulerRehydrationSubscriptionOptions {
     if (!getPersistentSchedulerStateConfig()) {
       return {};
     }
@@ -1679,8 +1697,31 @@ export class Runner {
         space,
         pieceId: `${scope}:${id}`,
         processGeneration: 0,
+        ...(awaitSync ? { awaitSync: true } : {}),
       },
     };
+  }
+
+  /**
+   * Sync the result cell's `internal` and `argument` meta-linked docs.
+   *
+   * They are separate content-addressed docs reached only via the result
+   * cell's meta links, so they are not loaded by syncing the result cell or the
+   * pattern's node inputs/outputs. `applySetupState` reads the persisted
+   * `internal` synchronously; awaiting these here keeps a build-time default
+   * from transiently clobbering a persisted value on a cold read (CT-1666).
+   *
+   * The result cell must already be synced so its meta links are readable.
+   */
+  private async syncMetaCells(resultCell: Cell<any>): Promise<void> {
+    const promises: Promise<unknown>[] = [];
+    for (const field of ["argument", "internal"] as const) {
+      const link = getMetaLink(resultCell, field);
+      if (link === undefined) continue;
+      const maybePromise = this.runtime.getCellFromLink(link).sync();
+      if (maybePromise instanceof Promise) promises.push(maybePromise);
+    }
+    await Promise.all(promises);
   }
 
   private async syncCellsForRunningPattern(
@@ -1709,6 +1750,16 @@ export class Runner {
     await Promise.all(promises);
 
     await resultCell.sync();
+
+    // Also load the `internal` and `argument` meta-linked docs. These live in
+    // separate content-addressed docs reached only via the result cell's meta
+    // links -- not through the schema/value graph synced above -- so they are
+    // not covered by `resultCell.sync()` or the node input/output sync below.
+    // `applySetupState` reads the persisted `internal` synchronously and merges
+    // the pattern's build-time defaults UNDER it (persisted wins). Without this
+    // awaited load that read races storage and can see `undefined`, letting a
+    // build-time default transiently clobber the persisted value (CT-1666).
+    await this.syncMetaCells(resultCell);
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -1987,6 +2038,7 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
+            schedulerRehydration,
           );
           break;
         default:
@@ -3626,6 +3678,12 @@ export class Runner {
               },
             }
             : {}),
+          // Propagate the resumed-from-synced-state flag so container-minting
+          // builtins (map/filter/flatmap) defer their per-element sub-pattern
+          // runs until sync completes too.
+          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
+            ? { awaitSync: true }
+            : {}),
         },
         processCell,
         this.runtime,
@@ -3805,6 +3863,7 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     _pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
@@ -3919,7 +3978,10 @@ export class Runner {
         resultCellLink.space,
       );
     }
-    this.run(tx, patternImpl, inputs, resultCell);
+    this.run(tx, patternImpl, inputs, resultCell, {
+      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
+        ?.awaitSync,
+    });
 
     if (sendToBindings) {
       sendValueToBinding(

@@ -68,7 +68,14 @@ export function flatMap(
     { resultCell: Cell<any>; lastIndex: number }
   >();
 
+  // Only the initial (resume) reconcile defers its per-element sub-pattern runs
+  // until sync completes; elements from later (post-resume) reconciles are fresh
+  // and must not wait. Cleared once a non-empty resume batch is processed.
+  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
+    ?.awaitSync;
+
   return (tx: IExtendedStorageTransaction) => {
+    const elementAwaitSync = resumeBatchAwaitSync;
     const { list, op } = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA)
       .withTx(tx).get();
 
@@ -132,6 +139,8 @@ export function flatMap(
       throw new Error("flatMap currently only supports arrays");
     }
 
+    if (list.length > 0) resumeBatchAwaitSync = false;
+
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
     for (let i = 0; i < list.length; i++) {
@@ -151,7 +160,10 @@ export function flatMap(
             opPattern,
             createRunInput(list[i], i),
             existing.resultCell,
-            { doNotUpdateOnPatternChange: true },
+            {
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: elementAwaitSync,
+            },
           );
         }
         existing.lastIndex = i;
@@ -167,7 +179,10 @@ export function flatMap(
           opPattern,
           createRunInput(list[i], i),
           resultCell,
-          { doNotUpdateOnPatternChange: true },
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: elementAwaitSync,
+          },
         );
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));

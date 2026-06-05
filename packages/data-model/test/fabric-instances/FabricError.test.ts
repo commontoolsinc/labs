@@ -1,20 +1,20 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
-  DECONSTRUCT,
   DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
-  RECONSTRUCT,
-} from "../../src/interface.ts";
-import { FabricError } from "../../src/fabric-instances/FabricError.ts";
-import { FabricNativeWrapper } from "../../src/fabric-instances/FabricNativeWrapper.ts";
+} from "@/interface.ts";
+import { DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {
   deepFreeze,
   isDeepFrozen,
   isDeepFrozenFabricValue,
-} from "../../src/deep-freeze.ts";
+} from "@/deep-freeze.ts";
 import { dummyContext, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricError", () => {

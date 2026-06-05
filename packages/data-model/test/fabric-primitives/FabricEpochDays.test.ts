@@ -1,8 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricEpochDays } from "../../src/fabric-primitives/FabricEpochDays.ts";
-import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
-import { shallowFabricFromNativeValue } from "../../src/fabric-value.ts";
+
+import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 
 describe("FabricEpochDays", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the

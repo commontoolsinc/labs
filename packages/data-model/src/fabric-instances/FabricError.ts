@@ -1,17 +1,15 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../interface.ts";
-import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
-import { FrozenSet } from "../frozen-builtins.ts";
-import { EmptyReconstructionContext } from "../EmptyReconstructionContext.ts";
+} from "@/wire-common/interface.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { FrozenSet } from "@/frozen-builtins.ts";
+import { EmptyReconstructionContext } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
-import { errorClassFromType, UNSAFE_KEYS } from "../native-conversion.ts";
+import { errorClassFromType, UNSAFE_KEYS } from "@/native-conversion.ts";
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the

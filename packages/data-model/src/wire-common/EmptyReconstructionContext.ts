@@ -5,7 +5,8 @@
  * structurally flat).
  */
 
-import type { FabricInstance, ReconstructionContext } from "./interface.ts";
+import type { FabricInstance } from "@/interface.ts";
+import type { ReconstructionContext } from "./interface.ts";
 import { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 
 /**

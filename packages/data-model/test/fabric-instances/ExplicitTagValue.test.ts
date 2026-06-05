@@ -1,8 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { UnknownValue } from "../../src/fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "../../src/fabric-instances/ProblematicValue.ts";
-import { ExplicitTagValue } from "../../src/fabric-instances/ExplicitTagValue.ts";
+
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 
 describe("ExplicitTagValue", () => {
   describe("instance members", () => {
