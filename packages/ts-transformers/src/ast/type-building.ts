@@ -63,29 +63,37 @@ export function qualifyCommonFabricTypeRefs(
       factory.createIdentifier(leafName),
     );
 
+  const isCommonFabricSymbol = (sym: ts.Symbol | undefined): boolean => {
+    if (!sym) return false;
+    const parent = (sym as unknown as { parent?: ts.Symbol }).parent;
+    return isCommonFabricModuleName(parent?.name) && !!sym.name;
+  };
+
   // From a Type, find the export name in commonfabric (if any).
   //
-  // Prefer `aliasSymbol` over `symbol`: when the user writes `Writable<X>`
-  // and `Writable` is an alias for `Cell`, the Type's `symbol` may be the
-  // underlying `Cell` constructor while `aliasSymbol` correctly points at
-  // `Writable`. Preserving the user's chosen name keeps the emitted
-  // annotation closer to authored intent.
+  // Prefer `aliasSymbol`: when the user writes `Writable<X>` and `Writable` is
+  // itself a commonfabric alias for `Cell`, the Type's `symbol` is the
+  // underlying `Cell` constructor while `aliasSymbol` points at `Writable` —
+  // we want to keep `Writable`.
+  //
+  // Crucially, if `aliasSymbol` is a USER alias (NOT a commonfabric export),
+  // the user has already named this type completely and resolvably (e.g.
+  // `type SharedMessagesCell = Writable<Foo>`). We must NOT fall through to
+  // `type.symbol` and rewrite to the bare underlying commonfabric name: the
+  // alias-reference node carries no type arguments (they're hidden inside the
+  // alias), so rewriting `SharedMessagesCell` -> `__cfHelpers.Cell` would drop
+  // the `<Foo>` entirely, degrading the type to `Cell<unknown>` and breaking
+  // runtime cell materialization. Leave user aliases alone.
   const commonFabricExportName = (
     type: ts.Type | undefined,
   ): string | undefined => {
     if (!type) return undefined;
-    const candidates: (ts.Symbol | undefined)[] = [
-      type.aliasSymbol,
-      type.symbol,
-    ];
-    for (const sym of candidates) {
-      if (!sym) continue;
-      const parent = (sym as unknown as { parent?: ts.Symbol }).parent;
-      if (isCommonFabricModuleName(parent?.name) && sym.name) {
-        return sym.name;
-      }
+    if (type.aliasSymbol) {
+      return isCommonFabricSymbol(type.aliasSymbol)
+        ? type.aliasSymbol.name
+        : undefined;
     }
-    return undefined;
+    return isCommonFabricSymbol(type.symbol) ? type.symbol.name : undefined;
   };
 
   // For a union/intersection member TypeNode, find the constituent Type to
