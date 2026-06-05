@@ -6,8 +6,8 @@ import {
   pattern,
   UI,
   type VNode,
-  Writable,
   type WishState,
+  Writable,
 } from "commonfabric";
 import ProfileCreate, {
   setDefaultProfile,

@@ -2556,14 +2556,24 @@ describe("wish built-in", () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-multi-profile-space",
       )).did();
-      const p1 = runtime.getCell(profileSpaceDid, "multi-profile-1", undefined, tx);
+      const p1 = runtime.getCell(
+        profileSpaceDid,
+        "multi-profile-1",
+        undefined,
+        tx,
+      );
       p1.set({
         name: "Ada",
         initialNameApplied: "Ada",
         avatar: "ada.png",
         elements: [],
       });
-      const p2 = runtime.getCell(profileSpaceDid, "multi-profile-2", undefined, tx);
+      const p2 = runtime.getCell(
+        profileSpaceDid,
+        "multi-profile-2",
+        undefined,
+        tx,
+      );
       p2.set({
         name: "Grace",
         initialNameApplied: "Grace",
@@ -2617,14 +2627,24 @@ describe("wish built-in", () => {
       const profileSpaceDid = (await Identity.fromPassphrase(
         "wish-mru-profile-space",
       )).did();
-      const p1 = runtime.getCell(profileSpaceDid, "mru-profile-1", undefined, tx);
+      const p1 = runtime.getCell(
+        profileSpaceDid,
+        "mru-profile-1",
+        undefined,
+        tx,
+      );
       p1.set({
         name: "Ada",
         initialNameApplied: "Ada",
         avatar: "",
         elements: [],
       });
-      const p2 = runtime.getCell(profileSpaceDid, "mru-profile-2", undefined, tx);
+      const p2 = runtime.getCell(
+        profileSpaceDid,
+        "mru-profile-2",
+        undefined,
+        tx,
+      );
       p2.set({
         name: "Grace",
         initialNameApplied: "Grace",
