@@ -240,6 +240,7 @@ export class PiecesController<T = unknown> {
       };
       pattern = await this.#manager.runtime.patternManager.compilePattern(
         options.customProgram,
+        { space: this.#manager.getSpace() },
       );
     } else {
       if (isHomeSpace) {
@@ -262,12 +263,13 @@ export class PiecesController<T = unknown> {
         this.#manager.runtime.apiUrl,
       );
 
-      // Load and compile the pattern
+      // Load and compile the pattern (cache in the target space — CT-1623).
       const program = await this.#manager.runtime.harness.resolve(
         new HttpProgramResolver(patternUrl.href),
       );
       pattern = await this.#manager.runtime.patternManager.compilePattern(
         program,
+        { space: this.#manager.getSpace() },
       );
     }
 
@@ -375,6 +377,10 @@ export class PiecesController<T = unknown> {
       () =>
         this.#manager.runtime.patternManager.compilePattern(
           program,
+          // Route the space-root compile through the content-addressed cell
+          // cache so the reload (fresh worker) reuses the compiled module set
+          // instead of cold-compiling the home/default-app pattern (CT-1623).
+          { space: this.#manager.getSpace() },
         ),
     );
 

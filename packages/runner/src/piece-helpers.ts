@@ -100,7 +100,11 @@ export async function compileAndSavePattern(
       files: [{ name: "/main.tsx", contents: patternSrc }],
     };
   }
-  const pattern = await runtime.patternManager.compilePattern(patternSrc);
+  // Route through the content-addressed cell cache in the target space so the
+  // saved pattern's compiled module set is reused on subsequent loads (CT-1623).
+  const pattern = await runtime.patternManager.compilePattern(patternSrc, {
+    space: options.space,
+  });
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");
   }

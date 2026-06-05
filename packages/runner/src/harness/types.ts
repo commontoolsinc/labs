@@ -93,6 +93,15 @@ export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
   loadId?: string;
+  /**
+   * Per-module namespaces keyed by content identity (the prefix-free
+   * `cf:module/<identity>` hash). Lets the runner register every module in a
+   * just-evaluated bundle into an in-memory identity->Pattern cache, so a later
+   * by-identity load of a sub-pattern reuses the already-live module instead of
+   * re-reading the closure from storage and re-evaluating it (CT-1623).
+   * Populated only on the ESM evaluate paths.
+   */
+  exportsByIdentity?: Map<string, Exports>;
 }
 
 export interface EvaluateOptions {
