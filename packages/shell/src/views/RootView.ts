@@ -8,7 +8,6 @@ import {
   Command,
   isAppViewEqual,
   isCommand,
-  isEmbeddedView,
   navigate,
 } from "../../shared/mod.ts";
 import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
@@ -17,10 +16,7 @@ import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { type RuntimeClient } from "@commonfabric/runtime-client";
 import { type DID } from "@commonfabric/identity";
-import {
-  createSpaceBaseHrefController,
-  RuntimeInternals,
-} from "@commonfabric/lib-shell";
+import { RuntimeInternals } from "@commonfabric/lib-shell";
 import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
@@ -45,11 +41,6 @@ function getCommonfabricGlobal(): typeof globalThis & {
     commonfabric?: CommonfabricDebugState;
   };
 }
-
-const setSpaceBaseHref = createSpaceBaseHrefController({
-  hrefForSpace: (space, embedded) =>
-    embedded ? `/.embed/${space}/` : `/${space}/`,
-});
 
 // The root element for the shell application.
 //
@@ -112,7 +103,6 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
-          setSpaceBaseHref();
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
@@ -133,7 +123,6 @@ export class XRootView extends BaseView {
           rt.dispose().catch(console.error);
           this.runtime = undefined;
           this.space = undefined;
-          setSpaceBaseHref();
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
@@ -144,7 +133,6 @@ export class XRootView extends BaseView {
         // Update the provided runtime and space values
         this.runtime = rt.runtime();
         this.space = rt.space() as DID;
-        setSpaceBaseHref(this.space, isEmbeddedView(app.view));
 
         // Expose RuntimeClient for console debugging
         // (e.g. commonfabric.rt.setLoggerLevel("debug"))
@@ -200,7 +188,6 @@ export class XRootView extends BaseView {
       "theme-preference-changed",
       this._onThemeChanged,
     );
-    setSpaceBaseHref();
     super.disconnectedCallback();
   }
 
@@ -228,8 +215,6 @@ export class XRootView extends BaseView {
 
     if (flipState || stateChanged) {
       this._rt.run([current]);
-    } else if (current.identity && this.space) {
-      setSpaceBaseHref(this.space, isEmbeddedView(current.view));
     }
   }
 

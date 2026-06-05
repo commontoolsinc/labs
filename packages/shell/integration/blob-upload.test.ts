@@ -10,7 +10,7 @@ describe("shell blob upload", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  it("uploads an image and displays it through a relative blobs path", async () => {
+  it("uploads an image and displays it through an absolute blobs URL", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const spaceName = `blob-upload-${Date.now()}`;
     await shell.goto({
@@ -112,8 +112,11 @@ describe("shell blob upload", () => {
       });
 
       return {
-        relativeUrl: upload.url,
+        uploadUrl: upload.url,
         currentSrc: image.currentSrc,
+        hasSpaceBase: Boolean(
+          document.head.querySelector("[data-commonfabric-space-base='true']"),
+        ),
       };
     });
 
@@ -167,9 +170,10 @@ describe("shell blob upload", () => {
       };
     });
 
-    expect(result.relativeUrl.startsWith("blobs/")).toBe(true);
+    expect(result.uploadUrl.startsWith("http")).toBe(true);
     expect(result.currentSrc).toContain("/did:key:");
     expect(result.currentSrc).toContain("/blobs/");
+    expect(result.hasSpaceBase).toBe(false);
     expect(Boolean(box)).toBe(true);
     expect(box?.width).toBe(16);
     expect(box?.height).toBe(16);

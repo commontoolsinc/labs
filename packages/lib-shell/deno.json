@@ -6,7 +6,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./credentials": "./src/credentials.ts",
-    "./runtime": "./src/runtime.ts",
-    "./space-base": "./src/space-base.ts"
+    "./runtime": "./src/runtime.ts"
   }
 }

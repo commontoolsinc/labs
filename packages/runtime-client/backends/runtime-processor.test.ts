@@ -711,7 +711,7 @@ describe("RuntimeProcessor diagnosis helpers", () => {
 });
 
 describe("RuntimeProcessor blob upload IPC", () => {
-  it("posts FabricBytes contents to the blob route and returns its URL", async () => {
+  it("posts FabricBytes contents to the blob route and returns an absolute URL", async () => {
     const originalFetch = globalThis.fetch;
     let requestedUrl: string | undefined;
     let requestedPayload: unknown;
@@ -748,7 +748,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
         }),
       ).resolves.toEqual({
         id: "fid1:test",
-        url: "blobs/test.png",
+        url: "http://toolshed.test/did:key:test-space/blobs/test.png",
       });
     } finally {
       globalThis.fetch = originalFetch;
