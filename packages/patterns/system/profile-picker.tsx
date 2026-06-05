@@ -10,6 +10,8 @@ import {
   Writable,
 } from "commonfabric";
 import ProfileCreate, {
+  profileLinkListSchema,
+  profileLinkSchema,
   setDefaultProfile,
   setMruProfile,
   TRUSTED_PROFILE_PICKER_SURFACE,
@@ -23,7 +25,10 @@ import type { ProfileHomeOutput } from "./profile-home.tsx";
 // offers an inline "create another" affordance, lets the user pick a default,
 // and stamps most-recently-used (MRU) on selection. The chosen profile flows
 // back as the wish `result`:
-//   result = most-recently-used (if present) ⟶ else default ⟶ else first.
+//   result = default (if set) ⟶ else most-recently-used ⟶ else first.
+// This default-first order matches headless `#profile` resolution
+// (wish.ts getProfileCandidateCells) so the "current profile" is the same
+// whether resolved headless or through the picker.
 // Selection writes MRU and the "set default" control writes `defaultProfile`,
 // both as trusted picker-surface actions (owner-protected; see profile-create).
 
@@ -38,18 +43,26 @@ export default pattern<
   WishState<ProfileHomeOutput> & { [UI]: VNode }
 >(({ profiles, defaultProfile, mru }) => {
   // Index (into `profiles`) of the profile the wish should resolve to.
+  // Reads links as cell refs (asCell) and matches by link identity via `equals`,
+  // so a cross-space profile not yet loaded here doesn't collapse the read to
+  // `undefined` (which would mis-resolve to index 0). See profileLinkSchema.
   const resultIndex = computed(() => {
-    const list = (profiles.get() ?? []) as ProfileHomeOutput[];
+    const list = ((profiles as any).asSchema(profileLinkListSchema()).get() ??
+      []) as ProfileHomeOutput[];
     if (list.length === 0) return -1;
-    const mruList = (mru.get() ?? []) as ProfileHomeOutput[];
-    const def = defaultProfile.get();
+    const def = (defaultProfile as any).asSchema(profileLinkSchema()).get() as
+      | ProfileHomeOutput
+      | undefined;
+    const mruList = ((mru as any).asSchema(profileLinkListSchema()).get() ??
+      []) as ProfileHomeOutput[];
     const matchIndex = (target: ProfileHomeOutput | undefined) =>
       target ? list.findIndex((entry) => equals(entry, target)) : -1;
 
-    const mruIdx = mruList.length > 0 ? matchIndex(mruList[0]) : -1;
-    if (mruIdx >= 0) return mruIdx;
+    // Default wins (matches headless #profile), then most-recently-used.
     const defIdx = matchIndex(def);
     if (defIdx >= 0) return defIdx;
+    const mruIdx = mruList.length > 0 ? matchIndex(mruList[0]) : -1;
+    if (mruIdx >= 0) return mruIdx;
     return 0;
   });
 
@@ -85,7 +98,12 @@ export default pattern<
               <cf-cell-link $cell={p as any} />
             </div>
             {ifElse(
-              computed(() => equals(defaultProfile.get(), p)),
+              computed(() => {
+                const def = (defaultProfile as any).asSchema(
+                  profileLinkSchema(),
+                ).get();
+                return def ? equals(def, p) : false;
+              }),
               <span style={{ color: "#0a7", fontSize: "12px" }}>default</span>,
               <cf-button
                 size="sm"

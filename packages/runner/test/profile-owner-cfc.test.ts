@@ -536,6 +536,50 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("rejects untrusted truncation/removal of the home profiles list", async () => {
+    // Element-level protection only gates *changed* elements of the new array,
+    // so a shrink (set([]) / dropping an entry) would otherwise be unmediated.
+    // The container-level writeAuthorizedBy must reject it.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const homePattern = await compileHomePattern(runtime);
+      // Seed a non-empty profiles list WITHOUT enforcement (no prepareCfc).
+      const seed = runtime.edit();
+      const profileA = runtime.getCell(
+        alice.did(),
+        "home-profiles-truncate-A",
+        undefined,
+        seed,
+      );
+      profileA.set({ name: "Ada", avatar: "", elements: [] });
+      const home = runtime.getCell(
+        alice.did(),
+        "home-profiles-truncate",
+        homePattern.resultSchema,
+        seed,
+      );
+      home.key("profiles").set([profileA]);
+      await seed.commit();
+
+      // Untrusted truncation under enforcement → rejected by the container
+      // writeAuthorizedBy (the array value changed [A] -> []).
+      const writeTx = runtime.edit();
+      const protectedHome = runtime.getCell(
+        alice.did(),
+        "home-profiles-truncate",
+        homePattern.resultSchema,
+        writeTx,
+      );
+      protectedHome.key("profiles").set([]);
+      writeTx.prepareCfc();
+      const result = await writeTx.commit();
+      expect(result.error?.message).toContain("trusted");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not expose a writable profile creation trigger", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
