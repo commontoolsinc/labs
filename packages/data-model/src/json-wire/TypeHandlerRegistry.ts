@@ -13,7 +13,7 @@ export class TypeHandlerRegistry {
   readonly #tagMap = new Map<string, TypeHandler>();
 
   /** Class -> handler map for O(1) serialization dispatch. */
-  readonly #classMap = new Map<Function, TypeHandler>();
+  readonly #classMap = new Map<() => any, TypeHandler>();
 
   /**
    * Registers a handler. Handlers with non-empty tags are indexed for O(1)
