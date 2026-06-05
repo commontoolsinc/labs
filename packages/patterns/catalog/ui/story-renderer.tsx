@@ -28,6 +28,8 @@ import TextStory from "../stories/cf-text-story.tsx";
 import LabelStory from "../stories/cf-label-story.tsx";
 import ChipStory from "../stories/cf-chip-story.tsx";
 import BadgeStory from "../stories/cf-badge-story.tsx";
+import AvatarStory from "../stories/cf-avatar-story.tsx";
+import ProfileBadgeStory from "../stories/cf-profile-badge-story.tsx";
 import AlertStory from "../stories/cf-alert-story.tsx";
 import SeparatorStory from "../stories/cf-separator-story.tsx";
 import MarkdownStory from "../stories/cf-markdown-story.tsx";
@@ -133,6 +135,10 @@ export default pattern<StoryRendererInput, StoryRendererOutput>(
           return ChipStory({});
         case "badge":
           return BadgeStory({});
+        case "avatar":
+          return AvatarStory({});
+        case "profile-badge":
+          return ProfileBadgeStory({});
         case "alert":
           return AlertStory({});
         case "separator":

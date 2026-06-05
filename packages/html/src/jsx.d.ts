@@ -2992,6 +2992,8 @@ interface CFLabelElement extends CFHTMLElement {}
 
 // Display components
 interface CFTextElement extends CFHTMLElement {}
+interface CFAvatarElement extends CFHTMLElement {}
+interface CFProfileBadgeElement extends CFHTMLElement {}
 interface CFBadgeElement extends CFHTMLElement {}
 interface CFChipElement extends CFHTMLElement {}
 interface CFProgressElement extends CFHTMLElement {}
@@ -4218,6 +4220,20 @@ interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-remove"?: EventHandler<{}>;
 }
 
+interface CFAvatarAttributes<T> extends CFHTMLAttributes<T> {
+  "src"?: string | CellLike<string>;
+  "name"?: string | CellLike<string>;
+  "alt"?: string | CellLike<string>;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
+  "shape"?: "circle" | "square" | CellLike<"circle" | "square">;
+}
+
+interface CFProfileBadgeAttributes<T> extends CFHTMLAttributes<T> {
+  /** A cell containing a profile (ProfileHomeOutput): renders avatar + name. */
+  "$profile"?: CellLike<any>;
+  "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
+}
+
 interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string | CellLike<string>;
   "color"?: "neutral" | "primary" | "accent" | "danger";
@@ -5244,6 +5260,14 @@ declare global {
       "cf-badge": CFDOM.DetailedHTMLProps<
         CFBadgeAttributes<CFBadgeElement>,
         CFBadgeElement
+      >;
+      "cf-avatar": CFDOM.DetailedHTMLProps<
+        CFAvatarAttributes<CFAvatarElement>,
+        CFAvatarElement
+      >;
+      "cf-profile-badge": CFDOM.DetailedHTMLProps<
+        CFProfileBadgeAttributes<CFProfileBadgeElement>,
+        CFProfileBadgeElement
       >;
       "cf-chip": CFDOM.DetailedHTMLProps<
         CFChipAttributes<CFChipElement>,
