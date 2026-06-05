@@ -72,7 +72,11 @@ export interface FabricCodec {
    * does not necessarily correspond to {@link #wireTypeTag} (depending on how
    * an instance of this class got hooked up).
    */
-  decode(state: FabricValue, wireTypeTag: string): FabricValue;
+  decode(
+    wireTypeTag: string,
+    state: FabricValue,
+    context: ReconstructionContext,
+  ): FabricValue;
 
   /**
    * Encodes the given value, returning its essential state. This is only ever
