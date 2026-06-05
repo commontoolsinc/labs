@@ -1,9 +1,14 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import {
+  createHarnessChatEventEnvelope,
+  createHarnessChatSessionStatus,
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
   type HarnessChatBrowserAccessLease,
+  type HarnessChatListEventsResult,
+  type HarnessChatListTurnsResult,
   type HarnessChatRequestEnvelope,
+  type HarnessChatTurnRecord,
 } from "../src/contracts/interactive-chat.ts";
 import {
   HarnessInteractiveChatService,
@@ -845,6 +850,109 @@ Deno.test("interactive service reserves turn start before durable duplicate chec
   const firstResult = await first;
   assertEquals(firstResult.ok, true);
   await service.waitForTurn("session-1", "turn-1");
+});
+
+Deno.test("interactive service handles replay requests from durable store", async () => {
+  const session = createHarnessChatSessionStatus({
+    sessionId: "durable-session",
+    createdAt: "2026-05-22T00:00:00.000Z",
+    workspace: { hostPath: "/workspace" },
+  });
+  const durableEvent = createHarnessChatEventEnvelope({
+    sessionId: session.sessionId,
+    sequence: 42,
+    emittedAt: "2026-05-22T00:00:42.000Z",
+    event: {
+      kind: "session_started",
+      session,
+    },
+  });
+  const durableTurn: HarnessChatTurnRecord = {
+    sessionId: session.sessionId,
+    turn: {
+      turnId: "durable-turn",
+      status: "completed",
+      startedAt: "2026-05-22T00:00:01.000Z",
+      updatedAt: "2026-05-22T00:00:02.000Z",
+      endedAt: "2026-05-22T00:00:02.000Z",
+    },
+    input: { text: "Persisted turn" },
+    policy: session.policy,
+  };
+  let eventsOptions: unknown;
+  let turnsOptions: unknown;
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: () => {},
+    saveSessionTurnAndAppendEvent: () => true,
+    appendEvent: () => {},
+    listEvents: (options) => {
+      eventsOptions = options;
+      return [durableEvent];
+    },
+    latestSequence: () => 77,
+    saveTurn: () => {},
+    getTurn: () => undefined,
+    listTurns: (options) => {
+      turnsOptions = options;
+      return [durableTurn];
+    },
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    sessionStore: store,
+  });
+
+  const events = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-events",
+    method: "list_events",
+    params: {
+      sessionId: session.sessionId,
+      afterSequence: 41,
+      limit: 1,
+    },
+  });
+  assertEquals(events.ok, true);
+  assertEquals(
+    events.ok ? (events.result as HarnessChatListEventsResult) : undefined,
+    {
+      events: [durableEvent],
+      latestSequence: 77,
+    },
+  );
+  assertEquals(eventsOptions, {
+    sessionId: session.sessionId,
+    afterSequence: 41,
+    limit: 1,
+  });
+
+  const turns = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-turns",
+    method: "list_turns",
+    params: {
+      sessionId: session.sessionId,
+      status: "completed",
+    },
+  });
+  assertEquals(turns.ok, true);
+  assertEquals(
+    turns.ok ? (turns.result as HarnessChatListTurnsResult) : undefined,
+    {
+      turns: [durableTurn],
+    },
+  );
+  assertEquals(turnsOptions, {
+    sessionId: session.sessionId,
+    status: "completed",
+  });
 });
 
 Deno.test("interactive service rejects missing sessions and concurrent turns", async () => {
