@@ -29,6 +29,10 @@ INSPECT_BRK=false
 INSPECT_PORT=${INSPECT_PORT:-}
 LOCAL_DEV_STARTUP_TIMEOUT=${LOCAL_DEV_STARTUP_TIMEOUT:-120}
 
+# Exit code emitted when a server cannot bind because its port is already in
+# use. Callers can retry on a different port.
+PORT_IN_USE_EXIT=3
+
 # Parse command line arguments
 FORCE=false
 WATCH=false
@@ -122,33 +126,32 @@ SHELL_PID=""
 TOOLSHED_PID=""
 BG_PID=""
 
-# Check if port is free; kill processes if --force, otherwise error
-check_port() {
+# With --force, kill anything already listening on the port so the server can
+# bind it. Without --force the port is left untouched: each server reports a
+# collision when its own bind fails (exit PORT_IN_USE_EXIT), which avoids a
+# check-then-bind race.
+free_port_if_forced() {
     local port=$1
+    [[ "$FORCE" == "true" ]] || return 0
+
     local pids
     pids=$(get_pids_on_port "$port")
-
     if [[ -n "$pids" ]]; then
-        if [[ "$FORCE" == "true" ]]; then
-            echo "Port $port is in use, killing processes: $pids"
-            echo "$pids" | xargs kill 2>/dev/null
+        echo "Port $port is in use, killing processes: $pids"
+        echo "$pids" | xargs kill 2>/dev/null
+        sleep 1
+        # Force kill if still running
+        pids=$(get_pids_on_port "$port")
+        if [[ -n "$pids" ]]; then
+            echo "Force killing remaining processes: $pids"
+            echo "$pids" | xargs kill -9 2>/dev/null
             sleep 1
-            # Force kill if still running
-            pids=$(get_pids_on_port "$port")
-            if [[ -n "$pids" ]]; then
-                echo "Force killing remaining processes: $pids"
-                echo "$pids" | xargs kill -9 2>/dev/null
-                sleep 1
-            fi
-        else
-            echo "Error: Port $port is already in use" >&2
-            exit 1
         fi
     fi
 }
 
-check_port "$TOOLSHED_PORT"
-check_port "$SHELL_PORT"
+free_port_if_forced "$TOOLSHED_PORT"
+free_port_if_forced "$SHELL_PORT"
 
 show_recent_log() {
     local name=$1
@@ -161,29 +164,24 @@ show_recent_log() {
     fi
 }
 
-kill_port_listeners() {
-    local port=$1
-    local pids
-    pids=$(get_pids_on_port "$port")
+# Kill a process and all of its descendants. Targets only processes this script
+# started, so a foreign server already on one of the ports (for example another
+# run's server during a port collision) is left untouched.
+kill_tree() {
+    local pid=$1
+    [[ -n "$pid" ]] || return 0
 
-    for pid in $pids; do
-        kill "$pid" 2>/dev/null
+    local child
+    for child in $(pgrep -P "$pid" 2>/dev/null); do
+        kill_tree "$child"
     done
+    kill "$pid" 2>/dev/null
 }
 
 cleanup_started_processes() {
-    if [[ -n "$BG_PID" ]]; then
-        kill "$BG_PID" 2>/dev/null
-    fi
-    if [[ -n "$TOOLSHED_PID" ]]; then
-        kill "$TOOLSHED_PID" 2>/dev/null
-    fi
-    if [[ -n "$SHELL_PID" ]]; then
-        kill "$SHELL_PID" 2>/dev/null
-    fi
-
-    kill_port_listeners "$TOOLSHED_PORT"
-    kill_port_listeners "$SHELL_PORT"
+    kill_tree "$BG_PID"
+    kill_tree "$TOOLSHED_PID"
+    kill_tree "$SHELL_PID"
 }
 
 fail_startup() {
@@ -214,6 +212,10 @@ ensure_process_running() {
     echo "Error: $name exited before it became ready (exit $exit_status)." >&2
     cleanup_started_processes
     show_recent_log "$name" "$log_file"
+    if [[ "$exit_status" -eq "$PORT_IN_USE_EXIT" ]]; then
+        echo "($name could not bind its port; it is already in use.)" >&2
+        exit "$PORT_IN_USE_EXIT"
+    fi
     exit 1
 }
 
@@ -253,6 +255,31 @@ wait_for_http() {
         "$name did not become ready at $url within ${LOCAL_DEV_STARTUP_TIMEOUT}s."
 }
 
+# Wait until the server reports a successful bind (its listen marker) or its
+# process exits. ensure_process_running classifies an early exit, surfacing
+# PORT_IN_USE_EXIT when the bind failed because the port was already in use.
+# Waiting on the marker rather than an HTTP probe avoids mistaking another
+# server already on the port for this one.
+wait_for_listen() {
+    local name=$1
+    local marker=$2
+    local pid=$3
+    local log_file=$4
+    local deadline=$((SECONDS + LOCAL_DEV_STARTUP_TIMEOUT))
+
+    echo "Waiting for $name to bind its port..."
+    while (( SECONDS < deadline )); do
+        ensure_process_running "$name" "$pid" "$log_file"
+        if grep -q "$marker" "$log_file" 2>/dev/null; then
+            echo "  $name has bound its port."
+            return
+        fi
+        sleep 1
+    done
+
+    fail_startup "$name did not bind its port within ${LOCAL_DEV_STARTUP_TIMEOUT}s."
+}
+
 # Start shell dev server in background
 cd "$SCRIPT_DIR/../packages/shell"
 TOOLSHED_PORT="$TOOLSHED_PORT" deno task dev-local > "$SHELL_LOG" 2>&1 &
@@ -279,6 +306,7 @@ SHELL_URL="http://localhost:$SHELL_PORT" \
         > "$TOOLSHED_LOG" 2>&1 &
 TOOLSHED_PID=$!
 
+wait_for_listen "shell" "Dev server listening on" "$SHELL_PID" "$SHELL_LOG"
 wait_for_http "shell" "http://localhost:$SHELL_PORT" "$SHELL_PID" "$SHELL_LOG"
 
 # # Function to cleanup background processes
@@ -290,6 +318,7 @@ wait_for_http "shell" "http://localhost:$SHELL_PORT" "$SHELL_PID" "$SHELL_LOG"
 # # Set up trap to cleanup on script exit
 # trap cleanup EXIT INT TERM
 
+wait_for_listen "toolshed" "Server running on" "$TOOLSHED_PID" "$TOOLSHED_LOG"
 wait_for_http \
     "toolshed" "http://localhost:$TOOLSHED_PORT/_health" \
     "$TOOLSHED_PID" "$TOOLSHED_LOG"
