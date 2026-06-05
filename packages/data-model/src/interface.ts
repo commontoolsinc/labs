@@ -25,7 +25,7 @@
 export abstract class FabricSpecialObject {}
 
 //
-// Fabric instance protocol (`[DECONSTRUCT]` / `[RECONSTRUCT]` / `FabricInstance`)
+// Fabric instance protocol
 //
 
 /**
@@ -35,13 +35,6 @@ export abstract class FabricSpecialObject {}
  * See Section 2.2 of the formal spec.
  */
 export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
-
-/**
- * Well-known symbol for reconstructing a fabric instance from its essential
- * state. Static method on the class.
- * See Section 2.2 of the formal spec.
- */
-export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The method

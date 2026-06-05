@@ -6,8 +6,8 @@ import {
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
-  RECONSTRUCT,
 } from "../../src/interface.ts";
+import { RECONSTRUCT } from "../../src/wire-common/interface.ts";
 import { FabricError } from "../../src/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "../../src/fabric-instances/FabricNativeWrapper.ts";
 import {

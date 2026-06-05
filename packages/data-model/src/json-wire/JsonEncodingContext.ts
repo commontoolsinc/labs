@@ -1,12 +1,12 @@
 import {
   type FabricInstance,
   type FabricValue,
-  RECONSTRUCT,
 } from "../interface.ts";
-import type {
-  FabricClass,
-  ReconstructionContext,
-  SerializationContext,
+import {
+  type FabricClass,
+  RECONSTRUCT,
+  type ReconstructionContext,
+  type SerializationContext,
 } from "../wire-common/interface.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 import { UnknownValue } from "../fabric-instances/UnknownValue.ts";

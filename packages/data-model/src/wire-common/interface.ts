@@ -2,7 +2,13 @@ import type {
   FabricInstance,
   FabricValue,
 } from "../interface.ts";
-import { RECONSTRUCT } from "../interface.ts";
+
+/**
+ * Well-known symbol for reconstructing a fabric instance from its essential
+ * state. Static method on the class.
+ * See Section 2.2 of the formal spec.
+ */
+export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
  * Interface for classes that can reconstruct fabric instances from essential

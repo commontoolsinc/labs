@@ -10,13 +10,13 @@ export {
   FabricPrimitive,
   type FabricValue,
   type FabricValueLayer,
-  RECONSTRUCT,
 } from "./interface.ts";
-export type {
-  FabricClass,
-  FabricValueConverter,
-  ReconstructionContext,
-  SerializationContext,
+export {
+  type FabricClass,
+  type FabricValueConverter,
+  RECONSTRUCT,
+  type ReconstructionContext,
+  type SerializationContext,
 } from "./wire-common/interface.ts";
 
 export {
