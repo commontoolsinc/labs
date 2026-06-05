@@ -2,6 +2,24 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { NAME } from "@commonfabric/runtime-client";
 import { CFProfileBadge, profileDisplayFromValue } from "./cf-profile-badge.ts";
+import { identitySeal } from "./identity-seal.ts";
+
+const OWNER_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+
+/** A resolved-cell stub that answers `getCfcLabel()` with the given label. */
+function labelCell(label: unknown) {
+  return { getCfcLabel: () => Promise.resolve(label) };
+}
+
+function representsPrincipalLabel(subject: string) {
+  return {
+    version: 1,
+    entries: [{
+      path: ["name"],
+      label: { integrity: [{ kind: "represents-principal", subject }] },
+    }],
+  };
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -101,6 +119,52 @@ describe("CFProfileBadge", () => {
       el.disconnectedCallback();
       expect(unsubscribeCount).toBe(1);
       expect(el._unsubscribe).toBeUndefined();
+    });
+  });
+
+  describe("verification seal", () => {
+    it("enters the verified state and derives the seal from the owner DID", async () => {
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+
+      await el._refreshVerification(
+        labelCell(representsPrincipalLabel(OWNER_DID)),
+      );
+
+      expect(el._state).toBe("verified");
+      // The seal is the pure DID-derived fingerprint, identical everywhere.
+      expect(el._seal?.did).toBe(OWNER_DID);
+      expect(el._seal?.hue).toBe(identitySeal(OWNER_DID).hue);
+    });
+
+    it("stays presented (no seal) when the label has no represents-principal atom", async () => {
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+
+      await el._refreshVerification(labelCell({
+        version: 1,
+        entries: [{ path: [], label: { integrity: ["profile-link"] } }],
+      }));
+
+      expect(el._state).toBe("presented");
+      expect(el._seal).toBeUndefined();
+    });
+
+    it("clears a prior seal up-front on re-bind, before the new attestation resolves", () => {
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+      // Simulate an already-verified badge for some other identity.
+      el._state = "verified";
+      el._seal = identitySeal(OWNER_DID);
+
+      // Re-bind to a different, never-resolving profile. `_resolve` resets the
+      // verification synchronously before its first await, so the stale seal
+      // must be gone immediately — it never lingers during the async gap.
+      el.profile = { resolveAsCell: () => new Promise(() => {}) };
+      void el._resolve();
+
+      expect(el._state).toBe("presented");
+      expect(el._seal).toBeUndefined();
     });
   });
 

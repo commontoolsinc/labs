@@ -82,7 +82,8 @@ export const ownerPrincipalFromLabel = (
         record.kind === REPRESENTS_PRINCIPAL &&
         typeof record.subject === "string" && record.subject.trim().length > 0
       ) {
-        return record.subject;
+        // Trim to match the string-form branch — both yield a normalized DID.
+        return record.subject.trim();
       }
     }
   }

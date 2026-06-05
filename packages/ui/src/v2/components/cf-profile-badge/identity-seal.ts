@@ -30,7 +30,13 @@ export type IdentitySeal = {
   accent: string;
 };
 
-/** Deterministic 32-bit FNV-1a hash of a string. */
+/**
+ * Deterministic 32-bit FNV-1a hash of a string.
+ *
+ * Deliberately a tiny non-cryptographic hash, NOT `@commonfabric/content-hash`:
+ * this seeds a *visual* fingerprint and must be synchronous and dependency-free
+ * (content-hash is async SHA-256 for content addressing — the wrong tool here).
+ */
 const fnv1a = (input: string): number => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {

@@ -22,6 +22,18 @@ describe("ownerPrincipalFromLabel", () => {
     expect(ownerPrincipalFromLabel(label)).toBe(DID);
   });
 
+  it("trims object-form subjects to match the string-form normalization", () => {
+    const label = view([
+      {
+        path: ["name"],
+        label: {
+          integrity: [{ kind: "represents-principal", subject: `  ${DID}  ` }],
+        },
+      },
+    ]);
+    expect(ownerPrincipalFromLabel(label)).toBe(DID);
+  });
+
   it("extracts the subject from a string-form atom", () => {
     const label = view([
       {

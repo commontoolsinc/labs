@@ -260,12 +260,15 @@ export class CFProfileBadge extends BaseElement {
   private async _resolve(): Promise<void> {
     const generation = ++this._resolveGeneration;
     this._cleanup();
+    // Clear any prior verification up-front: a re-bind to a different profile
+    // must not keep showing the previous profile's seal during the async
+    // re-resolve + attestation gap. `_refreshVerification` re-derives it below.
+    this._state = "presented";
+    this._seal = undefined;
 
     const cell = this.profile;
     if (!cell) {
       this._applyValue(undefined);
-      this._state = "presented";
-      this._seal = undefined;
       return;
     }
 
@@ -334,8 +337,14 @@ export class CFProfileBadge extends BaseElement {
         this._seal = undefined;
         this._state = "presented";
       }
-    } catch {
+    } catch (e) {
       if (generation !== this._resolveGeneration || !this.isConnected) return;
+      // Surface the IPC/label-read failure (mirrors `_resolve`'s catch) rather
+      // than silently collapsing every failure to the unverified state.
+      console.error(
+        "cf-profile-badge: failed to read CFC label for verification",
+        e,
+      );
       this._seal = undefined;
       this._state = "presented";
     }
