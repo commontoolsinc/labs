@@ -163,6 +163,13 @@ export class CFProfileBadge extends BaseElement {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    // Bump the generation so any in-flight `_resolve` continuation fails its
+    // `generation !== this._resolveGeneration` guard and bails before
+    // subscribing / writing state on this now-detached instance. Without this,
+    // an element that disconnects DURING the `await cell.resolveAsCell()` would
+    // resume, pass the (unchanged) generation check, and leak a live
+    // subscription that updates a detached element.
+    this._resolveGeneration++;
     this._cleanup();
   }
 
@@ -190,7 +197,11 @@ export class CFProfileBadge extends BaseElement {
 
     try {
       const resolved = await cell.resolveAsCell();
-      if (generation !== this._resolveGeneration) return;
+      // Bail if a newer resolve superseded us OR if we were disconnected during
+      // the await (disconnectedCallback bumps the generation, so the first guard
+      // already covers detachment; isConnected is kept as a belt-and-braces
+      // check so we never subscribe / write state on a detached instance).
+      if (generation !== this._resolveGeneration || !this.isConnected) return;
 
       // Subscribe with a minimal schema so the runtime only resolves the fields
       // we render, rather than walking the whole profile output graph (mirrors
@@ -209,7 +220,7 @@ export class CFProfileBadge extends BaseElement {
 
       void this._refreshVerification(resolved);
     } catch (e) {
-      if (generation !== this._resolveGeneration) return;
+      if (generation !== this._resolveGeneration || !this.isConnected) return;
       console.error("cf-profile-badge: failed to resolve profile cell", e);
       this._applyValue(undefined);
     }
@@ -229,6 +240,12 @@ export class CFProfileBadge extends BaseElement {
    * only then draw the seal/effects that user-space cannot reproduce. v1
    * intentionally renders the unverified "presented" state. Reuse
    * `authorshipStateForLabel` / the label helpers from cf-cfc-authorship.
+   *
+   * LIFECYCLE: this is synchronous today, so it is safe. When the deferred pass
+   * introduces an `await` (label read), it MUST re-check
+   * `generation === this._resolveGeneration && this.isConnected` AFTER the await
+   * before writing `_state`, otherwise it leaks state writes onto detached /
+   * superseded instances (same hazard guarded against in `_resolve`).
    */
   private _refreshVerification(_cell: CellHandle): void {
     this._state = "presented";
