@@ -5,11 +5,9 @@
  * structurally flat).
  */
 
+import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import type { FabricCodec } from "./interface.ts";
-
-/** Standard type meaning "class" a/k/a constructor function. */
-type Constructor<T = unknown> = abstract new (...args: any[]) => T;
 
 /**
  * Base class for `FabricCodec` which provides commonly-needed functionality.
@@ -32,6 +30,11 @@ export abstract class BaseFabricCodec implements FabricCodec {
   ) {
     this.#wireTypeTag = wireTypeTag;
     this.#uniqueHandledClass = uniqueHandledClass;
+  }
+
+  /** @inheritDoc */
+  get uniqueHandledClass(): Constructor | undefined {
+    return this.#uniqueHandledClass;
   }
 
   /** @inheritDoc */

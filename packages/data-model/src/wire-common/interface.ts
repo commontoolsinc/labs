@@ -1,3 +1,5 @@
+import type { Constructor } from "@commonfabric/utils/types";
+
 import type { FabricInstance, FabricValue } from "@/interface.ts";
 
 /**
@@ -38,6 +40,14 @@ export interface FabricDeconstructable {
  * a context-dependent sense) to the values that state was extracted from.
  */
 export interface FabricCodec {
+  /**
+   * The unique _direct_ class of instances, if any, that is associated with the
+   * format this instance encodes. The codec system uses this to make a quick
+   * determination about value compatibility before calling {@link #canEncode}
+   * to confirm.
+   */
+  get uniqueHandledClass(): Constructor | undefined;
+
   /**
    * The unique preferred wire format tag, if any, that is associated with the
    * format this instance decodes from. The codec system uses this to mark state
