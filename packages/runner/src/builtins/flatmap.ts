@@ -150,9 +150,10 @@ export function flatMap(
             createRunInput(list[i], i),
             existing.resultCell,
             {
-            doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })?.awaitSync,
-          },
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })
+                ?.awaitSync,
+            },
           );
         }
         existing.lastIndex = i;
@@ -170,7 +171,8 @@ export function flatMap(
           resultCell,
           {
             doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })?.awaitSync,
+            awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })
+              ?.awaitSync,
           },
         );
         // Link the new result cells to the pattern cell too

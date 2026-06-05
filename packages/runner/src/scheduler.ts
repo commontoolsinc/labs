@@ -737,16 +737,22 @@ export class Scheduler {
     const token = Symbol("scheduler-initial-rehydration");
     this.initialRehydrationTokens.set(action, token);
     const task = (async () => {
+      // The sync wait and the rehydration lookup share ONE timeout budget, so a
+      // stuck sync can't double the resumed startup delay: each step is bounded
+      // by the time remaining until this common deadline.
+      const deadline = performance.now() +
+        Math.max(0, options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS);
+      const remainingMs = () => Math.max(0, deadline - performance.now());
       if (options.awaitSync) {
         // Resumed from a synced state: hold the initial rehydration/run until
         // the space has finished syncing so consumers don't race the data.
-        await this.awaitSpaceSyncedWithTimeout(options.space, options.timeoutMs);
+        await this.awaitSpaceSyncedWithTimeout(options.space, remainingMs());
         // The action may have been superseded while we waited for sync.
         if (!this.canApplyInitialActionRehydration(action, token)) return;
       }
       const rehydrated = await this.runInitialActionRehydrationWithTimeout(
         action,
-        options,
+        options.awaitSync ? { ...options, timeoutMs: remainingMs() } : options,
         token,
       );
       if (rehydrated === "timeout") {

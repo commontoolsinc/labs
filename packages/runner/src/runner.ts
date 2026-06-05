@@ -1375,7 +1375,10 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: { doNotUpdateOnPatternChange?: boolean; awaitSyncBeforeInitialRun?: boolean } = {},
+    options: {
+      doNotUpdateOnPatternChange?: boolean;
+      awaitSyncBeforeInitialRun?: boolean;
+    } = {},
   ): void {
     const key = this.getDocKey(resultCell);
     if (this.cancels.has(key)) return;
@@ -1392,7 +1395,10 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: { doNotUpdateOnPatternChange?: boolean; awaitSyncBeforeInitialRun?: boolean } = {},
+    options: {
+      doNotUpdateOnPatternChange?: boolean;
+      awaitSyncBeforeInitialRun?: boolean;
+    } = {},
     pullOnceAfterStart: boolean = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
@@ -1521,21 +1527,30 @@ export class Runner {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { doNotUpdateOnPatternChange?: boolean; awaitSyncBeforeInitialRun?: boolean },
+    options?: {
+      doNotUpdateOnPatternChange?: boolean;
+      awaitSyncBeforeInitialRun?: boolean;
+    },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { doNotUpdateOnPatternChange?: boolean; awaitSyncBeforeInitialRun?: boolean },
+    options?: {
+      doNotUpdateOnPatternChange?: boolean;
+      awaitSyncBeforeInitialRun?: boolean;
+    },
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options: { doNotUpdateOnPatternChange?: boolean; awaitSyncBeforeInitialRun?: boolean } = {},
+    options: {
+      doNotUpdateOnPatternChange?: boolean;
+      awaitSyncBeforeInitialRun?: boolean;
+    } = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
     const sourceKey = getTxDebugActionId(tx) ?? "none";
@@ -3919,8 +3934,8 @@ export class Runner {
       );
     }
     this.run(tx, patternImpl, inputs, resultCell, {
-      awaitSyncBeforeInitialRun:
-        schedulerRehydration.rehydrateFromStorage?.awaitSync,
+      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
+        ?.awaitSync,
     });
 
     if (sendToBindings) {

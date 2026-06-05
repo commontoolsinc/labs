@@ -183,9 +183,10 @@ export function map(
             createRunInput(list[i], i),
             existing.resultCell,
             {
-            doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })?.awaitSync,
-          },
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })
+                ?.awaitSync,
+            },
           );
         }
         existing.lastIndex = i;
@@ -204,7 +205,8 @@ export function map(
           resultCell,
           {
             doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })?.awaitSync,
+            awaitSyncBeforeInitialRun: (cause as { awaitSync?: boolean })
+              ?.awaitSync,
           },
         );
         // Link these individual cells to the top cell

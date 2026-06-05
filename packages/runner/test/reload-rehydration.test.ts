@@ -1,6 +1,9 @@
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { getLogger, getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type JSONSchema, NAME } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -88,8 +91,9 @@ function newRuntime(storageManager: ReturnType<typeof StorageManager.emulate>) {
 
 function rehydrationCounts() {
   const b = getLoggerCountsBreakdown().scheduler ?? {};
-  const get = (k: string) => (b as Record<string, { total?: number }>)[k]
-    ?.total ?? 0;
+  const get = (k: string) =>
+    (b as Record<string, { total?: number }>)[k]
+      ?.total ?? 0;
   return {
     ok: get("rehydrate/ok"),
     missNoSnapshot: get("rehydrate/miss/no-snapshot"),
