@@ -2,11 +2,7 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import {
-  getMetaLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "../src/link-utils.ts";
+import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Cell, createCell } from "../src/cell.ts";
 
@@ -634,13 +630,14 @@ Deno.test("broad computed output links to narrower scoped result", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const internalLink = getMetaLink(result, "internal");
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    // in this case, don't follow links before the getRaw, because the links
-    // take us all the way to the value, and then we can't see the scope
-    const rawValue = internalCell?.key("value").getRaw();
-    const valueLink = parseLink(rawValue, internalCell!);
-    assertEquals(valueLink?.scope, "user");
+    // Our result cell will have a link to a space scoped internal call
+    // that space scoped internal cell should then have a link to a user
+    // scoped cell with the value
+    const internalLink = parseLink(result.key("value").getRaw(), result)!;
+    const internalCell = runtime.getCellFromLink(internalLink);
+    assertEquals(internalLink.scope, "space");
+    const internalLinkUser = parseLink(internalCell.getRaw(), internalCell)!;
+    assertEquals(internalLinkUser.scope, "user");
     assertEquals(result.key("value").get() as unknown, 42);
   } finally {
     await runtime.dispose();
@@ -699,13 +696,13 @@ Deno.test("opaque JS action result uses narrowest effective output scope", async
     await runtime.storageManager.synced();
     await result.pull();
 
-    const internalLink = getMetaLink(result, "internal");
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    const rawValue = internalCell.key("value").getRaw();
-    const outputLink = parseLink(rawValue, internalCell!);
-    assertEquals(outputLink?.scope, "user");
+    const internalLink = parseLink(result.key("value").getRaw(), result)!;
+    const internalCell = runtime.getCellFromLink(internalLink);
+    assertEquals(internalLink.scope, "space");
+    const outputLink = parseLink(internalCell.getRaw(), internalCell)!;
+    assertEquals(outputLink.scope, "user");
 
-    const scopedOutputCell = runtime.getCellFromLink(outputLink!);
+    const scopedOutputCell = runtime.getCellFromLink(outputLink);
     const auxiliaryLink = parseLink(
       scopedOutputCell.getRaw(),
       scopedOutputCell,
@@ -757,11 +754,11 @@ Deno.test("opaque JS action result schema scope participates in effective output
     await runtime.storageManager.synced();
     await result.pull();
 
-    const internalLink = getMetaLink(result, "internal");
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    const rawValue = internalCell?.key("value").getRaw();
-    const outputLink = parseLink(rawValue, internalCell!);
-    assertEquals(outputLink?.scope, "session");
+    const internalLink = parseLink(result.key("value").getRaw(), result)!;
+    const internalCell = runtime.getCellFromLink(internalLink);
+    assertEquals(internalLink.scope, "session");
+    const outputLink = parseLink(internalCell.getRaw(), internalCell)!;
+    assertEquals(outputLink.scope, "session");
 
     const scopedOutputCell = runtime.getCellFromLink(outputLink!);
     const auxiliaryLink = parseLink(

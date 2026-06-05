@@ -296,9 +296,10 @@ describe("Pattern Runner - Regressions", () => {
           recipe: initialRecipe as unknown,
         },
       },
+      derivedInternalCells: [{ partialCause: "recipe" }],
       result: {
         internalRecipe: {
-          $alias: { cell: "internal", path: ["recipe"] },
+          $alias: { partialCause: "recipe", path: [] },
         },
         resultRecipe: resultRecipe as unknown,
       },

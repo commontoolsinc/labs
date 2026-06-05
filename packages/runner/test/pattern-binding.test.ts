@@ -11,6 +11,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   areLinksSame,
   areNormalizedLinksSame,
+  getDerivedInternalCellLink,
   getMetaCell,
   isLegacyAlias,
   parseLink,
@@ -56,10 +57,8 @@ describe("pattern-binding", () => {
 
       const argumentCellLink = getMetaCell(testCell, "argument", tx)
         .getAsNormalizedFullLink();
-      const internalCellLink = getMetaCell(testCell, "internal", tx)
-        .getAsNormalizedFullLink();
       testCell.set({ value: 0 });
-      sendValueToBinding(tx, testCell, argumentCellLink, internalCellLink, {
+      sendValueToBinding(tx, testCell, argumentCellLink, {
         $alias: { cell: "result", path: ["value"] },
       }, 42);
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
@@ -75,15 +74,12 @@ describe("pattern-binding", () => {
       testCell.set({ arr: [0, 0, 0] });
       const argumentCellLink = getMetaCell(testCell, "argument", tx)
         .getAsNormalizedFullLink();
-      const internalCellLink = getMetaCell(testCell, "internal", tx)
-        .getAsNormalizedFullLink();
       sendValueToBinding(
         tx,
         testCell,
         argumentCellLink,
-        internalCellLink,
-        [{ $alias: { cell: "result", path: ["arr", 0] } }, {
-          $alias: { cell: "result", path: ["arr", 2] },
+        [{ $alias: { cell: "result", path: ["arr", "0"] } }, {
+          $alias: { cell: "result", path: ["arr", "2"] },
         }],
         [1, 3],
       );
@@ -116,8 +112,6 @@ describe("pattern-binding", () => {
       });
       const argumentCellLink = getMetaCell(testCell, "argument", tx)
         .getAsNormalizedFullLink();
-      const internalCellLink = getMetaCell(testCell, "internal", tx)
-        .getAsNormalizedFullLink();
 
       const binding = {
         person: {
@@ -147,7 +141,6 @@ describe("pattern-binding", () => {
         tx,
         testCell,
         argumentCellLink,
-        internalCellLink,
         binding,
         value,
       );
@@ -173,8 +166,6 @@ describe("pattern-binding", () => {
       output.set({ value: null });
       const argumentCellLink = getMetaCell(output, "argument", tx)
         .getAsNormalizedFullLink();
-      const internalCellLink = getMetaCell(output, "internal", tx)
-        .getAsNormalizedFullLink();
 
       const source = runtime.getCell<string>(
         space,
@@ -188,7 +179,6 @@ describe("pattern-binding", () => {
         tx,
         output,
         argumentCellLink,
-        internalCellLink,
         output.key("value").getAsWriteRedirectLink(),
         source,
         { narrowestReadScope: "user" },
@@ -227,8 +217,6 @@ describe("pattern-binding", () => {
       output.set({ value: null });
       const argumentCellLink = getMetaCell(output, "argument", tx)
         .getAsNormalizedFullLink();
-      const internalCellLink = getMetaCell(output, "internal", tx)
-        .getAsNormalizedFullLink();
 
       const source = runtime.getCell<string>(
         space,
@@ -242,7 +230,6 @@ describe("pattern-binding", () => {
         tx,
         output,
         argumentCellLink,
-        internalCellLink,
         output.key("value").getAsWriteRedirectLink(),
         { nested: source },
         { narrowestReadScope: "user" },
@@ -271,7 +258,7 @@ describe("pattern-binding", () => {
     it("should map bindings to cell aliases", () => {
       // Bindings are pseudo-links; the initial "internal" or "argument" determines how they are resolved
       const binding = {
-        x: { $alias: { cell: "internal", path: ["a"] } },
+        x: { $alias: { partialCause: "a", path: [] } },
         y: { $alias: { cell: "argument", path: ["b", "c"] } },
         z: 3,
       };
@@ -288,24 +275,19 @@ describe("pattern-binding", () => {
         tx,
       );
       argumentCell.set({ b: { c: 2 } });
-      const internalCell = runtime.getCell<{ a: number }>(
-        space,
-        "internal cell",
-        undefined,
-        tx,
-      );
-      internalCell.set({ a: 1 });
       const result = unwrapOneLevelAndBindtoDoc(
         runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
-        internalCell.getAsNormalizedFullLink(),
-        resultCell.getAsNormalizedFullLink(),
+        resultCell,
+        { derivedInternalCells: [{ partialCause: "a" }] },
       );
       expect(
-        areLinksSame(
-          result.x,
-          internalCell.key("a").getAsWriteRedirectLink(),
+        areNormalizedLinksSame(
+          parseLink(result.x, resultCell)!,
+          getDerivedInternalCellLink(resultCell, {
+            partialCause: "a",
+          }),
         ),
       ).toBe(true);
       expect(
@@ -349,19 +331,11 @@ describe("pattern-binding", () => {
         argumentSchema,
         tx,
       );
-      const internalCell = runtime.getCell(
-        space,
-        "schema fallback internal cell",
-        undefined,
-        tx,
-      );
-
       const result = unwrapOneLevelAndBindtoDoc(
         runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
-        internalCell.getAsNormalizedFullLink(),
-        resultCell.getAsNormalizedFullLink(),
+        resultCell,
       ) as { profile: unknown };
 
       expect(parseLink(result.profile, resultCell)).toEqual({
@@ -392,8 +366,8 @@ describe("pattern-binding", () => {
         expect(isLegacyAlias(nameBinding)).toBe(true);
         expect(nameBinding).toEqual({
           $alias: {
-            cell: "internal",
-            path: ["name"],
+            partialCause: "name",
+            path: [],
             scope: "space",
             schema: { default: "Ada" },
           },
@@ -401,6 +375,74 @@ describe("pattern-binding", () => {
       } finally {
         popFrame(frame);
       }
+    });
+
+    it("decrements deferred legacy aliases inside pattern values", () => {
+      const resultCell = runtime.getCell(
+        space,
+        "deferred legacy aliases inside unbound pattern values",
+        undefined,
+        tx,
+      );
+      const argumentCell = getMetaCell(resultCell, "argument", tx);
+      const nestedPattern = {
+        argumentSchema: {},
+        resultSchema: {},
+        result: {
+          $alias: { partialCause: "result", path: [], defer: 1 },
+        },
+        nodes: [
+          {
+            module: { type: "javascript", implementation: () => undefined },
+            inputs: {
+              value: {
+                $alias: { cell: "argument", path: ["value"], defer: 1 },
+              },
+              later: {
+                $alias: { partialCause: "later", path: [], defer: 2 },
+              },
+              nested: {
+                argumentSchema: {},
+                resultSchema: {},
+                result: {
+                  $alias: {
+                    partialCause: "nested-result",
+                    path: [],
+                    defer: 2,
+                  },
+                },
+                nodes: [],
+              },
+            },
+            outputs: {
+              $alias: { partialCause: "output", path: [], defer: 1 },
+            },
+          },
+        ],
+      };
+
+      const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        { op: nestedPattern },
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+      ) as { op: typeof nestedPattern };
+
+      expect(result.op.result).toEqual({
+        $alias: { partialCause: "result", path: [] },
+      });
+      expect(result.op.nodes[0].inputs.value).toEqual({
+        $alias: { cell: "argument", path: ["value"] },
+      });
+      expect(result.op.nodes[0].inputs.later).toEqual({
+        $alias: { partialCause: "later", path: [], defer: 1 },
+      });
+      expect(result.op.nodes[0].inputs.nested.result).toEqual({
+        $alias: { partialCause: "nested-result", path: [], defer: 1 },
+      });
+      expect(result.op.nodes[0].outputs).toEqual({
+        $alias: { partialCause: "output", path: [] },
+      });
     });
   });
 
@@ -455,9 +497,9 @@ describe("pattern-binding", () => {
       );
       testCell.set({ arr: [1, 2, 3] });
       const binding = [
-        { $alias: { path: ["arr", 0] } },
-        { $alias: { path: ["arr", 1] } },
-        { $alias: { path: ["arr", 2] } },
+        { $alias: { path: ["arr", "0"] } },
+        { $alias: { path: ["arr", "1"] } },
+        { $alias: { path: ["arr", "2"] } },
       ];
       const links = findAllWriteRedirectCells(binding, testCell);
       expect(links.length).toBe(3);
@@ -497,6 +539,29 @@ describe("pattern-binding", () => {
       const binding = { bar: 2 };
       const links = findAllWriteRedirectCells(binding, testCell);
       expect(links.length).toBe(0);
+    });
+
+    it("should ignore deferred legacy aliases", () => {
+      const testCell = runtime.getCell<{ foo: number }>(
+        space,
+        "deferred legacy aliases",
+        undefined,
+        tx,
+      );
+      testCell.set({ foo: 1 });
+      const binding = {
+        deferredArgument: {
+          $alias: { cell: "argument", path: ["foo"], defer: 1 },
+        },
+        deferredInternal: {
+          $alias: { partialCause: "local", path: [], defer: 1 },
+        },
+        immediate: { $alias: { path: ["foo"] } },
+      };
+
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.length).toBe(1);
+      expect(links[0].path).toEqual(["foo"]);
     });
 
     it("should find write redirect links using sigil format", () => {

@@ -40,6 +40,9 @@ import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
+  getDerivedInternalCell,
+  getDerivedInternalCellLink,
+  getDerivedInternalCellManifestKey,
   getMetaCell,
   getMetaLink,
   isCellLink,
@@ -709,13 +712,13 @@ export class Runner {
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       this.runtime.cfc,
       pattern.result as R,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
@@ -742,6 +745,54 @@ export class Runner {
         fabricFromNativeValue(result),
       );
     }
+  }
+
+  private materializeDerivedInternalCells<R>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<R>,
+    internalCell: Cell,
+    internal: FabricValue,
+  ): FabricValue {
+    const descriptors = pattern.derivedInternalCells;
+    if (!descriptors?.length) return internal;
+
+    const manifest: Record<string, FabricValue> = isRecord(internal)
+      ? { ...internal } as Record<string, FabricValue>
+      : {};
+
+    for (const descriptor of descriptors) {
+      const derivedCell = getDerivedInternalCell(
+        resultCell,
+        descriptor,
+        tx,
+      );
+      setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
+
+      const manifestKey = getDerivedInternalCellManifestKey(descriptor);
+      const manifestValue = manifest[manifestKey];
+      const manifestHasLink = isCellLink(manifestValue);
+      const currentDerivedValue = derivedCell.getRawUntyped({
+        meta: ignoreReadForScheduling,
+      });
+      const seedValue = manifestHasLink
+        ? descriptor.initial
+        : manifestValue ?? descriptor.initial;
+      if (seedValue !== undefined && currentDerivedValue === undefined) {
+        derivedCell.setRawUntyped(fabricFromNativeValue(seedValue));
+      }
+
+      if (!manifestHasLink) {
+        const derivedLink = getDerivedInternalCellLink(resultCell, descriptor);
+        manifest[manifestKey] = createSigilLinkFromParsedLink(derivedLink, {
+          base: internalCell,
+          includeSchema: true,
+          overwrite: "redirect",
+        }) as FabricValue;
+      }
+    }
+
+    return manifest as FabricValue;
   }
 
   /**
@@ -787,7 +838,14 @@ export class Runner {
     // clone) -- and producing a deep-frozen result lets the storage write
     // boundary's `cloneIfNecessary` identity-pass instead of
     // deep-cloning-to-freeze.
-    internalCell.setRawUntyped(fabricFromNativeValue(internal));
+    const internalManifest = this.materializeDerivedInternalCells(
+      tx,
+      pattern,
+      resultCell,
+      internalCell,
+      internal,
+    );
+    internalCell.setRawUntyped(fabricFromNativeValue(internalManifest));
     if (internalLink === undefined) {
       setResultCell(internalCell, resultCell.asSchema(pattern.resultSchema));
       const newInternalCellLink = internalCell.getAsWriteRedirectLink({
@@ -1868,23 +1926,25 @@ export class Runner {
     outputBindings: FabricValue,
     resultCell: Cell<any>,
     baseCell: Cell<any>,
+    pattern: Pattern,
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     return {
       inputs,
@@ -3090,6 +3150,7 @@ export class Runner {
       outputBindings,
       resultCell,
       processCell,
+      pattern,
     );
     const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
       module,
@@ -3204,7 +3265,6 @@ export class Runner {
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     // CT-1230: Pass bindPatterns: false to prevent premature alias binding in pattern
     // arguments. When a subpattern is passed to map(), its aliases should not be
     // bound to the current doc yet - they need to remain unbound until the pattern
@@ -3214,15 +3274,19 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
-      { bindPatterns: false },
+      resultCell,
+      {
+        bindPatterns: false,
+        derivedInternalCells: pattern.derivedInternalCells,
+      },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
 
     // For `map` and future other node types that take closures, we need to
@@ -3288,6 +3352,7 @@ export class Runner {
               outputBindingSchema,
               builtinIdentity,
             ),
+            { preserveLinkOutput: true },
           );
         },
         addCancel,
@@ -3435,17 +3500,17 @@ export class Runner {
     outputBindings: FabricValue,
     resultCell: Cell<any>,
     _addCancel: AddCancel,
-    _pattern: Pattern,
+    pattern: Pattern,
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
 
     sendValueToBinding(
@@ -3455,6 +3520,7 @@ export class Runner {
       internalCellLink,
       outputBindings,
       inputs,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
   }
 
@@ -3465,33 +3531,38 @@ export class Runner {
     outputBindings: FabricValue,
     resultCell: Cell<any>,
     addCancel: AddCancel,
-    _pattern: Pattern,
+    pattern: Pattern,
   ) {
+    const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
-    const resultCellLink = resultCell.getAsNormalizedFullLink();
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       internalCellLink,
-      resultCellLink,
-      { targetSchema: patternImpl.argumentSchema },
+      resultCell,
+      {
+        targetSchema: patternImpl.argumentSchema,
+        derivedInternalCells: pattern.derivedInternalCells,
+      },
     );
 
     // If output bindings is a link to a non-redirect cell,
     // use that instead of creating a new cell.
     let sendToBindings: boolean;
+    let childResultCell: Cell<any>;
     if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
-      resultCell = this.runtime.getCellFromLink(
+      childResultCell = this.runtime.getCellFromLink(
         parseLink(outputBindings, resultCell),
         patternImpl.resultSchema,
         tx,
@@ -3511,13 +3582,13 @@ export class Runner {
       );
       const resultScope = patternDefaultScope(patternImpl) ??
         module.defaultScope;
-      resultCell = baseResultCell;
+      childResultCell = baseResultCell;
       if (resultScope !== undefined && resultScope !== "space") {
         let resultCellLink = baseResultCell.getAsNormalizedFullLink();
         resultCellLink = { ...resultCellLink, scope: resultScope };
         // The result cell's scope isn't "space", so we may have just created
         // this cell. If so, create the corresponding argument/internal cells.
-        resultCell = createCell(this.runtime, resultCellLink, tx);
+        childResultCell = createCell(this.runtime, resultCellLink, tx);
       }
       sendToBindings = true;
     }
@@ -3525,28 +3596,29 @@ export class Runner {
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`instantiate-pattern-node/${sourceKey}`, () => [
       `[PATTERN-NODE] source=${sourceKey}`,
-      `result=${resultCell.getAsNormalizedFullLink().id}`,
+      `result=${childResultCell.getAsNormalizedFullLink().id}`,
       `pattern=${describePatternOrModule(patternImpl)}`,
       `sendToBindings=${sendToBindings}`,
     ]);
 
-    this.run(tx, patternImpl, inputs, resultCell);
+    this.run(tx, patternImpl, inputs, childResultCell);
 
     if (sendToBindings) {
       sendValueToBinding(
         tx,
-        resultCell,
+        parentResultCell,
         argumentCellLink,
         internalCellLink,
         outputBindings,
-        resultCell.getAsLink(),
+        childResultCell.getAsLink(),
+        { derivedInternalCells: pattern.derivedInternalCells },
       );
     }
 
     // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(() => this.stop(resultCell));
+    addCancel(() => this.stop(childResultCell));
   }
 }
 

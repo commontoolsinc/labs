@@ -185,13 +185,18 @@ describe("module", () => {
       expect(clickPattern.result).toEqual({
         click: {
           $alias: {
-            cell: "internal",
-            path: ["stream:click"],
+            partialCause: { stream: "click" },
+            path: [],
             schema: true,
             scope: "space",
           },
         },
       });
+      expect(clickPattern.derivedInternalCells).toEqual([{
+        partialCause: { stream: "click" },
+        schema: true,
+        initial: { $stream: true },
+      }]);
       expect(clickPattern.initial).toEqual({
         internal: {
           "stream:click": { $stream: true },
@@ -202,8 +207,48 @@ describe("module", () => {
       };
       expect(handlerInputs.$event).toEqual({
         $alias: {
-          cell: "internal",
-          path: ["stream:click"],
+          partialCause: { stream: "click" },
+          path: [],
+          schema: true,
+          scope: "space",
+        },
+      });
+    });
+
+    it("serializes anonymous stream roots with partial causes", () => {
+      const clickHandler = handler(
+        false,
+        false,
+        (_event: unknown, _state: unknown) => {},
+      );
+
+      const clickPattern = pattern(() => clickHandler({} as never));
+
+      expect(clickPattern.result).toEqual({
+        $alias: {
+          partialCause: 0,
+          path: [],
+          schema: true,
+          scope: "space",
+        },
+      });
+      expect(clickPattern.derivedInternalCells).toEqual([{
+        partialCause: 0,
+        schema: true,
+        initial: { $stream: true },
+      }]);
+      expect(clickPattern.initial).toEqual({
+        internal: {
+          "0": { $stream: true },
+        },
+      });
+      const handlerInputs = clickPattern.nodes[0].inputs as {
+        $event: unknown;
+      };
+      expect(handlerInputs.$event).toEqual({
+        $alias: {
+          partialCause: 0,
+          path: [],
           schema: true,
           scope: "space",
         },
@@ -226,7 +271,7 @@ describe("module", () => {
 
       expect(arrayCausePattern.result).toEqual({
         value: {
-          $alias: { cell: "internal", path: ['["a","b"]'], scope: "space" },
+          $alias: { partialCause: ["a", "b"], path: [], scope: "space" },
         },
       });
       expect(arrayCausePattern.initial).toEqual({

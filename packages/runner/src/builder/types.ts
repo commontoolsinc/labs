@@ -12,6 +12,7 @@ import type {
   AsWriteonlyCell,
   ByRefFunction,
   Cell,
+  CellScope,
   CellTypeConstructor,
   CfDataFunction,
   CompileAndRunFunction,
@@ -216,6 +217,13 @@ export type Node = {
   outputs: JSONValue;
 };
 
+export type DerivedInternalCellDescriptor = {
+  partialCause: JSONValue;
+  schema?: JSONSchema;
+  scope?: CellScope;
+  initial?: JSONValue;
+};
+
 // Used to get back to original pattern from a JSONified representation.
 export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
 export const unsafe_verifiedLoadId = Symbol("unsafe_verifiedLoadId");
@@ -227,6 +235,7 @@ declare module "@commonfabric/api" {
     resultSchema: JSONSchema;
     internalSchema?: JSONSchema;
     initial?: JSONValue;
+    derivedInternalCells?: DerivedInternalCellDescriptor[];
     result: JSONValue;
     nodes: Node[];
     program?: RuntimeProgram;

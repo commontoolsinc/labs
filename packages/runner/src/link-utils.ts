@@ -1,7 +1,12 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
-import { type AnyCell, type JSONSchema } from "./builder/types.ts";
+import {
+  type AnyCell,
+  type DerivedInternalCellDescriptor,
+  type JSONSchema,
+  type JSONValue,
+} from "./builder/types.ts";
 import {
   type Cell,
   isAnyCell,
@@ -697,7 +702,7 @@ function removeStrippedStreamPropertiesFromRequired(
 
 /** Get or create a cell using the resultCell as the cause. */
 export function getMetaCell(
-  resultCell: Cell,
+  resultCell: AnyCell<unknown>,
   type: "internal" | "argument",
   tx: IExtendedStorageTransaction,
   schema?: JSONSchema,
@@ -714,6 +719,88 @@ export function getMetaCell(
   return resultCell.runtime.getCellFromLink(metaLink, undefined, tx);
 }
 
+export function getDerivedInternalCellLink(
+  resultCell: AnyCell<unknown>,
+  descriptor: DerivedInternalCellDescriptor,
+): NormalizedFullLink {
+  const resultCellLink = resultCell.getAsNormalizedFullLink();
+  return {
+    space: resultCellLink.space,
+    id: toURI(createRef({}, {
+      parent: resultCell,
+      type: "internal",
+      cause: descriptor.partialCause,
+    })),
+    path: [],
+    scope: descriptor.scope ?? resultCellLink.scope,
+    ...(descriptor.schema !== undefined && { schema: descriptor.schema }),
+  };
+}
+
+export function getStableInternalPathSegment(
+  cause: unknown,
+): PropertyKey | undefined {
+  if (
+    typeof cause === "string" ||
+    typeof cause === "number" ||
+    typeof cause === "symbol"
+  ) {
+    return cause;
+  }
+
+  if (cause !== undefined) {
+    if (isRecord(cause) && "stream" in cause) {
+      return `stream:${formatStableCauseSegment(cause.stream as JSONValue)}`;
+    }
+    return formatStableCauseSegment(cause as JSONValue);
+  }
+
+  return undefined;
+}
+
+export function getDerivedInternalCellManifestKey(
+  descriptor: DerivedInternalCellDescriptor,
+): string {
+  const key = getStableInternalPathSegment(descriptor.partialCause);
+  if (key === undefined) {
+    throw new Error(
+      `Derived internal cell has no manifest key: ${
+        JSON.stringify(descriptor)
+      }`,
+    );
+  }
+  return String(key);
+}
+
+function formatStableCauseSegment(cause: JSONValue): string {
+  if (typeof cause === "string") return cause;
+  if (
+    typeof cause === "number" ||
+    typeof cause === "boolean" ||
+    cause === null
+  ) {
+    return String(cause);
+  }
+
+  try {
+    return JSON.stringify(cause) ?? String(cause);
+  } catch {
+    return String(cause);
+  }
+}
+
+export function getDerivedInternalCell(
+  resultCell: Cell,
+  descriptor: DerivedInternalCellDescriptor,
+  tx?: IExtendedStorageTransaction,
+): Cell {
+  return resultCell.runtime.getCellFromLink(
+    getDerivedInternalCellLink(resultCell, descriptor),
+    descriptor.schema,
+    tx,
+  );
+}
+
 const META_READ_OPTIONS = {
   meta: ignoreReadForScheduling,
 } as const;
@@ -726,7 +813,7 @@ const META_READ_OPTIONS = {
  * will be frozen.
  */
 export function getMetaLink(
-  resultCell: Cell<any>,
+  resultCell: Cell<unknown>,
   field: MetaField,
   options: unknown = META_READ_OPTIONS,
 ): NormalizedFullLink | undefined {

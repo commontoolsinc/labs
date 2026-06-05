@@ -5,6 +5,7 @@ import {
   type ICell,
   isOpaqueRef,
   type JSONSchema,
+  type JSONValue,
   type Module,
   type Node,
   type NodeRef,
@@ -26,13 +27,17 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import {
+  type CellAliasResolver,
   moduleToJSON,
   patternToJSON,
   toJSONWithLegacyAliases,
 } from "./json-utils.ts";
 import { setValueAtPath } from "../path-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
-import { sanitizeSchemaForLinks } from "../link-utils.ts";
+import {
+  getStableInternalPathSegment,
+  sanitizeSchemaForLinks,
+} from "../link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -200,6 +205,10 @@ function factoryFromPattern<T, R>(
   const allCells = new Set<ICell<unknown>>();
   const allNodes = new Set<NodeRef>();
 
+  // Walk through the value. We'll convert any cell results back into cells as
+  // we go. Our traverseValue doesn't descend into cells, but we'll recurse on
+  // the cell's nodes ourselves. We'll also add any cells we see to allCells,
+  // and any nodes to allNodes.
   const collectCellsAndNodes = (value: Opaque<unknown>) =>
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
@@ -275,58 +284,70 @@ function factoryFromPattern<T, R>(
   // assigned to cells via .set or .push and aren't otherwise connected.
   getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
 
-  // Then assign paths on the pattern cell for all cells. For now we just assign
-  // incremental counters, since we don't have access to the original variable
-  // names. Later we might do something more clever by analyzing the code (we'll
-  // want that anyway for extracting schemas from TypeScript).
-  const paths = new Map<OpaqueRef<any>, PropertyKey[]>();
+  const rootAliases = new Map<unknown, "argument" | "result">();
+  const setRootAlias = (
+    cell: ICell<unknown> | OpaqueCell<any>,
+    alias: "argument" | "result",
+  ) => {
+    const { cell: root } = cell.export();
+    rootAliases.set(cell, alias);
+    rootAliases.set(root, alias);
+  };
 
-  // Add the inputs default path
-  paths.set(inputs, ["argument"]);
+  const inputCell = isCell(inputs) ? inputs : getCellOrThrow(inputs);
+  setRootAlias(inputCell, "argument");
 
-  // Add path for self-reference if used in outputs
-  // Note: selfRef is an OpaqueRef, but allCells contains Cells (after getCellOrThrow conversion)
-  // So we need to get the underlying cell for comparison
+  // Add alias for self-reference if used in outputs.
   const selfRefCell = getCellOrThrow(selfRef);
   if (allCells.has(selfRefCell)) {
-    paths.set(selfRefCell, ["result"]);
+    setRootAlias(selfRefCell, "result");
   }
 
-  // Add paths for all the internal cells
-  // TODO(seefeld): Infer more stable identifiers
+  const assignedInternalPathSegments = new Map<OpaqueCell<any>, PropertyKey>();
   let count = 0;
   const usedInternalPathSegments = new Set<string>();
   allCells.forEach((cell) => {
-    if (paths.has(cell)) return;
     const { cell: top, path, value, name, external } = cell.export();
-    if (!external) {
-      if (!paths.has(top)) {
-        const stableName = getStableInternalPathSegment(name);
-        // HACK(seefeld): For unnamed cells, we've run into an issue when the
-        // order changes that a stream might clobber a previously used
-        // non-stream, which means the default value won't be assigned and the
-        // cell won't be treated as stream. So we'll namespace those separately.
-        const streamMarker = isRecord(value) && value.$stream === true
-          ? "stream"
-          : "";
-        // These paths that start with internal will be converted to cell: "internal", path: rest
-        let internalPathSegment = stableName ??
-          `__#${count++}${streamMarker}`;
-        let internalPathKey = String(internalPathSegment);
-        while (usedInternalPathSegments.has(internalPathKey)) {
-          internalPathSegment =
-            `${internalPathKey}__#${count++}${streamMarker}`;
-          internalPathKey = String(internalPathSegment);
-        }
-        usedInternalPathSegments.add(internalPathKey);
-        paths.set(top, ["internal", internalPathSegment]);
-      }
-      if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
+    if (
+      external || path.length > 0 || rootAliases.has(cell) ||
+      rootAliases.has(top) || assignedInternalPathSegments.has(top)
+    ) {
+      return;
     }
+
+    const stableName = getStableInternalPathSegment(name);
+    // HACK(seefeld): For unnamed cells, we've run into an issue when the
+    // order changes that a stream might clobber a previously used
+    // non-stream, which means the default value won't be assigned and the
+    // cell won't be treated as stream. So we'll namespace those separately.
+    const streamMarker = isRecord(value) && value.$stream === true
+      ? "stream"
+      : "";
+    let internalPathSegment = stableName ?? `__#${count++}${streamMarker}`;
+    let internalPathKey = String(internalPathSegment);
+    while (usedInternalPathSegments.has(internalPathKey)) {
+      internalPathSegment = `${internalPathKey}__#${count++}${streamMarker}`;
+      internalPathKey = String(internalPathSegment);
+    }
+    usedInternalPathSegments.add(internalPathKey);
+    assignedInternalPathSegments.set(top, internalPathSegment);
   });
 
-  // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithLegacyAliases(outputs ?? {}, paths, true)!;
+  const cellPathForCell = (
+    cell: ICell<unknown> | OpaqueCell<any> | OpaqueRef<any>,
+  ): PropertyKey[] | undefined => {
+    const { cell: top, path, external } = cell.export();
+    if (external) return undefined;
+
+    const rootAlias = rootAliases.get(cell) ?? rootAliases.get(top);
+    if (rootAlias !== undefined) return [rootAlias, ...path];
+
+    const internalPathSegment = assignedInternalPathSegments.get(top) ??
+      assignedInternalPathSegments.get(cell as OpaqueCell<any>);
+    if (internalPathSegment !== undefined) {
+      return ["internal", internalPathSegment, ...path];
+    }
+  };
 
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
@@ -339,22 +360,97 @@ function factoryFromPattern<T, R>(
     allCells,
   );
   allCells.forEach((cell) => {
-    const { cell: top } = cell.export();
-    if (paths.has(top)) allCellsAndInternalRoots.add(top);
+    const { cell: top, external } = cell.export();
+    if (!external && assignedInternalPathSegments.has(top)) {
+      allCellsAndInternalRoots.add(top);
+    }
   });
+  const derivedInternalCells: Pattern["derivedInternalCells"] = [];
+  const derivedInternalPartialCausesByRoot = new Map<
+    OpaqueCell<any>,
+    JSONValue
+  >();
   allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === (inputs as unknown)) return;
-    const { path, value, schema, external } = cell.export();
+    const { path, value, schema, name, external } = cell.export();
     if (path.length > 0 || external) return;
 
-    const cellPath = paths.get(cell)!;
+    const cellPath = cellPathForCell(cell);
+    if (cellPath === undefined) return;
+    const isStream = isRecord(value) && value.$stream === true;
+    if (
+      cellPath[0] === "internal" && cellPath.length === 2 && !isStream &&
+      name !== undefined
+    ) {
+      const key = String(cellPath[1]);
+      const stableKey = getStableInternalPathSegment(name);
+      const partialCause = String(stableKey) === key ? name as JSONValue : key;
+      derivedInternalPartialCausesByRoot.set(cell.export().cell, partialCause);
+      derivedInternalCells.push({
+        partialCause,
+        ...(schema !== undefined && { schema }),
+        ...(value !== undefined && { initial: value as JSONValue }),
+      });
+    }
     if (value !== undefined) setValueAtPath(initial, cellPath, value);
     if (schema !== undefined && cellPath[0] === "internal") {
       setSchemaAtPath(internalSchema, cellPath.slice(1), schema);
       hasInternalSchema = true;
     }
   });
+  const resolveCellAlias: CellAliasResolver = (
+    cell,
+    serializationPath,
+    ignoreSelfAliases,
+  ) => {
+    const { cell: top, schema, scope } = cell.export();
+    const cellPath = cellPathForCell(cell);
+    if (cellPath === undefined) return undefined;
+    if (
+      ignoreSelfAliases &&
+      serializationPath.length === cellPath.length &&
+      serializationPath.every((part, index) => part === cellPath[index])
+    ) {
+      return null;
+    }
+
+    const aliasMetadata = {
+      ...(scope !== undefined && { scope }),
+      ...(schema !== undefined &&
+        { schema: sanitizeSchemaForLinks(schema, { keepStreams: true }) }),
+    };
+    if (cellPath[0] === "internal") {
+      const partialCause = derivedInternalPartialCausesByRoot.get(top);
+      if (partialCause !== undefined) {
+        return {
+          $alias: {
+            partialCause,
+            path: cellPath.slice(2).map(String),
+            ...aliasMetadata,
+          },
+        };
+      }
+    }
+    if (
+      cellPath[0] === "argument" || cellPath[0] === "internal" ||
+      cellPath[0] === "result"
+    ) {
+      return {
+        $alias: {
+          cell: cellPath[0],
+          path: cellPath.slice(1).map(String),
+          ...aliasMetadata,
+        },
+      };
+    }
+  };
+  // Creates a query (i.e. aliases) into the cells for the result
+  const result = toJSONWithLegacyAliases(
+    outputs ?? {},
+    resolveCellAlias,
+    true,
+  )!;
 
   const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
 
@@ -364,10 +460,19 @@ function factoryFromPattern<T, R>(
   const serializedNodes = Array.from(allNodes).map((node) => {
     const module = toJSONWithLegacyAliases(
       node.module,
-      paths,
+      resolveCellAlias,
+      false,
     ) as unknown as Module;
-    const inputs = toJSONWithLegacyAliases(node.inputs, paths)!;
-    const outputs = toJSONWithLegacyAliases(node.outputs, paths)!;
+    const inputs = toJSONWithLegacyAliases(
+      node.inputs,
+      resolveCellAlias,
+      false,
+    )!;
+    const outputs = toJSONWithLegacyAliases(
+      node.outputs,
+      resolveCellAlias,
+      false,
+    )!;
     return { module, inputs, outputs } satisfies Node;
   });
 
@@ -386,6 +491,7 @@ function factoryFromPattern<T, R>(
       }
       : {}),
     initial,
+    ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,
     // Important that this refers to patternFactory, as .program will be set on
@@ -434,43 +540,6 @@ function factoryFromPattern<T, R>(
   const patternFactory = makePatternFactory();
 
   return patternFactory;
-}
-
-function getStableInternalPathSegment(cause: unknown): PropertyKey | undefined {
-  if (
-    typeof cause === "string" ||
-    typeof cause === "number" ||
-    typeof cause === "symbol"
-  ) {
-    return cause;
-  }
-
-  if (isRecord(cause) && "stream" in cause) {
-    return `stream:${formatStableCauseSegment(cause.stream)}`;
-  }
-
-  if (cause !== undefined) {
-    return formatStableCauseSegment(cause);
-  }
-
-  return undefined;
-}
-
-function formatStableCauseSegment(cause: unknown): string {
-  if (typeof cause === "string") return cause;
-  if (
-    typeof cause === "number" ||
-    typeof cause === "boolean" ||
-    cause === null
-  ) {
-    return String(cause);
-  }
-
-  try {
-    return JSON.stringify(cause) ?? String(cause);
-  } catch {
-    return String(cause);
-  }
 }
 
 const frames: Frame[] = [];

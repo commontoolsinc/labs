@@ -18,23 +18,23 @@ import {
   unsafe_originalPattern,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
-import {
-  isCellLink,
-  isLegacyAlias,
-  parseLink,
-  sanitizeSchemaForLinks,
-} from "../link-utils.ts";
+import { isCellLink, isLegacyAlias, parseLink } from "../link-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
 
+export type CellAliasResolver = (
+  cell: OpaqueRef<any>,
+  path: readonly PropertyKey[],
+  ignoreSelfAliases: boolean,
+) => LegacyAlias | null | undefined;
+
 export function toJSONWithLegacyAliases(
   value: Opaque<any>,
-  paths: Map<OpaqueRef<any>, PropertyKey[]>,
+  resolveCellAlias?: CellAliasResolver,
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
   seen?: WeakMap<object, number>,
@@ -46,7 +46,7 @@ export function toJSONWithLegacyAliases(
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value)) {
-    const { external, frame, schema, scope } = value.export();
+    const { external, frame } = value.export();
 
     // If this is an external reference, just copy the reference as is.
     if (external) return external as JSONValue;
@@ -58,44 +58,16 @@ export function toJSONWithLegacyAliases(
       );
     }
 
-    // Otherwise it's an internal reference. Extract the schema and output a link.
-    const pathToCell = paths.get(value);
-    if (pathToCell) {
-      if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
-
-      const [maybeCellName, ...restPath] = pathToCell;
-      const cellName = maybeCellName === "argument"
-        ? "argument"
-        : maybeCellName === "internal"
-        ? "internal"
-        : maybeCellName === "result"
-        ? "result"
-        : undefined;
-      if (cellName !== undefined) {
-        return {
-          $alias: {
-            cell: cellName,
-            path: restPath.map(String),
-            ...(scope !== undefined && { scope }),
-            ...(schema !== undefined &&
-              {
-                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
-              }),
-          },
-        } satisfies LegacyAlias;
-      } else {
-        return {
-          $alias: {
-            path: pathToCell as (string | number)[],
-            ...(scope !== undefined && { scope }), // we're including scope, though we may not honor it
-            ...(schema !== undefined &&
-              {
-                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
-              }),
-          },
-        } satisfies LegacyAlias;
-      }
-    } else throw new Error(`Cell not found in paths`);
+    // Otherwise it's an internal reference. Ask the pattern builder how this
+    // cell should be represented in the serialized pattern.
+    const alias = resolveCellAlias?.(
+      value as OpaqueRef<any>,
+      path,
+      ignoreSelfAliases,
+    );
+    if (alias === null) return undefined;
+    if (alias !== undefined) return alias as unknown as JSONValue;
+    throw new Error(`Cell not found in pattern aliases`);
   }
 
   // If we encounter a link, it's from a nested pattern.
@@ -103,36 +75,28 @@ export function toJSONWithLegacyAliases(
     const alias = (value as LegacyAlias).$alias;
     // If this was a shadow ref, i.e. a nested pattern, see whether we're now at
     // the level that it should be resolved to the actual cell.
-    if (!("cell" in alias) || typeof alias.cell === "number") {
-      // If we encounter an existing alias and it isn't an absolute reference
-      // with a cell id, then increase the nesting level.
+    if (alias.partialCause !== undefined) {
       return {
         $alias: {
-          ...alias, // Preserve existing metadata.
-          cell: ((alias.cell as number) ?? 0) + 1, // Increase nesting level.
-          path: alias.path as (string | number)[],
+          partialCause: alias.partialCause,
+          defer: (alias.defer ?? 0) + 1,
+          path: alias.path,
+          ...(alias.scope !== undefined && { scope: alias.scope }),
+          ...(alias.schema !== undefined && { schema: alias.schema }),
         },
       } satisfies LegacyAlias;
-    } else if (typeof alias.cell === "string") {
+    } else if (!("cell" in alias) || typeof (alias.cell) === "string") {
       // If we encounter an existing alias and it isn't an absolute reference
       // with a cell id, then increase the nesting level.
       return {
         $alias: {
-          ...alias, // Preserve existing metadata.
-          cell: [null, alias.cell], // Increase nesting level.
-          path: alias.path as (string | number)[],
+          defer: (alias.defer ?? 0) + 1,
+          path: alias.path,
+          ...(alias.scope !== undefined && { scope: alias.scope }),
+          ...(alias.schema !== undefined && { schema: alias.schema }),
+          ...(alias.cell !== undefined && { cell: alias.cell }),
         },
-      };
-    } else if (Array.isArray(alias.cell)) {
-      // If we encounter an existing alias and it isn't an absolute reference
-      // with a cell id, then increase the nesting level.
-      return {
-        $alias: {
-          ...alias, // Preserve existing metadata.
-          cell: [null, ...alias.cell], // Increase nesting level.
-          path: alias.path as (string | number)[],
-        },
-      };
+      } satisfies LegacyAlias;
     } else {
       throw new Error(`Invalid alias cell`);
     }
@@ -141,7 +105,13 @@ export function toJSONWithLegacyAliases(
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithLegacyAliases(v, paths, ignoreSelfAliases, [...path, i], seen)
+      toJSONWithLegacyAliases(
+        v,
+        resolveCellAlias,
+        ignoreSelfAliases,
+        [...path, i],
+        seen,
+      )
     );
   }
 
@@ -165,7 +135,7 @@ export function toJSONWithLegacyAliases(
     for (const key in valueToProcess as any) {
       const jsonValue = toJSONWithLegacyAliases(
         valueToProcess[key],
-        paths,
+        resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
         seen,
@@ -387,8 +357,6 @@ export function moduleToJSON(module: Module) {
   ) {
     implementation = toJSONWithLegacyAliases(
       implementation as unknown as Opaque<any>,
-      new Map(),
-      false,
     ) as unknown as Pattern;
     return {
       ...rest,
@@ -448,6 +416,9 @@ export function patternToJSON(pattern: Pattern) {
       ? { internalSchema: pattern.internalSchema }
       : {}),
     ...(pattern.initial ? { initial: pattern.initial } : {}),
+    ...(pattern.derivedInternalCells
+      ? { derivedInternalCells: pattern.derivedInternalCells }
+      : {}),
     result: pattern.result,
     nodes: pattern.nodes,
     program: pattern.program,

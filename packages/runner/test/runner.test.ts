@@ -15,8 +15,10 @@ import {
 } from "../src/storage/interface.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
 import {
-  createSigilLinkFromParsedLink,
+  areNormalizedLinksSame,
+  getDerivedInternalCell,
   getMetaLink,
+  isWriteRedirectLink,
   parseLink,
 } from "../src/link-utils.ts";
 
@@ -84,7 +86,7 @@ describe("runPattern", () => {
         description: "passthrough",
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: {
@@ -92,7 +94,7 @@ describe("runPattern", () => {
           },
           inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
           outputs: {
-            value: { $alias: { cell: "internal", path: ["output"] } },
+            value: { $alias: { partialCause: "output", path: [] } },
           },
         },
       ],
@@ -118,18 +120,84 @@ describe("runPattern", () => {
     );
     expect(internalLink).toBeDefined();
     const internalCell = runtime.getCellFromLink(internalLink!);
-    const internalCellValue = await internalCell.get();
+    const internalCellValue = await internalCell.getRaw();
     expect(argumentCellValue).toEqual({ input: 1 });
-    expect(internalCellValue).toEqual({ output: 1 });
+    expect(isWriteRedirectLink((internalCellValue as any).output)).toBe(true);
 
-    expect(result.getRaw()).toEqual({
-      output: createSigilLinkFromParsedLink({
-        ...internalLink,
-        path: ["output"],
-      }, { overwrite: "redirect" }),
-    });
+    const outputLink = parseLink(
+      (internalCellValue as any).output,
+      internalCell,
+    );
+    expect(
+      areNormalizedLinksSame(
+        parseLink((result.getRaw() as any).output, result)!,
+        outputLink!,
+      ),
+    ).toBe(true);
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ output: 1 });
+  });
+
+  it("writes internal aliases through derived internal cell manifest links", async () => {
+    const pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          input: { type: "number" },
+        },
+      },
+      resultSchema: {},
+      initial: { internal: { output: 0 } },
+      derivedInternalCells: [{
+        partialCause: "output",
+        schema: { type: "number" },
+        scope: "space",
+        initial: 0,
+      }],
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "passthrough",
+          },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "derived internal passthrough",
+    );
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      { input: 5 },
+      resultCell,
+    );
+
+    await resultCell.pull();
+    const internalLink = getMetaLink(resultCell, "internal");
+    expect(internalLink).toBeDefined();
+
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    const internalRaw = internalCell.getRaw();
+    expect(typeof (internalRaw as any).output).toBe("object");
+    expect(isWriteRedirectLink((internalRaw as any).output)).toBe(true);
+
+    const derivedLink = parseLink((internalRaw as any).output, internalCell);
+    expect(derivedLink).toBeDefined();
+    expect(derivedLink!.id).not.toBe(internalLink!.id);
+    expect(derivedLink!.path).toEqual([]);
+    expect(derivedLink!.schema).toEqual({ type: "number" });
+
+    const derivedCell = runtime.getCellFromLink(derivedLink!);
+    expect(await derivedCell.get()).toBe(5);
+    expect(await result.pull()).toEqual({ output: 5 });
   });
 
   it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
@@ -159,7 +227,7 @@ describe("runPattern", () => {
       argumentSchema,
       internalSchema,
       resultSchema,
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: {
@@ -167,7 +235,7 @@ describe("runPattern", () => {
           },
           inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
           outputs: {
-            value: { $alias: { cell: "internal", path: ["output"] } },
+            value: { $alias: { partialCause: "output", path: [] } },
           },
         },
       ],
@@ -192,44 +260,40 @@ describe("runPattern", () => {
 
     const resultCellLink = resultCell.getAsNormalizedFullLink();
     const argumentLink = getMetaLink(resultCell, "argument");
-    const internalLink = getMetaLink(resultCell, "internal");
 
     expect(resultCellLink.scope).toBe("user");
     expect(resultCell.getMetaRaw("schema")).toEqual(resultSchema);
     expect(argumentLink).toBeDefined();
-    expect(internalLink).toBeDefined();
     expect(argumentLink!.path).toEqual([]);
     expect(argumentLink!.space).toBe(space);
     expect(argumentLink!.scope).toBe("user");
     expect(argumentLink!.schema).toEqual(argumentSchema);
     expect(argumentLink!.overwrite).toBe("redirect");
-    expect(internalLink!.path).toEqual([]);
-    expect(internalLink!.space).toBe(space);
-    expect(internalLink!.scope).toBe("user");
-    expect(internalLink!.schema).toEqual(internalSchema);
-    expect(internalLink!.overwrite).toBe("redirect");
 
     const argumentCell = runtime.getCellFromLink(argumentLink!);
-    const internalCell = runtime.getCellFromLink(internalLink!);
     expect(argumentCell.get()).toEqual({ input: 7 });
-    expect(internalCell.get()).toEqual({ output: 7 });
+    const outputCell = getDerivedInternalCell(resultCell, {
+      partialCause: "output",
+      schema: internalSchema.properties.output,
+    });
+    const outputLink = outputCell.getAsNormalizedFullLink();
+    expect(outputLink.path).toEqual([]);
+    expect(outputLink.space).toBe(space);
+    expect(outputLink.scope).toBe("user");
+    expect(outputLink.schema).toEqual(internalSchema.properties.output);
     expect(getMetaLink(argumentCell, "result")).toEqual({
       ...resultCellLink,
       schema: resultSchema,
       overwrite: "redirect",
     });
-    expect(getMetaLink(internalCell, "result")).toEqual({
-      ...resultCellLink,
-      schema: resultSchema,
-      overwrite: "redirect",
-    });
-    expect(parseLink((result.getRaw() as { output: unknown }).output, result))
-      .toEqual({
-        ...internalLink!,
-        path: ["output"],
-        schema: { type: "number" },
-        overwrite: "redirect",
-      });
+    // getDerivedInternalCell doesn't generate a redirect link,
+    // but that's what we want to match, so add that property.
+    expect(
+      areNormalizedLinksSame(
+        parseLink((result.getRaw() as { output: unknown }).output, result)!,
+        { ...outputLink, overwrite: "redirect" },
+      ),
+    ).toBe(true);
   });
 
   it("should work with nested patterns", async () => {
@@ -242,17 +306,21 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { $alias: { cell: [null, "internal"], path: ["output"] } },
+      result: { $alias: { partialCause: "output", path: [], defer: 1 } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
           inputs: {
-            value: { $alias: { cell: [null, "argument"], path: ["input"] } },
+            value: {
+              $alias: { cell: "argument", path: ["input"], defer: 1 },
+            },
           },
           outputs: {
-            value: { $alias: { cell: [null, "internal"], path: ["output"] } },
+            value: {
+              $alias: { partialCause: "output", path: [], defer: 1 },
+            },
           },
         },
       ],
@@ -267,12 +335,12 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { result: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { result: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: innerPattern },
           inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
-          outputs: { $alias: { cell: "internal", path: ["output"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -297,7 +365,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -305,7 +373,7 @@ describe("runPattern", () => {
             implementation: (value: number) => value * 2,
           },
           inputs: { $alias: { cell: "argument", path: ["value"] } },
-          outputs: { $alias: { cell: "internal", path: ["result"] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -338,7 +406,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -375,7 +443,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -411,15 +479,19 @@ describe("runPattern", () => {
     const nestedPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { $alias: { cell: [null, "internal"], path: ["result"] } },
+      result: { $alias: { partialCause: "result", path: [], defer: 1 } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { cell: [null, "argument"], path: ["input"] } },
-          outputs: { $alias: { cell: [null, "internal"], path: ["result"] } },
+          inputs: {
+            $alias: { cell: "argument", path: ["input"], defer: 1 },
+          },
+          outputs: {
+            $alias: { partialCause: "result", path: [], defer: 1 },
+          },
         },
       ],
     };
@@ -427,12 +499,12 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: nestedPattern },
           inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
-          outputs: { $alias: { cell: "internal", path: ["result"] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -590,7 +662,7 @@ describe("runPattern", () => {
         required: ["input"],
       },
       resultSchema: {},
-      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -599,7 +671,7 @@ describe("runPattern", () => {
               args.input * args.multiplier,
           },
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: ["result"] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -653,7 +725,7 @@ describe("runPattern", () => {
         required: ["config"],
       },
       resultSchema: {},
-      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
+      result: { result: { $alias: { partialCause: "result", path: [] } } },
       nodes: [
         {
           module: {
@@ -677,7 +749,7 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: ["result"] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -718,7 +790,7 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        result: { $alias: { cell: "internal", path: ["result"] } },
+        result: { $alias: { partialCause: "result", path: [] } },
         options: { $alias: { cell: "argument", path: ["options"] } },
       },
       nodes: [
@@ -730,7 +802,7 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: ["result"] } },
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -761,7 +833,7 @@ describe("runPattern", () => {
       initial: { internal: { counter: 0 } },
       result: {
         [NAME]: "counter",
-        counter: { $alias: { cell: "internal", path: ["counter"] } },
+        counter: { $alias: { partialCause: "counter", path: [] } },
       },
       nodes: [
         {
@@ -772,7 +844,7 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: ["counter"] } },
+          outputs: { $alias: { partialCause: "counter", path: [] } },
         },
       ],
     };
@@ -807,7 +879,7 @@ describe("runPattern", () => {
       initial: { internal: { counter: 0 } },
       result: {
         [NAME]: "counter",
-        counter: { $alias: { cell: "internal", path: ["counter"] } },
+        counter: { $alias: { partialCause: "counter", path: [] } },
       },
       nodes: [
         {
@@ -816,7 +888,7 @@ describe("runPattern", () => {
             implementation: (input: any) => input.value,
           },
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: ["counter"] } },
+          outputs: { $alias: { partialCause: "counter", path: [] } },
         },
       ],
     };
@@ -825,7 +897,7 @@ describe("runPattern", () => {
       ...pattern,
       result: {
         [NAME]: "renamed counter",
-        counter: { $alias: { cell: "internal", path: ["counter"] } },
+        counter: { $alias: { partialCause: "counter", path: [] } },
       },
     };
 
@@ -870,8 +942,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        counter: { $alias: { cell: "internal", path: ["counter"] } },
-        nested: { $alias: { cell: "internal", path: ["nested"] } },
+        counter: { $alias: { partialCause: "counter", path: [] } },
+        nested: { $alias: { partialCause: "nested", path: [] } },
       },
       nodes: [
         {
@@ -884,7 +956,7 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["input"] } },
-          outputs: { $alias: { cell: "internal", path: ["counter"] } },
+          outputs: { $alias: { partialCause: "counter", path: [] } },
         },
       ],
     };
@@ -918,22 +990,23 @@ describe("runPattern", () => {
     await result2.pull();
 
     // Use getRawUntyped({ frozen: false }) for mutable copies
-    const internal1 = localRuntime.getCellFromLink(
-      getMetaLink(result1, "internal")!,
-    ).getRawUntyped({ frozen: false }) as any;
-    const internal2 = localRuntime.getCellFromLink(
-      getMetaLink(result2, "internal")!,
-    ).getRawUntyped({ frozen: false }) as any;
+    const internalCell1 = getDerivedInternalCell(result1, {
+      partialCause: "nested",
+    });
+    const internalCell2 = getDerivedInternalCell(result2, {
+      partialCause: "nested",
+    });
+    const nested1 = internalCell1.getRawUntyped({ frozen: false }) as any;
+    const nested2 = internalCell2.getRawUntyped({ frozen: false }) as any;
 
     // Verify they are different objects
-    expect(internal1).not.toBe(internal2);
-    expect(internal1.nested).not.toBe(internal2.nested);
+    expect(nested1).not.toBe(nested2);
 
     // Modify nested object in first instance
-    internal1.nested.value = "modified";
+    nested1.value = "modified";
 
     // Verify second instance is unaffected
-    expect(internal2.nested.value).toBe("initial");
+    expect(nested2.value).toBe("initial");
     const result2Value = await result2.pull() as any;
     expect(result2Value.nested.value).toBe("initial");
 
@@ -967,8 +1040,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        counter: { $alias: { cell: "internal", path: ["counter"] } },
-        nested: { $alias: { cell: "internal", path: ["nested"] } },
+        counter: { $alias: { partialCause: "counter", path: [] } },
+        nested: { $alias: { partialCause: "nested", path: [] } },
       },
       nodes: [
         {
@@ -981,7 +1054,7 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["input"] } },
-          outputs: { $alias: { cell: "internal", path: ["counter"] } },
+          outputs: { $alias: { partialCause: "counter", path: [] } },
         },
       ],
     };
@@ -1015,22 +1088,23 @@ describe("runPattern", () => {
     await result2.pull();
 
     // Use getRawUntyped({ frozen: false }) for mutable copies
-    const internal1 = localRuntime.getCellFromLink(
-      getMetaLink(result1, "internal")!,
-    ).getRawUntyped({ frozen: false }) as any;
-    const internal2 = localRuntime.getCellFromLink(
-      getMetaLink(result2, "internal")!,
-    ).getRawUntyped({ frozen: false }) as any;
+    const internalCell1 = getDerivedInternalCell(result1, {
+      partialCause: "nested",
+    });
+    const internalCell2 = getDerivedInternalCell(result2, {
+      partialCause: "nested",
+    });
+    const nested1 = internalCell1.getRawUntyped({ frozen: false }) as any;
+    const nested2 = internalCell2.getRawUntyped({ frozen: false }) as any;
 
     // Verify they are different objects
-    expect(internal1).not.toBe(internal2);
-    expect(internal1.nested).not.toBe(internal2.nested);
+    expect(nested1).not.toBe(nested2);
 
     // Modify nested object in first instance's mutable copy
-    internal1.nested.value = "modified";
+    nested1.value = "modified";
 
     // Verify second instance is unaffected
-    expect(internal2.nested.value).toBe("initial");
+    expect(nested2.value).toBe("initial");
 
     await localRuntime.storageManager.synced();
     await localRuntime.dispose();
@@ -1113,13 +1187,13 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "passthrough" },
           inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
           outputs: {
-            value: { $alias: { cell: "internal", path: ["output"] } },
+            value: { $alias: { partialCause: "output", path: [] } },
           },
         },
       ],
@@ -1147,7 +1221,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [],
     };
 
@@ -1177,7 +1251,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [],
     };
 
@@ -1208,13 +1282,13 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "passthrough" },
           inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
           outputs: {
-            value: { $alias: { cell: "internal", path: ["output"] } },
+            value: { $alias: { partialCause: "output", path: [] } },
           },
         },
       ],
@@ -1239,7 +1313,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: {
@@ -1247,7 +1321,7 @@ describe("setup/start", () => {
             implementation: (v: { input: number }) => v.input,
           },
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: ["output"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
@@ -1273,7 +1347,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: {
@@ -1281,7 +1355,7 @@ describe("setup/start", () => {
             implementation: (v: { input: number }) => v.input,
           },
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: ["output"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
@@ -1324,7 +1398,7 @@ describe("setup/start", () => {
 
     // Not started yet; no output
     let cellValue = await resultCell.pull();
-    expect(cellValue).toEqual({ output: undefined });
+    expect(cellValue).toEqual(undefined);
 
     runtime.start(resultCell);
     cellValue = await resultCell.pull();
@@ -1338,13 +1412,13 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
           module: { type: "passthrough" },
           inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
           outputs: {
-            value: { $alias: { cell: "internal", path: ["output"] } },
+            value: { $alias: { partialCause: "output", path: [] } },
           },
         },
       ],
@@ -1368,7 +1442,7 @@ describe("setup/start", () => {
     // Not started yet; result still aliases internal and shows previous value
     const rawValue = resultCell.get();
     expect(rawValue).toMatchObjectIgnoringSymbols({
-      output: { $alias: { cell: "internal", path: ["output"] } },
+      output: { $alias: { partialCause: "output", path: [] } },
     });
 
     // Verify a pattern link is present after setup without passing the pattern
@@ -1545,7 +1619,7 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
@@ -1553,7 +1627,7 @@ describe("runner utils", () => {
               implementation: (v: { input: number }) => v.input * 2,
             },
             inputs: { $alias: { cell: "argument", path: [] } },
-            outputs: { $alias: { cell: "internal", path: ["output"] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
@@ -1574,7 +1648,7 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
@@ -1582,7 +1656,7 @@ describe("runner utils", () => {
               implementation: (v: { input: number }) => v.input,
             },
             inputs: { $alias: { cell: "argument", path: [] } },
-            outputs: { $alias: { cell: "internal", path: ["output"] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
@@ -1608,8 +1682,8 @@ describe("runner utils", () => {
       };
       const streamAlias = {
         $alias: {
-          cell: "internal",
-          path: ["stream:increment"],
+          partialCause: { stream: "increment" },
+          path: [],
           scope: "space",
           schema: true,
         },
@@ -1726,7 +1800,7 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
@@ -1734,7 +1808,7 @@ describe("runner utils", () => {
               implementation: (v: { input: number }) => v.input * 3,
             },
             inputs: { $alias: { cell: "argument", path: [] } },
-            outputs: { $alias: { cell: "internal", path: ["output"] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
@@ -1765,7 +1839,7 @@ describe("runner utils", () => {
         resultSchema: {},
         result: {
           nested: {
-            value: { $alias: { cell: "internal", path: ["output"] } },
+            value: { $alias: { partialCause: "output", path: [] } },
           },
         },
         nodes: [
@@ -1775,7 +1849,7 @@ describe("runner utils", () => {
               implementation: (v: { input: number }) => v.input * 2,
             },
             inputs: { $alias: { cell: "argument", path: [] } },
-            outputs: { $alias: { cell: "internal", path: ["output"] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
@@ -1807,7 +1881,7 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
@@ -1815,7 +1889,7 @@ describe("runner utils", () => {
               implementation: (v: { input: number }) => v.input * 2,
             },
             inputs: { $alias: { cell: "argument", path: [] } },
-            outputs: { $alias: { cell: "internal", path: ["output"] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
@@ -1826,7 +1900,7 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+        result: { output: { $alias: { partialCause: "output", path: [] } } },
         nodes: [
           {
             module: {
@@ -1834,7 +1908,7 @@ describe("runner utils", () => {
               implementation: (v: { input: number }) => v.input * 10,
             },
             inputs: { $alias: { cell: "argument", path: [] } },
-            outputs: { $alias: { cell: "internal", path: ["output"] } },
+            outputs: { $alias: { partialCause: "output", path: [] } },
           },
         ],
       };
