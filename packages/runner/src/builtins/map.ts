@@ -81,7 +81,19 @@ export function map(
     { resultCell: Cell<any>; lastIndex: number }
   >();
 
+  // Only the initial (resume) reconcile should defer its per-element sub-pattern
+  // runs until storage sync completes. This map action is itself sync-gated when
+  // resumed, so its first reconcile already runs against synced data; elements
+  // added by later (post-resume) reconciles are fresh and must not wait.
+  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
+    ?.awaitSync;
+
   return (tx: IExtendedStorageTransaction) => {
+    // Captured before the loop consumes it: this reconcile's element runs use
+    // the current value; the flag is cleared only once a non-empty resume batch
+    // has been processed (below), so a transient empty first reconcile doesn't
+    // burn it.
+    const elementAwaitSync = resumeBatchAwaitSync;
     const mappedInputs = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
     const op = mappedInputs.key("op").get();
     const sourceListCell = inputsCell.key("list");
@@ -163,6 +175,9 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
+    // The resume batch has now been observed; later reconciles are post-resume.
+    if (list.length > 0) resumeBatchAwaitSync = false;
+
     const keyCounts = new Map<string, number>();
     const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {
@@ -182,7 +197,10 @@ export function map(
             opPattern,
             createRunInput(list[i], i),
             existing.resultCell,
-            { doNotUpdateOnPatternChange: true },
+            {
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: elementAwaitSync,
+            },
           );
         }
         existing.lastIndex = i;
@@ -199,7 +217,10 @@ export function map(
           opPattern,
           createRunInput(list[i], i),
           resultCell,
-          { doNotUpdateOnPatternChange: true },
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: elementAwaitSync,
+          },
         );
         // Link these individual cells to the top cell
         setResultCell(resultCell, parentCell);
