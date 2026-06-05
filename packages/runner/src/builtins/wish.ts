@@ -1538,6 +1538,31 @@ export function wish(
     errorTx.commit();
   }
 
+  // Run a just-fetched sidecar pattern (profile create / picker) into its result
+  // cell on its own committed transaction, surfacing any commit failure as an
+  // error UI in that cell. Shared by launchProfileCreatePattern and
+  // launchProfilePickerPattern so the commit/error lifecycle lives in one place.
+  function runSidecarInOwnTx(
+    resultCell: Cell<any>,
+    pattern: Pattern,
+    inputForTx: (tx: IExtendedStorageTransaction) => unknown,
+  ): void {
+    try {
+      const runTx = runtime.edit();
+      runtime.run(runTx, pattern, inputForTx(runTx), resultCell.withTx(runTx));
+      runtime.prepareTxForCommit(runTx);
+      runTx.commit().then(({ error }) => {
+        if (error) {
+          commitPatternErrorUI(resultCell, toCompactDebugString(error));
+        }
+      }).catch((error) => {
+        commitPatternErrorUI(resultCell, errorMessage(error));
+      });
+    } catch (error) {
+      commitPatternErrorUI(resultCell, errorMessage(error));
+    }
+  }
+
   function launchProfileCreatePattern(
     ctx: WishContext,
     providedTx?: IExtendedStorageTransaction,
@@ -1611,26 +1636,11 @@ export function wish(
       }
       void profileCreatePatternFetchPromise.then((pattern) => {
         if (!cancelled && pattern && profileCreatePatternResultCell) {
-          const resultCell = profileCreatePatternResultCell;
-          try {
-            const runTx = runtime.edit();
-            runtime.run(
-              runTx,
-              pattern,
-              profileCreateInputForTx(runTx),
-              resultCell.withTx(runTx),
-            );
-            runtime.prepareTxForCommit(runTx);
-            runTx.commit().then(({ error }) => {
-              if (error) {
-                commitPatternErrorUI(resultCell, toCompactDebugString(error));
-              }
-            }).catch((error) => {
-              commitPatternErrorUI(resultCell, errorMessage(error));
-            });
-          } catch (error) {
-            commitPatternErrorUI(resultCell, errorMessage(error));
-          }
+          runSidecarInOwnTx(
+            profileCreatePatternResultCell,
+            pattern,
+            profileCreateInputForTx,
+          );
         }
       });
     } else if (!cancelled && profileCreatePatternResultCell) {
@@ -1720,26 +1730,11 @@ export function wish(
       }
       void profilePickerPatternFetchPromise.then((pattern) => {
         if (!cancelled && pattern && profilePickerPatternResultCell) {
-          const resultCell = profilePickerPatternResultCell;
-          try {
-            const runTx = runtime.edit();
-            runtime.run(
-              runTx,
-              pattern,
-              pickerInputForTx(runTx),
-              resultCell.withTx(runTx),
-            );
-            runtime.prepareTxForCommit(runTx);
-            runTx.commit().then(({ error }) => {
-              if (error) {
-                commitPatternErrorUI(resultCell, toCompactDebugString(error));
-              }
-            }).catch((error) => {
-              commitPatternErrorUI(resultCell, errorMessage(error));
-            });
-          } catch (error) {
-            commitPatternErrorUI(resultCell, errorMessage(error));
-          }
+          runSidecarInOwnTx(
+            profilePickerPatternResultCell,
+            pattern,
+            pickerInputForTx,
+          );
         }
       });
     } else if (!cancelled && profilePickerPatternResultCell) {
