@@ -63,7 +63,10 @@ describe("rehydrate internal default (CT-1666)", () => {
     nodes: [],
   };
 
-  const internalCellOf = (runtime: Runtime, resultCell: { sourceURI: string }) => {
+  const internalCellOf = (
+    runtime: Runtime,
+    resultCell: { sourceURI: string },
+  ) => {
     const internalLink = getMetaLink(resultCell as never, "internal");
     expect(internalLink).toBeDefined();
     return runtime.getCellFromLink(internalLink!);
