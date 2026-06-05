@@ -60,6 +60,7 @@ export interface CreateHarnessInteractiveChatServiceOptions {
   randomUUID?: () => string;
   onEvent?: HarnessInteractiveChatEventListener;
   sessionStore?: HarnessChatSessionStore;
+  maxInMemoryEvents?: number;
 }
 
 interface HarnessInteractiveChatSessionRecord {
@@ -293,6 +294,7 @@ export class HarnessInteractiveChatService {
   readonly #randomUUID: () => string;
   readonly #onEvent?: HarnessInteractiveChatEventListener;
   readonly #sessionStore?: HarnessChatSessionStore;
+  readonly #maxInMemoryEvents?: number;
   readonly #sessions = new Map<string, HarnessInteractiveChatSessionRecord>();
   readonly #events: HarnessChatEventEnvelope[] = [];
   #emitQueue: Promise<void> = Promise.resolve();
@@ -306,6 +308,14 @@ export class HarnessInteractiveChatService {
     this.#randomUUID = options.randomUUID ?? defaultRandomUUID;
     this.#onEvent = options.onEvent;
     this.#sessionStore = options.sessionStore;
+    if (
+      options.maxInMemoryEvents !== undefined &&
+      (!Number.isInteger(options.maxInMemoryEvents) ||
+        options.maxInMemoryEvents < 0)
+    ) {
+      throw new Error("maxInMemoryEvents must be a non-negative integer");
+    }
+    this.#maxInMemoryEvents = options.maxInMemoryEvents;
   }
 
   async initializeFromStore(): Promise<void> {
@@ -336,6 +346,7 @@ export class HarnessInteractiveChatService {
       this.#events.length,
       ...await this.#sessionStore.listEvents(),
     );
+    this.#pruneInMemoryEvents();
     this.#sequence = Math.max(
       await this.#sessionStore.latestSequence(),
       ...this.#events.map((event) => event.sequence),
@@ -369,6 +380,19 @@ export class HarnessInteractiveChatService {
     };
   }
 
+  async listEventsForReplay(
+    params: HarnessChatListEventsParams = {},
+  ): Promise<HarnessChatListEventsResult> {
+    if (this.#sessionStore === undefined) {
+      return this.listEvents(params);
+    }
+    const [events, latestSequence] = await Promise.all([
+      this.#sessionStore.listEvents(params),
+      this.#sessionStore.latestSequence(),
+    ]);
+    return { events, latestSequence };
+  }
+
   turns(
     sessionId?: string,
     options: Omit<HarnessChatListTurnsParams, "sessionId"> = {},
@@ -390,6 +414,17 @@ export class HarnessInteractiveChatService {
   ): HarnessChatListTurnsResult {
     return {
       turns: this.turns(params.sessionId, { status: params.status }),
+    };
+  }
+
+  async listTurnsForReplay(
+    params: HarnessChatListTurnsParams = {},
+  ): Promise<HarnessChatListTurnsResult> {
+    if (this.#sessionStore === undefined) {
+      return this.listTurns(params);
+    }
+    return {
+      turns: await this.#sessionStore.listTurns(params),
     };
   }
 
@@ -528,12 +563,12 @@ export class HarnessInteractiveChatService {
       case "list_events":
         return createHarnessChatOkResponse(
           request.requestId,
-          this.listEvents(request.params),
+          await this.listEventsForReplay(request.params),
         );
       case "list_turns":
         return createHarnessChatOkResponse(
           request.requestId,
-          this.listTurns(request.params),
+          await this.listTurnsForReplay(request.params),
         );
       default:
         return createHarnessChatErrorResponse(requestId, {
@@ -1073,6 +1108,7 @@ export class HarnessInteractiveChatService {
     }
     this.#sequence = sequence;
     this.#events.push(envelope);
+    this.#pruneInMemoryEvents();
     if (record !== undefined && nextStatus !== undefined) {
       record.status = nextStatus;
     }
@@ -1080,6 +1116,16 @@ export class HarnessInteractiveChatService {
       record.turns.set(nextTurn.turn.turnId, nextTurn);
     }
     await this.#onEvent?.(envelope);
+  }
+
+  #pruneInMemoryEvents(): void {
+    if (
+      this.#maxInMemoryEvents === undefined ||
+      this.#events.length <= this.#maxInMemoryEvents
+    ) {
+      return;
+    }
+    this.#events.splice(0, this.#events.length - this.#maxInMemoryEvents);
   }
 }
 

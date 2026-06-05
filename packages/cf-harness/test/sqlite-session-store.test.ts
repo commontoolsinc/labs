@@ -3,6 +3,9 @@ import { toFileUrl } from "@std/path";
 import {
   createHarnessChatEventEnvelope,
   createHarnessChatSessionStatus,
+  HARNESS_CHAT_PROTOCOL_VERSION,
+  HARNESS_CHAT_REQUEST_TYPE,
+  type HarnessChatListEventsResult,
 } from "../src/contracts/interactive-chat.ts";
 import {
   HarnessInteractiveChatService,
@@ -171,6 +174,77 @@ Deno.test("sqlite session store persists chat sessions and replayable events", a
     assertEquals(
       duplicate.ok === false ? duplicate.error.code : "",
       "session_exists",
+    );
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session replay survives bounded in-memory event retention", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: async (options) => {
+      const result = makeResult(options, "Pruned from memory.");
+      await options.onTranscriptEvent?.({
+        message: result.transcript[result.transcript.length - 1],
+        transcript: result.transcript,
+      });
+      return result;
+    },
+  });
+
+  try {
+    const service = new HarnessInteractiveChatService({
+      createPromptLoop,
+      now: nextIsoNow(),
+      sessionStore: store,
+      maxInMemoryEvents: 2,
+    });
+
+    await service.startSession("req-1", {
+      sessionId: "session-pruned",
+      workspace: { hostPath: "/workspace" },
+    });
+    await service.startTurn("req-2", {
+      sessionId: "session-pruned",
+      turnId: "turn-1",
+      input: { text: "Generate enough events to prune" },
+    });
+    await service.waitForTurn("session-pruned", "turn-1");
+
+    assertEquals(
+      service.events("session-pruned").map((event) => event.event.kind),
+      ["assistant_completed", "turn_completed"],
+    );
+
+    const replay = await service.handleRequest({
+      type: HARNESS_CHAT_REQUEST_TYPE,
+      protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+      requestId: "req-replay",
+      method: "list_events",
+      params: {
+        sessionId: "session-pruned",
+        afterSequence: 0,
+      },
+    });
+    assertEquals(replay.ok, true);
+    const result = replay.ok
+      ? replay.result as HarnessChatListEventsResult
+      : undefined;
+    assertEquals(result?.latestSequence, 5);
+    assertEquals(
+      result?.events.map((event) => event.event.kind),
+      [
+        "session_started",
+        "turn_started",
+        "assistant_delta",
+        "assistant_completed",
+        "turn_completed",
+      ],
     );
   } finally {
     store.close();
