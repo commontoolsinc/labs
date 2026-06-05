@@ -33,20 +33,20 @@ const SRC_ROOT = new URL("../src/", import.meta.url);
 // allowed to bypass the chokepoint. Update deliberately.
 const ALLOWED: Record<string, string> = {
   // The chokepoint's own implementation — this IS the sanctioned wrapper.
-  "ast/type-building.ts": "chokepoint implementation (typeToTypeNodeWithRegistry)",
+  "ast/type-building.ts":
+    "chokepoint implementation (typeToTypeNodeWithRegistry)",
   // Internal-only: node is inspected for any/unknown and discarded, never emitted.
   // No emit, no registry consumer → neither bug class applies.
-  "transformers/schema-injection.ts": "internal-only: node checked for any/unknown, not emitted",
+  "transformers/schema-injection.ts":
+    "internal-only: node checked for any/unknown, not emitted",
   // Shared low-level helper with try/catch; callers that emit should prefer the
   // chokepoint. Tracked for migration in the universal phase.
-  "ast/type-inference.ts": "[emit+concrete] low-level typeToTypeNode helper (try/catch); migrate emitting callers",
+  "ast/type-inference.ts":
+    "[emit+concrete] low-level typeToTypeNode helper (try/catch); migrate emitting callers",
   // type-shrinking builds shrunk TypeNodes used in emitted lift/pattern type
   // args. Candidate for chokepoint migration; pinned here until then.
-  "transformers/type-shrinking.ts": "[emit+concrete] shrunk type nodes; migrate to chokepoint (import-leak + registry-degrade)",
-  // Compute-wrapper arrow return type (emit-reaching). Migrate to chokepoint.
-  "transformers/expression-rewrite/rewrite-helpers.ts": "[emit+concrete] compute-wrapper arrow return type; migrate to chokepoint",
-  // Event parameter type for schema (emit-reaching). Migrate to chokepoint.
-  "closures/utils/schema-factory.ts": "[emit+concrete] event param type for schema; migrate to chokepoint",
+  "transformers/type-shrinking.ts":
+    "[emit+concrete] shrunk type nodes; migrate to chokepoint (import-leak + registry-degrade)",
 };
 
 Deno.test("raw checker.typeToTypeNode call sites match the reviewed allowlist", async () => {

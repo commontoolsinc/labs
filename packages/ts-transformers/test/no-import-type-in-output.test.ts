@@ -18,7 +18,7 @@ import { walk } from "@std/fs";
 const FIXTURES_ROOT = new URL("./fixtures/", import.meta.url);
 const FORBIDDEN = 'import("commonfabric")';
 
-Deno.test("no golden output contains the inline import(\"commonfabric\") type form", async () => {
+Deno.test('no golden output contains the inline import("commonfabric") type form', async () => {
   const offenders: string[] = [];
 
   for await (
