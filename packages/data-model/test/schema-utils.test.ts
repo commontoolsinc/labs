@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import type {
   FabricValue,
   JSONSchema,
@@ -7,6 +8,7 @@ import type {
   JSONSchemaTypes,
   SchemaPathSelector,
 } from "@commonfabric/api";
+
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import {
   cloneSchemaMutable,

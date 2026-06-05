@@ -2,6 +2,7 @@ import type {
   FabricEpochDays as ApiFabricEpochDays,
   FabricEpochDaysConstructor as ApiFabricEpochDaysConstructor,
 } from "@commonfabric/api";
+
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 

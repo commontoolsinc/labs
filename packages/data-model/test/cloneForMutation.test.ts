@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import { cloneForMutation, CloneForMutationError } from "@/fabric-value.ts";
 import type { FabricValue } from "@/fabric-value.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";

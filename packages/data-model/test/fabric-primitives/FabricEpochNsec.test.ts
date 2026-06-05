@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";

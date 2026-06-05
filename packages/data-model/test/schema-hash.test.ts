@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";
+
+import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
+
 import {
   findInternedSchema,
   hashSchema,
@@ -13,7 +16,6 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { hashStringOf } from "@/value-hash.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { toDeepFrozenSchema } from "@/schema-utils.ts";
-import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
 describe("schema-hash dispatch", () => {
   describe("hashSchema()", () => {

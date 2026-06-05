@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */

@@ -1,11 +1,12 @@
-import type { FabricValue } from "@/interface.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+
+import type { FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,

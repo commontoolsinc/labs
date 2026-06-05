@@ -1,6 +1,3 @@
-import type { FabricValue } from "@/interface.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -9,6 +6,10 @@ import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
 } from "@commonfabric/utils/bigint";
+
+import type { FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,

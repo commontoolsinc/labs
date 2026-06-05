@@ -1,4 +1,5 @@
 import { isInstance } from "@commonfabric/utils/types";
+
 import type { FabricValue } from "@/fabric-value.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { EmptyReconstructionContext } from "@/wire-common/EmptyReconstructionContext.ts";

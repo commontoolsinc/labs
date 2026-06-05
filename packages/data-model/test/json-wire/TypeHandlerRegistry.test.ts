@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import { toCompactDebugString } from "@/value-debug.ts";
 import { TypeHandlerRegistry } from "@/json-wire/TypeHandlerRegistry.ts";
 import type {

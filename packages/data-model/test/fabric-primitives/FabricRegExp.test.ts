@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { isConvertibleNativeInstance } from "@/native-conversion.ts";

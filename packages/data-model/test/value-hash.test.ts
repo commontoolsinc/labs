@@ -1,8 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf, hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
+
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+
+import { hashOf, hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricValue } from "@/interface.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";

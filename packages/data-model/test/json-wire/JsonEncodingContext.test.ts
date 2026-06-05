@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import { JsonEncodingContext } from "@/json-wire/JsonEncodingContext.ts";
 import type { FabricValue } from "@/interface.ts";
 import type { JsonWireValue } from "@/json-wire/interface.ts";

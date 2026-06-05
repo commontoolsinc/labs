@@ -2,11 +2,12 @@ import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
 } from "@commonfabric/api";
-import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+
+import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /**

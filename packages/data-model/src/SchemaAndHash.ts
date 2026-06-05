@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+
 import { isDeepFrozen } from "./deep-freeze.ts";
 import type { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 

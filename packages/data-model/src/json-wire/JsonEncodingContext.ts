@@ -1,3 +1,5 @@
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
+
 import { type FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   type FabricClass,
@@ -19,7 +21,6 @@ import {
 } from "@/fabric-instances/index.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { WIRE_META_TAGS } from "@/wire-common/wire-meta-tags.ts";
-import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 /**
  * Tag prefix for the encoded form used by this module. We use this explicit

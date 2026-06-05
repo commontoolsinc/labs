@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import { shallowMutableClone } from "@/fabric-value.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";

@@ -1,9 +1,10 @@
+import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 /**
  * Options for `cloneIfNecessary()`.
