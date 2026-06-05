@@ -269,25 +269,26 @@ export class JsonEncodingContext implements SerializationContext<string> {
     _seen?: Set<object>,
     registry: TypeHandlerRegistry = defaultRegistry,
   ): JsonWireValue {
-    // Try type handlers first
-    const handler = registry.findSerializer(value);
-    if (handler) {
+    // Try the registry first.
+    const codec = registry.codecFromValue(value);
+    if (codec) {
       const seen = _seen ?? new Set<object>();
+      let addedToSeen = false;
 
       if (value !== null && typeof value === "object") {
         if (seen.has(value as object)) {
           throw new Error("Circular reference detected during serialization");
         }
         seen.add(value as object);
+        addedToSeen = true;
       }
 
-      const result = handler.serialize(
-        value,
-        this.tagHandler,
-        (v: FabricValue) => this.serialize(v, seen, registry),
-      );
+      const tag = codec.wireTypeTag;
+      const unprocessedState = codec.encode(value);
+      const finalState = this.serialize(unprocessedState, seen, registry);
+      const result: JsonWireValue = { [`/${tag}`]: finalState };
 
-      if (value !== null && typeof value === "object") {
+      if (addedToSeen) {
         seen.delete(value as object);
       }
 
@@ -419,9 +420,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return state as FabricValue;
       }
 
-      // Type handler dispatch
+      // Registry-based (tag lookup) dispatch
       //
-      // `TypeHandler.deserialize()` makes a contractual guarantee that its
+      // `FabricCodec.decode()` makes a contractual guarantee that its
       // results are deep-frozen, rather than relying on every caller to
       // freeze: every return out of this arm passes through `deepFreeze()`.
       // This covers the handler's produced value (e.g. `FabricPrimitive`
@@ -429,15 +430,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
       // lenient-mode `ProblematicValue` fallback. The class-registry
       // fallback below is a separate arm and is intentionally NOT covered by
       // this contract.
-      const handler = registry.getDeserializer(tag);
-      if (handler) {
+      const codec = registry.codecFromTag(tag);
+      if (codec) {
         if (this.lenient) {
           try {
-            return deepFreeze(handler.deserialize(
-              state,
-              runtime,
-              (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-            ));
+            return deepFreeze(codec.decode(tag, state, runtime));
           } catch (e: unknown) {
             return deepFreeze(
               new ProblematicValue(
@@ -448,11 +445,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
             );
           }
         }
-        return deepFreeze(handler.deserialize(
-          state,
-          runtime,
-          (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-        ));
+        return deepFreeze(codec.decode(tag, state, runtime));
       }
 
       // Class registry fallback

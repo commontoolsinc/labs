@@ -1,5 +1,6 @@
 import type { FabricValue } from "@/interface.ts";
-import type { TypeHandler } from "./interface.ts";
+import type { FabricCodec } from "@/wire-common/interface.ts";
+import type { Constructor } from "@commonfabric/utils/types";
 
 /**
  * Gets the constructor function ("class") of the given value, if any, for the
@@ -7,7 +8,7 @@ import type { TypeHandler } from "./interface.ts";
  */
 function constructorOf(
   value: FabricValue,
-): ((...args: any[]) => any) | undefined {
+): Constructor | undefined {
   if (typeof value === "object") {
     if (value === null) {
       return undefined;
@@ -22,7 +23,7 @@ function constructorOf(
   } else if (value !== undefined) {
     // This gets the pseudo-constructor of a primitive. **Note:** `function` is
     // not included in the `FabricValue` union.
-    return value.constructor as (...args: any[]) => any;
+    return value.constructor as Constructor;
   } else {
     return undefined;
   }
@@ -34,58 +35,54 @@ function constructorOf(
  */
 export class TypeHandlerRegistry {
   /** Ordered list of handlers for serialization matching. */
-  readonly #handlers: TypeHandler[] = [];
+  readonly #codecs: FabricCodec[] = [];
 
   /** Tag -> handler map for O(1) deserialization dispatch. */
-  readonly #tagMap = new Map<string, TypeHandler>();
+  readonly #tagMap = new Map<string, FabricCodec>();
 
   /** Class -> handler map for O(1) serialization dispatch. */
-  readonly #classMap = new Map<(...args: any[]) => any, TypeHandler>();
+  readonly #classMap = new Map<Constructor, FabricCodec>();
 
   /**
    * Registers a handler. Handlers with non-empty tags are indexed for O(1)
    * deserialization lookup. Handlers with empty tags (like
    * `FabricInstanceHandler`) participate in serialization matching only.
    */
-  register(handler: TypeHandler): void {
-    this.#handlers.push(handler);
-
-    const classSource = handler.classSource;
+  register(codec: FabricCodec): void {
+    const classSource = codec.uniqueHandledClass;
     if (classSource !== undefined) {
-      this.#classMap.set(classSource, handler);
+      this.#classMap.set(classSource, codec);
     }
 
-    const wireTypeTag = handler.wireTypeTag;
-    if (wireTypeTag !== undefined) {
-      this.#tagMap.set(wireTypeTag, handler);
-    }
+    this.#tagMap.set(codec.wireTypeTag, codec);
+    this.#codecs.push(codec);
   }
 
   /**
-   * Finds a handler that can serialize the given value. Returns `undefined`
+   * Finds a codec that can serialize the given value. Returns `undefined`
    * if no handler matches (the caller should fall through to structural
    * handling for primitives, arrays, and plain objects).
    */
-  findSerializer(value: FabricValue): TypeHandler | undefined {
+  codecFromValue(value: FabricValue): FabricCodec | undefined {
     const constructorFn = constructorOf(value);
     if (constructorFn) {
-      const handler = this.#classMap.get(constructorFn);
-      if (handler && handler.canSerialize(value)) {
-        return handler;
+      const codec = this.#classMap.get(constructorFn);
+      if (codec && codec.canEncode(value)) {
+        return codec;
       }
     }
 
-    for (const handler of this.#handlers) {
-      if (handler.canSerialize(value)) {
-        return handler;
+    for (const codec of this.#codecs) {
+      if (codec.canEncode(value)) {
+        return codec;
       }
     }
 
     return undefined;
   }
 
-  /** Looks up a handler by tag for deserialization. */
-  getDeserializer(wireTypeTag: string): TypeHandler | undefined {
+  /** Looks up a codec by tag for decoding. */
+  codecFromTag(wireTypeTag: string): FabricCodec | undefined {
     return this.#tagMap.get(wireTypeTag);
   }
 }
