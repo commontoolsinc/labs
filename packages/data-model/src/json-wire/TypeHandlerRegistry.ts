@@ -27,6 +27,7 @@ export class TypeHandlerRegistry {
     if (classSource !== undefined) {
       this.#classMap.set(classSource, handler);
     }
+
     const wireTypeTag = handler.wireTypeTag;
     if (wireTypeTag !== undefined) {
       this.#tagMap.set(wireTypeTag, handler);
