@@ -101,7 +101,11 @@ const parseNonNegativeIntegerOption = (
   if (!/^\d+$/.test(rawValue)) {
     throw new Error(`${name} requires a non-negative integer value`);
   }
-  return Number(rawValue);
+  const parsed = Number(rawValue);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} requires a safe non-negative integer value`);
+  }
+  return parsed;
 };
 
 export const parseHarnessInteractiveChatStdioCliOptions = (

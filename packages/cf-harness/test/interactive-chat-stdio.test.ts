@@ -758,6 +758,14 @@ Deno.test("interactive stdio CLI parses runtime options", () => {
   assertThrows(
     () =>
       parseHarnessInteractiveChatStdioCliOptions([
+        "--chat-max-in-memory-events=9007199254740992",
+      ], {}),
+    Error,
+    "--chat-max-in-memory-events requires a safe non-negative integer value",
+  );
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions([
         "--chat-max-in-memory-events",
       ], {}),
     Error,
