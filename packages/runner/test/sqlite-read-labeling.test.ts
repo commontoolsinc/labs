@@ -13,6 +13,11 @@ import { Runtime } from "../src/runtime.ts";
 import { labelResultSchema } from "../src/builtins/sqlite-builtins.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
+import { ensureSqliteLibPath } from "../../memory/test/sqlite-lib-path.ts";
+
+// Provision the column-origin FFI lib (production binds it via DENO_SQLITE_PATH
+// only) so the provider-provenance suite runs against the real library.
+await ensureSqliteLibPath();
 
 describe("labelResultSchema (pure)", () => {
   const tables = {

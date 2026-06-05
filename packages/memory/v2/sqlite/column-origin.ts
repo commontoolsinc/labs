@@ -10,26 +10,27 @@
 //   - spoof  `subject AS from_email`-> origin (emails, subject)      [defeated]
 //   - expr   `upper(from_email)`    -> origin (null, null)           [fail closed]
 //
-// We bind the origin symbols against the SAME libsqlite3 `@db/sqlite` loaded:
-// `DENO_SQLITE_PATH` if set (the robust deployment knob — a vendored lib also
-// guarantees the column-metadata compile flag), else the plug-cached prebuilt
-// `@db/sqlite` downloads. `columnOriginAvailable()` reports whether it resolved.
+// We bind the origin symbols against the SAME libsqlite3 `@db/sqlite` uses, via
+// `DENO_SQLITE_PATH` (the one explicit knob `@db/sqlite` itself honors). We do
+// NOT scan the filesystem, download, or probe the compile flags: we ASSUME the
+// bundled prebuilt is built with SQLITE_ENABLE_COLUMN_METADATA (it is). If the
+// lib can't be bound (path unset or symbols missing), `columnOrigins()` throws —
+// a labeled query then fails loudly rather than silently mislabeling.
 
-let cached:
-  | {
-    origin: Deno.DynamicLibrary<{
-      sqlite3_column_origin_name: {
-        parameters: ["pointer", "i32"];
-        result: "pointer";
-      };
-      sqlite3_column_table_name: {
-        parameters: ["pointer", "i32"];
-        result: "pointer";
-      };
-    }>;
-  }
-  | null
-  | undefined;
+type OriginLib = {
+  origin: Deno.DynamicLibrary<{
+    sqlite3_column_origin_name: {
+      parameters: ["pointer", "i32"];
+      result: "pointer";
+    };
+    sqlite3_column_table_name: {
+      parameters: ["pointer", "i32"];
+      result: "pointer";
+    };
+  }>;
+};
+
+let cached: OriginLib | null | undefined;
 
 const SYMBOLS = {
   sqlite3_column_origin_name: {
@@ -42,64 +43,16 @@ const SYMBOLS = {
   },
 } as const;
 
-function denoDirCandidates(): string[] {
-  const home = Deno.env.get("HOME") ?? "";
-  return [
-    Deno.env.get("DENO_DIR"),
-    home && `${home}/Library/Caches/deno`, // macOS
-    home && `${home}/.cache/deno`, // linux
-  ].filter((p): p is string => !!p);
-}
-
-function* plugLibCandidates(): Generator<string> {
-  for (const dir of denoDirCandidates()) {
-    const plug = `${dir}/plug`;
-    let entries: Array<{ name: string; path: string }>;
-    try {
-      entries = [...walkSyncFiles(plug)];
-    } catch {
-      continue;
-    }
-    for (const f of entries) {
-      if (/\.(dylib|so|dll)$/.test(f.name)) yield f.path;
-    }
-  }
-}
-
-// Minimal recursive file walk (no dep just to discover the cached lib).
-function* walkSyncFiles(
-  root: string,
-): Generator<{ name: string; path: string }> {
-  for (const e of Deno.readDirSync(root)) {
-    const path = `${root}/${e.name}`;
-    if (e.isDirectory) yield* walkSyncFiles(path);
-    else if (e.isFile) yield { name: e.name, path };
-  }
-}
-
-/** Resolve and dlopen the column-origin symbols against libsqlite3. */
-function lib() {
+/** Bind the origin symbols against libsqlite3 (lazy, memoized). Null if the
+ *  library path is unset or the symbols can't be opened. */
+function lib(): OriginLib | null {
   if (cached !== undefined) return cached;
-  const tryOpen = (path: string) => {
-    try {
-      return { origin: Deno.dlopen(path, SYMBOLS) };
-    } catch {
-      return null;
-    }
-  };
-  const explicit = Deno.env.get("DENO_SQLITE_PATH");
-  if (explicit) {
-    cached = tryOpen(explicit);
-    if (cached) return cached;
+  const path = Deno.env.get("DENO_SQLITE_PATH");
+  try {
+    cached = path ? { origin: Deno.dlopen(path, SYMBOLS) } : null;
+  } catch {
+    cached = null;
   }
-  for (const path of plugLibCandidates()) {
-    const opened = tryOpen(path);
-    if (opened) {
-      cached = opened;
-      return cached;
-    }
-  }
-  cached = null; // column-metadata FFI unavailable in this deployment
   return cached;
 }
 
@@ -124,20 +77,23 @@ const cstr = (p: Deno.PointerValue): string | null =>
  * no single source (expression, literal, some compound selects) reports
  * `{ table: null, column: null }` — callers MUST fail closed on that.
  *
- * Returns all-null origins if column-metadata FFI is unavailable (so callers
- * can detect that and fail closed wholesale rather than mislabel).
+ * Throws if the column-metadata FFI can't be bound (path unset / symbols
+ * missing) — a labeled query fails loudly rather than silently mislabeling.
  */
 export function columnOrigins(
   stmtHandle: Deno.PointerValue,
   count: number,
 ): ColumnOrigin[] {
   const l = lib();
+  if (!l) {
+    throw new Error(
+      "sqlite: column-origin FFI unavailable — set DENO_SQLITE_PATH to the " +
+        "libsqlite3 @db/sqlite uses (built with SQLITE_ENABLE_COLUMN_METADATA) " +
+        "so CFC read-labeling can resolve column provenance",
+    );
+  }
   const out: ColumnOrigin[] = [];
   for (let i = 0; i < count; i++) {
-    if (!l) {
-      out.push({ table: null, column: null });
-      continue;
-    }
     out.push({
       table: cstr(l.origin.symbols.sqlite3_column_table_name(stmtHandle, i)),
       column: cstr(l.origin.symbols.sqlite3_column_origin_name(stmtHandle, i)),

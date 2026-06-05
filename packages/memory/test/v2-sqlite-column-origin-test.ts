@@ -11,6 +11,11 @@ import {
   columnOrigins,
 } from "../v2/sqlite/column-origin.ts";
 import { ReadConnectionPool } from "../v2/sqlite/read-pool.ts";
+import { ensureSqliteLibPath } from "./sqlite-lib-path.ts";
+
+// Production binds the column-origin FFI via DENO_SQLITE_PATH only; provision it
+// here (test-only) so these provenance assertions run against the real lib.
+await ensureSqliteLibPath();
 
 function seed(path: string): void {
   const db = new Database(path); // writable for setup
@@ -40,8 +45,9 @@ Deno.test({
   name: "column-origin metadata is reachable in this deployment",
   sanitizeResources: false,
 }, () => {
-  // If this fails, the FFI lib resolution needs the DENO_SQLITE_PATH production
-  // path; the feature would fall back to constrained-projection mode.
+  // Provisioned above via ensureSqliteLibPath() (sets DENO_SQLITE_PATH); in
+  // production a deployment sets DENO_SQLITE_PATH and labeled queries that need
+  // provenance fail loudly if it's absent.
   assertEquals(columnOriginAvailable(), true);
 });
 
