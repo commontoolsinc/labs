@@ -138,6 +138,73 @@ function decodeRowLinkColumns(
   });
 }
 
+interface ResultColumn {
+  output: string;
+  table: string | null;
+  column: string | null;
+}
+
+/**
+ * CFC read-labeling: from each result column's TRUE origin (table, column),
+ * build a schema for the result-cell's `result` array whose per-field `ifc`
+ * carries the origin column's declared confidentiality — so a consumer reading
+ * `q.result[i].<col>` inherits it (re-establishing label propagation across the
+ * opaque SQLite boundary).
+ *
+ * FAIL CLOSED: a labeled db must never silently drop a label, so any result
+ * column the engine can't attribute to a source column (`null` origin —
+ * expression, literal, compound) makes the whole query refuse. Returns
+ * `{ schema }` (possibly undefined when no selected column is labeled),
+ * or `{ error }` to refuse.
+ */
+export function labelResultSchema(
+  columns: readonly ResultColumn[],
+  tables:
+    | Record<string, { properties?: Record<string, { ifc?: unknown }> }>
+    | undefined,
+): { schema?: Record<string, unknown>; error?: string } {
+  const itemProps: Record<string, unknown> = {};
+  let anyLabeled = false;
+  for (const c of columns) {
+    if (c.table === null || c.column === null) {
+      return {
+        error:
+          `sqlite: a CFC-labeled query cannot select column "${c.output}" ` +
+          `because it has no resolvable source column (expressions, literals, ` +
+          `and compound selects aren't supported in a labeled query yet — ` +
+          `select source columns directly)`,
+      };
+    }
+    const ifc = tables?.[c.table]?.properties?.[c.column]?.ifc;
+    if (ifc && typeof ifc === "object" && Object.keys(ifc).length > 0) {
+      itemProps[c.output] = { ifc };
+      anyLabeled = true;
+    }
+  }
+  if (!anyLabeled) return {};
+  // `additionalProperties: true` at BOTH object levels so the write preserves
+  // every field it isn't labeling — the QueryState siblings (`pending`,
+  // `requestHash`, `error`) and every unlabeled result column — while the
+  // declared columns carry their `ifc`. A partial schema would otherwise shape
+  // those away.
+  return {
+    schema: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        result: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: true,
+            properties: itemProps,
+          },
+        },
+      },
+    },
+  };
+}
+
 /** sqliteDatabase: yields an opaque handle cell whose value is the SqliteDbRef. */
 export function sqliteDatabase(
   inputsCell: Cell<any>,
@@ -276,6 +343,16 @@ export function sqliteQuery(
           // OBJECTS so a typed consumer's asCell schema rehydrates them to live
           // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
           const rows = decodeRowLinkColumns(res.rows, linkCols);
+          // CFC read-labeling (per-column static `ifc`): the server returns each
+          // result column's TRUE origin in `res.columns` when the db declares
+          // `ifc` (sound provenance — see `labelResultSchema` / column-origin).
+          // TODO(cfc-phase2): ATTACH the per-field label to the result so a
+          // consumer inherits it. The persistence entry point is still open —
+          // neither `asSchema().set()` nor `recordRelevantSchemaWritePolicyInput`
+          // persisted the per-field label as expected (the value vanished); needs
+          // a focused pass on the runtime's label-write path. Until then, reads of
+          // a labeled db return rows WITHOUT propagation (the provenance + the
+          // schema/refuse logic are in place and tested, ready to wire).
           await runtime.editWithRetry((wtx) => {
             // Stale-writeback guard: a newer query (different inputs -> different
             // hash) may have superseded this one while the RPC was in flight.

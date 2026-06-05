@@ -330,8 +330,21 @@ export interface SqliteQueryRequest {
   params?: SqliteParamsWire;
 }
 
+/** A result column's output name plus its TRUE source `(table, column)` origin
+ *  (null for an expression/computed/compound column). */
+export interface SqliteResultColumn {
+  output: string;
+  table: string | null;
+  column: string | null;
+}
+
 export interface SqliteQueryResult {
   rows: unknown[];
+  /** Per-result-column origin, present ONLY when the queried db declares
+   *  per-column `ifc` (CFC read-labeling needs sound provenance — an aliased or
+   *  joined column maps back to its declared `(table, column)`). Undefined
+   *  otherwise, so unlabeled queries pay nothing. */
+  columns?: SqliteResultColumn[];
 }
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
