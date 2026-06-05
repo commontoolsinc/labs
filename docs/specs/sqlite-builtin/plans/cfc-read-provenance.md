@@ -126,9 +126,12 @@ labeling become sound and parser-free:
   — not null. So null-origin is rarer than feared (mostly just expressions),
   and a non-null origin is never a *wrong* column. The FFI helper is
   `v2/sqlite/column-origin.ts` (`columnOrigins(stmtHandle, count)` +
-  `columnOriginAvailable()`), with the lib resolved via `DENO_SQLITE_PATH` only
-  (no filesystem scan / download / compile-flag probe — we ASSUME the bundled
-  `@db/sqlite` prebuilt has `SQLITE_ENABLE_COLUMN_METADATA`); if it can't bind,
-  `columnOrigins` throws so a labeled query fails loudly rather than mislabeling.
-  Tests provision `DENO_SQLITE_PATH` via a test-only helper
-  (`packages/memory/test/sqlite-lib-path.ts`).
+  `ensureColumnOriginAvailable()`). It binds the SAME libsqlite3 `@db/sqlite`
+  already loaded (NOT a different implementation) — `@db/sqlite` is compiled with
+  `SQLITE_ENABLE_COLUMN_METADATA`, it just doesn't expose the origin symbols, so
+  we `Deno.dlopen` its file to declare them. The path comes from plug's
+  `download({ cache: "use" })` (the way `@db/sqlite` itself locates its lib — a
+  cache hit returns the already-downloaded path with no network and no
+  filesystem scan), with `DENO_SQLITE_PATH` as an optional override. Resolution
+  is async, so the server `await ensureColumnOriginAvailable()` before a labeled
+  read and fails loudly if the symbols can't be bound.

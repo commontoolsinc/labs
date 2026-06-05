@@ -13,11 +13,6 @@ import { Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
-import { ensureSqliteLibPath } from "../../memory/test/sqlite-lib-path.ts";
-
-// Production binds the column-origin FFI via DENO_SQLITE_PATH only; provision it
-// here (test-only) so the real toolshed server can resolve column provenance.
-await ensureSqliteLibPath();
 
 const TIMEOUT_MS = 180000;
 

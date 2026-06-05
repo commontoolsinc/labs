@@ -53,6 +53,7 @@ import { assertReadOnly } from "./sqlite/guard.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import { ensureColumnOriginAvailable } from "./sqlite/column-origin.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -1013,6 +1014,14 @@ export class Server {
       // (CFC read-labeling needs sound provenance). Unlabeled dbs — the common
       // case, and all injected on-disk sources — pay nothing.
       const wantColumns = declaresColumnIfc(message.db.tables);
+      // Bind @db/sqlite's column-origin symbols before a labeled read; fail
+      // loudly if they can't be bound rather than mislabeling the result.
+      if (wantColumns && !(await ensureColumnOriginAvailable())) {
+        throw new Error(
+          "sqlite: CFC read labeling needs SQLite column-metadata FFI, but " +
+            "@db/sqlite's column-origin symbols could not be bound",
+        );
+      }
       const disk = this.#diskSources.get(message.space, message.db.id);
       const result = disk
         ? (wantColumns
