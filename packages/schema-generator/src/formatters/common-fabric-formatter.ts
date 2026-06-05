@@ -49,6 +49,20 @@ const scopeForWrapperName = (
 ): SchemaScope | undefined =>
   name === undefined ? undefined : SCOPE_WRAPPER_SCOPES[name];
 
+// Cell-capability brands all wrap the SAME structural inner `T`; they differ
+// only in read/write capability. The transformer narrows one to another (e.g.
+// `Cell<T>` → `ReadonlyCell<T>`) to reflect usage, so a node-vs-type brand
+// mismatch among these is a capability narrowing, not a structural change.
+const CELL_CAPABILITY_KINDS: ReadonlySet<WrapperKind> = new Set([
+  "Cell",
+  "ReadonlyCell",
+  "WriteonlyCell",
+  "ComparableCell",
+  "OpaqueCell",
+]);
+const isCellCapabilityKind = (kind: WrapperKind): boolean =>
+  CELL_CAPABILITY_KINDS.has(kind);
+
 const resolveScopeWrapperNode = (
   typeNode: ts.TypeNode | undefined,
 ): ResolvedScopeWrapper | undefined => {
@@ -272,6 +286,14 @@ export class CommonFabricFormatter implements TypeFormatter {
         resolvedWrapper.node,
         context,
         resolvedWrapper.kind,
+        // The synthetic node narrows the resolved type's capability brand (e.g.
+        // the transformer re-wrapped `Cell<T>` as `ReadonlyCell<T>` for read-only
+        // usage). Both brands wrap the SAME structural inner. When the node's own
+        // inner has no source position and degrades to `any`, fall back to the
+        // resolved type's inner so the inner `$ref`/`$defs` survives the re-wrap.
+        isCellCapabilityKind(wrapperInfo.kind)
+          ? wrapperInfo.typeRef
+          : undefined,
       );
     }
 
@@ -347,6 +369,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     wrapperKind: WrapperKind,
+    // When the synthetic node's own inner type degrades to `any`/`unknown` (no
+    // source position to resolve against), the inner type argument of this
+    // type — the capability re-wrap's source wrapper, e.g. `Cell<T>` for a node
+    // narrowed to `ReadonlyCell<T>` — supplies the precise inner so the inner
+    // `$ref`/`$defs` survives. Only consulted as a fallback, so node-driven
+    // results that already resolve (including node-level unions like
+    // `string | undefined`) are left untouched.
+    fallbackInnerTypeRef?: ts.TypeReference,
   ): JSONSchemaMutable {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
@@ -365,6 +395,23 @@ export class CommonFabricFormatter implements TypeFormatter {
         context.typeChecker.getTypeFromTypeNode(innerTypeNode);
     } catch {
       innerType = context.typeChecker.getAnyType();
+    }
+
+    // Only adopt the resolved type's inner when the node's inner is a bare named
+    // reference (a `TypeReferenceNode`) that degrades to `any` — the case where
+    // node-driven formatting can recover NOTHING and would emit `{}`, dropping
+    // the inner `$ref`/`$defs`. Structured inner nodes (unions, literals, arrays)
+    // carry recoverable shape even when the checker resolves them to `any` from a
+    // synthetic position, so the node-driven result must win there (e.g. a
+    // `string | undefined` inner whose `| undefined` lives only on the node).
+    if (
+      this.isUnusableInnerType(innerType) && fallbackInnerTypeRef &&
+      ts.isTypeReferenceNode(innerTypeNode)
+    ) {
+      const fallbackInner = fallbackInnerTypeRef.typeArguments?.[0];
+      if (fallbackInner && !this.isUnusableInnerType(fallbackInner)) {
+        innerType = fallbackInner;
+      }
     }
 
     // Keep schema-hint propagation behavior aligned with type-based wrapper formatting.
