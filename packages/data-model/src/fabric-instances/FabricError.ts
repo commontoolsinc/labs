@@ -7,7 +7,7 @@ import {
   type ReconstructionContext,
 } from "../interface.ts";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import { FrozenSet } from "../frozen-builtins.ts";
 import { EmptyReconstructionContext } from "../EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -80,9 +80,6 @@ export type FabricErrorState = {
  * spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Error;
-
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
   type: string;
   /** The `.name` property (always a concrete string). */
@@ -133,6 +130,11 @@ export class FabricError extends FabricNativeWrapper<Error> {
         this.#extras.set(key, value);
       }
     }
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Error;
   }
 
   /**

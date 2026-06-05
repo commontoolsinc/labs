@@ -376,7 +376,7 @@ export default pattern<Record<string, never>>(() => {
     description:
       "Run a higher-clearance worker with the raw briefing in context. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
     ...patternTool(
-      subAgentPattern as any,
+      subAgentPattern,
       {
         model: subAgentModel,
         maxTokens: 512,
@@ -395,7 +395,7 @@ export default pattern<Record<string, never>>(() => {
     description:
       "Run a higher-clearance worker with the raw briefing in context. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
     ...patternTool(
-      subAgentPattern as any,
+      subAgentPattern,
       {
         model: subAgentModel,
         maxTokens: 512,

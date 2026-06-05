@@ -1,11 +1,11 @@
 import type { FabricValue, ReconstructionContext } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for registry-interned symbols. Serializes the registry key as a
@@ -20,7 +20,7 @@ import { makeProblematic } from "./makeProblematic.ts";
  * path instead of being silently coerced to a registry symbol.
  */
 export const SymbolHandler: TypeHandler = {
-  tag: TAGS.Symbol,
+  tag: WIRE_TYPE_TAGS.Symbol,
 
   canSerialize(value: FabricValue): boolean {
     return typeof value === "symbol" && Symbol.keyFor(value) !== undefined;
@@ -33,7 +33,7 @@ export const SymbolHandler: TypeHandler = {
   ): JsonWireValue {
     // `canSerialize()` already verified the symbol has a registry key.
     const key = Symbol.keyFor(value as symbol)!;
-    return codec.wrapTag(TAGS.Symbol, key);
+    return codec.wrapTag(WIRE_TYPE_TAGS.Symbol, key);
   },
 
   deserialize(
@@ -42,8 +42,8 @@ export const SymbolHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
-        TAGS.Symbol,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.Symbol,
         state,
         `Symbol: expected string state, got ${typeof state}`,
       );

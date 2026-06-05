@@ -6,17 +6,20 @@ import {
   type ReconstructionContext,
   type SerializationContext,
 } from "../interface.ts";
-import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 import { UnknownValue } from "../fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue, TypeHandlerCodec } from "./interface.ts";
 import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
-import { FabricError } from "../fabric-instances/FabricError.ts";
-import { FabricMap } from "../fabric-instances/FabricMap.ts";
-import { FabricSet } from "../fabric-instances/FabricSet.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import {
+  BaseFabricInstance,
+  FabricError,
+  FabricMap,
+  FabricSet,
+} from "../fabric-instances/index.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import { WIRE_META_TAGS } from "../wire-common/wire-meta-tags.ts";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 /**
@@ -116,15 +119,16 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Create a codec view that delegates to our private methods.
     this.codec = {
       wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) => this.getTagFor(value),
+      getTagFor: (value: FabricInstance) =>
+        BaseFabricInstance.wireTypeTagOf(value),
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
     // static `[RECONSTRUCT]` method is used by the class registry fallback
     // path in `deserialize()`.
-    this.registry.set(TAGS.Error, FabricError);
-    this.registry.set(TAGS.Map, FabricMap);
-    this.registry.set(TAGS.Set, FabricSet);
+    this.registry.set(WIRE_TYPE_TAGS.Error, FabricError);
+    this.registry.set(WIRE_TYPE_TAGS.Map, FabricMap);
+    this.registry.set(WIRE_TYPE_TAGS.Set, FabricSet);
   }
 
   //
@@ -194,20 +198,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
   // Tag wrapping/unwrapping (private)
   //
-
-  /** Returns the wire format tag for a fabric instance's type. */
-  private getTagFor(value: FabricInstance): string {
-    if (value instanceof ExplicitTagValue) {
-      return value.typeTag;
-    }
-    const typeTag = (value as { typeTag?: unknown }).typeTag;
-    if (typeof typeTag === "string") {
-      return typeTag;
-    }
-    throw new Error(
-      `JsonEncodingContext: no tag registered for value: ${value}`,
-    );
-  }
 
   /** Returns the class that can reconstruct instances for a given tag. */
   private getClassFor(
@@ -329,7 +319,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
             count++;
             i++;
           }
-          result.push(this.wrapTag(TAGS.hole, count));
+          result.push(this.wrapTag(WIRE_META_TAGS.hole, count));
         } else {
           result.push(
             this.serialize(value[i] as FabricValue, seen, registry),
@@ -372,9 +362,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
             Object.entries(result).map(([k, v]) => [k, unquote(v)]),
           ),
         );
-        return this.wrapTag(TAGS.quote, unquoted) as JsonWireValue;
+        return this.wrapTag(WIRE_META_TAGS.quote, unquoted) as JsonWireValue;
       }
-      return this.wrapTag(TAGS.object, result) as JsonWireValue;
+      return this.wrapTag(WIRE_META_TAGS.object, result) as JsonWireValue;
     }
 
     return result as JsonWireValue;
@@ -414,8 +404,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
         ) as unknown as FabricValue;
       }
 
-      // `TAGS.object` unwrapping (Section 5.6).
-      if (tag === TAGS.object) {
+      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
+      if (tag === WIRE_META_TAGS.object) {
         const inner = state as Record<string, JsonWireValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
@@ -424,8 +414,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return Object.freeze(result);
       }
 
-      // `TAGS.quote` literal handling (Section 5.6).
-      if (tag === TAGS.quote) {
+      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
+      if (tag === WIRE_META_TAGS.quote) {
         return state as FabricValue;
       }
 
@@ -510,7 +500,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let logicalLength = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
+        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           logicalLength += entryDecoded.state as number;
         } else {
           logicalLength++;
@@ -521,7 +511,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let targetIndex = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
+        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           targetIndex += entryDecoded.state as number;
         } else {
           result[targetIndex] = this.deserialize(entry, runtime, registry);

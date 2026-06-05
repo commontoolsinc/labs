@@ -17,10 +17,10 @@ import { dummyContext, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 describe("FabricMap", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (they don't fit a single member, aren't construction mechanics).
-  it("implements `FabricInstance` with tag `Map@1`", () => {
+  it("implements `FabricInstance` with expected `.wireTypeTag`", () => {
     const sm = new FabricMap(new Map());
     expect(sm instanceof FabricInstance).toBe(true);
-    expect(sm.typeTag).toBe("Map@1");
+    expect(sm.wireTypeTag).toBe("Map@1");
   });
 
   it("is an instance of `FabricNativeWrapper`", () => {

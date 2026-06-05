@@ -2358,19 +2358,7 @@ function resolveFunctionLikeExpressionInner(
     );
   }
 
-  const initializer = ts.isIdentifier(unwrapped)
-    ? getSyntheticModuleCallbackInitializer(unwrapped, sourceFile)
-    : undefined;
-  if (!initializer) {
-    return undefined;
-  }
-
-  return resolveFunctionLikeExpressionInner(
-    initializer,
-    checker,
-    sourceFile,
-    seen,
-  );
+  return undefined;
 }
 
 function unwrapHardenedFunctionExpression(
@@ -2389,49 +2377,6 @@ function unwrapHardenedFunctionExpression(
   }
 
   return expression.arguments[0];
-}
-
-function getSyntheticModuleCallbackInitializer(
-  identifier: ts.Identifier,
-  sourceFile: ts.SourceFile | undefined,
-): ts.Expression | undefined {
-  if (!identifier.text.startsWith("__cfModuleCallback")) {
-    return undefined;
-  }
-
-  const containingSourceFile = sourceFile ??
-    findContainingSourceFile(identifier);
-  if (!containingSourceFile) {
-    return undefined;
-  }
-
-  for (const statement of containingSourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) {
-      continue;
-    }
-
-    for (const declaration of statement.declarationList.declarations) {
-      if (
-        ts.isIdentifier(declaration.name) &&
-        declaration.name.text === identifier.text
-      ) {
-        return declaration.initializer;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
-  let current: ts.Node | undefined = node;
-  while (current) {
-    if (ts.isSourceFile(current)) {
-      return current;
-    }
-    current = current.parent ?? ts.getOriginalNode(current).parent;
-  }
-  return undefined;
 }
 
 /**

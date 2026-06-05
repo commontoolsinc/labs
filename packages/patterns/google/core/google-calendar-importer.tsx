@@ -988,50 +988,54 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       }),
       // Pattern tools for omnibot
       searchEvents: patternTool(
-        ({ query, events }: { query: string; events: CalendarEvent[] }) => {
-          return computed(() => {
-            if (!query || !events) return [];
-            const lowerQuery = query.toLowerCase();
-            return events.filter((event) =>
-              event.summary?.toLowerCase().includes(lowerQuery) ||
-              event.description?.toLowerCase().includes(lowerQuery) ||
-              event.location?.toLowerCase().includes(lowerQuery)
-            );
-          });
-        },
+        pattern(
+          ({ query, events }: { query: string; events: CalendarEvent[] }) => {
+            return computed(() => {
+              if (!query || !events) return [];
+              const lowerQuery = query.toLowerCase();
+              return events.filter((event) =>
+                event.summary?.toLowerCase().includes(lowerQuery) ||
+                event.description?.toLowerCase().includes(lowerQuery) ||
+                event.location?.toLowerCase().includes(lowerQuery)
+              );
+            });
+          },
+        ),
         { events },
       ),
       getEventCount: patternTool(
-        ({ events }: { events: CalendarEvent[] }) => {
+        pattern(({ events }: { events: CalendarEvent[] }) => {
           return computed(() => events?.length || 0);
-        },
+        }),
         { events },
       ),
       getUpcomingEvents: patternTool(
-        ({ count, events }: { count: number; events: CalendarEvent[] }) => {
-          return computed(() => {
-            if (!events || events.length === 0) return "No events";
-            const now = new Date();
-            const upcoming = events
-              .filter((e) => new Date(e.startDateTime || e.start) >= now)
-              .slice(0, count || 5);
-            return upcoming.map((event) =>
-              `${
-                formatEventDate(
-                  event.startDateTime,
-                  event.endDateTime,
-                  event.isAllDay,
-                )
-              }: ${event.summary}${
-                event.location ? ` @ ${event.location}` : ""
-              }`
-            ).join("\n");
-          });
-        },
+        pattern(
+          ({ count, events }: { count: number; events: CalendarEvent[] }) => {
+            return computed(() => {
+              if (!events || events.length === 0) return "No events";
+              const now = new Date();
+              const upcoming = events
+                .filter((e) => new Date(e.startDateTime || e.start) >= now)
+                .slice(0, count || 5);
+              return upcoming.map((event) =>
+                `${
+                  formatEventDate(
+                    event.startDateTime,
+                    event.endDateTime,
+                    event.isAllDay,
+                  )
+                }: ${event.summary}${
+                  event.location ? ` @ ${event.location}` : ""
+                }`
+              ).join("\n");
+            });
+          },
+        ),
         { events },
       ),
       getTodaysEvents: patternTool(
-        ({ events }: { events: CalendarEvent[] }) => {
+        pattern(({ events }: { events: CalendarEvent[] }) => {
           return computed(() => {
             if (!events || events.length === 0) return "No events";
             const today = new Date().toISOString().split("T")[0];
@@ -1050,7 +1054,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
               }: ${event.summary}`
             ).join("\n");
           });
-        },
+        }),
         { events },
       ),
     };

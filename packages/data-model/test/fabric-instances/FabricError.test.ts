@@ -26,9 +26,9 @@ describe("FabricError", () => {
     expect(se instanceof FabricInstance).toBe(true);
   });
 
-  it("has typeTag `Error@1`", () => {
+  it("has the expected `.wireTypeTag`", () => {
     const se = FabricError.fromNativeError(new Error("test"));
-    expect(se.typeTag).toBe("Error@1");
+    expect(se.wireTypeTag).toBe("Error@1");
   });
 
   it("is an instance of `FabricNativeWrapper`", () => {

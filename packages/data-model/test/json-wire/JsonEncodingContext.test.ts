@@ -18,6 +18,10 @@ import { shallowFabricFromNativeValue } from "../../src/fabric-value.ts";
  * `BaseReconstructionContext` (defaults to `true`).
  */
 class TestReconstructionContext extends BaseReconstructionContext {
+  constructor() {
+    super(true);
+  }
+
   override getCell(): never {
     throw new Error("getCell not implemented in test runtime");
   }
@@ -367,7 +371,7 @@ describe("JsonEncodingContext", () => {
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
-      expect(prob.typeTag).toBe("BigInt@1");
+      expect(prob.wireTypeTag).toBe("BigInt@1");
       expect(prob.state).toBe(42);
     });
 
@@ -388,7 +392,7 @@ describe("JsonEncodingContext", () => {
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
-      expect(prob.typeTag).toBe("BigInt@1");
+      expect(prob.wireTypeTag).toBe("BigInt@1");
     });
   });
 
@@ -477,7 +481,7 @@ describe("JsonEncodingContext", () => {
         JSON.stringify({ "/SpecialNumber@1": 0 });
       const result = ctx.decode(encoded, runtime);
       expect(result).toBeInstanceOf(ProblematicValue);
-      expect((result as unknown as ProblematicValue).typeTag).toBe(
+      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
         "SpecialNumber@1",
       );
     });
@@ -489,7 +493,7 @@ describe("JsonEncodingContext", () => {
         JSON.stringify({ "/SpecialNumber@1": "Infinity" }); // missing leading +
       const result = ctx.decode(encoded, runtime);
       expect(result).toBeInstanceOf(ProblematicValue);
-      expect((result as unknown as ProblematicValue).typeTag).toBe(
+      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
         "SpecialNumber@1",
       );
     });
@@ -563,7 +567,7 @@ describe("JsonEncodingContext", () => {
         JSON.stringify({ "/Symbol@1": 42 });
       const result = ctx.decode(encodedJson, runtime);
       expect(result).toBeInstanceOf(ProblematicValue);
-      expect((result as unknown as ProblematicValue).typeTag).toBe(
+      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
         "Symbol@1",
       );
     });
@@ -859,9 +863,9 @@ describe("JsonEncodingContext", () => {
       expect(result.toNativeValue(true).constructor.name).toBe("Error");
     });
 
-    it("has `.typeTag` property", () => {
+    it("has `.wireTypeTag` property", () => {
       const se = FabricError.fromNativeError(new Error("test"));
-      expect(se.typeTag).toBe("Error@1");
+      expect(se.wireTypeTag).toBe("Error@1");
     });
 
     it("round-trips `FabricError` with pre-converted cause (raw `Error`)", () => {
@@ -1290,7 +1294,9 @@ describe("JsonEncodingContext", () => {
         const data = { "/Future@7": { id: "x" } } as JsonWireValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
-        expect((result as unknown as UnknownValue).typeTag).toBe("Future@7");
+        expect((result as unknown as UnknownValue).wireTypeTag).toBe(
+          "Future@7",
+        );
       });
 
       it("decoder strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
@@ -1365,7 +1371,7 @@ describe("JsonEncodingContext", () => {
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
-      expect(unknown.typeTag).toBe("FutureType@2");
+      expect(unknown.wireTypeTag).toBe("FutureType@2");
       expect(unknown.state).toEqual({ some: "data" });
     });
 
@@ -1383,7 +1389,7 @@ describe("JsonEncodingContext", () => {
       const result = roundTrip(us as FabricValue);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
-      expect(unknown.typeTag).toBe("FutureType@2");
+      expect(unknown.wireTypeTag).toBe("FutureType@2");
       expect(unknown.state).toEqual({ some: "data" });
     });
 
@@ -1392,7 +1398,7 @@ describe("JsonEncodingContext", () => {
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
-      expect(unknown.typeTag).toBe("hole");
+      expect(unknown.wireTypeTag).toBe("hole");
       expect(unknown.state).toBe(5);
     });
   });
@@ -1429,12 +1435,11 @@ describe("JsonEncodingContext", () => {
 
     it("throws on `FabricInstance` whose state references itself", () => {
       const { context } = makeTestContext();
-      // Create an UnknownValue whose state transitively references itself.
-      const us = new UnknownValue("Test@1", null);
-      // Mutate state to create a cycle: us -> [us] -> us.
-      (us as unknown as { state: FabricValue }).state = [
-        us,
-      ] as unknown as FabricValue;
+      // Create an instance with a circular reference in its state.
+      const state = { eek: [] as unknown[] };
+      state.eek.push(state);
+
+      const us = new UnknownValue("Test@1", state);
       expect(() => context.encode(us as FabricValue))
         .toThrow(
           "Circular reference",
@@ -1474,7 +1479,7 @@ describe("JsonEncodingContext", () => {
       );
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
-      expect(prob.typeTag).toBe("BigInt@1");
+      expect(prob.wireTypeTag).toBe("BigInt@1");
     });
 
     it("lenient mode wraps failed class-registry reconstruction", () => {
@@ -1492,7 +1497,7 @@ describe("JsonEncodingContext", () => {
       );
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
-      expect(prob.typeTag).toBe("Map@1");
+      expect(prob.wireTypeTag).toBe("Map@1");
     });
   });
 

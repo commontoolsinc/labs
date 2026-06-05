@@ -343,6 +343,10 @@ describe("native-conversion", () => {
 
     it("returns `true` for custom `FabricInstance` subclass", () => {
       class CustomFabInst extends BaseFabricInstance {
+        get wireTypeTag(): string {
+          return "Custom@914";
+        }
+
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
         }

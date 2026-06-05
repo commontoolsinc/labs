@@ -10,9 +10,6 @@ import { BaseFabricInstance } from "./BaseFabricInstance.ts";
  */
 export abstract class FabricNativeWrapper<T extends object>
   extends BaseFabricInstance {
-  /** The wire format tag for this wrapper's type (e.g. `TAGS.Error`). */
-  abstract readonly typeTag: string;
-
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
   protected abstract get wrappedValue(): T;
 
