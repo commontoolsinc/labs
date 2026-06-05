@@ -391,7 +391,25 @@ export class JsonEncodingContext implements SerializationContext<string> {
   ): FabricValue {
     const decoded = this.unwrapTag(data);
     if (decoded !== null) {
-      const { tag, state } = decoded;
+      const { tag, state: rawState } = decoded;
+
+      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
+      if (tag === WIRE_META_TAGS.quote) {
+        return rawState as FabricValue;
+      }
+
+      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
+      if (tag === WIRE_META_TAGS.object) {
+        const inner = rawState as Record<string, JsonWireValue>;
+        const result: Record<string, FabricValue> = {};
+        for (const [key, val] of Object.entries(inner)) {
+          result[key] = this.deserialize(val, runtime, registry);
+        }
+        return Object.freeze(result);
+      }
+
+      // Except for `/quote` and `/object`, the `state` needs to be fully decoded.
+      const state = this.deserialize(rawState, runtime, registry);
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
@@ -403,21 +421,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
           state as unknown as FabricValue,
           `object has bare "/" key`,
         ) as unknown as FabricValue;
-      }
-
-      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
-      if (tag === WIRE_META_TAGS.object) {
-        const inner = state as Record<string, JsonWireValue>;
-        const result: Record<string, FabricValue> = {};
-        for (const [key, val] of Object.entries(inner)) {
-          result[key] = this.deserialize(val, runtime, registry);
-        }
-        return Object.freeze(result);
-      }
-
-      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
-      if (tag === WIRE_META_TAGS.quote) {
-        return state as FabricValue;
       }
 
       // Registry-based (tag lookup) dispatch
@@ -450,34 +453,27 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // Class registry fallback
       const cls = this.getClassFor(tag);
-      const deserializedState = this.deserialize(state, runtime, registry);
 
       if (cls) {
         if (this.lenient) {
           try {
             return cls[RECONSTRUCT](
-              deserializedState,
+              state,
               runtime,
-            ) as unknown as FabricValue;
+            );
           } catch (e: unknown) {
             return new ProblematicValue(
               tag,
-              deserializedState,
+              state,
               e instanceof Error ? e.message : String(e),
-            ) as unknown as FabricValue;
+            );
           }
         }
-        return cls[RECONSTRUCT](
-          deserializedState,
-          runtime,
-        ) as unknown as FabricValue;
+        return cls[RECONSTRUCT](state, runtime);
       }
 
       // Unknown type: preserve for round-tripping.
-      return new UnknownValue(
-        tag,
-        deserializedState,
-      ) as unknown as FabricValue;
+      return new UnknownValue(tag, state);
     }
 
     // Primitives pass through.
