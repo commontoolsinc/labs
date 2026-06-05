@@ -24,7 +24,17 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * See Section 5.3 of the formal spec.
  */
 export const EpochDaysHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.EpochDays,
+  /** @inheritDoc */
+  get classSource() {
+    // Alas, this project doesn't let us just say the type "arbitrary function,"
+    // and the cast here is the best we can do.
+    return FabricEpochDays as unknown as ((...args: any[]) => any);
+  },
+
+  /** @inheritDoc */
+  get wireTypeTag() {
+    return WIRE_TYPE_TAGS.EpochDays;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricEpochDays;

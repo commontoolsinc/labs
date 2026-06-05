@@ -18,7 +18,17 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * Matches by `instanceof`. Same flat encoding approach as the epoch handlers.
  */
 export const BytesHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.Bytes,
+  /** @inheritDoc */
+  get classSource() {
+    // Alas, this project doesn't let us just say the type "arbitrary function,"
+    // and the cast here is the best we can do.
+    return FabricBytes as unknown as ((...args: any[]) => any);
+  },
+
+  /** @inheritDoc */
+  get wireTypeTag() {
+    return WIRE_TYPE_TAGS.Bytes;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricBytes;

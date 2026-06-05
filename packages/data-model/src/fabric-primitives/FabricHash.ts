@@ -7,6 +7,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -51,6 +52,11 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     this.#justHashString = toUnpaddedBase64url(hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
     Object.freeze(this);
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Hash;
   }
 
   /**

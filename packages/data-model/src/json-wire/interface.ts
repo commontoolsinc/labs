@@ -50,13 +50,26 @@ export interface TypeHandlerCodec {
  * See Section 4.5 of the formal spec.
  */
 export interface TypeHandler {
-  /** The wire format tag this handler deserializes from. */
-  readonly tag: string;
+  /**
+   * The unique class (constructor function) whose direct instances this handler
+   * serializes from, if any. This _can_ be the non-`new`-able "constructor"
+   * function for a primitive type (e.g., `BigInt`). If a handler is found to
+   * match on this, it will still be asked `canSerialize()` to handle the case
+   * of a handler for _some_ but not _all_ values of a particular class/type.
+   *
+   * **Note:** If this is a base class, this will not cause its subclasses to be
+   * matched.
+   */
+  get classSource(): ((...args: any[]) => any) | undefined;
+
+  /**
+   * The unique wire format tag this handler deserializes from, if any.
+   */
+  get wireTypeTag(): string | undefined;
 
   /**
    * Returns `true` if this handler can serialize the given value. Called
-   * during serialization to find the right handler via linear scan. Order
-   * matters: more specific handlers should be checked first.
+   * during serialization to find a compatible handler.
    */
   canSerialize(value: FabricValue): boolean;
 

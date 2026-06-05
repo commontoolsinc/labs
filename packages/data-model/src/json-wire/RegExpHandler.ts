@@ -14,7 +14,15 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
  * `{ "/RegExp@1": { "flags": "<flags>", "flavor": "<flavor>", "source": "<source>" } }`.
  */
 export const RegExpHandler: TypeHandler = {
-  tag: WIRE_TYPE_TAGS.RegExp,
+  /** @inheritDoc */
+  get classSource() {
+    return RegExp;
+  },
+
+  /** @inheritDoc */
+  get wireTypeTag() {
+    return WIRE_TYPE_TAGS.RegExp;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricRegExp;

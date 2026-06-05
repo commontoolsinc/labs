@@ -35,6 +35,9 @@ export const WIRE_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricBytes`. */
     Bytes: "Bytes@1",
 
+    /** Constant for class `FabricHash`. */
+    Hash: "Hash@1",
+
     /** Constant for class `FabricEpochNsec`. */
     EpochNsec: "EpochNsec@1",
 
