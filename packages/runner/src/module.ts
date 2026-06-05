@@ -9,6 +9,7 @@ import type {
 import type { AddCancel } from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type { NormalizedFullLink } from "./link-types.ts";
 
 /**
  * Result returned by a raw builtin implementation.
@@ -115,6 +116,14 @@ export function raw<T, R>(
     cause: any,
     parentCell: Cell<any>,
     runtime: Runtime,
+    // Fully-resolved normalized link of the output spot this node writes
+    // through (a write redirect at the top, always present for a real node).
+    // Carries the binding's declared `scope` (folded from the result schema /
+    // `.asScope()` default) and `schema`, so a builtin can mint its result
+    // container at the author-declared scope. Replaces the scope-less
+    // `cause.outputSpot` for scope-aware builtins; `cause.outputSpot` stays for
+    // identity (it is hashed into result-cell causes and must not churn).
+    outputBinding?: NormalizedFullLink,
   ) => RawBuiltinReturnType,
   options?: RawModuleOptions,
 ): ModuleFactory<T, R> {

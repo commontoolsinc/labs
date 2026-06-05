@@ -969,7 +969,7 @@ export class CellImpl<T extends FabricValue>
     // resolved (a handler-delivered handle may sit behind a link at its target) —
     // getRaw's default `"top"` would stop at the link object and miss `id`.
     const handle = this.getRaw({ lastNode: "value" }) as
-      | { id?: unknown; tables?: unknown }
+      | { id?: unknown; tables?: unknown; scope?: unknown }
       | undefined;
     if (!handle || typeof handle.id !== "string") {
       throw new TypeError(
@@ -981,6 +981,10 @@ export class CellImpl<T extends FabricValue>
       db: {
         id: handle.id,
         tables: handle.tables as Record<string, unknown> | undefined,
+        // Carry the db's declared scope so the write lands in the same per-user
+        // / per-session on-disk file the read path resolves (stamped by
+        // sqliteDatabase onto the handle value).
+        scope: isCellScope(handle.scope) ? handle.scope : undefined,
       },
       sql,
       params: encodeSqliteParams(sql, params),

@@ -308,10 +308,16 @@ export interface GraphQueryRequest {
 export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
 
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
- *  entity id) plus the declared table schemas (for additive create/migrate). */
+ *  entity id) plus the declared table schemas (for additive create/migrate).
+ *
+ *  `scope` is the SqliteDb cell's declared scope (space/user/session). The
+ *  server folds it (with the request's principal / session id) into the on-disk
+ *  filename so a `user`/`session`-scoped db gets a per-user / per-session file;
+ *  `space` (or absent) keeps the original unqualified name. */
 export interface SqliteDbRef {
   id: string;
   tables?: Record<string, unknown>;
+  scope?: CellScope;
 }
 
 export interface SqliteQueryRequest {

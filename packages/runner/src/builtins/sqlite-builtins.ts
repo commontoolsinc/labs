@@ -24,26 +24,37 @@ import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 
 type SqliteDbRef = {
   id: string;
   tables?: Record<string, unknown>;
+  // The author-declared scope of the SqliteDb cell (space/user/session). The
+  // server folds this into the on-disk filename so user/session-scoped dbs get
+  // a per-user / per-session file. Absent ⇒ "space" (the default, unqualified).
+  scope?: CellScope;
 };
 type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
 
 const errMsg = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** Allocate a result cell linked to the parent/pattern cells. */
+/** Allocate a result cell linked to the parent/pattern cells, at `scope` (the
+ *  author-declared scope of the SqliteDb / its query result). The base entity
+ *  id is scope-independent; `scope` only re-addresses which scoped instance the
+ *  value lands in, matching how the server partitions the on-disk db. */
 function makeResultCell<T>(
   runtime: Runtime,
   parentCell: Cell<any>,
   cause: unknown,
   label: string,
   tx: IExtendedStorageTransaction,
+  scope: CellScope = "space",
 ): Cell<T> {
   const base = runtime.getCell<T>(
     parentCell.space,
@@ -51,7 +62,12 @@ function makeResultCell<T>(
     undefined,
     tx,
   );
-  const cell = createCell(runtime, base.getAsNormalizedFullLink(), tx);
+  const link = base.getAsNormalizedFullLink();
+  const cell = createCell<T>(
+    runtime,
+    link.scope === scope ? link : { ...link, scope },
+    tx,
+  );
   setResultCell(cell, parentCell);
   setPatternCell(cell, parentCell.key("pattern"));
   cell.sync();
@@ -64,7 +80,7 @@ function readDbRef(value: unknown): SqliteDbRef {
     typeof (value as SqliteDbRef).id === "string"
   ) {
     const ref = value as SqliteDbRef;
-    return { id: ref.id, tables: ref.tables };
+    return { id: ref.id, tables: ref.tables, scope: ref.scope };
   }
   throw new TypeError("sqlite: invalid database handle");
 }
@@ -130,23 +146,31 @@ export function sqliteDatabase(
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: Runtime,
+  outputBinding?: NormalizedFullLink,
 ): RawBuiltinResult {
   let initialized = false;
   let handle: Cell<SqliteDbRef>;
   const action: Action = (tx: IExtendedStorageTransaction) => {
     if (!initialized) {
+      // The db's scope is the scope the author declared on the result cell
+      // (`PerUser<SqliteDb>` / `.asScope("user")`), carried on the resolved
+      // output binding. The server uses it to derive a per-user / per-session
+      // on-disk filename; the handle cell itself must live at that scope so its
+      // value is partitioned the same way.
+      const scope = outputBinding?.scope ?? "space";
       handle = makeResultCell<SqliteDbRef>(
         runtime,
         parentCell,
         cause,
         "sqliteDatabase",
         tx,
+        scope,
       );
       const options = inputsCell.withTx(tx).get() as
         | { tables?: Record<string, unknown> }
         | undefined;
       const id = handle.entityId?.["/"] ?? JSON.stringify(handle.getAsLink());
-      handle.withTx(tx).set({ id, tables: options?.tables });
+      handle.withTx(tx).set({ id, tables: options?.tables, scope });
       sendResult(tx, handle);
       initialized = true;
     }
@@ -169,24 +193,14 @@ export function sqliteQuery(
   cause: Cell<any>[],
   parentCell: Cell<any>,
   runtime: Runtime,
+  outputBinding?: NormalizedFullLink,
 ): RawBuiltinResult {
   let initialized = false;
   let result: Cell<QueryState>;
+  let resultScope: CellScope | undefined;
   const space = parentCell.space;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
-    if (!initialized) {
-      result = makeResultCell<QueryState>(
-        runtime,
-        parentCell,
-        cause,
-        "sqliteQuery",
-        tx,
-      );
-      sendResult(tx, result);
-      initialized = true;
-    }
-
     const inputs = inputsCell.withTx(tx).get() as {
       db?: unknown;
       sql?: string;
@@ -196,6 +210,30 @@ export function sqliteQuery(
       // for untyped queries.
       rowSchema?: unknown;
     } | undefined;
+
+    // The query result holds rows from a scope-partitioned db, so it must be at
+    // least as narrow as the db's scope; also honor any scope declared on the
+    // query result binding itself. The db's scope rides on its handle value.
+    const dbScope = (inputs?.db && typeof inputs.db === "object" &&
+        typeof (inputs.db as SqliteDbRef).id === "string")
+      ? (inputs.db as SqliteDbRef).scope
+      : undefined;
+    const scope = narrowestScope([outputBinding?.scope, dbScope]);
+
+    if (!initialized || resultScope !== scope) {
+      result = makeResultCell<QueryState>(
+        runtime,
+        parentCell,
+        cause,
+        "sqliteQuery",
+        tx,
+        scope,
+      );
+      sendResult(tx, result);
+      initialized = true;
+      resultScope = scope;
+    }
+
     if (!inputs?.db || typeof inputs.sql !== "string") return;
 
     const db = readDbRef(inputs.db);

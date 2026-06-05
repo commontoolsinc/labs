@@ -1920,11 +1920,16 @@ export class Runner {
       switch (module.type) {
         case "ref": {
           const refName = module.implementation as string;
+          const resolved = this.runtime.moduleRegistry.getModule(refName);
+          // `.asScope(scope)` records its scope on the *ref* module (the node's
+          // module), but resolving the ref swaps in the registry's module — so
+          // carry the declared default scope across, or it is silently dropped
+          // and the node falls back to "space".
           this.instantiateNode(
             tx,
-            this.runtime.moduleRegistry.getModule(
-              refName,
-            ),
+            module.defaultScope !== undefined
+              ? { ...resolved, defaultScope: module.defaultScope }
+              : resolved,
             inputBindings,
             outputBindings,
             resultCell,
@@ -3552,6 +3557,20 @@ export class Runner {
       processCell,
     );
 
+    // The output spot's *declared* scope is not inherently on the resolved link
+    // (`.asScope("user")` lands on `module.defaultScope`, and a `PerUser<>`
+    // annotation on `module.resultSchema.scope`), so fold both in here and hand
+    // the builtin a fully-normalized output link carrying that scope + schema.
+    // Scope-aware builtins (sqliteDatabase) mint their result container at this
+    // scope; the rest ignore the extra argument.
+    const outputBinding = resolvedOutputSpot
+      ? {
+        ...resolvedOutputSpot,
+        scope: schemaCellScope(module.resultSchema) ??
+          module.defaultScope ?? resolvedOutputSpot.scope,
+      }
+      : undefined;
+
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
@@ -3610,6 +3629,7 @@ export class Runner {
         },
         processCell,
         this.runtime,
+        outputBinding,
       );
     } finally {
       popFrame(builtinFrame);
