@@ -85,15 +85,10 @@ const scopedLinkForPath = (
 const descriptorForPartialCauseAlias = (
   partialCause: JSONValue,
   descriptors: readonly DerivedInternalCellDescriptor[] | undefined,
-): DerivedInternalCellDescriptor => {
+): DerivedInternalCellDescriptor | undefined => {
   const descriptor = descriptors?.find((descriptor) =>
     deepEqual(descriptor.partialCause, partialCause)
   );
-  if (!descriptor) {
-    throw new Error(
-      `Unknown derived internal cell: ${partialCause}`,
-    );
-  }
   return descriptor;
 };
 
@@ -135,7 +130,7 @@ export function sendValueToBinding<T>(
         const descriptor = descriptorForPartialCauseAlias(
           partialCause,
           options.derivedInternalCells,
-        );
+        )!;
         binding = createSigilLinkFromParsedLink(
           scopedLinkForPath(
             cell.runtime.cfc,
@@ -288,7 +283,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink,
-  resultCell: AnyCell<any>,
+  resultCell: AnyCell<unknown>,
   options?: UnwrapOneLevelOptions,
 ): T {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
@@ -307,12 +302,37 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       }
       const alias = binding.$alias;
       if (alias.partialCause !== undefined) {
-        const partialCause = alias.partialCause;
+        // If we've provided derivedInternalCells, we can look up this alias
         const descriptor = descriptorForPartialCauseAlias(
-          partialCause,
+          alias.partialCause,
           options?.derivedInternalCells,
         );
-        const link = getDerivedInternalCellLink(resultCell as any, descriptor);
+        // If we're providing derivedInternalCells, and we didn't find our
+        // cell, we should throw an error.
+        if (
+          descriptor === undefined &&
+          options?.derivedInternalCells !== undefined
+        ) {
+          throw new Error(
+            `Unknown derived internal cell with partial cause: ${
+              JSON.stringify(alias.partialCause)
+            }`,
+          );
+        }
+        // For manually constructed patterns, we don't always have
+        // derivedInternalCells, so we won't find a descriptor.
+        // In that case, we'll just create a link with the partial
+        // cause and hope it gets resolved later.
+        // Without the derivedInternalCells, we also won't be able to set the
+        // initial values.
+        const link = descriptor !== undefined
+          ? getDerivedInternalCellLink(resultCell, descriptor)
+          : getDerivedInternalCellLink(resultCell, {
+            partialCause: alias.partialCause,
+            scope: alias.scope === "inherit"
+              ? resultCell.export().scope
+              : alias.scope,
+          });
         const path = alias.path;
         const sourceSchema = alias.schema !== undefined
           ? alias.schema

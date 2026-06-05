@@ -1,9 +1,11 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   type CellScope,
   type Frame,
   type ICell,
   isOpaqueRef,
+  JSONObject,
   type JSONSchema,
   type JSONValue,
   type Module,
@@ -35,9 +37,11 @@ import {
 import { setValueAtPath } from "../path-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
+  getDerivedInternalCellManifestKey,
   getStableInternalPathSegment,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
+import { type LegacyAlias } from "../sigil-types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -303,49 +307,66 @@ function factoryFromPattern<T, R>(
     setRootAlias(selfRefCell, "result");
   }
 
-  const assignedInternalPathSegments = new Map<OpaqueCell<any>, PropertyKey>();
-  let count = 0;
-  const usedInternalPathSegments = new Set<string>();
+  const assignedInternalPartialCauses = new Map<OpaqueCell<any>, JSONValue>();
+  let anonymousPartialCauseCount = 0;
+  const nextAnonymousPartialCause = (isStream: boolean): JSONObject => {
+    const generated = { $generated: anonymousPartialCauseCount++ };
+    return isStream ? { ...generated, $kind: "stream" } : generated;
+  };
+  const hasUsedInternalPartialCause = (partialCause: JSONValue): boolean =>
+    Array.from(assignedInternalPartialCauses.values()).some((used) =>
+      deepEqual(used, partialCause)
+    );
   allCells.forEach((cell) => {
     const { cell: top, path, value, name, external } = cell.export();
     if (
       external || path.length > 0 || rootAliases.has(cell) ||
-      rootAliases.has(top) || assignedInternalPathSegments.has(top)
+      rootAliases.has(top) || assignedInternalPartialCauses.has(top)
     ) {
       return;
     }
 
-    const stableName = getStableInternalPathSegment(name);
-    // HACK(seefeld): For unnamed cells, we've run into an issue when the
-    // order changes that a stream might clobber a previously used
-    // non-stream, which means the default value won't be assigned and the
-    // cell won't be treated as stream. So we'll namespace those separately.
-    const streamMarker = isRecord(value) && value.$stream === true
-      ? "stream"
-      : "";
-    let internalPathSegment = stableName ?? `__#${count++}${streamMarker}`;
-    let internalPathKey = String(internalPathSegment);
-    while (usedInternalPathSegments.has(internalPathKey)) {
-      internalPathSegment = `${internalPathKey}__#${count++}${streamMarker}`;
-      internalPathKey = String(internalPathSegment);
+    const isStream = isRecord(value) && value.$stream === true;
+    let partialCause = name === undefined
+      ? nextAnonymousPartialCause(isStream)
+      : name as JSONValue;
+    while (hasUsedInternalPartialCause(partialCause)) {
+      const generated = nextAnonymousPartialCause(isStream);
+      partialCause = name === undefined
+        ? generated
+        : { name: name as JSONValue, ...generated };
     }
-    usedInternalPathSegments.add(internalPathKey);
-    assignedInternalPathSegments.set(top, internalPathSegment);
+    assignedInternalPartialCauses.set(top, partialCause);
   });
 
-  const cellPathForCell = (
+  const cellReferenceForCell = (
     cell: ICell<unknown> | OpaqueCell<any> | OpaqueRef<any>,
-  ): PropertyKey[] | undefined => {
-    const { cell: top, path, external } = cell.export();
+  ): LegacyAlias["$alias"] | undefined => {
+    const { cell: top, path, external, scope, schema } = cell.export();
+    // If we have an external id, don't bother with all this
     if (external) return undefined;
 
+    // See if we're one of the special cells (result or argument)
     const rootAlias = rootAliases.get(cell) ?? rootAliases.get(top);
-    if (rootAlias !== undefined) return [rootAlias, ...path];
+    if (rootAlias !== undefined) {
+      return {
+        cell: rootAlias,
+        path,
+        ...(scope !== undefined && { scope }),
+        ...(schema !== undefined && { schema }),
+      };
+    }
 
-    const internalPathSegment = assignedInternalPathSegments.get(top) ??
-      assignedInternalPathSegments.get(cell as OpaqueCell<any>);
-    if (internalPathSegment !== undefined) {
-      return ["internal", internalPathSegment, ...path];
+    // Otherwise, we should be an internal call, and should have partialCause
+    const partialCause = assignedInternalPartialCauses.get(top) ??
+      assignedInternalPartialCauses.get(cell as OpaqueCell<any>);
+    if (partialCause !== undefined) {
+      return {
+        path,
+        partialCause,
+        ...(scope !== undefined && { scope }),
+        ...(schema !== undefined && { schema }),
+      };
     }
   };
 
@@ -361,7 +382,7 @@ function factoryFromPattern<T, R>(
   );
   allCells.forEach((cell) => {
     const { cell: top, external } = cell.export();
-    if (!external && assignedInternalPathSegments.has(top)) {
+    if (!external && assignedInternalPartialCauses.has(top)) {
       allCellsAndInternalRoots.add(top);
     }
   });
@@ -373,74 +394,97 @@ function factoryFromPattern<T, R>(
   allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === (inputs as unknown)) return;
-    const { path, value, schema, name, external } = cell.export();
+    const { cell: top, path, value, schema, external } = cell.export();
     if (path.length > 0 || external) return;
 
-    const cellPath = cellPathForCell(cell);
-    if (cellPath === undefined) return;
-    const isStream = isRecord(value) && value.$stream === true;
+    const cellReference = cellReferenceForCell(cell);
+    if (cellReference === undefined) return;
     if (
-      cellPath[0] === "internal" && cellPath.length === 2 && !isStream &&
-      name !== undefined
+      cellReference.partialCause !== undefined &&
+      cellReference.path.length === 0
     ) {
-      const key = String(cellPath[1]);
-      const stableKey = getStableInternalPathSegment(name);
-      const partialCause = String(stableKey) === key ? name as JSONValue : key;
-      derivedInternalPartialCausesByRoot.set(cell.export().cell, partialCause);
+      const partialCause = cellReference.partialCause!;
+      derivedInternalPartialCausesByRoot.set(top, partialCause);
       derivedInternalCells.push({
         partialCause,
         ...(schema !== undefined && { schema }),
         ...(value !== undefined && { initial: value as JSONValue }),
       });
     }
-    if (value !== undefined) setValueAtPath(initial, cellPath, value);
-    if (schema !== undefined && cellPath[0] === "internal") {
-      setSchemaAtPath(internalSchema, cellPath.slice(1), schema);
+    if (value !== undefined) {
+      const initialPath = (typeof cellReference.cell === "string")
+        ? [cellReference.cell, ...cellReference.path]
+        : [
+          "internal",
+          getDerivedInternalCellManifestKey({
+            partialCause: cellReference.partialCause!,
+          }),
+          ...cellReference.path,
+        ];
+      setValueAtPath(initial, initialPath, value);
+    }
+    if (schema !== undefined && cellReference.partialCause !== undefined) {
+      setSchemaAtPath(
+        internalSchema,
+        [getDerivedInternalCellManifestKey({
+          partialCause: cellReference.partialCause!,
+        })],
+        schema,
+      );
       hasInternalSchema = true;
     }
   });
   const resolveCellAlias: CellAliasResolver = (
-    cell,
-    serializationPath,
+    cell, // opaque cell that we found
+    serializationPath, // path where we encountered the cell
     ignoreSelfAliases,
   ) => {
-    const { cell: top, schema, scope } = cell.export();
-    const cellPath = cellPathForCell(cell);
-    if (cellPath === undefined) return undefined;
-    if (
-      ignoreSelfAliases &&
-      serializationPath.length === cellPath.length &&
-      serializationPath.every((part, index) => part === cellPath[index])
-    ) {
-      return null;
-    }
-
-    const aliasMetadata = {
-      ...(scope !== undefined && { scope }),
-      ...(schema !== undefined &&
-        { schema: sanitizeSchemaForLinks(schema, { keepStreams: true }) }),
-    };
-    if (cellPath[0] === "internal") {
-      const partialCause = derivedInternalPartialCausesByRoot.get(top);
-      if (partialCause !== undefined) {
-        return {
-          $alias: {
-            partialCause,
-            path: cellPath.slice(2).map(String),
-            ...aliasMetadata,
-          },
-        };
+    const { cell: top } = cell.export();
+    const cellReference = cellReferenceForCell(cell);
+    if (cellReference === undefined) return undefined;
+    if (cellReference.cell !== undefined) {
+      // make up a fake path that looks like cell type followed by the path
+      // this can only match argument and result aliases, since internal
+      // aliases link directly to their target cell.
+      const cellPath = [cellReference.cell, ...cellReference.path];
+      if (
+        ignoreSelfAliases &&
+        serializationPath.length === cellPath.length &&
+        serializationPath.every((part, index) => part === cellPath[index])
+      ) {
+        // this is a reference to the cell itself, so we shouldn't alias it or
+        // we'll have an infinite loop. Instead, we'll convert the alias to
+        // undefined, effectively removing it.
+        return null;
       }
     }
-    if (
-      cellPath[0] === "argument" || cellPath[0] === "internal" ||
-      cellPath[0] === "result"
+
+    const sanitizedSchema = cellReference.schema !== undefined
+      ? sanitizeSchemaForLinks(cellReference.schema, { keepStreams: true })
+      : undefined;
+    const partialCause = derivedInternalPartialCausesByRoot.get(top);
+    if (partialCause !== undefined) {
+      if (!deepEqual(partialCause, cellReference.partialCause)) {
+        throw new Error(
+          `Inconsistent partial cause for cell. This is a bug in the pattern serializer, please report it.\n` +
+            `Cell path: ${cell.export().path.join(".")}\n` +
+            `Existing partial cause: ${JSON.stringify(partialCause)}\n` +
+            `New partial cause: ${JSON.stringify(cellReference.partialCause)}`,
+        );
+      }
+      return {
+        $alias: {
+          ...cellReference,
+          ...(sanitizedSchema !== undefined && { schema: sanitizedSchema }),
+        },
+      };
+    } else if (
+      cellReference.cell === "argument" || cellReference.cell === "result"
     ) {
       return {
         $alias: {
-          cell: cellPath[0],
-          path: cellPath.slice(1).map(String),
-          ...aliasMetadata,
+          ...cellReference,
+          ...(sanitizedSchema !== undefined && { schema: sanitizedSchema }),
         },
       };
     }

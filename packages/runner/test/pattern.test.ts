@@ -100,14 +100,14 @@ describe("pattern", () => {
 
     expect(testPattern.derivedInternalCells).toEqual([
       {
-        partialCause: 0,
+        partialCause: { $generated: 0 },
       },
       {
         partialCause: "doubled",
       },
     ]);
     expect(testPattern.nodes[0].outputs).toMatchObject({
-      $alias: { partialCause: 0, path: [] },
+      $alias: { partialCause: { $generated: 0 }, path: [] },
     });
   });
 
@@ -129,14 +129,15 @@ describe("pattern", () => {
     expect((testPattern.result as any).first.$alias.partialCause).toBe(
       "isSelected",
     );
-    expect((testPattern.result as any).second.$alias.partialCause).toBe(
-      "isSelected__#0",
-    );
+    expect((testPattern.result as any).second.$alias.partialCause).toEqual({
+      name: "isSelected",
+      $generated: 0,
+    });
     expect(firstPath).toEqual([]);
     expect(secondPath).toEqual([]);
     expect((testPattern.internalSchema as any).properties).toEqual({
       isSelected: { type: "boolean" },
-      "isSelected__#0": { type: "boolean" },
+      '{"name":"isSelected","$generated":0}': { type: "boolean" },
     });
   });
 
@@ -167,10 +168,10 @@ describe("pattern", () => {
       $alias: { cell: "argument", path: ["x"], scope: "space" },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { partialCause: 0, path: [], scope: "space" },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
-      $alias: { partialCause: 0, path: [], scope: "space" },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].outputs).toEqual({
       $alias: {
@@ -253,7 +254,11 @@ describe("pattern", () => {
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
       double: {
-        $alias: { partialCause: 1, path: ["doubled"], scope: "space" },
+        $alias: {
+          partialCause: { $generated: 1 },
+          path: ["doubled"],
+          scope: "space",
+        },
       },
     });
 
@@ -265,15 +270,19 @@ describe("pattern", () => {
       x: { $alias: { cell: "argument", path: ["x"], scope: "space" } },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { partialCause: 0, path: [], scope: "space" },
+      $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
       x: {
-        $alias: { partialCause: 0, path: ["doubled"], scope: "space" },
+        $alias: {
+          partialCause: { $generated: 0 },
+          path: ["doubled"],
+          scope: "space",
+        },
       },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { partialCause: 1, path: [], scope: "space" },
+      $alias: { partialCause: { $generated: 1 }, path: [], scope: "space" },
     });
 
     const json = JSON.stringify(doublePattern);
@@ -365,7 +374,7 @@ describe("pattern", () => {
     expect(result).toMatchObject({
       double: {
         $alias: {
-          partialCause: 1,
+          partialCause: { $generated: 1 },
           path: ["double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
@@ -390,7 +399,7 @@ describe("pattern", () => {
     // I don't like that we don't know the other properties of our output here
     expect(nodes[0].outputs).toMatchObject({
       $alias: {
-        partialCause: 0,
+        partialCause: { $generated: 0 },
         path: [],
         schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
@@ -398,7 +407,7 @@ describe("pattern", () => {
     expect(nodes[1].inputs).toMatchObject({
       x: {
         $alias: {
-          partialCause: 0,
+          partialCause: { $generated: 0 },
           path: ["double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
@@ -408,7 +417,7 @@ describe("pattern", () => {
     });
     expect(nodes[1].outputs).toMatchObject({
       $alias: {
-        partialCause: 1,
+        partialCause: { $generated: 1 },
         path: [],
         schema: {
           ifc: ArgumentSchema.properties.x.ifc,
@@ -486,14 +495,14 @@ describe("pattern", () => {
     expect(nodes[0].outputs).toHaveProperty("$alias");
     const nodeOutputAlias = (nodes[0].outputs as any)["$alias"];
     expect(nodeOutputAlias).toMatchObject({
-      partialCause: 0,
+      partialCause: { $generated: 0 },
       path: [],
       schema: { ifc: { confidentiality: ["confidential"] } },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
-          partialCause: 0,
+          partialCause: { $generated: 0 },
           path: ["capitalized"],
           schema: { ifc: { confidentiality: ["confidential"] } },
         },

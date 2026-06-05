@@ -8,7 +8,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
-import { getMetaCell } from "../src/link-utils.ts";
+import { getDerivedInternalCell, getMetaCell } from "../src/link-utils.ts";
 import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -118,7 +118,7 @@ describe("ensurePieceRunning", () => {
         properties: { doubled: { type: "number" } },
       },
       result: {
-        doubled: { $alias: { cell: "internal", path: ["doubled"] } }, // bound to resultCell.internal.doubled
+        doubled: { $alias: { partialCause: "doubled", path: [] } }, // bound to resultCell.internal.doubled
       },
       nodes: [
         {
@@ -130,7 +130,7 @@ describe("ensurePieceRunning", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["value"] } }, // bound to resultCell.argument.value
-          outputs: { $alias: { cell: "internal", path: ["doubled"] } }, // bound to resultCell.internal.doubled
+          outputs: { $alias: { partialCause: "doubled", path: [] } }, // bound to resultCell.internal.doubled
         },
       ],
     };
@@ -153,17 +153,18 @@ describe("ensurePieceRunning", () => {
       tx,
       pattern.argumentSchema,
     );
-    const internalCell = getMetaCell(resultCell, "internal", tx);
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
 
     // Set up the structure
     resultCell.setRaw({
-      doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
+      doubled: doubledCell.getAsWriteRedirectLink(),
     });
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
-    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, resultCell);
     argumentCell.set({ value: 5 });
-    internalCell.set({});
 
     await tx.commit();
     tx = runtime.edit();
@@ -220,14 +221,11 @@ describe("ensurePieceRunning", () => {
       tx,
       pattern.argumentSchema,
     );
-    const internalCell = getMetaCell(resultCell, "internal", tx);
 
     resultCell.set({});
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
-    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
     argumentCell.set({});
-    internalCell.set({});
 
     await tx.commit();
     tx = runtime.edit();
@@ -291,14 +289,11 @@ describe("ensurePieceRunning", () => {
       tx,
       pattern.argumentSchema,
     );
-    const internalCell = getMetaCell(resultCell, "internal", tx);
 
     resultCell.set({});
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
-    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
     argumentCell.set({});
-    internalCell.set({});
 
     await tx.commit();
     tx = runtime.edit();
@@ -401,9 +396,13 @@ describe("queueEvent with auto-start", () => {
           events: { $stream: true },
         },
       },
+      derivedInternalCells: [
+        { partialCause: "doubled" },
+        { partialCause: "events", initial: { $stream: true } },
+      ],
       result: {
-        doubled: { $alias: { cell: "internal", path: ["doubled"] } },
-        events: { $alias: { cell: "internal", path: ["events"] } },
+        doubled: { $alias: { partialCause: "doubled", path: [] } },
+        events: { $alias: { partialCause: "events", path: [] } },
       },
       nodes: [
         {
@@ -416,7 +415,7 @@ describe("queueEvent with auto-start", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["value"] } },
-          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
         // Note: NO handler node for events - this is intentional
       ],
@@ -437,19 +436,25 @@ describe("queueEvent with auto-start", () => {
     // Create a internal and argument cells, and attach them to resultCell.
     // This would be done inside setupInternal, but we want to proactively set up links
     // to that internal cell in our result cell.
-    const internalCell = getMetaCell(resultCell, "internal", tx);
     const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
+    const eventsCell = getDerivedInternalCell(resultCell, {
+      partialCause: "events",
+    }, tx);
 
     // Set up result cell - events points to internal/events through metadata
     resultCell.setRaw({
-      doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
-      events: internalCell.key("events").getAsWriteRedirectLink(),
+      doubled: doubledCell.getAsWriteRedirectLink(),
+      events: eventsCell.getAsWriteRedirectLink(),
     });
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
-    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, resultCell);
+    setResultCell(eventsCell, resultCell);
     argumentCell.set({ value: 5 });
-    internalCell.setRaw({ events: { $stream: true } });
+    eventsCell.setRaw({ $stream: true });
 
     await tx.commit();
     tx = runtime.edit();
@@ -462,11 +467,12 @@ describe("queueEvent with auto-start", () => {
     // 1. Get cell at resultCell (with path removed)
     // 2. Find pattern metadata in resultCell
     // 3. Start the piece
-    const eventsLink = resultCell.key("events").getAsNormalizedFullLink();
+    const eventsLink = eventsCell.getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
-    // Wait for processing
-    await resultCell.pull();
+    // Wait for auto-start, then demand the output written by the started piece.
+    await runtime.idle();
+    await doubledCell.pull();
 
     // The piece should have been started (lift ran)
     expect(liftRunCount).toBe(1);
@@ -514,9 +520,9 @@ describe("queueEvent with auto-start", () => {
         },
       },
       result: {
-        doubled: { $alias: { cell: "internal", path: ["doubled"] } },
-        events: { $alias: { cell: "internal", path: ["events"] } },
-        eventCount: { $alias: { cell: "internal", path: ["eventCount"] } },
+        doubled: { $alias: { partialCause: "doubled", path: [] } },
+        events: { $alias: { partialCause: "events", path: [] } },
+        eventCount: { $alias: { partialCause: "eventCount", path: [] } },
       },
       nodes: [
         {
@@ -529,7 +535,7 @@ describe("queueEvent with auto-start", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["value"] } },
-          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
         {
           // Handler that reads from the stream
@@ -543,15 +549,15 @@ describe("queueEvent with auto-start", () => {
             },
           },
           inputs: {
-            $event: { $alias: { cell: "internal", path: ["events"] } },
+            $event: { $alias: { partialCause: "events", path: [] } },
             $ctx: {
               eventCount: {
-                $alias: { cell: "internal", path: ["eventCount"] },
+                $alias: { partialCause: "eventCount", path: [] },
               },
             },
           },
           outputs: {
-            eventCount: { $alias: { cell: "internal", path: ["eventCount"] } },
+            eventCount: { $alias: { partialCause: "eventCount", path: [] } },
           },
         },
       ],
@@ -572,22 +578,32 @@ describe("queueEvent with auto-start", () => {
     // Create a internal and argument cells, and attach them to resultCell.
     // This would be done inside setupInternal, but we want to proactively set up links
     // to that internal cell in our result cell.
-    const internalCell = getMetaCell(resultCell, "internal", tx);
     const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
+    const eventsCell = getDerivedInternalCell(resultCell, {
+      partialCause: "events",
+    }, tx);
+    const eventCountCell = getDerivedInternalCell(resultCell, {
+      partialCause: "eventCount",
+    }, tx);
 
     // Set up result cell - events points to events in internal cell
     resultCell.setRaw({
-      doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
-      events: internalCell.key("events").getAsWriteRedirectLink(),
-      eventCount: internalCell.key("eventCount").getAsWriteRedirectLink(),
+      doubled: doubledCell.getAsWriteRedirectLink(),
+      events: eventsCell.getAsWriteRedirectLink(),
+      eventCount: eventCountCell.getAsWriteRedirectLink(),
     });
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
-    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, resultCell);
+    setResultCell(eventsCell, resultCell);
+    setResultCell(eventCountCell, resultCell);
     argumentCell.set({ value: 5 });
-    // Set up internal cell - events must be set to $stream: true
-    internalCell.setRaw({ events: { $stream: true }, eventCount: 0 });
-    setResultCell(internalCell, resultCell);
+    // Set up derived cells - events must be set to $stream: true
+    eventsCell.setRaw({ $stream: true });
+    eventCountCell.setRaw(0);
 
     await tx.commit();
     tx = runtime.edit();
@@ -598,7 +614,7 @@ describe("queueEvent with auto-start", () => {
 
     // Send an event - should start piece and process the event
     // The handler is registered for the events path on internal cell
-    const eventsLink = internalCell.key("events").getAsNormalizedFullLink();
+    const eventsLink = eventsCell.getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 10 });
 
     // Wait for processing
@@ -656,8 +672,8 @@ describe("queueEvent with auto-start", () => {
         },
       },
       result: {
-        doubled: { $alias: { cell: "internal", path: ["doubled"] } },
-        events: { $alias: { cell: "internal", path: ["events"] } },
+        doubled: { $alias: { partialCause: "doubled", path: [] } },
+        events: { $alias: { partialCause: "events", path: [] } },
       },
       nodes: [
         {
@@ -669,7 +685,7 @@ describe("queueEvent with auto-start", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["value"] } },
-          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+          outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
         {
           module: {
@@ -681,7 +697,7 @@ describe("queueEvent with auto-start", () => {
             },
           },
           inputs: {
-            $event: { $alias: { cell: "internal", path: ["events"] } },
+            $event: { $alias: { partialCause: "events", path: [] } },
           },
           outputs: {},
         },
@@ -705,21 +721,26 @@ describe("queueEvent with auto-start", () => {
       tx,
     );
 
-    const internalCell = getMetaCell(resultCell, "internal", tx);
     const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const doubledCell = getDerivedInternalCell(resultCell, {
+      partialCause: "doubled",
+    }, tx);
+    const eventsCell = getDerivedInternalCell(resultCell, {
+      partialCause: "events",
+    }, tx);
 
     resultCell.setRaw({
-      doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
-      events: internalCell.key("events").getAsWriteRedirectLink(),
+      doubled: doubledCell.getAsWriteRedirectLink(),
+      events: eventsCell.getAsWriteRedirectLink(),
     });
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
-    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
+    setResultCell(doubledCell, intermediateCell);
+    setResultCell(eventsCell, intermediateCell);
     argumentCell.set({ value: 6 });
-    internalCell.setRaw({ events: { $stream: true } });
+    eventsCell.setRaw({ $stream: true });
     intermediateCell.setRaw({});
 
-    setResultCell(internalCell, intermediateCell);
     setResultCell(intermediateCell, resultCell);
 
     await tx.commit();
@@ -728,7 +749,7 @@ describe("queueEvent with auto-start", () => {
     expect(liftRunCount).toBe(0);
     expect(handlerRunCount).toBe(0);
 
-    const eventsLink = internalCell.key("events").getAsNormalizedFullLink();
+    const eventsLink = eventsCell.getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 42 });
 
     await resultCell.pull();

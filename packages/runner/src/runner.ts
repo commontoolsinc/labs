@@ -711,12 +711,10 @@ export class Runner {
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       this.runtime.cfc,
       pattern.result as R,
       argumentCellLink,
-      internalCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
@@ -1005,15 +1003,20 @@ export class Runner {
 
   /** Convert a module to pattern format */
   private moduleToPattern(module: Module): Pattern {
+    const resultSchema = module.resultSchema ?? {};
     return {
       argumentSchema: module.argumentSchema ?? {},
-      resultSchema: module.resultSchema ?? {},
-      result: { $alias: { cell: "internal", path: [] } },
+      resultSchema,
+      derivedInternalCells: [{
+        partialCause: "$result",
+        schema: resultSchema,
+      }],
+      result: { $alias: { partialCause: "$result", path: [] } },
       nodes: [
         {
           module,
           inputs: { $alias: { cell: "argument", path: [] } },
-          outputs: { $alias: { cell: "internal", path: [] } },
+          outputs: { $alias: { partialCause: "$result", path: [] } },
         },
       ],
     } satisfies Pattern;
@@ -1929,12 +1932,10 @@ export class Runner {
     pattern: Pattern,
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
@@ -1942,7 +1943,6 @@ export class Runner {
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
-      internalCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
@@ -2567,7 +2567,6 @@ export class Runner {
         tx,
         resultCell,
         getMetaLink(resultCell, "argument")!,
-        getMetaLink(resultCell, "internal")!,
         outputs,
         result,
         {
@@ -2651,7 +2650,6 @@ export class Runner {
       tx,
       resultCell,
       getMetaLink(resultCell, "argument")!,
-      getMetaLink(resultCell, "internal")!,
       outputs,
       resultCell.getAsLink(),
       { narrowestReadScope: effectiveOutputScope },
@@ -2943,7 +2941,6 @@ export class Runner {
             tx,
             resultCell,
             getMetaLink(resultCell, "argument")!,
-            getMetaLink(resultCell, "internal")!,
             outputs,
             undefined,
           );
@@ -3264,27 +3261,17 @@ export class Runner {
       tx.setCfcImplementationIdentity(builtinIdentity);
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
-    // CT-1230: Pass bindPatterns: false to prevent premature alias binding in pattern
-    // arguments. When a subpattern is passed to map(), its aliases should not be
-    // bound to the current doc yet - they need to remain unbound until the pattern
-    // is actually instantiated for each mapped item.
     const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
       resultCell,
-      {
-        bindPatterns: false,
-        derivedInternalCells: pattern.derivedInternalCells,
-      },
+      { derivedInternalCells: pattern.derivedInternalCells },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
-      internalCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
@@ -3345,7 +3332,6 @@ export class Runner {
             tx,
             resultCell,
             argumentCellLink!,
-            internalCellLink!,
             mappedOutputBindings,
             resultForRawBuiltinOutputBinding(
               result,
@@ -3503,12 +3489,17 @@ export class Runner {
     pattern: Pattern,
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
+    );
+    const outputs = unwrapOneLevelAndBindtoDoc(
+      this.runtime.cfc,
+      outputBindings,
+      argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
@@ -3517,8 +3508,7 @@ export class Runner {
       tx,
       resultCell,
       argumentCellLink,
-      internalCellLink,
-      outputBindings,
+      outputs,
       inputs,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
@@ -3535,13 +3525,11 @@ export class Runner {
   ) {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const internalCellLink = getMetaLink(resultCell, "internal")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
-      internalCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
@@ -3549,21 +3537,27 @@ export class Runner {
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
-      internalCellLink,
       resultCell,
       {
         targetSchema: patternImpl.argumentSchema,
         derivedInternalCells: pattern.derivedInternalCells,
       },
     );
+    const outputs = unwrapOneLevelAndBindtoDoc(
+      this.runtime.cfc,
+      outputBindings,
+      argumentCellLink,
+      resultCell,
+      { derivedInternalCells: pattern.derivedInternalCells },
+    );
 
     // If output bindings is a link to a non-redirect cell,
     // use that instead of creating a new cell.
     let sendToBindings: boolean;
     let childResultCell: Cell<any>;
-    if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
+    if (isSigilLink(outputs) && !isWriteRedirectLink(outputs)) {
       childResultCell = this.runtime.getCellFromLink(
-        parseLink(outputBindings, resultCell),
+        parseLink(outputs, resultCell),
         patternImpl.resultSchema,
         tx,
       );
@@ -3608,8 +3602,7 @@ export class Runner {
         tx,
         parentResultCell,
         argumentCellLink,
-        internalCellLink,
-        outputBindings,
+        outputs,
         childResultCell.getAsLink(),
         { derivedInternalCells: pattern.derivedInternalCells },
       );

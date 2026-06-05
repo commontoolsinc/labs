@@ -114,24 +114,17 @@ describe("runPattern", () => {
 
     await resultCell.pull();
     const argumentCellValue = resultCell.getArgumentCell()?.get();
-    const internalLink = parseLink(
-      resultCell.getMetaRaw("internal"),
-      resultCell,
-    );
-    expect(internalLink).toBeDefined();
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    const internalCellValue = await internalCell.getRaw();
     expect(argumentCellValue).toEqual({ input: 1 });
-    expect(isWriteRedirectLink((internalCellValue as any).output)).toBe(true);
-
-    const outputLink = parseLink(
-      (internalCellValue as any).output,
-      internalCell,
-    );
+    const outputCell = getDerivedInternalCell(resultCell, {
+      partialCause: "output",
+    });
+    const outputLink = outputCell.getAsNormalizedFullLink();
+    // getDerivedInternalCell doesn't generate a redirect link,
+    // but that's what we want to match, so add that property.
     expect(
       areNormalizedLinksSame(
-        parseLink((result.getRaw() as any).output, result)!,
-        outputLink!,
+        parseLink((result.getRaw() as { output: unknown }).output, result)!,
+        { ...outputLink, overwrite: "redirect" },
       ),
     ).toBe(true);
     const resultValue = await result.pull();
@@ -945,6 +938,21 @@ describe("runPattern", () => {
         counter: { $alias: { partialCause: "counter", path: [] } },
         nested: { $alias: { partialCause: "nested", path: [] } },
       },
+      // Because we're setting the initial values, we need to provide these
+      // as derivedInternalCells. Normally, factoryFromPattern would build this
+      // for us from the other pattern information.
+      derivedInternalCells: [
+        {
+          partialCause: "nested",
+          scope: "space",
+          initial: { value: "initial" },
+        },
+        {
+          partialCause: "counter",
+          scope: "space",
+          initial: 10,
+        },
+      ],
       nodes: [
         {
           module: {
@@ -999,6 +1007,7 @@ describe("runPattern", () => {
     const nested1 = internalCell1.getRawUntyped({ frozen: false }) as any;
     const nested2 = internalCell2.getRawUntyped({ frozen: false }) as any;
 
+    expect(nested1).toEqual({ value: "initial" });
     // Verify they are different objects
     expect(nested1).not.toBe(nested2);
 
@@ -1038,6 +1047,18 @@ describe("runPattern", () => {
           nested: { value: "initial" },
         },
       },
+      derivedInternalCells: [
+        {
+          partialCause: "nested",
+          scope: "space",
+          initial: { value: "initial" },
+        },
+        {
+          partialCause: "counter",
+          scope: "space",
+          initial: 10,
+        },
+      ],
       resultSchema: {},
       result: {
         counter: { $alias: { partialCause: "counter", path: [] } },
@@ -1717,6 +1738,13 @@ describe("runner utils", () => {
             "stream:increment": { $stream: true },
           },
         },
+        derivedInternalCells: [
+          {
+            partialCause: { stream: "increment" },
+            scope: "space",
+            initial: { $stream: true },
+          },
+        ],
         result: {
           value: valueAlias,
           increment: streamAlias,

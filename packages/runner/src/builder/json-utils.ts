@@ -36,7 +36,7 @@ export function toJSONWithLegacyAliases(
   value: Opaque<any>,
   resolveCellAlias?: CellAliasResolver,
   ignoreSelfAliases: boolean = false,
-  path: PropertyKey[] = [],
+  path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
 ): JSONValue | undefined {
   // Turn strongly typed builder values into legacy JSON structures while

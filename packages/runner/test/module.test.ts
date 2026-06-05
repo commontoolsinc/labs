@@ -224,22 +224,23 @@ describe("module", () => {
 
       const clickPattern = pattern(() => clickHandler({} as never));
 
+      const generatedStreamCause = { $generated: 0, $kind: "stream" };
       expect(clickPattern.result).toEqual({
         $alias: {
-          partialCause: 0,
+          partialCause: generatedStreamCause,
           path: [],
           schema: true,
           scope: "space",
         },
       });
       expect(clickPattern.derivedInternalCells).toEqual([{
-        partialCause: 0,
+        partialCause: generatedStreamCause,
         schema: true,
         initial: { $stream: true },
       }]);
       expect(clickPattern.initial).toEqual({
         internal: {
-          "0": { $stream: true },
+          '{"$generated":0,"$kind":"stream"}': { $stream: true },
         },
       });
       const handlerInputs = clickPattern.nodes[0].inputs as {
@@ -247,7 +248,7 @@ describe("module", () => {
       };
       expect(handlerInputs.$event).toEqual({
         $alias: {
-          partialCause: 0,
+          partialCause: generatedStreamCause,
           path: [],
           schema: true,
           scope: "space",

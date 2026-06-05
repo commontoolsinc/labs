@@ -724,10 +724,11 @@ export function getDerivedInternalCellLink(
   descriptor: DerivedInternalCellDescriptor,
 ): NormalizedFullLink {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
+  const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
     id: toURI(createRef({}, {
-      parent: resultCell,
+      parent,
       type: "internal",
       cause: descriptor.partialCause,
     })),
