@@ -4,65 +4,49 @@ import {
 } from "@commonfabric/utils/base64url";
 
 import type { FabricValue } from "@/interface.ts";
+import {
+  BaseFabricCodec,
+} from "@/wire-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
- * Handler for `FabricBytes`. Serializes to a flat base64url string
- * encoding the raw bytes. Wire format: `{ "/Bytes@1": "<base64>" }`.
- * Matches by `instanceof`. Same flat encoding approach as the epoch handlers.
+ * Codec for `FabricBytes`. Encodes to a flat base64url string encoding the raw
+ * bytes. Wire format: `{ "/Bytes@1": "<base64>" }`. Matches by `instanceof`.
  */
-export const BytesHandler: TypeHandler = {
-  /** @inheritDoc */
-  get classSource() {
-    // Alas, this project doesn't let us just say the type "arbitrary function,"
-    // and the cast here is the best we can do.
-    return FabricBytes as unknown as ((...args: any[]) => any);
-  },
+export class BytesHandler extends BaseFabricCodec {
+  constructor() {
+    super(WIRE_TYPE_TAGS.Bytes, FabricBytes);
+  }
 
   /** @inheritDoc */
-  get wireTypeTag() {
-    return WIRE_TYPE_TAGS.Bytes;
-  },
+  encode(value: FabricBytes): FabricValue {
+    return toUnpaddedBase64url(value.slice());
+  }
 
-  canSerialize(value: FabricValue): boolean {
-    return value instanceof FabricBytes;
-  },
-
-  serialize(
-    value: FabricValue,
-    tagHandler: TagHandler,
-    _recurse: (v: FabricValue) => JsonWireValue,
-  ): JsonWireValue {
-    const fab = value as FabricBytes;
-    const b64 = toUnpaddedBase64url(fab.slice());
-    return tagHandler.wrapTag(WIRE_TYPE_TAGS.Bytes, b64 as JsonWireValue);
-  },
-
-  deserialize(
-    state: JsonWireValue,
-    _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => FabricValue,
+  /** @inheritDoc */
+  decode(
+    wireTypeTag: string,
+    state: FabricValue,
+    _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        WIRE_TYPE_TAGS.Bytes,
+        wireTypeTag,
         state,
         `Bytes: expected string state, got ${typeof state}`,
       );
     }
     try {
-      const bytes = fromBase64url(state);
-      return new FabricBytes(bytes) as unknown as FabricValue;
+      return new FabricBytes(fromBase64url(state));
     } catch {
       return new ProblematicValue(
-        WIRE_TYPE_TAGS.Bytes,
+        wireTypeTag,
         state,
         `Bytes: invalid base64: ${state}`,
       );
     }
-  },
-};
+  }
+}

@@ -1,69 +1,55 @@
 import type { FabricValue } from "@/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
- * Handler for `FabricRegExp`. Serializes the essential state
+ * Codec for `FabricRegExp`. Encodes the essential state
  * `{ source, flags, flavor }` under the `RegExp@1` tag. Wire format:
  * `{ "/RegExp@1": { "flags": "<flags>", "flavor": "<flavor>", "source": "<source>" } }`.
+ * Matches by `instanceof`.
  */
-export const RegExpHandler: TypeHandler = {
-  /** @inheritDoc */
-  get classSource() {
-    return FabricRegExp;
-  },
+export class RegExpHandler extends BaseFabricCodec {
+  constructor() {
+    super(WIRE_TYPE_TAGS.RegExp, FabricRegExp);
+  }
 
   /** @inheritDoc */
-  get wireTypeTag() {
-    return WIRE_TYPE_TAGS.RegExp;
-  },
+  encode(value: FabricRegExp): FabricValue {
+    return {
+      source: value.source,
+      flags: value.flags,
+      flavor: value.flavor,
+    };
+  }
 
-  canSerialize(value: FabricValue): boolean {
-    return value instanceof FabricRegExp;
-  },
-
-  serialize(
-    value: FabricValue,
-    tagHandler: TagHandler,
-    recurse: (v: FabricValue) => JsonWireValue,
-  ): JsonWireValue {
-    const fab = value as FabricRegExp;
-    const state = {
-      source: fab.source,
-      flags: fab.flags,
-      flavor: fab.flavor,
-    } as FabricValue;
-    return tagHandler.wrapTag(WIRE_TYPE_TAGS.RegExp, recurse(state));
-  },
-
-  deserialize(
-    state: JsonWireValue,
-    _runtime: ReconstructionContext,
-    recurse: (v: JsonWireValue) => FabricValue,
+  /** @inheritDoc */
+  decode(
+    wireTypeTag: string,
+    state: FabricValue,
+    _context: ReconstructionContext,
   ): FabricValue {
-    const decoded = recurse(state);
-    if (decoded === null || typeof decoded !== "object") {
+    if (state === null || typeof state !== "object" || Array.isArray(state)) {
       return new ProblematicValue(
-        WIRE_TYPE_TAGS.RegExp,
+        wireTypeTag,
         state,
-        `RegExp: expected object state, got ${typeof decoded}`,
+        `RegExp: expected object state, got ${typeof state}`,
       );
     }
-    const s = decoded as Record<string, unknown>;
+    const s = state as Record<string, unknown>;
     const flavor = (s.flavor as string) ?? "es2025";
     const source = (s.source as string) ?? "";
     const flags = (s.flags as string) ?? "";
     try {
-      return new FabricRegExp(flavor, source, flags) as unknown as FabricValue;
+      return new FabricRegExp(flavor, source, flags);
     } catch (e) {
       return new ProblematicValue(
-        WIRE_TYPE_TAGS.RegExp,
+        wireTypeTag,
         state,
         `RegExp: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
-  },
-};
+  }
+}

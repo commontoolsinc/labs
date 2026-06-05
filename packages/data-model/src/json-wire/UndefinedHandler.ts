@@ -1,43 +1,34 @@
 import type { FabricValue } from "@/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 
 /**
- * Handler for `undefined`. Serializes to `WIRE_TYPE_TAGS.Undefined` tag with
- * `null` state. See Section 1.4.1 of the formal spec.
+ * Codec for `undefined`. Encodes to the `Undefined@1` tag with `null` state.
+ * `undefined` has no corresponding class, so there is no `uniqueHandledClass`;
+ * matching is by `canEncode()`. See Section 1.4.1 of the formal spec.
  */
-export const UndefinedHandler: TypeHandler = {
-  /**
-   * `undefined` doesn't have a corresponding class, so this is `undefined` and
-   * not a would-be `Undefined`.
-   */
-  get classSource() {
-    return undefined;
-  },
+export class UndefinedHandler extends BaseFabricCodec {
+  constructor() {
+    super(WIRE_TYPE_TAGS.Undefined, undefined);
+  }
 
   /** @inheritDoc */
-  get wireTypeTag() {
-    return WIRE_TYPE_TAGS.Undefined;
-  },
-
-  canSerialize(value: FabricValue): boolean {
+  override canEncode(value: FabricValue): boolean {
     return value === undefined;
-  },
+  }
 
-  serialize(
-    _value: FabricValue,
-    tagHandler: TagHandler,
-    _recurse: (v: FabricValue) => JsonWireValue,
-  ): JsonWireValue {
-    return tagHandler.wrapTag(WIRE_TYPE_TAGS.Undefined, null);
-  },
+  /** @inheritDoc */
+  encode(_value: FabricValue): FabricValue {
+    return null;
+  }
 
-  deserialize(
-    _state: JsonWireValue,
-    _runtime: ReconstructionContext,
-    _recurse: (v: JsonWireValue) => FabricValue,
+  /** @inheritDoc */
+  decode(
+    _wireTypeTag: string,
+    _state: FabricValue,
+    _context: ReconstructionContext,
   ): FabricValue {
     return undefined;
-  },
-};
+  }
+}

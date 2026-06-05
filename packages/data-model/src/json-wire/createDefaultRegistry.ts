@@ -22,16 +22,16 @@ export function createDefaultRegistry(): TypeHandlerRegistry {
   // `FabricPrimitive` subclasses first -- they are direct `FabricValue` members
   // matched by `instanceof`, and must be checked before the generic
   // `FabricInstanceHandler`.
-  registry.register(EpochNsecHandler);
-  registry.register(EpochDaysHandler);
-  registry.register(BytesHandler);
-  registry.register(RegExpHandler);
+  registry.register(new EpochNsecHandler());
+  registry.register(new EpochDaysHandler());
+  registry.register(new BytesHandler());
+  registry.register(new RegExpHandler());
   // `FabricInstance` (generic -- checked via `instanceof`).
   registry.register(FabricInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).
-  registry.register(BigIntHandler);
-  registry.register(SpecialNumberHandler);
-  registry.register(SymbolHandler);
-  registry.register(UndefinedHandler);
+  registry.register(new BigIntHandler());
+  registry.register(new SpecialNumberHandler());
+  registry.register(new SymbolHandler());
+  registry.register(new UndefinedHandler());
   return registry;
 }
