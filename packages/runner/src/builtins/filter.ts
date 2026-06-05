@@ -52,7 +52,7 @@ export function filter(
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
-  _cause: any,
+  cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
   outputBinding?: NormalizedFullLink,

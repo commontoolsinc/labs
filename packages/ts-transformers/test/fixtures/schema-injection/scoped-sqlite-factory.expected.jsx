@@ -11,6 +11,9 @@ import { pattern, type PerSession, type PerUser, type SqliteDb, sqliteDatabase, 
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Input {
+    seed?: string;
+}
 // A SqliteDb declared with a scope wrapper must lower to `sqliteDatabase
 // .asScope(<scope>)(...)`, so the runtime binds the db (and its on-disk file)
 // to that scope. `sqliteDatabase` is an opaque factory (its public type is
@@ -26,10 +29,40 @@ export default pattern(() => {
     return { userDb: userDb.for(["__patternResult", "userDb"], true), sessionDb: sessionDb.for(["__patternResult", "sessionDb"], true), spaceDb: spaceDb.for(["__patternResult", "spaceDb"], true) };
 }, {
     type: "object",
-    properties: {}
+    properties: {
+        seed: {
+            type: "string"
+        }
+    }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
-    properties: {}
+    properties: {
+        userDb: {
+            $ref: "#/$defs/SqliteDatabase",
+            asCell: [{
+                    kind: "sqlite",
+                    scope: "user"
+                }]
+        },
+        sessionDb: {
+            $ref: "#/$defs/SqliteDatabase",
+            asCell: [{
+                    kind: "sqlite",
+                    scope: "session"
+                }]
+        },
+        spaceDb: {
+            $ref: "#/$defs/SqliteDatabase",
+            asCell: ["sqlite"]
+        }
+    },
+    required: ["userDb", "sessionDb", "spaceDb"],
+    $defs: {
+        SqliteDatabase: {
+            type: "object",
+            properties: {}
+        }
+    }
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

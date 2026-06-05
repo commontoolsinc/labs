@@ -69,7 +69,7 @@ export function map(
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
-  _cause: any,
+  cause: any,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
   outputBinding?: NormalizedFullLink,

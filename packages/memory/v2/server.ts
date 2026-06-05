@@ -867,7 +867,31 @@ export class Server {
           "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
         );
       }
-      if (map.has(id)) continue;
+      // Validate the declared scope on the WRITE path too. `sqlite.query`
+      // validates scope at parse time, but a folded op rides the loosely-parsed
+      // `transact` commit — an invalid value must fail loudly here, not silently
+      // degrade to space scoping (which would mis-place the file).
+      if (
+        op.db.scope !== undefined && op.db.scope !== "space" &&
+        op.db.scope !== "user" && op.db.scope !== "session"
+      ) {
+        throw new Engine.ProtocolError("sqlite op declares an invalid scope");
+      }
+      const scopeKey = Engine.resolveScopeKey(op.db.scope, {
+        principal: scopeContext.principal,
+        sessionId: scopeContext.sessionId,
+      });
+      if (map.has(id)) {
+        // Same db id appears twice in one commit: it must resolve to the same
+        // scoped file. A differing scope key would mean the second op silently
+        // writes into the first op's (different user/session) file — reject it.
+        if (scopeKeyById.get(id) !== scopeKey) {
+          throw new Engine.ProtocolError(
+            "conflicting scope for the same sqlite database in one commit",
+          );
+        }
+        continue;
+      }
       if (map.size >= 1) {
         throw new Engine.ProtocolError(
           "a commit may write to at most one sqlite database",
@@ -875,13 +899,7 @@ export class Server {
       }
       map.set(id, aliasForDbId(id));
       tablesById.set(id, op.db.tables);
-      scopeKeyById.set(
-        id,
-        Engine.resolveScopeKey(op.db.scope, {
-          principal: scopeContext.principal,
-          sessionId: scopeContext.sessionId,
-        }),
-      );
+      scopeKeyById.set(id, scopeKey);
     }
     // Attach + create tables. If `ensureTables` throws (e.g. a malformed/hostile
     // `db.tables` payload — DDL validation rejects it), DETACH everything
