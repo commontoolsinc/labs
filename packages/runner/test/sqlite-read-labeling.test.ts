@@ -56,12 +56,44 @@ describe("labelResultSchema (pure)", () => {
     expect(schema).toBeUndefined();
   });
 
-  it("FAILS CLOSED on an unattributable column (null origin)", () => {
+  it("null-origin column carries join(conf)/meet(integrity) of the db's sources", () => {
+    // An expression / aggregate (COUNT(*), upper(x)) has no single origin. We
+    // can't cheaply know which columns it derives from, so it conservatively
+    // inherits the JOIN (union) of confidentiality and the MEET (intersection)
+    // of integrity across every declared labeled column in the db.
+    const t = {
+      emails: {
+        properties: {
+          from_email: {
+            ifc: { confidentiality: ["sender"], integrity: ["a", "b"] },
+          },
+          body: {
+            ifc: { confidentiality: ["body-secret"], integrity: ["b", "c"] },
+          },
+          subject: {},
+        },
+      },
+    };
+    const { schema, error } = labelResultSchema(
+      [{ output: "n", table: null, column: null }],
+      t,
+    );
+    expect(error).toBeUndefined();
+    const ifc = (schema as Record<string, any>).properties.result.items
+      .properties.n.ifc;
+    expect([...ifc.confidentiality].sort()).toEqual(["body-secret", "sender"]);
+    expect(ifc.integrity).toEqual(["b"]); // meet: {a,b} ∩ {b,c}
+  });
+
+  it("refuses a query with duplicate output column names (ambiguous label)", () => {
     const { error } = labelResultSchema(
-      [{ output: "x", table: null, column: null }],
+      [
+        { output: "x", table: "emails", column: "from_email" },
+        { output: "x", table: "emails", column: "subject" },
+      ],
       tables,
     );
-    expect(error).toMatch(/no resolvable source column/);
+    expect(error).toMatch(/same output name/i);
   });
 });
 

@@ -30,6 +30,8 @@ import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
+import { uniqueCfcAtoms } from "../cfc/observation.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 type SqliteDbRef = {
   id: string;
@@ -144,6 +146,57 @@ interface ResultColumn {
   column: string | null;
 }
 
+type LabelTables =
+  | Record<string, { properties?: Record<string, { ifc?: unknown }> }>
+  | undefined;
+
+/**
+ * Conservative `ifc` for a result column with NO single source (`null` origin —
+ * an expression, literal, or aggregate like `COUNT(*)`/`upper(x)`). We can't
+ * cheaply know which columns such a value derives from, so it inherits the JOIN
+ * (union) of confidentiality and the MEET (intersection) of integrity across
+ * EVERY declared labeled column in the db schema. This is a sound
+ * over-approximation — it never under-labels confidentiality and never
+ * over-trusts integrity — at the cost of possible over-restriction (we bound by
+ * the whole schema rather than parsing the query's FROM tables). A column
+ * without declared integrity is treated as top (it does not tighten the meet).
+ * Returns undefined when the db declares no confidentiality/integrity at all.
+ */
+function deriveNullOriginIfc(
+  tables: LabelTables,
+): { confidentiality?: unknown[]; integrity?: unknown[] } | undefined {
+  const conf: unknown[] = [];
+  const integritySets: unknown[][] = [];
+  for (const table of Object.values(tables ?? {})) {
+    for (const col of Object.values(table?.properties ?? {})) {
+      const ifc =
+        (col as { ifc?: { confidentiality?: unknown; integrity?: unknown } })
+          ?.ifc;
+      if (!ifc || typeof ifc !== "object") continue;
+      if (
+        Array.isArray(ifc.confidentiality) && ifc.confidentiality.length > 0
+      ) {
+        conf.push(...ifc.confidentiality);
+      }
+      if (Array.isArray(ifc.integrity) && ifc.integrity.length > 0) {
+        integritySets.push(ifc.integrity);
+      }
+    }
+  }
+  const confidentiality = uniqueCfcAtoms(conf);
+  // Meet (intersection) over the columns that DECLARE integrity; an undeclared
+  // column is top and does not tighten it. No integrity anywhere → empty.
+  const integrity = integritySets.length > 0
+    ? integritySets.reduce((acc, set) =>
+      acc.filter((a) => set.some((b) => deepEqual(a, b)))
+    )
+    : [];
+  const out: { confidentiality?: unknown[]; integrity?: unknown[] } = {};
+  if (confidentiality.length > 0) out.confidentiality = confidentiality;
+  if (integrity.length > 0) out.integrity = integrity;
+  return out.confidentiality || out.integrity ? out : undefined;
+}
+
 /**
  * CFC read-labeling: from each result column's TRUE origin (table, column),
  * build a schema for the result-cell's `result` array whose per-field `ifc`
@@ -151,29 +204,42 @@ interface ResultColumn {
  * `q.result[i].<col>` inherits it (re-establishing label propagation across the
  * opaque SQLite boundary).
  *
- * FAIL CLOSED: a labeled db must never silently drop a label, so any result
- * column the engine can't attribute to a source column (`null` origin —
- * expression, literal, compound) makes the whole query refuse. Returns
- * `{ schema }` (possibly undefined when no selected column is labeled),
- * or `{ error }` to refuse.
+ * A `null`-origin column (expression/literal/aggregate) does NOT refuse the
+ * query; it inherits the conservative join/meet of the db's labeled columns
+ * (see `deriveNullOriginIfc`). The query IS refused (`{ error }`) only when two
+ * columns project to the SAME output name, which would make the per-row label
+ * ambiguous. Returns `{ schema }` (possibly undefined when nothing is labeled).
  */
 export function labelResultSchema(
   columns: readonly ResultColumn[],
-  tables:
-    | Record<string, { properties?: Record<string, { ifc?: unknown }> }>
-    | undefined,
+  tables: LabelTables,
 ): { schema?: Record<string, unknown>; error?: string } {
   const itemProps: Record<string, unknown> = {};
+  const seen = new Set<string>();
   let anyLabeled = false;
   for (const c of columns) {
-    if (c.table === null || c.column === null) {
+    // Duplicate output names make per-field labeling ambiguous: the row object
+    // keeps only the last value for that key, but a label set on an earlier
+    // iteration could track a DIFFERENT source column. Refuse rather than
+    // mis-attribute.
+    if (seen.has(c.output)) {
       return {
         error:
-          `sqlite: a CFC-labeled query cannot select column "${c.output}" ` +
-          `because it has no resolvable source column (expressions, literals, ` +
-          `and compound selects aren't supported in a labeled query yet — ` +
-          `select source columns directly)`,
+          `sqlite: a CFC-labeled query cannot project two columns to the same ` +
+          `output name ("${c.output}") — the per-row label would be ambiguous; ` +
+          `alias them to distinct names`,
       };
+    }
+    seen.add(c.output);
+
+    if (c.table === null || c.column === null) {
+      // No single source → conservative join/meet of the db's labeled columns.
+      const derived = deriveNullOriginIfc(tables);
+      if (derived) {
+        itemProps[c.output] = { ifc: derived };
+        anyLabeled = true;
+      }
+      continue;
     }
     const ifc = tables?.[c.table]?.properties?.[c.column]?.ifc;
     if (ifc && typeof ifc === "object" && Object.keys(ifc).length > 0) {
