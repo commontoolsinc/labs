@@ -1,5 +1,8 @@
 {
   "name": "@commonfabric/leb128",
+  "imports": {
+    "@/": "./src/"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
