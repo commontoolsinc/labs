@@ -3,12 +3,12 @@ import { expect } from "@std/expect";
 import {
   EMPTY_RECONSTRUCTION_CONTEXT,
   EmptyReconstructionContext,
-} from "../src/EmptyReconstructionContext.ts";
+} from "../src/wire-common/EmptyReconstructionContext.ts";
 
 describe("EmptyReconstructionContext", () => {
   describe("EMPTY_RECONSTRUCTION_CONTEXT", () => {
     it("is a singleton (re-import yields the same instance)", async () => {
-      const reimported = (await import("../src/EmptyReconstructionContext.ts"))
+      const reimported = (await import("../src/wire-common/EmptyReconstructionContext.ts"))
         .EMPTY_RECONSTRUCTION_CONTEXT;
       expect(reimported).toBe(EMPTY_RECONSTRUCTION_CONTEXT);
     });
