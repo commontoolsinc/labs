@@ -1,10 +1,39 @@
 # SQLite builtin: `db.exec` fails on a _deployed_ piece — bug report
 
-**Status:** OPEN — reliably reproduced, root cause not isolated. **Date:**
-2026-06-04 **Context:** First dogfood of the SQLite pattern builtins
-(`sqliteDatabase` / `db.query` / `db.exec`, PRs #3776 / #3848) on `lunch-poll`.
-The migration is complete and **green in `cf test`**, but cannot deploy live
-because of this bug. **For:** review with the sqlite-builtin owner (Berni).
+**Status:** OPEN. **Dates:** found 2026-06-04, re-verified 2026-06-05.
+**Context:** First dogfood of the SQLite pattern builtins (`sqliteDatabase` /
+`db.query` / `db.exec`, PRs #3776 / #3848) on `lunch-poll`. The migration is
+complete and **green in `cf test`**, but cannot deploy live because of this bug.
+**For:** review with the sqlite-builtin owner (Berni).
+
+## Update 2026-06-05 — reconciling with Berni's diagnosis
+
+Berni's hypothesis: the `"sqlite"` cell should be **forced per-space** (the
+cell-derived DB file is per-space), or scope folded into the DB id for per-user
+DBs. Our follow-up confirms the diagnosis is in the right place — the handle's
+scope — and adds two concrete data points:
+
+1. **The bug is deterministic on the real `lunch-poll`** — re-verified on a
+   fresh deploy on 2026-06-05; `clearHistory`/`logVisit` still throw. (A
+   _minimal_ `reactOn: db` repro that failed on 06-04 happened to pass on 06-05
+   — environment-sensitive — but the full pattern fails robustly. Use the full
+   pattern as the reproducer, not that minimal one.)
+2. **The author-side `.asScope("space")` lever is a no-op for `sqliteDatabase`,
+   and does NOT fix it.** `sqliteDatabase` is a `raw()` builtin whose handle is
+   allocated in its own action via
+   `makeResultCell → runtime.getCell(parentCell.space, …, undefined, tx)`
+   ([`packages/runner/src/builtins/sqlite-builtins.ts:41-58,138`](../../runner/src/builtins/sqlite-builtins.ts))
+   — it never consults `module.defaultScope`. (Only the _pattern-node_ path
+   reads `module.defaultScope`, [`runner.ts:3821`](../../runner/src/runner.ts).)
+   So a pattern author cannot pin the handle's scope today, and pinning it via
+   `.asScope` does nothing. **The per-space fix has to live inside the builtin /
+   `makeResultCell`** — give the handle cell an explicit `"space"` scope at
+   allocation (or fold scope into the DB id). Verified: adding
+   `.asScope("space")` to lunch-poll's `db` left `clearHistory` still failing.
+
+This narrows it nicely: the **write-handle materialization on the deployed path
+needs the handle to carry a definite (space) scope**, which the current builtin
+allocation doesn't give it in a `PerUser`+`PerSpace` pattern.
 
 ---
 
