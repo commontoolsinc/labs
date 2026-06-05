@@ -197,12 +197,14 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                     <cf-hstack id="home-profile-summary" gap="2" align="center">
                       {
                         /*
-                        Show the home-space `profileName` mirror here rather than
-                        `profile.key("name")`: the latter reads cross-space (into
-                        the profile space) and renders empty inline. The live,
-                        editable name is shown by the `cf-render` below.
+                        The trusted <cf-profile-badge> resolves the cross-space
+                        profile cell and renders its avatar + name as official
+                        system chrome. The `profileName` mirror is kept alongside
+                        it as a light-DOM label (the badge renders its name in
+                        shadow DOM; integration tests assert on this text).
                       */
                       }
+                      <cf-profile-badge $profile={profile as any} />
                       <strong>{profileName}</strong>
                     </cf-hstack>
                     <cf-render $cell={profile as any} />
