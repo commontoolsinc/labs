@@ -143,7 +143,9 @@ async function startServer() {
   } catch (err) {
     if (err instanceof Deno.errors.AddrInUse) {
       console.error(`Port ${env.PORT} is already in use`);
-      Deno.exit(1);
+      // Distinct exit code so callers can tell a port collision from other
+      // startup failures and retry on a different port.
+      Deno.exit(3);
     }
     console.error("Failed to start server:", err);
     Deno.exit(1);
