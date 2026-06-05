@@ -49,12 +49,12 @@ export interface FabricCodec {
   get uniqueHandledClass(): Constructor | undefined;
 
   /**
-   * The unique preferred wire format tag, if any, that is associated with the
-   * format this instance decodes from. The codec system uses this to mark state
+   * The unique preferred wire format tag that is associated with the format
+   * this instance decodes from. The codec system uses this to mark state
    * produced by {@link #encode} on this instance and (by default) routes state
    * so marked back to this instance (or an equivalent) for decoding.
    */
-  get wireTypeTag(): string | undefined;
+  get wireTypeTag(): string;
 
   /**
    * Returns `true` if this handler can encode the state of the given value.
