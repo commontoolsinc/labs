@@ -9,6 +9,7 @@ import {
   isAppViewEqual,
   isCommand,
   isEmbeddedView,
+  navigate,
 } from "../../shared/mod.ts";
 import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
 import { KeyStore } from "@commonfabric/identity";
@@ -16,7 +17,10 @@ import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import { type RuntimeClient } from "@commonfabric/runtime-client";
 import { type DID } from "@commonfabric/identity";
-import { RuntimeInternals } from "../lib/runtime.ts";
+import {
+  createSpaceBaseHrefController,
+  RuntimeInternals,
+} from "@commonfabric/lib-shell";
 import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
@@ -25,6 +29,7 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
+import { COMPILATION_CACHE_CLIENT, EXPERIMENTAL } from "../lib/env.ts";
 
 type CommonfabricDebugState = Partial<ReturnType<typeof createDebugUtils>> & {
   rt?: RuntimeClient;
@@ -41,25 +46,10 @@ function getCommonfabricGlobal(): typeof globalThis & {
   };
 }
 
-const SPACE_BASE_SELECTOR = 'base[data-commonfabric-space-base="true"]';
-
-function setSpaceBaseHref(space?: DID, embedded = false): void {
-  const existing = document.head.querySelector<HTMLBaseElement>(
-    SPACE_BASE_SELECTOR,
-  );
-  if (!space) {
-    existing?.remove();
-    return;
-  }
-
-  const href = embedded ? `/.embed/${space}/` : `/${space}/`;
-  const base = existing ?? document.createElement("base");
-  base.setAttribute("data-commonfabric-space-base", "true");
-  base.href = href;
-  if (!existing) {
-    document.head.prepend(base);
-  }
-}
+const setSpaceBaseHref = createSpaceBaseHrefController({
+  hrefForSpace: (space, embedded) =>
+    embedded ? `/.embed/${space}/` : `/${space}/`,
+});
 
 // The root element for the shell application.
 //
@@ -134,6 +124,9 @@ export class XRootView extends BaseView {
           identity: app.identity,
           view: app.view,
           apiUrl: app.apiUrl,
+          experimental: EXPERIMENTAL,
+          compilationCacheClient: COMPILATION_CACHE_CLIENT,
+          navigate,
         });
 
         if (signal.aborted) {

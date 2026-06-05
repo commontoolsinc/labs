@@ -83,7 +83,7 @@ describe("RuntimeInternals navigation", () => {
     }
   });
 
-  it("waits for same-space registration and convergence before navigating", async () => {
+  it("does not block same-space navigation on piece registration", async () => {
     const env = globalThis as typeof globalThis & {
       $API_URL?: string;
       $ENVIRONMENT?: string;
@@ -146,11 +146,6 @@ describe("RuntimeInternals navigation", () => {
       await registrationStarted.promise;
 
       expect(registrations).toBe(1);
-      expect(client.idleCalls).toBe(0);
-      expect(client.syncedCalls).toBe(0);
-      expect(navigation).toBeUndefined();
-
-      registrationReleased.resolve();
       await navigationReceived.promise;
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
@@ -158,6 +153,7 @@ describe("RuntimeInternals navigation", () => {
         spaceDid,
         pieceId: "piece-123",
       });
+      registrationReleased.resolve();
     } finally {
       globalThis.removeEventListener("cf-navigate", onNavigate);
       env.$API_URL = originalEnv.$API_URL;
