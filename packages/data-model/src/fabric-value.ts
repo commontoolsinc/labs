@@ -4,18 +4,20 @@
 export {
   DECONSTRUCT,
   type FabricArray,
-  type FabricClass,
   FabricInstance,
   type FabricNativeObject,
   type FabricObject,
   FabricPrimitive,
   type FabricValue,
-  type FabricValueConverter,
   type FabricValueLayer,
   RECONSTRUCT,
-  type ReconstructionContext,
-  type SerializationContext,
 } from "./interface.ts";
+export type {
+  FabricClass,
+  FabricValueConverter,
+  ReconstructionContext,
+  SerializationContext,
+} from "./wire-common/interface.ts";
 
 export {
   cloneForMutation,

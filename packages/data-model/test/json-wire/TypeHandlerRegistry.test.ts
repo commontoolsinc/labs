@@ -12,8 +12,8 @@ import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
 import {
   FabricInstance,
   type FabricValue,
-  type ReconstructionContext,
 } from "../../src/interface.ts";
+import type { ReconstructionContext } from "../../src/wire-common/interface.ts";
 
 /** Handy no-op `TypeHandler` base class for use in tests. */
 class TestTypeHandler implements TypeHandler {

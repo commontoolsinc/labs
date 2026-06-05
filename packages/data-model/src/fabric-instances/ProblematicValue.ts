@@ -4,8 +4,8 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
   RECONSTRUCT,
-  type ReconstructionContext,
 } from "../interface.ts";
+import type { ReconstructionContext } from "../wire-common/interface.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 

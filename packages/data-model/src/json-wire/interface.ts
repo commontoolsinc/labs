@@ -1,8 +1,8 @@
 import type {
   FabricInstance,
   FabricValue,
-  ReconstructionContext,
 } from "../interface.ts";
+import type { ReconstructionContext } from "../wire-common/interface.ts";
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
