@@ -102,8 +102,12 @@ alongside it for an explicit "refresh from profile" action.
 ## Reference demo
 
 A complete, copy-pasteable pattern. It uses the snapshot approach (the
-recommended default) and resolves the joiner's name/avatar from their shared
-profile via `wish`. Every API used below is exercised elsewhere in the repo:
+recommended default) for *rendering* — name/avatar are copied at join time —
+and additionally stores each joiner's profile **cell as the stable identity
+key**, deduped with `equals()`. Note this is distinct from the "live link" path
+above: the cell is used for *identity comparison*, not dereferenced for
+cross-space render, so it does not depend on other users' profile spaces being
+reachable. Every API used below is exercised elsewhere in the repo:
 
 - `wish<string>({ query: "#profileName" | "#profileAvatar" })` and reading
   `.result` — `packages/patterns/shared-profile-demo/main.tsx`,
@@ -118,8 +122,10 @@ profile via `wish`. Every API used below is exercised elsewhere in the repo:
 
 ```tsx
 import {
+  type Cell,
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -138,8 +144,18 @@ import {
 // Roster shapes
 // ---------------------------------------------------------------------------
 
+/**
+ * Stable identity for a participant: the contributor's own `#profile` cell.
+ * Display name is mutable and not unique (two different people can both be
+ * "Alex"), so it must NOT be the identity key. The profile cell is the stable
+ * handle — a distinct entity per user — compared with `equals()`.
+ */
+export type ParticipantProfileCell = Cell<{ name?: string; avatar?: string }>;
+
 /** One participant's contribution to the shared roster (a profile snapshot). */
 export interface Participant {
+  /** Link to the contributor's profile cell — the stable identity key. */
+  profile: ParticipantProfileCell;
   /** Display name, snapshotted from the joiner's profile at join time. */
   name: string;
   /** Avatar URL/text, snapshotted from the joiner's profile (may be empty). */
@@ -153,6 +169,9 @@ export interface Roster {
 
 /** Per-user marker so a viewer only joins once and can see "joined" state. */
 export interface ViewerState {
+  /** Set once this viewer has contributed their entry to the shared roster. */
+  joined?: boolean;
+  /** Display name shown on the join button after joining (cosmetic only). */
   joinedName?: string;
 }
 
@@ -171,33 +190,39 @@ export type JoinEvent = Record<PropertyKey, never>;
 // Join handler: contribute the current viewer's profile snapshot
 // ---------------------------------------------------------------------------
 //
-// `name` / `avatar` are resolved from the viewer's shared profile in the
-// pattern body (via wish) and passed in as plain string state. The handler
-// only appends a snapshot to the shared roster and records that this viewer
-// has joined.
+// `name` / `avatar` (plain strings) and the live `profile` cell are resolved
+// from the viewer's shared profile in the pattern body (via wish). The handler
+// appends a snapshot to the shared roster and records that this viewer joined.
+// Identity is keyed on the `profile` CELL — never the display name, which is
+// mutable and may collide between distinct users. `profile` round-trips through
+// `push` as a link and is compared with `equals()`, the cell-identity idiom.
 
 const join = handler<JoinEvent, {
   roster: RosterCell;
   viewer: ViewerCell;
+  // May be undefined until the viewer's `#profile` wish resolves; guarded below.
+  profile: ParticipantProfileCell | undefined;
   name: string;
   avatar: string;
-}>((_event, { roster, viewer, name, avatar }) => {
+}>((_event, { roster, viewer, profile, name, avatar }) => {
   const trimmed = (name ?? "").trim();
   if (!trimmed) return; // No resolved profile name yet — nothing to contribute.
+  if (!profile) return; // No resolved profile cell — no stable identity yet.
 
-  // Idempotent: don't double-add this viewer.
-  if ((viewer.get().joinedName ?? "") === trimmed) return;
-
+  // Idempotent: dedupe by profile-cell identity so a viewer who later renames
+  // still counts as joined, and two distinct users sharing a display name don't
+  // block each other.
   const participants = roster.key("participants");
-  const already = participants.get().some((p) => p.name === trimmed);
+  const already = participants.get().some((p) => equals(p.profile, profile));
   if (!already) {
     participants.push({
+      profile,
       name: trimmed,
       avatar: (avatar ?? "").trim(),
       joinedAt: safeDateNow(),
     });
   }
-  viewer.set({ joinedName: trimmed });
+  viewer.set({ joined: true, joinedName: trimmed });
 });
 
 // ---------------------------------------------------------------------------
@@ -223,7 +248,12 @@ export interface RosterDemoOutput {
 export default pattern<RosterDemoInput, RosterDemoOutput>(
   ({ roster, viewer }) => {
     // Resolve THIS viewer's shared profile. Under PR #3830 this yields the
-    // user's default profile (or the picker result if they have >= 2).
+    // user's default profile (or the picker result if they have >= 2). `#profile`
+    // gives the live profile CELL (the stable identity used to dedupe); the
+    // convenience targets give just the snapshot strings.
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
@@ -231,17 +261,25 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
     // not resolved yet (e.g. user has no profile, or it is still loading).
     const myName = computed(() => profileNameWish.result ?? "");
     const myAvatar = computed(() => profileAvatarWish.result ?? "");
+    // The live profile cell — passed to the join handler as the identity key.
+    const myProfile = profileWish.result;
 
     const participants = roster.participants;
     const participantCount = participants.length;
-    const hasJoined = computed(() => (viewer.joinedName ?? "") !== "");
+    const hasJoined = computed(() => viewer.joined === true);
     // Inside a `computed` body, named `computed` values (hasJoined, myName)
     // auto-unwrap to their plain value — do NOT call `.get()` on them here.
     const joinLabel = computed(() =>
       hasJoined ? "Joined" : "Join as " + (myName || "...")
     );
 
-    const boundJoin = join({ roster, viewer, name: myName, avatar: myAvatar });
+    const boundJoin = join({
+      roster,
+      viewer,
+      profile: myProfile,
+      name: myName,
+      avatar: myAvatar,
+    });
 
     return {
       [NAME]: "Shared-profile roster",
