@@ -1,4 +1,5 @@
-import type { FabricValue, ReconstructionContext } from "../interface.ts";
+import type { FabricValue } from "../interface.ts";
+import type { ReconstructionContext } from "../wire-common/interface.ts";
 import { FabricEpochNsec } from "../fabric-primitives/FabricEpochNsec.ts";
 import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import {

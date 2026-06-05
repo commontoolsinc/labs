@@ -39,6 +39,7 @@
     "./schema-hash": "./src/schema-hash.ts",
     "./schema-utils": "./src/schema-utils.ts",
     "./value-debug": "./src/value-debug.ts",
-    "./value-hash": "./src/value-hash.ts"
+    "./value-hash": "./src/value-hash.ts",
+    "./wire-common": "./src/wire-common/index.ts"
   }
 }

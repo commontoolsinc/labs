@@ -4,7 +4,8 @@
  * via a single shared implementation instead of repeating it.
  */
 
-import type { FabricInstance, ReconstructionContext } from "./interface.ts";
+import type { FabricInstance } from "./interface.ts";
+import type { ReconstructionContext } from "./wire-common/interface.ts";
 
 /**
  * Abstract base that supplies the `shouldDeepFreeze` getter from a

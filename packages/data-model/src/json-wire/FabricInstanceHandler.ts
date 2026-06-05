@@ -1,9 +1,9 @@
+import { FabricInstance, type FabricValue } from "../interface.ts";
 import {
   DECONSTRUCT,
-  FabricInstance,
-  type FabricValue,
+  type FabricDeconstructable,
   type ReconstructionContext,
-} from "../interface.ts";
+} from "../wire-common/interface.ts";
 import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
 import type {
   JsonWireValue,
@@ -46,7 +46,7 @@ export const FabricInstanceHandler: TypeHandler = {
     codec: TypeHandlerCodec,
     recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
-    const inst = value as FabricInstance;
+    const inst = value as FabricDeconstructable;
 
     // For `ExplicitTagValue`, use the preserved original `wireTypeTag` and
     // `state`.

@@ -6,11 +6,14 @@ import {
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
-  DECONSTRUCT,
   FabricInstance,
   type FabricValue,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  DECONSTRUCT,
+  FabricDeconstructable,
+} from "@commonfabric/data-model/wire-common";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -2466,21 +2469,24 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
-  // `FabricInstance` values are immutable wrappers with class-defined identity.
-  // Their own-enumerable properties are implementation details, not
-  // user-visible structure; iterating them via the generic walker would
-  // descend into wrapper internals meaninglessly. Instead, walk the
-  // observable internal
-  // structure via `[DECONSTRUCT]()` (the same mechanism the serialization
-  // system uses) for side effects only — tracking shared references in
-  // `seen` and populating `frame.generatedIdCounter` for any
-  // objects-in-arrays nested inside — then return the original instance
-  // unchanged. Subclasses that haven't implemented `[DECONSTRUCT]` yet
-  // will throw from this path; that's the right signal the moment they
-  // start seeing traffic.
+  // `FabricInstance`s are opaque with respect to plain-object-like property
+  // access; they have class-defined identity. Iterating their own-enumerable
+  // properties via the generic walker would descend into wrapper internals
+  // meaninglessly. Instead, walk the observable internal structure via
+  // `[DECONSTRUCT]()` (the same mechanism the serialization system uses) for
+  // side effects only — tracking shared references in `seen` and populating
+  // `frame.generatedIdCounter` for any objects-in-arrays nested inside — then
+  // return the original instance unchanged. Subclasses that haven't implemented
+  // `[DECONSTRUCT]` yet will throw from this path; that's the right signal the
+  // moment they start seeing traffic.
   if (value instanceof FabricInstance) {
     seen.set(value, value);
-    const state = value[DECONSTRUCT]();
+
+    // All `FabricInstance`s must implement `FabricDeconstructable`, even though
+    // the type system can't let us say that (because of how the `data-model`
+    // separates client vs. internal-implementation concerns).
+    const deconstructable = value as unknown as FabricDeconstructable;
+    const state = deconstructable[DECONSTRUCT]();
     if (isRecord(state) || Array.isArray(state)) {
       recursivelyAddIDIfNeeded(state, frame, seen);
     }
@@ -2501,7 +2507,10 @@ export function recursivelyAddIDIfNeeded<T>(
   // `[DECONSTRUCT]()` for side effects, return the instance unchanged.
   if (converted instanceof FabricInstance) {
     seen.set(value, converted);
-    const state = converted[DECONSTRUCT]();
+
+    // See above in re this cast.
+    const deconstructable = converted as unknown as FabricDeconstructable;
+    const state = deconstructable[DECONSTRUCT]();
     if (isRecord(state) || Array.isArray(state)) {
       recursivelyAddIDIfNeeded(state, frame, seen);
     }

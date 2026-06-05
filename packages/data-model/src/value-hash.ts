@@ -17,7 +17,7 @@ import { FabricHash } from "./fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
 import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
-import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
+import { DECONSTRUCT } from "./wire-common/interface.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
@@ -301,7 +301,7 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.FabricInstance: {
-      const fabInst = value as FabricInstance;
+      const fabInst = value as BaseFabricInstance;
       hasher.update(TAG_INSTANCE_BYTES);
       const wireTypeTag = BaseFabricInstance.wireTypeTagOf(fabInst);
       hasher.update(getStringRep(wireTypeTag));
