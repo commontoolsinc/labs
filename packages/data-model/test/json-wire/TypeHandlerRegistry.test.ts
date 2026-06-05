@@ -22,7 +22,10 @@ class TestTypeHandler implements TypeHandler {
   canSerializeCalled: boolean = false;
   valueToAccept: unknown = undefined;
 
-  constructor(classSource: ((...args: any[]) => any) | undefined, wireTypeTag: string | undefined) {
+  constructor(
+    classSource: ((...args: any[]) => any) | undefined,
+    wireTypeTag: string | undefined,
+  ) {
     this.#classSource = classSource;
     this.#wireTypeTag = wireTypeTag;
   }
@@ -57,24 +60,39 @@ class TestTypeHandler implements TypeHandler {
   ): FabricValue {
     throw new Error("Unimplemented.");
   }
-};
+}
 
 describe("TypeHandlerRegistry", () => {
   describe("findSerializer()", () => {
-    for (const [fastPath, classSource, example, counterExample] of [
-      [true, Boolean, false, [1, 2, 3]],
-      [true, BigInt, 914n, true],
-      [true, Number, 123, "florp"],
-      [true, String, "blorp", null],
-      [true, Symbol, Symbol.for("bleep"), undefined],
-      [true, FabricRegExp, new FabricRegExp(/123/), { a: "boop" }], // a `FabricPrimitive`
-      [true, UnknownValue, new UnknownValue("Unk@12", { muffin: "corn" }), 123n], // a `FabricInstance`
-      [false, FabricInstance, new UnknownValue("Unk@34", { biscuit: "butter" }), null],
-    ] as const) {
+    for (
+      const [fastPath, classSource, example, counterExample] of [
+        [true, Boolean, false, [1, 2, 3]],
+        [true, BigInt, 914n, true],
+        [true, Number, 123, "florp"],
+        [true, String, "blorp", null],
+        [true, Symbol, Symbol.for("bleep"), undefined],
+        [true, FabricRegExp, new FabricRegExp(/123/), { a: "boop" }], // a `FabricPrimitive`
+        [
+          true,
+          UnknownValue,
+          new UnknownValue("Unk@12", { muffin: "corn" }),
+          123n,
+        ], // a `FabricInstance`
+        [
+          false,
+          FabricInstance,
+          new UnknownValue("Unk@34", { biscuit: "butter" }),
+          null,
+        ],
+      ] as const
+    ) {
       const sourceName = classSource.name;
       const exampleStr = toCompactDebugString(example);
       const counterStr = toCompactDebugString(counterExample);
-      const handler = new TestTypeHandler(classSource as (...args: any[]) => any, undefined);
+      const handler = new TestTypeHandler(
+        classSource as (...args: any[]) => any,
+        undefined,
+      );
       const firstHandler = new TestTypeHandler(undefined, undefined);
       const lastHandler = new TestTypeHandler(undefined, undefined);
       const registry = new TypeHandlerRegistry();

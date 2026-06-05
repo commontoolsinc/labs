@@ -5,7 +5,9 @@ import type { TypeHandler } from "./interface.ts";
  * Gets the constructor function ("class") of the given value, if any, for the
  * purposes of fast-path lookup.
  */
-function constructorOf(value: FabricValue): ((...args: any[]) => any) | undefined {
+function constructorOf(
+  value: FabricValue,
+): ((...args: any[]) => any) | undefined {
   if (typeof value === "object") {
     if (value === null) {
       return undefined;
