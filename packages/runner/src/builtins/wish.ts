@@ -75,6 +75,28 @@ const profileElementListSchema = internSchema(
   },
 );
 
+// Schema for a list of profile links (the home `profiles` and `mru` lists). Each
+// element is read as a cell *reference* (`asCell`), NOT its inlined value, so the
+// list can be enumerated without deep-resolving every profile's own space. A
+// plain `.get()` inlines each element and returns `undefined` for the whole list
+// whenever any element is a link into a space not yet loaded in the reading
+// context — e.g. a shared piece resolving `#profile` right after a profile was
+// created in its own (`inSpace`) space. That collapsed the list to length 0 and
+// hid the just-created profile behind the "No profile" / create surface.
+//
+// The item type is `unknown` (not `object`) on purpose: with `asCell`, an
+// `object` item schema would trigger a *deep* sync of each linked profile —
+// fetching its entire object graph and everything it transitively links, across
+// space boundaries — just to count the list. `unknown` keeps the sync shallow
+// (we only need the links here). The default profile's name is loaded lazily and
+// targeted via `subscribeProfileName` once a candidate is selected.
+const profileLinkListSchema = internSchema(
+  {
+    type: "array",
+    items: { type: "unknown", asCell: ["cell"] },
+  },
+);
+
 class WishError extends Error {
   constructor(message: string) {
     super(message);
@@ -312,7 +334,10 @@ function getProfileCandidateCells(ctx: WishContext): Cell<unknown>[] {
   const homeSpaceCell = getHomeSpaceCell(ctx);
   const defaultPattern = homeSpaceCell.key("defaultPattern").resolveAsCell();
   const profilesCell = defaultPattern.key("profiles");
-  const rawList = profilesCell.get();
+  // Read the list as cell references so a freshly-created profile (a link into
+  // its own space, not yet loaded here) is still counted rather than collapsing
+  // the whole list to `undefined`. See profileLinkListSchema.
+  const rawList = profilesCell.asSchema(profileLinkListSchema).get();
   const length = Array.isArray(rawList) ? rawList.length : 0;
 
   const candidates: Cell<unknown>[] = [];
@@ -343,7 +368,7 @@ function getProfileCandidateCells(ctx: WishContext): Cell<unknown>[] {
   );
 
   const mruCell = defaultPattern.key("mru");
-  const mruRaw = mruCell.get();
+  const mruRaw = mruCell.asSchema(profileLinkListSchema).get();
   const mruLength = Array.isArray(mruRaw) ? mruRaw.length : 0;
   const mruCells: Cell<unknown>[] = [];
   for (let j = 0; j < mruLength; j++) {
