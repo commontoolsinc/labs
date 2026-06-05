@@ -832,6 +832,27 @@ export class CellImpl<T extends FabricValue>
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
+
+    // Per-transaction read cache: within one ready transaction, repeatedly
+    // reading the same cell with no intervening write recomputes an identical
+    // result -- same value, the same reactive reads already registered on the
+    // tx, and the same CFC state. Reuse the prior result when the tx supports
+    // caching (the non-reactive sample() wrapper does not) and is still open.
+    // The tx clears this cache on any write, so a hit only happens when nothing
+    // has changed since the last read. Keyed on the cell's link identity, which
+    // is stable per cell; `variant` separates reads that differ in options.
+    const tx = this.tx;
+    const cacheable = tx !== undefined &&
+      tx.getCachedReadResult !== undefined &&
+      tx.status().status === "ready";
+    const variant = `${options?.traverseCells ?? false}|${this.synced}`;
+    if (cacheable) {
+      const cached = tx.getCachedReadResult!(this._link, variant);
+      if (cached !== undefined) {
+        return cached.value as Readonly<StripDefaultBrand<T>>;
+      }
+    }
+
     logger.timeStart("cell", "get");
     const value = validateAndTransform(
       this.runtime,
@@ -847,6 +868,12 @@ export class CellImpl<T extends FabricValue>
         `get() took ${Math.floor(elapsed)}ms`,
         this.link,
       );
+    }
+    if (cacheable) {
+      // Re-read this._link: validateAndTransform (via viewRef -> link) may have
+      // run ensureLink() and replaced it with the completed link object, which
+      // is the identity subsequent get()s will key on.
+      tx.setCachedReadResult!(this._link, variant, value);
     }
     return value;
   }

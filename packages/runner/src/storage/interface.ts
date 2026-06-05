@@ -868,6 +868,35 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   writeValuesOrThrow?(
     writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
   ): void;
+
+  /**
+   * Per-transaction memoization for `Cell.get()` results.
+   *
+   * Within a single transaction, repeatedly reading the same cell recomputes the
+   * full read pipeline (link resolution, schema merge, schema-guided traversal).
+   * When no write has occurred since the last read, that work is redundant: the
+   * value, the reactive reads it registers, and the CFC state it produces are all
+   * identical. These two methods let `Cell.get()` cache its result keyed by the
+   * cell's link identity; the implementation clears the entire cache on any
+   * write, so a cached entry is only ever returned when no write has intervened.
+   *
+   * Optional: transactions that must not cache (e.g. the non-reactive `sample()`
+   * wrapper) leave these undefined and callers fall back to recomputing.
+   * `keyObject` must be a stable per-cell object identity (the cell's normalized
+   * link); `variant` distinguishes reads that differ in options. A returned
+   * `{ value }` wrapper signals a hit, so a cached `undefined` value is
+   * distinguishable from a miss.
+   */
+  getCachedReadResult?(
+    keyObject: object,
+    variant: string,
+  ): { value: unknown } | undefined;
+
+  setCachedReadResult?(
+    keyObject: object,
+    variant: string,
+    value: unknown,
+  ): void;
 }
 
 export interface ITransactionReader {
