@@ -43,10 +43,19 @@ const ALLOWED: Record<string, string> = {
   // chokepoint. Tracked for migration in the universal phase.
   "ast/type-inference.ts":
     "[emit+concrete] low-level typeToTypeNode helper (try/catch); migrate emitting callers",
-  // type-shrinking builds shrunk TypeNodes used in emitted lift/pattern type
-  // args. Candidate for chokepoint migration; pinned here until then.
+  // type-shrinking: the emit-reaching shrink paths were migrated to the
+  // chokepoint. THREE raw calls remain, each genuinely special (not workarounds):
+  //   - getArrayElementTypeNode (~1684): result feeds validateShrinkCoverage ->
+  //     reportDiagnostic (validation, never emitted); its `undefined`-on-failure
+  //     return is load-bearing for the caller's union-member iteration.
+  //   - createIdentityOnlyNullishTypeNode (~2303): nullish-only types (no
+  //     commonfabric refs possible) with a custom null-literal/undefined-keyword
+  //     fallback, not the chokepoint's `unknown`.
+  //   - identity-only union member (~2361): the node is INSPECTED
+  //     (isCellLikeTypeNode / preservedWrapperFor) to build a fresh unknown-based
+  //     replacement; never emitted directly.
   "transformers/type-shrinking.ts":
-    "[emit+concrete] shrunk type nodes; migrate to chokepoint (import-leak + registry-degrade)",
+    "3 special sites: validation-only (undefined contract), nullish-only custom fallback, inspected-not-emitted",
 };
 
 Deno.test("raw checker.typeToTypeNode call sites match the reviewed allowlist", async () => {
