@@ -88,6 +88,35 @@ export function qualifyCommonFabricTypeRefs(
     return undefined;
   };
 
+  // For a union/intersection member TypeNode, find the constituent Type to
+  // pair it with. Matches by commonfabric export name (order-independent):
+  // a bare member ref `X` is paired with the constituent whose CF export name
+  // is `X`. Returns undefined when there's no constituent info or no match —
+  // in which case the member is walked with no paired Type (safe: it can only
+  // be rewritten via the syntactic Import-form branch, never misattributed).
+  const pairedConstituentForMember = (
+    member: ts.TypeNode,
+    unionOrIntersectionType: ts.Type | undefined,
+  ): ts.Type | undefined => {
+    if (!unionOrIntersectionType) return undefined;
+    const constituents =
+      (unionOrIntersectionType as ts.UnionOrIntersectionType).types;
+    if (!constituents) return undefined;
+
+    // Only bare identifier refs can be name-matched (the case the printer
+    // emits for in-scope/aliasable commonfabric types inside unions).
+    if (!ts.isTypeReferenceNode(member) || !ts.isIdentifier(member.typeName)) {
+      return undefined;
+    }
+    const memberName = member.typeName.text;
+    for (const constituent of constituents) {
+      if (commonFabricExportName(constituent) === memberName) {
+        return constituent;
+      }
+    }
+    return undefined;
+  };
+
   // For a TypeReference Type, get its Nth type argument. Different
   // TypeScript versions expose this via slightly different shapes; try the
   // public ones first.
@@ -250,26 +279,27 @@ export function qualifyCommonFabricTypeRefs(
         : factory.updateArrayTypeNode(node, rewritten);
     }
 
-    // Union / Intersection: walk each member without paired Type info (the
-    // paired Type IS the union/intersection, but mapping individual members
-    // to constituent Types is brittle; recurse and rely on Import-form
-    // detection for nested refs).
-    if (ts.isUnionTypeNode(node)) {
-      const rewritten = node.types.map((t) => walk(t, undefined));
+    // Union / Intersection: walk each member, pairing it with the constituent
+    // Type that matches by commonfabric export name. Index-pairing TypeNode
+    // members to constituent Types is brittle (TS doesn't guarantee matching
+    // order), so we match by NAME instead: for a bare member ref, find the
+    // constituent whose commonfabric export name equals the ref's identifier.
+    // This is order-independent and only ever supplies a paired Type that
+    // would make the member rewrite to that same name — a non-CF member finds
+    // no match and passes through unchanged. The Import-form (ImportTypeNode)
+    // members are still handled syntactically without needing a paired Type.
+    if (ts.isUnionTypeNode(node) || ts.isIntersectionTypeNode(node)) {
+      const rewritten = node.types.map((t) =>
+        walk(t, pairedConstituentForMember(t, pairedType))
+      );
       const changed = rewritten.some((t, i) => t !== node.types[i]);
-      return changed
+      if (!changed) return node;
+      return ts.isUnionTypeNode(node)
         ? factory.updateUnionTypeNode(node, factory.createNodeArray(rewritten))
-        : node;
-    }
-    if (ts.isIntersectionTypeNode(node)) {
-      const rewritten = node.types.map((t) => walk(t, undefined));
-      const changed = rewritten.some((t, i) => t !== node.types[i]);
-      return changed
-        ? factory.updateIntersectionTypeNode(
+        : factory.updateIntersectionTypeNode(
           node,
           factory.createNodeArray(rewritten),
-        )
-        : node;
+        );
     }
 
     // ParenthesizedType, TypeOperator: unwrap and walk inner.

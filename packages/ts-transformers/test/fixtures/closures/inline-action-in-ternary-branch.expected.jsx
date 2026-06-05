@@ -47,7 +47,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         isEditing: __cfHelpers.ReadonlyCell<boolean>;
     };
-}, import("commonfabric").JSXElement>({
+}, __cfHelpers.JSXElement>({
     type: "object",
     properties: {
         state: {

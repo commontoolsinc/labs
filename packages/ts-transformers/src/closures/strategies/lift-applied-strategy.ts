@@ -13,6 +13,7 @@ import {
 } from "../../ast/mod.ts";
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
+import { typeToTypeNodeWithRegistry } from "../../ast/type-building.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -469,17 +470,20 @@ export function transformLiftAppliedCall(
     if (isTypeParam) {
       hasTypeParameter = true;
     } else {
-      resultTypeNode = checker.typeToTypeNode(
+      // Convert via the canonical chokepoint so commonfabric refs in the
+      // result type are normalized to the always-resolvable `__cfHelpers.X`
+      // form (otherwise the emitted `lift<In, Out>` second type arg prints
+      // `import("commonfabric").X`). It also registers the result Type in the
+      // typeRegistry for downstream schema generation.
+      resultTypeNode = typeToTypeNodeWithRegistry(
         resultType,
-        context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
+        {
+          checker,
+          factory,
+          sourceFile: context.sourceFile,
+        },
+        options.state?.typeRegistry,
       );
-
-      // Register the result Type in typeRegistry
-      if (resultTypeNode && options.state?.typeRegistry) {
-        options.state?.typeRegistry.set(resultTypeNode, resultType);
-      }
     }
   }
 

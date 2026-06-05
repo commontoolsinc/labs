@@ -555,7 +555,7 @@ const __cfLift_7 = __cfHelpers.lift<{
     state: {
         lane: string;
     };
-}, import("commonfabric").JSXElement[]>({
+}, __cfHelpers.JSXElement[]>({
     type: "object",
     properties: {
         visibleThreads: {

@@ -63,7 +63,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         votes: VoteEvent[];
     };
-}, import("commonfabric").Stream<unknown>>({
+}, __cfHelpers.Stream<unknown>>({
     type: "object",
     properties: {
         castVote: {
@@ -112,7 +112,10 @@ const __cfLift_1 = __cfHelpers.lift<{
             "enum": ["space", "user", "session"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }));
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "unknown",
+    asCell: ["stream"]
+} as const satisfies __cfHelpers.JSONSchema, ({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }));
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

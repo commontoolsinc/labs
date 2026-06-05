@@ -233,7 +233,7 @@ const __cfLift_4 = __cfHelpers.lift<{
         prefix: string;
     };
     fallbackMembers: __cfHelpers.ReadonlyCell<string[]>;
-}, (import("commonfabric").VNode | import("commonfabric").UIRenderable)[]>({
+}, (__cfHelpers.VNode | __cfHelpers.UIRenderable)[]>({
     type: "object",
     properties: {
         visibleProjects: {
