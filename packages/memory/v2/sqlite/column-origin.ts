@@ -1,19 +1,19 @@
-// SPIKE — sound read-label provenance via SQLite column-origin metadata.
+// Sound read-label provenance via SQLite column-origin metadata.
 //
 // `@db/sqlite` returns rows keyed by the SELECT's OUTPUT column names, which is
 // unsound for CFC labeling: `SELECT body AS x` hides a confidential column, and
 // `SELECT subject AS from_email` spoofs another column's name. The bundled
-// libsqlite3 is compiled with SQLITE_ENABLE_COLUMN_METADATA, so we can ask the
+// libsqlite3 is compiled with SQLITE_ENABLE_COLUMN_METADATA, so we ask the
 // engine for each result column's TRUE origin `(table, column)` via FFI on the
 // prepared statement's `unsafeHandle`:
 //   - alias  `from_email AS r`      -> origin (emails, from_email)   [resolved]
 //   - spoof  `subject AS from_email`-> origin (emails, subject)      [defeated]
 //   - expr   `upper(from_email)`    -> origin (null, null)           [fail closed]
 //
-// Production note: bind these symbols against the SAME libsqlite3 `@db/sqlite`
-// loaded. The robust path is to set `DENO_SQLITE_PATH` to a vendored lib (which
-// also guarantees the column-metadata compile flag) and dlopen that exact path.
-// This spike falls back to discovering the plug-cached prebuilt.
+// We bind the origin symbols against the SAME libsqlite3 `@db/sqlite` loaded:
+// `DENO_SQLITE_PATH` if set (the robust deployment knob — a vendored lib also
+// guarantees the column-metadata compile flag), else the plug-cached prebuilt
+// `@db/sqlite` downloads. `columnOriginAvailable()` reports whether it resolved.
 
 let cached:
   | {
@@ -66,7 +66,7 @@ function* plugLibCandidates(): Generator<string> {
   }
 }
 
-// Minimal recursive file walk (avoid a dep for the spike).
+// Minimal recursive file walk (no dep just to discover the cached lib).
 function* walkSyncFiles(
   root: string,
 ): Generator<{ name: string; path: string }> {

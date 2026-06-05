@@ -1,8 +1,8 @@
-// SPIKE — prove read-label provenance via SQLite column-origin metadata works
-// on a read-only connection opened exactly as the ReadConnectionPool does, and
-// nail the soundness edge cases (alias / spoof / expression / join-ambiguity /
-// UNION / CTE / view). The soundness contract: a non-null origin is the TRUE
-// source column; anything the engine can't attribute reports null (fail closed).
+// Read-label provenance via SQLite column-origin metadata, on a read-only
+// connection opened exactly as the ReadConnectionPool does. The soundness
+// contract under aliasing / spoofing / expressions / joins / UNION / CTE / view:
+// a non-null origin is the TRUE source column; anything the engine can't
+// attribute reports null (the caller fails closed).
 
 import { assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
@@ -136,17 +136,6 @@ Deno.test({
     sound("WITH c AS (SELECT from_email FROM emails) SELECT from_email FROM c");
     sound("SELECT from_email FROM v_emails");
     sound("SELECT from_email FROM (SELECT from_email FROM emails)");
-    // Log what they actually resolve to (informs the design's null-origin rate).
-    for (
-      const sql of [
-        "SELECT from_email FROM emails UNION SELECT from_email FROM people",
-        "WITH c AS (SELECT from_email FROM emails) SELECT from_email FROM c",
-        "SELECT from_email FROM v_emails",
-        "SELECT from_email FROM (SELECT from_email FROM emails)",
-      ]
-    ) {
-      console.log("origin:", JSON.stringify(origins(ro, sql)), "<=", sql);
-    }
   } finally {
     ro.close();
     Deno.removeSync(path);

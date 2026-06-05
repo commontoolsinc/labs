@@ -177,7 +177,13 @@ export function labelResultSchema(
     }
     const ifc = tables?.[c.table]?.properties?.[c.column]?.ifc;
     if (ifc && typeof ifc === "object" && Object.keys(ifc).length > 0) {
-      itemProps[c.output] = { ifc };
+      // Deep-clone via JSON: the `ifc` read off `db.tables` is part of a
+      // deep-frozen cell value exposed through a proxy. Embedding it by
+      // reference makes the schema-policy walk proxy a non-extensible object
+      // ("ownKeys … non-extensible"), and `structuredClone` can't clone the
+      // proxy. `ifc` is plain JSON, so a round-trip yields a fully extensible
+      // copy.
+      itemProps[c.output] = { ifc: JSON.parse(JSON.stringify(ifc)) };
       anyLabeled = true;
     }
   }
@@ -370,7 +376,18 @@ export function sqliteQuery(
             }
             labelSchema = schema;
           }
-          await runtime.editWithRetry((wtx) => {
+          // On the labeled path, write the rows UNDER the label schema: the
+          // schema-aware write is what attaches the per-path `ifc` to each row's
+          // entity doc (recording the policy alone does not). The provider rows
+          // are deep-frozen and reach this write through a proxy; the
+          // schema-aware diff would trip "ownKeys … non-extensible", so write a
+          // plain extensible JSON copy. `editWithRetry` runs
+          // `prepareTxForCommit`, so the CFC-relevant labeled write commits and
+          // the label persists.
+          const resultRows = labelSchema
+            ? JSON.parse(JSON.stringify(rows))
+            : rows;
+          const wrote = await runtime.editWithRetry((wtx) => {
             // Stale-writeback guard: a newer query (different inputs -> different
             // hash) may have superseded this one while the RPC was in flight.
             // Only write back if the result cell still records THIS request.
@@ -380,10 +397,22 @@ export function sqliteQuery(
               : result.withTx(wtx);
             target.set({
               pending: false,
-              result: rows,
+              result: resultRows,
               requestHash: hash,
             });
           });
+          // Surface a write-back failure as `q.error` rather than leaving the
+          // query stuck `pending` (editWithRetry returns the error, not throws).
+          if (wrote.error) {
+            await runtime.editWithRetry((wtx) => {
+              if (result.withTx(wtx).get()?.requestHash !== hash) return;
+              result.withTx(wtx).set({
+                pending: false,
+                error: wrote.error?.message ?? "sqlite: result write failed",
+                requestHash: hash,
+              });
+            });
+          }
         } catch (error) {
           await runtime.editWithRetry((wtx) => {
             if (result.withTx(wtx).get()?.requestHash !== hash) return;
