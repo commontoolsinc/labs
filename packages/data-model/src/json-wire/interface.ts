@@ -60,7 +60,7 @@ export interface TypeHandler {
    * **Note:** If this is a base class, this will not cause its subclasses to be
    * matched.
    */
-  get classSource(): (() => any) | undefined;
+  get classSource(): ((...args: any[]) => any) | undefined;
 
   /**
    * The unique wire format tag this handler deserializes from, if any.

@@ -20,7 +20,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 export const BytesHandler: TypeHandler = {
   /** @inheritDoc */
   get classSource() {
-    return FabricBytes;
+    // Alas, this project doesn't let us just say the type "arbitrary function,"
+    // and the cast here is the best we can do.
+    return FabricBytes as unknown as ((...args: any[]) => any);
   },
 
   /** @inheritDoc */

@@ -25,7 +25,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 export const EpochNsecHandler: TypeHandler = {
   /** @inheritDoc */
   get classSource() {
-    return FabricEpochNsec;
+    // Alas, this project doesn't let us just say the type "arbitrary function,"
+    // and the cast here is the best we can do.
+    return FabricEpochNsec as unknown as ((...args: any[]) => any);
   },
 
   /** @inheritDoc */

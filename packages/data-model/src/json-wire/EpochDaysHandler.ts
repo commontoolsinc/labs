@@ -26,7 +26,9 @@ import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 export const EpochDaysHandler: TypeHandler = {
   /** @inheritDoc */
   get classSource() {
-    return FabricEpochDays;
+    // Alas, this project doesn't let us just say the type "arbitrary function,"
+    // and the cast here is the best we can do.
+    return FabricEpochDays as unknown as ((...args: any[]) => any);
   },
 
   /** @inheritDoc */

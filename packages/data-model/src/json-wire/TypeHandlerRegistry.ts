@@ -13,7 +13,7 @@ export class TypeHandlerRegistry {
   readonly #tagMap = new Map<string, TypeHandler>();
 
   /** Class -> handler map for O(1) serialization dispatch. */
-  readonly #classMap = new Map<() => any, TypeHandler>();
+  readonly #classMap = new Map<(...args: any[]) => any, TypeHandler>();
 
   /**
    * Registers a handler. Handlers with non-empty tags are indexed for O(1)
@@ -41,7 +41,9 @@ export class TypeHandlerRegistry {
   findSerializer(value: FabricValue): TypeHandler | undefined {
     const constructorFn = value?.constructor;
     if (constructorFn) {
-      const handler = this.#classMap.get(constructorFn);
+      const handler = this.#classMap.get(
+        constructorFn as ((...args: any[]) => any),
+      );
       if (handler && handler.canSerialize(value)) {
         return handler;
       }
