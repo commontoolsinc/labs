@@ -1,8 +1,33 @@
 # Plan — CFC Phase 2: per-column `ifc` for SQLite
 
 > Phase 2 of [06-cfc.md](../06-cfc.md): honor **static per-column `ifc`** on a
-> SQLite table schema. Status: **design** (pre-implementation). Grounded in a
-> ground-truth recon of the runtime CFC machinery (see "What the recon found").
+> SQLite table schema. Status: **implemented** (write-ceiling + read propagation;
+> branch `feat/sqlite-cfc-phase2`). Grounded in a ground-truth recon of the
+> runtime CFC machinery (see "What the recon found").
+
+## Status / as-built
+
+- **Write-ceiling:** done. `db.exec` (`cell.ts`) checks each bound value's
+  confidentiality (read off the value via `cfcLabelViewForCell`) against the
+  target column's `maxConfidentiality`; the target column comes from
+  `parseWriteParamColumns`/`parseWriteTable` (bounded, fail-closed on `UPDATE`
+  with a complex `WHERE`, subqueries, upserts, …). No-op until `ifc` is declared.
+- **Read propagation:** done, but **needs sound column provenance** (an
+  unsoundness `by-name` shared by per-column too — `SELECT body AS x`). The
+  server captures each result column's TRUE origin via SQLite column-metadata
+  FFI (`column-origin.ts`, gated on the db declaring `ifc`); the builtin maps
+  origin → the column's `ifc` (`labelResultSchema`) and writes the rows under
+  that schema so a consumer inherits the label. An unattributable column
+  (expression/literal/compound → `null` origin) **fails closed** (refuses).
+  - **Mechanism note:** the labeled write is CFC-relevant, so the tx must be
+    `prepareTxForCommit`-prepared before commit (`enforce-explicit` mode) or the
+    write is rejected and rolls back. The builtin's `editWithRetry` does this.
+    The per-row label lands on each split-out row entity; downstream reads inherit
+    it via the dereference-trace (not the single-cell `cfcLabelViewForCell`).
+- **Deferred (source A):** tunnelling labels write→read that are NOT described on
+  the db schema (arbitrary captured labels — a value that flowed in confidential
+  and was stored in a plain column). This ships **source B** only: labels derived
+  from the db's declared per-column `ifc`.
 
 ## Scope (honest, given the recon)
 
