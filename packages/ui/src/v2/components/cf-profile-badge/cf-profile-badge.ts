@@ -11,6 +11,11 @@ import {
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import {
+  ownerPrincipalFromLabel,
+  readCfcLabelView,
+} from "../../core/cfc-label.ts";
+import { type IdentitySeal, identitySeal } from "./identity-seal.ts";
 
 /** Verification state of the presented identity. */
 export type ProfileBadgeState = "presented" | "verified" | "unverified";
@@ -56,18 +61,18 @@ export const profileDisplayFromValue = (val: unknown): ProfileBadgeDisplay => {
  *
  * You bind it a *cell* containing a profile (e.g. `$profile={profileCell}`) and
  * it renders the person's avatar + name as system chrome. It runs on the trusted
- * main thread (outside the iframe sandbox where patterns run), which makes it the
- * right home for an *unspoofable* identity treatment — but that property is
- * **deferred, not delivered by v1**: today the seal renders unconditionally and
- * `_state` is always "presented", so a pattern could compose a visually identical
- * badge. v1 just renders avatar + name from the cell.
+ * main thread (outside the iframe sandbox where patterns run), which is what lets
+ * it draw an identity treatment a pattern cannot forge.
  *
- * The deferred pass (see CT-1645 follow-ups) is what earns "unspoofable": read
- * the cell's CFC label via `getCfcLabel()` (the `represents-principal` atom →
- * owner DID), compare it to the authenticated identity, and draw the "seal"
- * effects **only when verified** (gate on `_state === "verified"`). The seam is
- * `_refreshVerification()` + the `_state` field; reuse `authorshipStateForLabel`
- * from `cf-cfc-authorship`.
+ * When the bound cell carries a runtime-attested `represents-principal` CFC label
+ * (read over trusted IPC via `getCfcLabel()`), the badge enters the **verified**
+ * state and draws a *generative identity seal* — a deterministic aura derived
+ * purely from the owner's principal DID (see `identity-seal.ts`). Because the
+ * aura is a pure function of the DID, it is the *same everywhere* that person's
+ * badge appears, so it reads as a recognizable fingerprint of their identity;
+ * and because it is gated on the attestation (which user-space cannot mint), a
+ * pattern can mimic the CSS but not earn the verified seal for a DID it doesn't
+ * control. Without that label the badge stays in the plain "presented" state.
  *
  * @element cf-profile-badge
  * @attr {string} size - avatar size: xs | sm | md | lg | xl (default md)
@@ -119,10 +124,29 @@ export class CFProfileBadge extends BaseElement {
         display: block;
       }
 
-      /* Reserved for the deferred trusted pass: when verification lands, a
-        "verified" badge gets the system seal treatment that user-space CSS
-        cannot reproduce (it depends on runtime-confirmed provenance, not just
-        these styles). */
+      /* The generative aura ring. It is transparent until the badge is verified;
+        when verified, the per-identity conic gradient is supplied inline (it is
+        a pure function of the owner DID), so the ring is unique-but-stable for
+        each person. The thin surface-colored gap separates the ring from the
+        avatar so the colors read cleanly at any size. */
+      .aura {
+        display: inline-flex;
+        flex: 0 0 auto;
+        border-radius: var(--cf-border-radius-full, 9999px);
+        padding: 0;
+      }
+
+      .badge[data-state="verified"] .aura {
+        padding: 2px;
+      }
+
+      .badge[data-state="verified"] .aura cf-avatar {
+        box-shadow: 0 0 0 1.5px var(--cf-theme-color-surface, hsl(0, 0%, 99%));
+        border-radius: var(--cf-border-radius-full, 9999px);
+      }
+
+      /* When verified the seal mark is tinted with the identity's accent color
+        (also DID-derived), supplied inline. */
       .badge[data-state="verified"] .seal {
         color: var(--cf-theme-color-primary, hsl(212, 100%, 47%));
       }
@@ -152,6 +176,10 @@ export class CFProfileBadge extends BaseElement {
 
   @state()
   private accessor _state: ProfileBadgeState = "presented";
+
+  /** Generative identity seal, derived from the owner DID once verified. */
+  @state()
+  private accessor _seal: IdentitySeal | undefined = undefined;
 
   private _unsubscribe?: () => void;
   private _resolveGeneration = 0;
@@ -192,6 +220,8 @@ export class CFProfileBadge extends BaseElement {
     const cell = this.profile;
     if (!cell) {
       this._applyValue(undefined);
+      this._state = "presented";
+      this._seal = undefined;
       return;
     }
 
@@ -234,24 +264,49 @@ export class CFProfileBadge extends BaseElement {
   }
 
   /**
-   * Trust seam — deferred. The unspoofable presentation will read the resolved
-   * cell's CFC label (`represents-principal` → owner DID, via `getCfcLabel()`),
-   * verify it against the authenticated identity, set `_state` accordingly, and
-   * only then draw the seal/effects that user-space cannot reproduce. v1
-   * intentionally renders the unverified "presented" state. Reuse
-   * `authorshipStateForLabel` / the label helpers from cf-cfc-authorship.
+   * Reads the resolved cell's runtime-attested CFC label and, if it carries a
+   * `represents-principal` atom, enters the verified state and derives the
+   * generative seal from the owner principal DID. The seal is a pure function of
+   * the DID, so it is identical wherever this person's badge renders. No
+   * attestation → the badge stays in the plain "presented" state (a pattern can
+   * mimic the chrome but cannot mint the label that unlocks the seal).
    *
-   * LIFECYCLE: this is synchronous today, so it is safe. When the deferred pass
-   * introduces an `await` (label read), it MUST re-check
-   * `generation === this._resolveGeneration && this.isConnected` AFTER the await
-   * before writing `_state`, otherwise it leaks state writes onto detached /
-   * superseded instances (same hazard guarded against in `_resolve`).
+   * LIFECYCLE: this awaits a label read, so after the await it MUST re-check
+   * `generation === this._resolveGeneration && this.isConnected` before writing
+   * `_state`/`_seal` — `disconnectedCallback` bumps the generation, so a badge
+   * detached (or re-bound) mid-read won't leak a state write onto a stale /
+   * detached instance (same hazard guarded in `_resolve`).
    */
-  private _refreshVerification(_cell: CellHandle): void {
-    this._state = "presented";
+  private async _refreshVerification(cell: CellHandle): Promise<void> {
+    const generation = this._resolveGeneration;
+    try {
+      const view = await readCfcLabelView(cell);
+      if (generation !== this._resolveGeneration || !this.isConnected) return;
+      const owner = ownerPrincipalFromLabel(view);
+      if (owner) {
+        this._seal = identitySeal(owner);
+        this._state = "verified";
+      } else {
+        this._seal = undefined;
+        this._state = "presented";
+      }
+    } catch {
+      if (generation !== this._resolveGeneration || !this.isConnected) return;
+      this._seal = undefined;
+      this._state = "presented";
+    }
   }
 
   override render() {
+    const verified = this._state === "verified" && this._seal !== undefined;
+    const auraStyle = verified
+      ? `background: ${this._seal!.ringGradient};`
+      : "";
+    const sealStyle = verified ? `color: ${this._seal!.accent};` : "";
+    const sealTitle = verified
+      ? "Identity verified by the system"
+      : "System-rendered identity";
+
     return html`
       <span
         class="badge"
@@ -259,13 +314,15 @@ export class CFProfileBadge extends BaseElement {
         data-cf-profile-badge
         data-state="${this._state}"
       >
-        <cf-avatar
-          part="avatar"
-          exportparts="avatar"
-          .src="${this._avatar}"
-          .name="${this._name}"
-          size="${this.size}"
-        ></cf-avatar>
+        <span class="aura" part="aura" style="${auraStyle}">
+          <cf-avatar
+            part="avatar"
+            exportparts="avatar"
+            .src="${this._avatar}"
+            .name="${this._name}"
+            size="${this.size}"
+          ></cf-avatar>
+        </span>
         <span class="name" part="name">
           ${this._name ?? "Unknown profile"}
         </span>
@@ -273,7 +330,8 @@ export class CFProfileBadge extends BaseElement {
           class="seal"
           part="seal"
           aria-hidden="true"
-          title="System-rendered identity"
+          title="${sealTitle}"
+          style="${sealStyle}"
         >
           <svg
             viewBox="0 0 24 24"
@@ -284,6 +342,11 @@ export class CFProfileBadge extends BaseElement {
             stroke-linejoin="round"
           >
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            ${verified
+              ? html`
+                <path d="M9 12l2 2 4-4" />
+              `
+              : null}
           </svg>
         </span>
       </span>
