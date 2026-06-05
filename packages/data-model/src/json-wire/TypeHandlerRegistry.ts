@@ -2,6 +2,31 @@ import type { FabricValue } from "../interface.ts";
 import type { TypeHandler } from "./interface.ts";
 
 /**
+ * Gets the constructor function ("class") of the given value, if any, for the
+ * purposes of fast-path lookup.
+ */
+function constructorOf(value: FabricValue): ((...args: any[]) => any) | undefined {
+  if (typeof value === "object") {
+    if (value === null) {
+      return undefined;
+    }
+
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null) {
+      return undefined;
+    }
+
+    return proto.constructor;
+  } else if (value !== undefined) {
+    // This gets the pseudo-constructor of a primitive. **Note:** `function` is
+    // not included in the `FabricValue` union.
+    return value.constructor as (...args: any[]) => any;
+  } else {
+    return undefined;
+  }
+}
+
+/**
  * Registry of type handlers. Provides tag-based lookup for deserialization
  * and linear-scan matching for serialization.
  */
@@ -40,11 +65,9 @@ export class TypeHandlerRegistry {
    * handling for primitives, arrays, and plain objects).
    */
   findSerializer(value: FabricValue): TypeHandler | undefined {
-    const constructorFn = value?.constructor;
+    const constructorFn = constructorOf(value);
     if (constructorFn) {
-      const handler = this.#classMap.get(
-        constructorFn as ((...args: any[]) => any),
-      );
+      const handler = this.#classMap.get(constructorFn);
       if (handler && handler.canSerialize(value)) {
         return handler;
       }
