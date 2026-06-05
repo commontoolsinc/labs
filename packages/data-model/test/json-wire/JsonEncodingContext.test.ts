@@ -9,7 +9,7 @@ import { FabricEpochDays } from "../../src/fabric-primitives/FabricEpochDays.ts"
 import { FabricEpochNsec } from "../../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "../../src/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "../../src/deep-freeze.ts";
-import { BaseReconstructionContext } from "../../src/BaseReconstructionContext.ts";
+import { BaseReconstructionContext } from "../../src/wire-common/BaseReconstructionContext.ts";
 import { shallowFabricFromNativeValue } from "../../src/fabric-value.ts";
 
 /**

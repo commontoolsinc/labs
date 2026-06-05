@@ -18,7 +18,7 @@ import {
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
 import type {
   ClientCommit,
   ConfirmedRead,

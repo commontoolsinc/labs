@@ -7,7 +7,7 @@ import {
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import { FrozenSet } from "../frozen-builtins.ts";
-import { EmptyReconstructionContext } from "../EmptyReconstructionContext.ts";
+import { EmptyReconstructionContext } from "../wire-common/EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 import { errorClassFromType, UNSAFE_KEYS } from "../native-conversion.ts";
 
