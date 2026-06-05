@@ -1,5 +1,14 @@
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
+
+import { FabricValue } from "@/interface.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { FabricCodec, CODEC, ReconstructionContext } from "@/wire-common/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -29,6 +38,10 @@ export class FabricBytes extends BaseFabricPrimitive {
     this.#bytes = new Uint8Array(bytes);
     Object.freeze(this);
   }
+
+  //
+  // Instance members
+  //
 
   /** @inheritDoc */
   get wireTypeTag(): string {
@@ -75,5 +88,50 @@ export class FabricBytes extends BaseFabricPrimitive {
     const toCopy = Math.min(length ?? available, available, target.length);
     target.set(this.#bytes.subarray(offset, offset + toCopy));
     return toCopy;
+  }
+
+  //
+  // Static members
+  //
+
+  static #codec = new (class BytesCodec extends BaseFabricCodec {
+    constructor() {
+      super(WIRE_TYPE_TAGS.Bytes, FabricBytes);
+    }
+
+    /** @inheritDoc */
+    decode(
+      wireTypeTag: string,
+      state: FabricValue,
+      _context: ReconstructionContext,
+    ): FabricBytes | ProblematicValue {
+      if (typeof state !== "string") {
+        return new ProblematicValue(
+          wireTypeTag,
+          state,
+          `Bytes: expected string state, got ${typeof state}`,
+        );
+      }
+      try {
+        const bytes = fromBase64url(state);
+        return new FabricBytes(bytes);
+      } catch {
+        return new ProblematicValue(
+          wireTypeTag,
+          state,
+          `Bytes: invalid base64: ${state}`,
+        );
+      }
+    }
+
+    /** @inheritDoc */
+    encode(value: FabricBytes): FabricValue {
+      return toUnpaddedBase64url(value.#bytes);
+    }
+  })();
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
