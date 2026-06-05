@@ -343,22 +343,42 @@ export function sqliteQuery(
           // OBJECTS so a typed consumer's asCell schema rehydrates them to live
           // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
           const rows = decodeRowLinkColumns(res.rows, linkCols);
-          // CFC read-labeling (per-column static `ifc`): the server returns each
-          // result column's TRUE origin in `res.columns` when the db declares
-          // `ifc` (sound provenance — see `labelResultSchema` / column-origin).
-          // TODO(cfc-phase2): ATTACH the per-field label to the result so a
-          // consumer inherits it. The persistence entry point is still open —
-          // neither `asSchema().set()` nor `recordRelevantSchemaWritePolicyInput`
-          // persisted the per-field label as expected (the value vanished); needs
-          // a focused pass on the runtime's label-write path. Until then, reads of
-          // a labeled db return rows WITHOUT propagation (the provenance + the
-          // schema/refuse logic are in place and tested, ready to wire).
+          // CFC read-labeling (per-column static `ifc`): when the db declares
+          // `ifc`, the server returns each result column's TRUE origin; map it to
+          // the column's confidentiality and write the rows under a schema that
+          // carries it, so a consumer reading `q.result[i].<col>` inherits the
+          // label (re-establishing propagation across the opaque SQLite boundary).
+          // Fail closed (refuse) on an unattributable column. The labeled write
+          // is CFC-relevant; `editWithRetry` runs `prepareTxForCommit` before the
+          // commit, so the label persists.
+          let labelSchema: Record<string, unknown> | undefined;
+          if (res.columns) {
+            const { schema, error } = labelResultSchema(
+              res.columns,
+              db.tables as Parameters<typeof labelResultSchema>[1],
+            );
+            if (error) {
+              await runtime.editWithRetry((wtx) => {
+                if (result.withTx(wtx).get()?.requestHash !== hash) return;
+                result.withTx(wtx).set({
+                  pending: false,
+                  error,
+                  requestHash: hash,
+                });
+              });
+              return;
+            }
+            labelSchema = schema;
+          }
           await runtime.editWithRetry((wtx) => {
             // Stale-writeback guard: a newer query (different inputs -> different
             // hash) may have superseded this one while the RPC was in flight.
             // Only write back if the result cell still records THIS request.
             if (result.withTx(wtx).get()?.requestHash !== hash) return;
-            result.withTx(wtx).set({
+            const target = labelSchema
+              ? result.asSchema(labelSchema).withTx(wtx)
+              : result.withTx(wtx);
+            target.set({
               pending: false,
               result: rows,
               requestHash: hash,

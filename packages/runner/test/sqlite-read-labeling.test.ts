@@ -11,6 +11,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import { labelResultSchema } from "../src/builtins/sqlite-builtins.ts";
+import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
 
 describe("labelResultSchema (pure)", () => {
   const tables = {
@@ -65,6 +67,64 @@ describe("labelResultSchema (pure)", () => {
 
 const signer = await Identity.fromPassphrase("read-labeling test");
 const space = signer.did();
+
+describe("writing rows under the label schema persists per-field confidentiality", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+  });
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("a consumer reading q.result[i].col inherits the column's confidentiality", async () => {
+    const { schema } = labelResultSchema(
+      [{ output: "sender", table: "emails", column: "from_email" }],
+      {
+        emails: {
+          properties: { from_email: { ifc: { confidentiality: ["sec"] } } },
+        },
+      },
+    );
+    expect(schema).toBeDefined();
+
+    // Write as the builtin does (asSchema). The write is CFC-relevant, so the
+    // tx MUST be prepared before commit (the builtin's editWithRetry does this
+    // for free; here we do it explicitly).
+    const tx = runtime.edit();
+    const cell = runtime.getCell(space, "rl-result", undefined, tx);
+    cell.asSchema(schema!).withTx(tx).set({
+      pending: false,
+      result: [{ sender: "a@x.com" }, { sender: "b@x.com" }],
+      requestHash: "h1",
+    });
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const tx2 = runtime.edit();
+    const c = runtime.getCell(space, "rl-result", undefined, tx2).withTx(tx2);
+    // Sibling fields survive (not shaped away by the labeling schema).
+    expect((c.get() as { requestHash: string }).requestHash).toBe("h1");
+    expect((c.get() as { result: unknown[] }).result).toHaveLength(2);
+
+    // Each row's `sender` carries the column confidentiality — a consumer
+    // reading it inherits it.
+    for (const i of [0, 1]) {
+      const rowView = cfcLabelViewForCell(
+        c.key("result").key(i),
+      );
+      const conf = cfcConfidentialityForObservationNode({
+        labelView: rowView,
+        logicalPath: ["sender"],
+      });
+      expect(conf).toContainEqual("sec");
+    }
+    await tx2.commit();
+  });
+});
 
 // Raw wire schema with a labeled column (what the server sees).
 const labeledTables = {
