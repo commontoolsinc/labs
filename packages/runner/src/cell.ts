@@ -844,7 +844,11 @@ export class CellImpl<T extends FabricValue>
     const tx = this.tx;
     const cacheable = tx !== undefined &&
       tx.getCachedReadResult !== undefined &&
-      tx.status().status === "ready";
+      tx.status().status === "ready" &&
+      // Once CFC is prepared, the real read path's `read-after-prepare`
+      // invalidation is load-bearing: bypass the cache so a post-prepare read
+      // still goes through readOrThrow() and invalidates the prepared digest.
+      tx.getCfcState().prepare.status !== "prepared";
     const variant = `${options?.traverseCells ?? false}|${this.synced}`;
     if (cacheable) {
       const cached = tx.getCachedReadResult!(this._link, variant);

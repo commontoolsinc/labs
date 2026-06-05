@@ -456,7 +456,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
     this.assertWritable("writer()");
-    return this.tx.writer(space);
+    const result = this.tx.writer(space);
+    if (result.error) {
+      return result;
+    }
+    // Wrap the raw writer so that writes made through it -- which bypass this
+    // transaction's write*() methods -- still clear the per-tx read cache.
+    // Only write() invalidates; did()/read() pass through untouched, so merely
+    // obtaining a writer does not drop cached reads.
+    const inner = result.ok;
+    const wrapped: ITransactionWriter = {
+      did: () => inner.did(),
+      read: (address, options) => inner.read(address, options),
+      write: (address, value) => {
+        this.invalidateReadResultCache();
+        return inner.write(address, value);
+      },
+    };
+    return { ok: wrapped };
   }
 
   write(
