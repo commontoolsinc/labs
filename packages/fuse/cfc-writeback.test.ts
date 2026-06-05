@@ -23,6 +23,7 @@ import {
   normalizeCfcWritebackXattrName,
   parseCfcMode,
   resolveCfcMode,
+  safeReconcileCfcWritebacks,
   shouldEnableCfcAnnotations,
 } from "./cfc-writeback.ts";
 import {
@@ -141,6 +142,41 @@ Deno.test("CFC mode parsing and annotation defaults match runner modes", () => {
     }),
     true,
   );
+});
+
+Deno.test("safe writeback reconciliation records diagnostics without throwing", () => {
+  const diagnostics: string[] = [];
+  const ok = safeReconcileCfcWritebacks({
+    context: "unit test",
+    reconcile: () => {
+      throw new Error("storage unavailable");
+    },
+    recordDiagnostics: (messages) => diagnostics.push(...messages),
+  });
+
+  assertEquals(ok, false);
+  assertEquals(diagnostics, [
+    "unit test reconciliation failed: storage unavailable",
+  ]);
+});
+
+Deno.test("safe writeback reconciliation preserves normal diagnostics", () => {
+  const diagnostics: string[] = [];
+  const ok = safeReconcileCfcWritebacks({
+    context: "unit test",
+    reconcile: () => ({
+      inspected: 1,
+      rebound: 0,
+      reapplied: 0,
+      finalized: 0,
+      stale: 0,
+      diagnostics: ["existing diagnostic"],
+    }),
+    recordDiagnostics: (messages) => diagnostics.push(...messages),
+  });
+
+  assertEquals(ok, true);
+  assertEquals(diagnostics, ["existing diagnostic"]);
 });
 
 Deno.test("FUSE setattr flag constants and metadata field mapping match low-level ABI", () => {

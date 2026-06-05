@@ -205,6 +205,158 @@ const warmFabricParents = async (
   assertEquals(result.output.exitCode, 0);
 };
 
+const fabricHostPathForSandboxPath = (
+  fabricHostPath: string,
+  sandboxPath: string,
+): string =>
+  join(fabricHostPath, ...sandboxPath.slice("/fabric/".length).split("/"));
+
+type BoundedCommandStatus =
+  | { kind: "completed"; status: Deno.CommandStatus }
+  | { kind: "timed-out"; killError?: string };
+
+const commandStatusWithTimeout = async (
+  command: Deno.Command,
+  timeoutMs: number,
+): Promise<BoundedCommandStatus> => {
+  const child = command.spawn();
+  const statusPromise = child.status;
+  let timeoutId: number | undefined;
+  const timeoutPromise = new Promise<"timed-out">((resolve) => {
+    timeoutId = setTimeout(() => resolve("timed-out"), timeoutMs);
+  });
+  const result = await Promise.race([statusPromise, timeoutPromise]);
+  if (timeoutId !== undefined) clearTimeout(timeoutId);
+  if (result !== "timed-out") return { kind: "completed", status: result };
+
+  const describeError = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+  const appendError = (
+    existing: string | undefined,
+    label: string,
+    error: unknown,
+  ): string => {
+    const message = `${label}: ${describeError(error)}`;
+    return existing === undefined ? message : `${existing}; ${message}`;
+  };
+
+  let killError: string | undefined;
+  try {
+    child.kill("SIGKILL");
+  } catch (error) {
+    killError = appendError(killError, "SIGKILL failed", error);
+  }
+
+  let cleanupTimeoutId: number | undefined;
+  const cleanupTimeoutPromise = new Promise<"cleanup-timed-out">((resolve) => {
+    cleanupTimeoutId = setTimeout(() => resolve("cleanup-timed-out"), 1_000);
+  });
+  const cleanupResult = await Promise.race([
+    statusPromise.then(() => "closed" as const).catch((error) => ({
+      kind: "status-error" as const,
+      message: describeError(error),
+    })),
+    cleanupTimeoutPromise,
+  ]);
+  if (cleanupTimeoutId !== undefined) clearTimeout(cleanupTimeoutId);
+
+  if (cleanupResult === "cleanup-timed-out") {
+    child.unref();
+  } else if (cleanupResult !== "closed") {
+    killError = killError === undefined
+      ? `child status failed after timeout: ${cleanupResult.message}`
+      : `${killError}; child status failed after timeout: ${cleanupResult.message}`;
+  }
+
+  return killError === undefined
+    ? { kind: "timed-out" }
+    : { kind: "timed-out", killError };
+};
+
+const waitForFabricHostCfcSubject = async (
+  fabricHostPath: string,
+  sandboxPath: string,
+  subject: string,
+): Promise<void> => {
+  const hostPath = fabricHostPathForSandboxPath(fabricHostPath, sandboxPath);
+  const lastValuePath = await Deno.makeTempFile({
+    prefix: "cf-harness-cfc-xattr-",
+    suffix: ".txt",
+  });
+  const script = [
+    "import os, sys, time",
+    "path, subject, last_value_path = sys.argv[1:4]",
+    "last = ''",
+    "def record(value):",
+    "    with open(last_value_path, 'w', encoding='utf-8') as out:",
+    "        out.write(value)",
+    "for _ in range(50):",
+    "    try:",
+    "        last = os.getxattr(path, 'user.commonfabric.cfc.contentLabel').decode()",
+    "    except OSError as exc:",
+    "        last = f'{type(exc).__name__}: {exc}'",
+    "    if subject in last:",
+    "        record(last)",
+    "        raise SystemExit(0)",
+    "    time.sleep(0.1)",
+    "record(last)",
+    "raise SystemExit(1)",
+  ].join("\n");
+  try {
+    const result = await commandStatusWithTimeout(
+      new Deno.Command("python3", {
+        args: ["-c", script, hostPath, subject, lastValuePath],
+        stdout: "null",
+        stderr: "null",
+      }),
+      10_000,
+    );
+    if (result.kind === "timed-out") {
+      throw new Error(
+        `timed out waiting for host CFC xattr subprocess for ${hostPath}; ` +
+          `getxattr may be blocked by the live FUSE mount${
+            result.killError === undefined ? "" : `; ${result.killError}`
+          }`,
+      );
+    }
+    if (!result.status.success) {
+      let lastValue = "";
+      try {
+        lastValue = (await Deno.readTextFile(lastValuePath)).trim();
+      } catch (error) {
+        lastValue = error instanceof Error ? error.message : String(error);
+      }
+      throw new Error(
+        `timed out waiting for ${subject} in CFC xattr for ${hostPath}: ${lastValue}`,
+      );
+    }
+  } finally {
+    await Deno.remove(lastValuePath).catch((error) => {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    });
+  }
+};
+
+Deno.test({
+  name:
+    "cf-harness integration helper: command timeout returns before child exits",
+  permissions: { run: true },
+  async fn() {
+    const result = await commandStatusWithTimeout(
+      new Deno.Command(
+        Deno.execPath(),
+        {
+          args: ["eval", "await new Promise(() => {})"],
+          stdout: "null",
+          stderr: "null",
+        },
+      ),
+      20,
+    );
+    assertEquals(result.kind, "timed-out");
+  },
+});
+
 const invocationInputLabels = (): CfcLabelView => ({
   version: 1,
   entries: [{
@@ -983,9 +1135,7 @@ Deno.test({
         const result = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            `IFS= read -r payload < ${
-              singleQuoteShell(fabricReadPath)
-            } || [ -n "$payload" ]`,
+            `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
             `printf ${
               singleQuoteShell(hostPayload)
             } > /workspace/fuse-read-host.txt`,
@@ -1033,9 +1183,10 @@ Deno.test({
     );
     await withFabricHarness(
       "integration-input-label-fabric-write",
-      async (engine) => {
+      async (engine, _workspaceHostPath, fabricHostPath) => {
         const fabricPayload =
           "from invocation label through FUSE: integration-input-label-fabric-write\n";
+        const normalizedFabricPayload = fabricPayload.trimEnd();
         await warmFabricParents(engine, fabricWritePath);
         const writeResult = await engine.invokeBuiltinTool("bash", {
           command: [
@@ -1056,6 +1207,11 @@ Deno.test({
           INVOCATION_TAINT_SUBJECT,
         );
 
+        await waitForFabricHostCfcSubject(
+          fabricHostPath,
+          fabricWritePath,
+          INVOCATION_TAINT_SUBJECT,
+        );
         await warmFabricParents(engine, fabricWritePath);
         const readBack = await engine.invokeBuiltinTool("bash", {
           command: [
@@ -1064,7 +1220,7 @@ Deno.test({
           ].join("\n"),
         });
         assertEquals(readBack.output.exitCode, 0);
-        assertStringIncludes(readBack.output.stdout, fabricPayload);
+        assertStringIncludes(readBack.output.stdout, normalizedFabricPayload);
         assert(readBack.output.cfcResult !== undefined);
         assertEquals(readBack.output.cfcResult.stdout.policy, "opaque");
         assertLabelIncludesSubject(
@@ -1093,9 +1249,10 @@ Deno.test({
     );
     await withFabricHarness(
       "integration-input-label-fabric-join-write",
-      async (engine) => {
+      async (engine, _workspaceHostPath, fabricHostPath) => {
         const joinedPayload =
           "joined invocation and fabric labels: integration-input-label-fabric-join-write\n";
+        const normalizedJoinedPayload = joinedPayload.trimEnd();
         await warmFabricParents(engine, fabricReadPath);
         await warmFabricParents(engine, fabricWritePath);
         const joinedWrite = await engine.invokeBuiltinTool("bash", {
@@ -1122,6 +1279,11 @@ Deno.test({
           FABRIC_CFC_LABEL_SUBJECT,
         );
 
+        await waitForFabricHostCfcSubject(
+          fabricHostPath,
+          fabricWritePath,
+          INVOCATION_TAINT_SUBJECT,
+        );
         await warmFabricParents(engine, fabricWritePath);
         const readBack = await engine.invokeBuiltinTool("bash", {
           command: [
@@ -1130,7 +1292,7 @@ Deno.test({
           ].join("\n"),
         });
         assertEquals(readBack.output.exitCode, 0);
-        assertStringIncludes(readBack.output.stdout, joinedPayload);
+        assertStringIncludes(readBack.output.stdout, normalizedJoinedPayload);
         assert(readBack.output.cfcResult !== undefined);
         assertEquals(readBack.output.cfcResult.stdout.policy, "opaque");
         assertLabelIncludesSubject(
