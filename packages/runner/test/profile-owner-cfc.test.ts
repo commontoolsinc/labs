@@ -35,18 +35,37 @@ const ownerProtectedString = (ownerDid: string): JSONSchema => ({
   },
 });
 
-const ownerProtectedElements = (ownerDid: string): JSONSchema => ({
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      tag: { type: "string" },
-      userTags: {
-        type: "array",
-        items: { type: "string" },
-      },
+// Mirrors the real `ProfileElementSchema` lowering in
+// packages/patterns/system/profile-home.tsx: each element is a cross-pattern
+// link (`asCell`) — ProfileCatalogCard(...).for(tag) — whose own schema carries
+// a CFC integrity atom so CFC can derive a label for a freshly-created element
+// link on commit (the link source schema becomes `LinkWritePolicyInput.linkSchema`,
+// read by `derivePersistedLinkLabel` via `rootLabelFromSchema`). Pass
+// `withElementLinkLabel: false` to drop that atom and reproduce the original
+// "missing link source metadata ... at /elements/0" failure.
+const PROFILE_ELEMENT_INTEGRITY = "profile-element";
+
+const elementLinkSchema = (withElementLinkLabel = true): JSONSchema => ({
+  asCell: ["cell"],
+  type: "object",
+  ...(withElementLinkLabel
+    ? { ifc: { addIntegrity: [PROFILE_ELEMENT_INTEGRITY] } }
+    : {}),
+  properties: {
+    tag: { type: "string" },
+    userTags: {
+      type: "array",
+      items: { type: "string" },
     },
   },
+});
+
+const ownerProtectedElements = (
+  ownerDid: string,
+  withElementLinkLabel = true,
+): JSONSchema => ({
+  type: "array",
+  items: elementLinkSchema(withElementLinkLabel),
   ifc: {
     ownerPrincipal: ownerDid,
     addIntegrity: [ownerAtom(ownerDid)],
@@ -60,12 +79,15 @@ const ownerProtectedElements = (ownerDid: string): JSONSchema => ({
   },
 });
 
-const profileSchema = (ownerDid: string): JSONSchema => ({
+const profileSchema = (
+  ownerDid: string,
+  withElementLinkLabel = true,
+): JSONSchema => ({
   type: "object",
   properties: {
     name: ownerProtectedString(ownerDid),
     avatar: ownerProtectedString(ownerDid),
-    elements: ownerProtectedElements(ownerDid),
+    elements: ownerProtectedElements(ownerDid, withElementLinkLabel),
   },
   required: ["name", "avatar", "elements"],
 });
@@ -205,6 +227,127 @@ describe("profile owner CFC policy", () => {
         label: { integrity: [ownerAtom(alice.did())] },
       });
       verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("accepts a trusted element link written into the owner-protected elements array", async () => {
+    // Regression for the profile-card save failure:
+    //   StorageTransactionAborted: CFC enforcement rejected commit: relevant
+    //   transaction was not prepared: missing link source metadata for
+    //   of:... at /elements/0
+    // The addElement/addCatalogElement/addUrlElement handlers push a
+    // cross-pattern link (ProfileCatalogCard(...).for(tag)) into the
+    // owner-protected `elements` array. Under enforce-explicit, CFC must derive
+    // a label for that freshly-created link on commit. With the element link's
+    // own schema carrying `ifc.addIntegrity` (see ProfileElementSchema in
+    // profile-home.tsx), the link write carries a non-empty `linkSchema` whose
+    // root label `derivePersistedLinkLabel` resolves via `rootLabelFromSchema`
+    // (hatch 3), so the legitimate write is accepted.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      // Seed the profile with an empty elements array so its owner-protected
+      // CFC metadata is stored — this makes the later /elements/0 link write a
+      // CFC-relevant link write that must be labeled.
+      const seed = runtime.edit();
+      setTrustedProfileWriter(seed, alice.did());
+      const seeded = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-element-link",
+        profileSchema(alice.did()),
+        seed,
+      );
+      seeded.set({ name: "Ada", avatar: "ada.png", elements: [] });
+      const target = seeded.getAsNormalizedFullLink();
+      recordTrustedEdit(seed, target, ["name"]);
+      recordTrustedEdit(seed, target, ["avatar"]);
+      recordTrustedEdit(seed, target, ["elements"]);
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      setTrustedProfileWriter(tx, alice.did());
+      // A freshly-created element link cell — like the card pattern cell
+      // produced by ProfileCatalogCard(...).for(tag). Its schema carries the
+      // element integrity atom, exactly as the lowered ProfileElementSchema
+      // does, so the link write is labeled.
+      const elementLink = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-element-target",
+        elementLinkSchema(/* withElementLinkLabel */ true),
+        tx,
+      );
+      elementLink.set({ tag: "profile-card", userTags: [] } as never);
+
+      const cell = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-element-link",
+        profileSchema(alice.did()),
+        tx,
+      );
+      cell.key("elements").set([elementLink] as never);
+      recordTrustedEdit(tx, target, ["elements"]);
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects the same element link write when the element link carries no integrity label", async () => {
+    // Negative twin: identical trusted element-link write, but the element
+    // link's schema omits `ifc.addIntegrity`. With no stored source metadata, no
+    // pending source schema, no link-schema label, and no carried label, CFC
+    // cannot derive a label for the link and aborts the commit with the exact
+    // "missing link source metadata ... at /elements/0" failure the user hit.
+    // This locks the regression: the integrity atom on the element link is
+    // load-bearing.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      setTrustedProfileWriter(seed, alice.did());
+      const seeded = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-element-link-nolabel",
+        profileSchema(alice.did(), /* withElementLinkLabel */ false),
+        seed,
+      );
+      seeded.set({ name: "Ada", avatar: "ada.png", elements: [] });
+      const target = seeded.getAsNormalizedFullLink();
+      recordTrustedEdit(seed, target, ["name"]);
+      recordTrustedEdit(seed, target, ["avatar"]);
+      recordTrustedEdit(seed, target, ["elements"]);
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      setTrustedProfileWriter(tx, alice.did());
+      const elementLink = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-element-target-nolabel",
+        elementLinkSchema(/* withElementLinkLabel */ false),
+        tx,
+      );
+      elementLink.set({ tag: "profile-card", userTags: [] } as never);
+
+      const cell = runtime.getCell(
+        alice.did(),
+        "profile-owner-cfc-element-link-nolabel",
+        profileSchema(alice.did(), /* withElementLinkLabel */ false),
+        tx,
+      );
+      cell.key("elements").set([elementLink] as never);
+      recordTrustedEdit(tx, target, ["elements"]);
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("missing link source metadata");
     } finally {
       await runtime.dispose();
       await storageManager.close();

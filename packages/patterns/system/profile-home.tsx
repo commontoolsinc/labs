@@ -1,4 +1,5 @@
 import {
+  type Cell,
   Cfc,
   computed,
   equals,
@@ -34,11 +35,45 @@ type ProfileElementCell = {
   [NAME]?: string;
 };
 
-// NOTE(CT-1628): `cell: any` here/below and the `(Pattern(...) as any).for(...)`
+// NOTE(CT-1628): `cell: any` here and the `(Pattern(...) as any).for(...)`
 // casts later in this file are required until the CFC wrapper / pattern-factory
 // types expose a typed cell ref and `.for()`. Tracked for a proper type fix.
+// The runtime CFC schema for `cell` is supplied separately via
+// `ProfileElementSchema` below; this value type keeps `cell: any` so the
+// handler-state plumbing composes.
 export type ProfileElement = {
   cell: any;
+  tag: string;
+  userTags: readonly string[];
+  title?: string;
+  source?: "catalog" | "url";
+};
+
+// The element link is a cross-pattern link (ProfileCatalogCard(...).for(tag) /
+// UrlPatternReference(...).for(tag)) pushed into the owner-protected `elements`
+// array. Under `enforce-explicit`, CFC must derive a label for that link on
+// commit; for a freshly-created link the only available source is the link's
+// own schema (CFC `derivePersistedLinkLabel` hatch 3 —
+// `rootLabelFromSchema(tx, input.linkSchema)`). We carry a CFC integrity atom on
+// the cell ref so the generated runtime schema's root label is non-empty and the
+// legitimate element write is accepted — mirroring `TrustedProfileLink`'s
+// `addIntegrity: ["profile-link"]` in profile-create.tsx. Without it the commit
+// fails with "missing link source metadata ... at /elements/0".
+//
+// `ProfileElementSchema` mirrors `ProfileElement` but types `cell` so the schema
+// generator emits `asCell` + `ifc.addIntegrity` on the element's `cell` field.
+// It drives only the `elements` schema; the runtime value plumbing keeps
+// `cell: any` via `ProfileElement` because `Cfc<Cell<...>>` does not compose with
+// the handler-state value shape (the root cause `cell: any` exists for, CT-1628).
+export const PROFILE_ELEMENT_INTEGRITY = "profile-element";
+
+type ProfileElementCellRef = Cfc<
+  Cell<ProfileElementCell>,
+  { addIntegrity: [typeof PROFILE_ELEMENT_INTEGRITY] }
+>;
+
+export type ProfileElementSchema = {
+  cell: ProfileElementCellRef;
   tag: string;
   userTags: readonly string[];
   title?: string;
@@ -76,7 +111,10 @@ export type ProfileHomeOutput = {
   [UI]: unknown;
   name: OwnerProtectedProfileWrite<string, typeof setName>;
   avatar: OwnerProtectedProfileWrite<string, typeof setAvatar>;
-  elements: OwnerProtectedProfileWrite<ProfileElement[], typeof addElement>;
+  elements: OwnerProtectedProfileWrite<
+    ProfileElementSchema[],
+    typeof addElement
+  >;
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   addElement: Stream<AddProfileElementEvent>;
@@ -247,7 +285,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");
     const elements = new Writable<
-      OwnerProtectedProfileWrite<ProfileElement[], typeof addElement>
+      OwnerProtectedProfileWrite<ProfileElementSchema[], typeof addElement>
     >([]).for("elements");
     const patternUrl = new Writable("").for("patternUrl");
     const elementTitle = new Writable("").for("elementTitle");
