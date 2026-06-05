@@ -13,7 +13,10 @@ import {
 } from "../../ast/mod.ts";
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
-import { typeToTypeNodeWithRegistry } from "../../ast/type-building.ts";
+import {
+  qualifyCommonFabricTypeRefs,
+  typeToTypeNodeWithRegistry,
+} from "../../ast/type-building.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -457,8 +460,29 @@ export function transformLiftAppliedCall(
   let hasTypeParameter = false;
 
   if (callback.type) {
-    // Explicit return type annotation
-    resultTypeNode = callback.type;
+    // Explicit return type annotation. This may be a synthesized annotation
+    // attached upstream (pos < 0) that still carries raw
+    // `import("commonfabric").X` refs, so normalize it to `__cfHelpers.X`
+    // before it flows into the emitted lift type argument. The normalizer's
+    // ImportTypeNode branch is purely syntactic, so it works without a paired
+    // Type; pass the registered Type when available for nested bare refs.
+    const registeredResultType = options.state?.typeRegistry?.get(callback.type);
+    resultTypeNode = qualifyCommonFabricTypeRefs(
+      callback.type,
+      registeredResultType,
+      { checker, factory, typeRegistry: options.state?.typeRegistry },
+    );
+    // qualifyCommonFabricTypeRefs returns a fresh node when it rewrites, but
+    // does not carry the registry association forward. Re-register the new
+    // node with the original annotation's Type so the SchemaGenerator can
+    // still recover it (otherwise it falls back to the permissive `true`
+    // schema instead of the precise JSXElement/vnode schema).
+    if (
+      registeredResultType && resultTypeNode !== callback.type &&
+      options.state?.typeRegistry
+    ) {
+      options.state.typeRegistry.set(resultTypeNode, registeredResultType);
+    }
   } else if (signature) {
     // Infer from callback signature
     resultType = signature.getReturnType();

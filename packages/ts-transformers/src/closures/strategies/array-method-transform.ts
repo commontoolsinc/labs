@@ -6,6 +6,7 @@ import {
   getTypeAtLocationWithFallback,
   registerSyntheticCallType,
 } from "../../ast/mod.ts";
+import { typeToTypeNodeWithRegistry } from "../../ast/type-building.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
@@ -222,16 +223,19 @@ function createPatternCallWithParams(
       const isTypeParam = (resultType.flags & ts.TypeFlags.TypeParameter) !== 0;
 
       if (!isTypeParam) {
-        resultTypeNode = checker.typeToTypeNode(
+        // Convert via the canonical chokepoint so commonfabric refs in the
+        // result type normalize to `__cfHelpers.X` (otherwise the emitted
+        // pattern<…, Out> second type arg prints `import("commonfabric").X`).
+        // It also registers the result Type for downstream schema generation.
+        resultTypeNode = typeToTypeNodeWithRegistry(
           resultType,
-          context.sourceFile,
-          ts.NodeBuilderFlags.NoTruncation |
-            ts.NodeBuilderFlags.UseStructuralFallback,
+          {
+            checker,
+            factory,
+            sourceFile: context.sourceFile,
+          },
+          typeRegistry,
         );
-
-        if (resultTypeNode && typeRegistry) {
-          typeRegistry.set(resultTypeNode, resultType);
-        }
       }
     }
   }
