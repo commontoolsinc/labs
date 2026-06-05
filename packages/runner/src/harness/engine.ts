@@ -742,10 +742,20 @@ export class Engine extends EventTarget implements Harness {
       // for sub-pattern resolution.
       const exportMap: Record<string, Exports> = {};
       const exportsByValue = new Map<unknown, RuntimeProgram>();
+      // Per-module namespaces keyed by content identity (stripped from the
+      // `cf:module/<identity>` specifier) for the in-memory identity cache.
+      const exportsByIdentity = new Map<string, Exports>();
+      const MODULE_SPECIFIER_PREFIX = "cf:module/";
       for (const [path, specifier] of graph.specifierByPath) {
         const namespace = loaded.importNow(specifier) as Exports;
         const fileName = ctx.fileNameForPath(path);
         exportMap[fileName] = namespace;
+        if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
+          exportsByIdentity.set(
+            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
+            namespace,
+          );
+        }
         for (const [exportName, value] of Object.entries(namespace)) {
           // Only object/function exports are sub-pattern candidates. Skip the
           // `__esModule` flag and primitives, which would otherwise collide in
@@ -767,7 +777,7 @@ export class Engine extends EventTarget implements Harness {
       this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
-      return { main, exportMap, loadId };
+      return { main, exportMap, loadId, exportsByIdentity };
     } finally {
       logger.timeEnd("evaluateRecordGraph");
     }
