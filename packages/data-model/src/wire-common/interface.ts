@@ -52,21 +52,25 @@ export interface FabricCodec {
   canEncode(value: FabricValue): boolean;
 
   /**
+   * Decodes a value from the given essential state, which is (alleged / supposed)
+   * to be a value that was produced by an earlier call to {@link #encode} on
+   * a compatible class to this one. The result is expected to be a _shallow_
+   * decoding. The codec system handles recursively converting `state` contents
+   * as necessary.
+   *
+   * The given `wireTypeTag` is what was associated with the given `state` and
+   * does not necessarily correspond to {@link #wireTypeTag} (depending on how
+   * an instance of this class got hooked up).
+   */
+  decode(state: FabricValue, wireTypeTag: string): FabricValue;
+
+  /**
    * Encodes the given value, returning its essential state. This is only ever
    * called after {@link #canEncode} has confirmed that `value` is encodable by
    * this instance. The result is expected to be a _shallow_ encoding. The codec
    * system handles recursion as necessary.
    */
   encode(value: FabricValue): FabricValue;
-
-  /**
-   * Decodes a value from the given essential state, which is (alleged / supposed)
-   * to be a value that was produced by an earlier call to {@link #encode} on
-   * a compatible class to this one. The result is expected to be a _shallow_
-   * decoding. The codec system handles recursively converting `state` contents
-   * as necessary.
-   */
-  decode(state: FabricValue): FabricValue;
 }
 
 /**

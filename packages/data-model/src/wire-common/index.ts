@@ -12,6 +12,7 @@ export {
 
 export { WIRE_META_TAGS } from "./wire-meta-tags.ts";
 export { WIRE_TYPE_TAGS } from "./wire-type-tags.ts";
+export { BaseFabricCodec } from "./BaseFabricCodec.ts";
 export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 export {
   EMPTY_RECONSTRUCTION_CONTEXT,
