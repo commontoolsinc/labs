@@ -1,6 +1,6 @@
 import type { FabricValue, ReconstructionContext } from "../interface.ts";
 import { FabricEpochDays } from "../fabric-primitives/FabricEpochDays.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -14,7 +14,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricEpochDays`. Serializes to a flat base64 string encoding
@@ -24,7 +24,7 @@ import { makeProblematic } from "./makeProblematic.ts";
  * See Section 5.3 of the formal spec.
  */
 export const EpochDaysHandler: TypeHandler = {
-  tag: TAGS.EpochDays,
+  tag: WIRE_TYPE_TAGS.EpochDays,
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricEpochDays;
@@ -38,7 +38,7 @@ export const EpochDaysHandler: TypeHandler = {
     const days = (value as FabricEpochDays).value;
     const bytes = bigintToMinimalTwosComplement(days);
     const b64 = toUnpaddedBase64url(bytes);
-    return codec.wrapTag(TAGS.EpochDays, b64 as JsonWireValue);
+    return codec.wrapTag(WIRE_TYPE_TAGS.EpochDays, b64 as JsonWireValue);
   },
 
   deserialize(
@@ -47,8 +47,8 @@ export const EpochDaysHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
-        TAGS.EpochDays,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.EpochDays,
         state,
         `EpochDays: expected string state, got ${typeof state}`,
       );
@@ -58,8 +58,8 @@ export const EpochDaysHandler: TypeHandler = {
       const bigint = bigintFromMinimalTwosComplement(bytes);
       return new FabricEpochDays(bigint) as unknown as FabricValue;
     } catch {
-      return makeProblematic(
-        TAGS.EpochDays,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.EpochDays,
         state,
         `EpochDays: invalid base64: ${state}`,
       );

@@ -15,9 +15,9 @@ import type {
  * Handler for `FabricInstance` values (custom protocol types, including
  * `FabricError` and `ExplicitTagValue` subtypes). Serializes via
  * `[DECONSTRUCT]` and the codec's tag methods. Deserialization is not
- * dispatched via this handler's tag (since each instance type has its own
- * tag like `TAGS.Error`); instead, the deserializer falls back to the class
- * registry for those tags.
+ * dispatched via this handler's tag (since each instance type has its own tag
+ * like `WIRE_TYPE_TAGS.Error`); instead, the deserializer falls back to the
+ * class registry for those tags.
  */
 export const FabricInstanceHandler: TypeHandler = {
   // This tag is not used for deserialization dispatch -- `FabricInstance`
@@ -36,11 +36,11 @@ export const FabricInstanceHandler: TypeHandler = {
   ): JsonWireValue {
     const inst = value as FabricInstance;
 
-    // `ExplicitTagValue` (`UnknownValue`, `ProblematicValue`): use
-    // preserved `.typeTag` and re-serialize their stored state.
+    // For `ExplicitTagValue`, use the preserved original `wireTypeTag` and
+    // `state`.
     if (inst instanceof ExplicitTagValue) {
       const serializedState = recurse(inst.state);
-      return codec.wrapTag(inst.typeTag, serializedState);
+      return codec.wrapTag(inst.wireTypeTag, serializedState);
     }
 
     // General `FabricInstance`: use `[DECONSTRUCT]` and codec for tag.

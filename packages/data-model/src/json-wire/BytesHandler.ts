@@ -1,6 +1,6 @@
 import type { FabricValue, ReconstructionContext } from "../interface.ts";
 import { FabricBytes } from "../fabric-primitives/FabricBytes.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -10,7 +10,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricBytes`. Serializes to a flat base64url string
@@ -18,7 +18,7 @@ import { makeProblematic } from "./makeProblematic.ts";
  * Matches by `instanceof`. Same flat encoding approach as the epoch handlers.
  */
 export const BytesHandler: TypeHandler = {
-  tag: TAGS.Bytes,
+  tag: WIRE_TYPE_TAGS.Bytes,
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricBytes;
@@ -31,7 +31,7 @@ export const BytesHandler: TypeHandler = {
   ): JsonWireValue {
     const fab = value as FabricBytes;
     const b64 = toUnpaddedBase64url(fab.slice());
-    return codec.wrapTag(TAGS.Bytes, b64 as JsonWireValue);
+    return codec.wrapTag(WIRE_TYPE_TAGS.Bytes, b64 as JsonWireValue);
   },
 
   deserialize(
@@ -40,8 +40,8 @@ export const BytesHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
-        TAGS.Bytes,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.Bytes,
         state,
         `Bytes: expected string state, got ${typeof state}`,
       );
@@ -50,8 +50,8 @@ export const BytesHandler: TypeHandler = {
       const bytes = fromBase64url(state);
       return new FabricBytes(bytes) as unknown as FabricValue;
     } catch {
-      return makeProblematic(
-        TAGS.Bytes,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.Bytes,
         state,
         `Bytes: invalid base64: ${state}`,
       );

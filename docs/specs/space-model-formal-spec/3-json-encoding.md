@@ -165,10 +165,9 @@ round-trip correctly.
 // a `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
 // general handler-validation rule below.
 //
-// Whether such values reach this encoder in a given run is gated by the
-// `modernDataModel` flag at the fabric-value conversion gate; see
-// `1-fabric-values.md` Section 4.9. The wire format above is the encoder's
-// contract regardless of how the values arrived.
+// Whether such values reach this encoder depends on the fabric-value
+// conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
+// above is the encoder's contract regardless of how the values arrived.
 
 // Registry-interned symbols (`Symbol.for(key)`).
 // Tag: "Symbol@1"
@@ -187,10 +186,9 @@ round-trip correctly.
 // yields a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
 // per the general handler-validation rule below.
 //
-// Whether a symbol value reaches this encoder in a given run is gated
-// by the `modernDataModel` flag at the fabric-value conversion gate;
-// see `1-fabric-values.md` Section 4.9. The wire format above is the
-// encoder's contract regardless of how the value arrived.
+// Whether a symbol value reaches this encoder depends on the fabric-value
+// conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
+// above is the encoder's contract regardless of how the value arrived.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
@@ -346,7 +344,7 @@ The JSON encoding context's internal `wrapTag()` / `unwrapTag()` methods
 generate and parse `/<Type>@<Version>` keys. The context is also responsible
 for:
 
-- Re-wrapping unknown types using the `typeTag` preserved in
+- Re-wrapping unknown types using the `wireTypeTag` preserved in
   `UnknownValue` and `ExplicitTagValue`.
 - Managing the class registry for deserialization of known `FabricInstance`
   types (e.g., `FabricError`, `FabricMap`, `FabricSet`).

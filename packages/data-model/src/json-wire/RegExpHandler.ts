@@ -1,12 +1,12 @@
 import type { FabricValue, ReconstructionContext } from "../interface.ts";
 import { FabricRegExp } from "../fabric-primitives/FabricRegExp.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricRegExp`. Serializes the essential state
@@ -14,7 +14,7 @@ import { makeProblematic } from "./makeProblematic.ts";
  * `{ "/RegExp@1": { "flags": "<flags>", "flavor": "<flavor>", "source": "<source>" } }`.
  */
 export const RegExpHandler: TypeHandler = {
-  tag: TAGS.RegExp,
+  tag: WIRE_TYPE_TAGS.RegExp,
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricRegExp;
@@ -31,7 +31,7 @@ export const RegExpHandler: TypeHandler = {
       flags: fab.flags,
       flavor: fab.flavor,
     } as FabricValue;
-    return codec.wrapTag(TAGS.RegExp, recurse(state));
+    return codec.wrapTag(WIRE_TYPE_TAGS.RegExp, recurse(state));
   },
 
   deserialize(
@@ -41,8 +41,8 @@ export const RegExpHandler: TypeHandler = {
   ): FabricValue {
     const decoded = recurse(state);
     if (decoded === null || typeof decoded !== "object") {
-      return makeProblematic(
-        TAGS.RegExp,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.RegExp,
         state,
         `RegExp: expected object state, got ${typeof decoded}`,
       );
@@ -54,8 +54,8 @@ export const RegExpHandler: TypeHandler = {
     try {
       return new FabricRegExp(flavor, source, flags) as unknown as FabricValue;
     } catch (e) {
-      return makeProblematic(
-        TAGS.RegExp,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.RegExp,
         state,
         `RegExp: ${e instanceof Error ? e.message : String(e)}`,
       );

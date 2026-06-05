@@ -133,10 +133,9 @@ four special values that JSON cannot represent natively (`-0`, `NaN`,
   at the language level.
 
 > **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity`
-> reach this layer in a given run depends on the `modernDataModel` flag at
-> the fabric-value conversion gate; see `1-fabric-values.md` Section 4.9.
-> The byte-level encoding above is the hasher's contract regardless of how
-> the values arrived.
+> reach this layer depends on the fabric-value conversion gate; see
+> `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
+> hasher's contract regardless of how the values arrived.
 
 ### 4.4 `string`
 
@@ -243,10 +242,9 @@ hashes, while inheriting the short/long string-encoding delegation
 unchanged.
 
 > **Conversion-gate cross-reference.** Whether a symbol value reaches this
-> layer in a given run depends on the `modernDataModel` flag at the
-> fabric-value conversion gate; see `1-fabric-values.md` Section 4.9. The
-> byte-level encoding above is the hasher's contract regardless of how the
-> value arrived.
+> layer depends on the fabric-value conversion gate; see
+> `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
+> hasher's contract regardless of how the value arrived.
 
 ### 4.7 `undefined`
 
@@ -318,8 +316,8 @@ so the two temporal types are always distinguishable.
 ### 4.11 `FabricHash`
 
 ```
-Bytes: TAG_CONTENT_ID  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
-       0x29            <string, §4.4>   <1+ bytes>       <varies>
+Bytes: TAG_HASH  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
+       0x29       <string, §4.4>   <1+ bytes>       <varies>
 ```
 
 `FabricHash` represents a content identifier — a hash with an algorithm
@@ -602,7 +600,7 @@ payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 29  24 04 66 69 64 31  04  DE AD BE EF
 ```
 
-- `TAG_CONTENT_ID` (`0x29`)
+- `TAG_HASH` (`0x29`)
 - Algorithm tag (string, §4.4 direct form): `TAG_STRING` (`0x24`), length 4
   (`0x04`), UTF-8 bytes `66 69 64 31`
 - Hash byte length 4 (`0x04`)

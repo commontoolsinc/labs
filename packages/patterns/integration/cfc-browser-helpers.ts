@@ -436,6 +436,16 @@ export async function waitForRuntimeSynced(
 }
 
 export type SchedulerLoadSummary = {
+  /** Scheduler-state rehydration health on (re)load. */
+  rehydration: {
+    ok: number;
+    missNoSnapshot: number;
+    missActionId: number;
+    missFingerprint: number;
+    skipShouldNotApply: number;
+    fallbackRunNoMatch: number;
+    fallbackRunTimeout: number;
+  };
   graph: {
     nodes: number;
     edges: number;
@@ -480,6 +490,10 @@ export async function collectSchedulerLoadSummary(
         rt?: {
           getLoggerCounts?: () => Promise<{
             timing: Record<string, Record<string, TimingRow>>;
+            counts?: Record<
+              string,
+              Record<string, { debug?: number } | number>
+            >;
           }>;
           getGraphSnapshot?: () => Promise<{
             nodes: GraphNode[];
@@ -494,9 +508,26 @@ export async function collectSchedulerLoadSummary(
     }
     await rt.idle();
 
-    const { timing } = await rt.getLoggerCounts();
+    const { timing, counts } = await rt.getLoggerCounts();
     const graph = await rt.getGraphSnapshot();
     const schedulerTiming = timing["scheduler"] ?? {};
+
+    // Scheduler-state rehydration health on (re)load: how many actions restored
+    // from a persisted observation vs re-ran, and why the misses missed.
+    const schedulerCounts = counts?.["scheduler"] ?? {};
+    const countKey = (key: string): number => {
+      const v = schedulerCounts[key] as { debug?: number } | number | undefined;
+      return typeof v === "number" ? v : (v?.debug ?? 0);
+    };
+    const rehydration = {
+      ok: countKey("rehydrate/ok"),
+      missNoSnapshot: countKey("rehydrate/miss/no-snapshot"),
+      missActionId: countKey("rehydrate/miss/action-id"),
+      missFingerprint: countKey("rehydrate/miss/fingerprint"),
+      skipShouldNotApply: countKey("rehydrate/skip/should-not-apply"),
+      fallbackRunNoMatch: countKey("rehydrate/fallback-run/no-match"),
+      fallbackRunTimeout: countKey("rehydrate/fallback-run/timeout"),
+    };
     const schedulerRunCount = schedulerTiming["scheduler/run"]?.count ?? 0;
     const schedulerRunActionCount =
       schedulerTiming["scheduler/run/action"]?.count ?? 0;
@@ -537,6 +568,7 @@ export async function collectSchedulerLoadSummary(
     const round = (value: number) => Number(value.toFixed(3));
 
     return {
+      rehydration,
       graph: {
         nodes: graph.nodes.length,
         edges: graph.edges.length,

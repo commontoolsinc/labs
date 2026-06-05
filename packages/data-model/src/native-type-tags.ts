@@ -31,8 +31,8 @@ export const NATIVE_TAGS = Object.freeze(
     RegExp: "RegExp",
     EpochNsec: "EpochNsec",
     EpochDays: "EpochDays",
-    ContentHash: "ContentHash",
     HasToJSON: "HasToJSON",
+    Hash: "Hash",
     FabricBytes: "FabricBytes",
     FabricRegExp: "FabricRegExp",
     FabricInstance: "FabricInstance",
@@ -83,14 +83,14 @@ export function tagFromNativeClass(
       return NATIVE_TAGS.Uint8Array;
     case RegExp:
       return NATIVE_TAGS.RegExp;
+    case FabricBytes:
+      return NATIVE_TAGS.FabricBytes;
     case FabricEpochNsec:
       return NATIVE_TAGS.EpochNsec;
     case FabricEpochDays:
       return NATIVE_TAGS.EpochDays;
     case FabricHash:
-      return NATIVE_TAGS.ContentHash;
-    case FabricBytes:
-      return NATIVE_TAGS.FabricBytes;
+      return NATIVE_TAGS.Hash;
     case FabricRegExp:
       return NATIVE_TAGS.FabricRegExp;
 

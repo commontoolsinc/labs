@@ -26,7 +26,7 @@ export type JsonWireValue =
   | number
   | string
   | readonly JsonWireValue[]
-  | { [key: string]: JsonWireValue };
+  | { readonly [key: string]: JsonWireValue };
 
 /**
  * Narrow interface for what type handlers need from the encoding context
@@ -50,7 +50,7 @@ export interface TypeHandlerCodec {
  * See Section 4.5 of the formal spec.
  */
 export interface TypeHandler {
-  /** The wire format tag this handler deserializes from, e.g. `TAGS.Error`. */
+  /** The wire format tag this handler deserializes from. */
   readonly tag: string;
 
   /**
