@@ -12,18 +12,19 @@ import {
   type IncrementalHasher,
   sha256,
 } from "@commonfabric/content-hash";
-import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "./fabric-primitives/FabricHash.ts";
-import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
-import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
-import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
-import { DECONSTRUCT } from "./wire-common/interface.ts";
-import { shallowFabricFromNativeValue } from "./native-conversion.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
+
+import { isDeepFrozen } from "./deep-freeze.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { shallowFabricFromNativeValue } from "./native-conversion.ts";
+import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)

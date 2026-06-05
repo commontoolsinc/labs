@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { valueEqual } from "../src/fabric-value.ts";
+
+import { valueEqual } from "@/fabric-value.ts";
 
 describe("fabric-value", () => {
   describe("valueEqual()", () => {

@@ -1,13 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
   DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
-} from "../../src/interface.ts";
-import { DECONSTRUCT } from "../../src/wire-common/interface.ts";
-import { BaseFabricInstance } from "../../src/fabric-instances/BaseFabricInstance.ts";
+} from "@/interface.ts";
+import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 
 /**
  * Minimal `BaseFabricInstance` subclass used to exercise the template-method

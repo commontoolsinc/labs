@@ -1,19 +1,20 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
-import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
-import { isConvertibleNativeInstance } from "../../src/native-conversion.ts";
+
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   isFabricCompatible,
   shallowFabricFromNativeValue,
-} from "../../src/fabric-value.ts";
+} from "@/fabric-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../../src/native-type-tags.ts";
-import { jsonFromValue, valueFromJson } from "../../src/json-wire/index.ts";
-import { hashOf } from "../../src/value-hash.ts";
+} from "@/native-type-tags.ts";
+import { jsonFromValue, valueFromJson } from "@/json-wire/index.ts";
+import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the

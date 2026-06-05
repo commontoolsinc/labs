@@ -1,14 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
-} from "../../src/interface.ts";
-import { DECONSTRUCT } from "../../src/wire-common/interface.ts";
-import { ProblematicValue } from "../../src/fabric-instances/ProblematicValue.ts";
-import { ExplicitTagValue } from "../../src/fabric-instances/ExplicitTagValue.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
+
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("ProblematicValue", () => {

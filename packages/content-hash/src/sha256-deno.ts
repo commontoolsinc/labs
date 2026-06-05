@@ -3,8 +3,8 @@
  */
 
 import { isDeno } from "@commonfabric/utils/env";
-import type { IncrementalHasher } from "./interface.ts";
-import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
+import type { IncrementalHasher } from "@/interface.ts";
+import { BaseIncrementalHasher } from "@/BaseIncrementalHasher.ts";
 
 // Can't `import` at the top, because then `import`ing this module would fail
 // in a non-Deno environment.

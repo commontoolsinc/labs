@@ -16,15 +16,15 @@
  * a duplicate of `sha256Wasm`'s (same underlying one-shot path).
  */
 
-import { createHasherDeno, sha256Deno } from "../src/sha256-deno.ts";
-import { createHasherNoble, sha256Noble } from "../src/sha256-noble.ts";
+import { createHasherDeno, sha256Deno } from "@/sha256-deno.ts";
+import { createHasherNoble, sha256Noble } from "@/sha256-noble.ts";
 import {
   createHasherWasm,
   createHasherWasmCollecting,
   initWasm,
   sha256Wasm,
-} from "../src/sha256-wasm.ts";
-import type { DigestFn, IncrementalHasher } from "../src/interface.ts";
+} from "@/sha256-wasm.ts";
+import type { DigestFn, IncrementalHasher } from "@/interface.ts";
 import { FIXTURES } from "../test/fixtures.ts";
 
 await initWasm();

@@ -1,5 +1,5 @@
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.

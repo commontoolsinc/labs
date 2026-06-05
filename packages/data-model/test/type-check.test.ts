@@ -1,8 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isFabricValueLayer } from "../src/type-check.ts";
-import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
+
+import { isFabricValueLayer } from "@/type-check.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
 describe("type-check", () => {
   describe("isFabricValueLayer()", () => {

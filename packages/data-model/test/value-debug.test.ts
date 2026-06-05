@@ -1,15 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
-} from "../src/value-debug.ts";
-import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
-import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
+} from "@/value-debug.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricMap } from "@/fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {

@@ -1,4 +1,4 @@
-import type { FabricInstance, FabricValue } from "../interface.ts";
+import type { FabricInstance, FabricValue } from "@/interface.ts";
 
 /**
  * Well-known symbol for deconstructing a fabric object into its essential

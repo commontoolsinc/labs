@@ -1,3 +1,6 @@
+import { isPlainObject } from "@commonfabric/utils/types";
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+
 import {
   DEEP_FREEZE,
   FabricInstance,
@@ -5,8 +8,6 @@ import {
   FabricValue,
   IS_DEEP_FROZEN,
 } from "./interface.ts";
-import { isPlainObject } from "@commonfabric/utils/types";
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 
 /**
  * Cache of confirmed deep-frozen objects.

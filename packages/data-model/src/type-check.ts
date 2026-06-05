@@ -1,5 +1,6 @@
-import { FabricSpecialObject, type FabricValueLayer } from "./interface.ts";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+
+import { FabricSpecialObject, type FabricValueLayer } from "./interface.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting `FabricInstance`

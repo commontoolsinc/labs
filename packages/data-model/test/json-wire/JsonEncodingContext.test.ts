@@ -1,16 +1,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JsonEncodingContext } from "../../src/json-wire/JsonEncodingContext.ts";
-import type { FabricValue } from "../../src/interface.ts";
-import type { JsonWireValue } from "../../src/json-wire/interface.ts";
-import { UnknownValue } from "../../src/fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "../../src/fabric-instances/ProblematicValue.ts";
-import { FabricEpochDays } from "../../src/fabric-primitives/FabricEpochDays.ts";
-import { FabricEpochNsec } from "../../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricError } from "../../src/fabric-instances/FabricError.ts";
-import { isDeepFrozen } from "../../src/deep-freeze.ts";
-import { BaseReconstructionContext } from "../../src/wire-common/BaseReconstructionContext.ts";
-import { shallowFabricFromNativeValue } from "../../src/fabric-value.ts";
+
+import { JsonEncodingContext } from "@/json-wire/JsonEncodingContext.ts";
+import type { FabricValue } from "@/interface.ts";
+import type { JsonWireValue } from "@/json-wire/interface.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { isDeepFrozen } from "@/deep-freeze.ts";
+import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
+import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test

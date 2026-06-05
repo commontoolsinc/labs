@@ -1,8 +1,8 @@
-import { FabricEpochDays } from "./fabric-primitives/FabricEpochDays.ts";
-import { FabricEpochNsec } from "./fabric-primitives/FabricEpochNsec.ts";
-import { FabricHash } from "./fabric-primitives/FabricHash.ts";
-import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
-import { FabricRegExp } from "./fabric-primitives/FabricRegExp.ts";
+import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
 /**

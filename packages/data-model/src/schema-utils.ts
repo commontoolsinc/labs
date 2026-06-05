@@ -9,6 +9,7 @@ import type {
   JSONSchemaTypes,
   SchemaPathSelector,
 } from "@commonfabric/api";
+
 import { deepFreeze } from "./deep-freeze.ts";
 import { cloneIfNecessary, shallowMutableClone } from "./fabric-value.ts";
 import {

@@ -3,6 +3,7 @@
  */
 
 import { isPlainObject } from "@commonfabric/utils/types";
+
 import { FabricInstance, FabricPrimitive } from "./interface.ts";
 
 /**
