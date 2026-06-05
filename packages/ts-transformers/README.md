@@ -83,8 +83,12 @@ env FIXTURE=map-single-capture deno task test
 To see transformed output:
 
 ```bash
-deno task cf check --show-transformed test/fixtures/closures/map-single-capture.input.tsx
+deno task cf check --show-transformed [--no-run] packages/patterns/lunch-poll/main.tsx
 ```
+
+The command must be run on a pattern inside `labs/` for it to actually execute
+the transform (it resolves the pattern against the workspace). Add `--no-run` to
+emit the transformed output without running the pattern.
 
 ### Adding New Transformations
 
