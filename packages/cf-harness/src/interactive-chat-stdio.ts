@@ -46,6 +46,7 @@ export interface RunHarnessInteractiveChatStdioOptions {
   input?: ReadableStream<Uint8Array>;
   output?: WritableStream<Uint8Array>;
   sessionDbPath?: string;
+  maxInMemoryEvents?: number;
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   createService?: (
     onEvent: (event: HarnessChatEventEnvelope) => void | Promise<void>,
@@ -54,10 +55,12 @@ export interface RunHarnessInteractiveChatStdioOptions {
 
 export interface HarnessInteractiveChatStdioCliOptions {
   sessionDbPath?: string;
+  maxInMemoryEvents?: number;
   help: boolean;
 }
 
 const CHAT_SESSION_DB_ENV = "CF_HARNESS_CHAT_SESSION_DB";
+const CHAT_MAX_IN_MEMORY_EVENTS_ENV = "CF_HARNESS_CHAT_MAX_IN_MEMORY_EVENTS";
 
 const invalidRequestResponse = (
   message: string,
@@ -71,11 +74,13 @@ const invalidRequestResponse = (
 const usageText = `Usage: deno run -A src/interactive-chat-stdio.ts [options]
 
 Options:
-  --chat-session-db <path>  Persist chat sessions, turns, and events in SQLite
-  --help                   Print this help text to stderr
+  --chat-session-db <path>             Persist chat sessions, turns, and events in SQLite
+  --chat-max-in-memory-events <count>  Retain at most count events in memory
+  --help                              Print this help text to stderr
 
 Environment:
-  ${CHAT_SESSION_DB_ENV}    Default SQLite chat session DB path
+  ${CHAT_SESSION_DB_ENV}                 Default SQLite chat session DB path
+  ${CHAT_MAX_IN_MEMORY_EVENTS_ENV}       Default in-memory event retention cap
 `;
 
 const nonEmptyOptionValue = (
@@ -88,11 +93,29 @@ const nonEmptyOptionValue = (
   return value;
 };
 
+const parseNonNegativeIntegerOption = (
+  name: string,
+  value: string | undefined,
+): number => {
+  const rawValue = nonEmptyOptionValue(name, value).trim();
+  if (!/^\d+$/.test(rawValue)) {
+    throw new Error(`${name} requires a non-negative integer value`);
+  }
+  return Number(rawValue);
+};
+
 export const parseHarnessInteractiveChatStdioCliOptions = (
   args: readonly string[],
   env: Record<string, string | undefined> = Deno.env.toObject(),
 ): HarnessInteractiveChatStdioCliOptions => {
   let sessionDbPath = env[CHAT_SESSION_DB_ENV];
+  let maxInMemoryEvents = env[CHAT_MAX_IN_MEMORY_EVENTS_ENV] === undefined ||
+      env[CHAT_MAX_IN_MEMORY_EVENTS_ENV]?.trim() === ""
+    ? undefined
+    : parseNonNegativeIntegerOption(
+      CHAT_MAX_IN_MEMORY_EVENTS_ENV,
+      env[CHAT_MAX_IN_MEMORY_EVENTS_ENV],
+    );
   let help = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -112,12 +135,25 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
       );
       continue;
     }
+    if (arg === "--chat-max-in-memory-events") {
+      index += 1;
+      maxInMemoryEvents = parseNonNegativeIntegerOption(arg, args[index]);
+      continue;
+    }
+    if (arg.startsWith("--chat-max-in-memory-events=")) {
+      maxInMemoryEvents = parseNonNegativeIntegerOption(
+        "--chat-max-in-memory-events",
+        arg.slice("--chat-max-in-memory-events=".length),
+      );
+      continue;
+    }
     throw new Error(`unsupported interactive chat stdio argument: ${arg}`);
   }
   return {
     ...(sessionDbPath !== undefined && sessionDbPath.trim() !== ""
       ? { sessionDbPath }
       : {}),
+    ...(maxInMemoryEvents !== undefined ? { maxInMemoryEvents } : {}),
     help,
   };
 };
@@ -488,6 +524,9 @@ export const runHarnessInteractiveChatStdio = async (
             ? { createPromptLoop: options.createPromptLoop }
             : {}),
           ...(sessionStore !== undefined ? { sessionStore } : {}),
+          ...(options.maxInMemoryEvents !== undefined
+            ? { maxInMemoryEvents: options.maxInMemoryEvents }
+            : {}),
         });
         await service.initializeFromStore();
         return service;

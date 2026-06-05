@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 import {
   HARNESS_CHAT_PROTOCOL_VERSION,
@@ -608,6 +613,54 @@ Deno.test("interactive stdio CLI persists sessions across process invocations", 
   }
 });
 
+Deno.test("interactive stdio bounds in-memory event replay when configured", async () => {
+  const output = captureOutputLines();
+  await runHarnessInteractiveChatStdio({
+    maxInMemoryEvents: 0,
+    input: encodeInputLines([
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-start",
+        method: "start_session",
+        params: {
+          sessionId: "session-pruned",
+          workspace: { hostPath: "/workspace" },
+        },
+      }),
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-events",
+        method: "list_events",
+        params: {
+          sessionId: "session-pruned",
+          afterSequence: 0,
+        },
+      }),
+    ]),
+    output: output.output,
+  });
+
+  const envelopes = decodeLines(output.lines());
+  assertEquals(
+    envelopes.filter((envelope) => "event" in envelope).map((envelope) =>
+      "event" in envelope ? envelope.event.kind : undefined
+    ),
+    ["session_started"],
+  );
+  const response = envelopes.find((envelope) =>
+    "ok" in envelope && envelope.requestId === "req-events"
+  );
+  const result = response !== undefined && "ok" in response && response.ok
+    ? response.result as HarnessChatListEventsResult
+    : undefined;
+  assertEquals(result, {
+    events: [],
+    latestSequence: 1,
+  });
+});
+
 Deno.test({
   name:
     "interactive stdio CLI reports invalid SQLite session DB startup failures",
@@ -632,7 +685,7 @@ Deno.test({
   },
 });
 
-Deno.test("interactive stdio CLI parses SQLite session DB options", () => {
+Deno.test("interactive stdio CLI parses runtime options", () => {
   assertEquals(
     parseHarnessInteractiveChatStdioCliOptions([], {
       CF_HARNESS_CHAT_SESSION_DB: "/tmp/chat.sqlite",
@@ -655,14 +708,60 @@ Deno.test("interactive stdio CLI parses SQLite session DB options", () => {
     },
   );
   assertEquals(
+    parseHarnessInteractiveChatStdioCliOptions([], {
+      CF_HARNESS_CHAT_MAX_IN_MEMORY_EVENTS: "3",
+    }),
+    {
+      maxInMemoryEvents: 3,
+      help: false,
+    },
+  );
+  assertEquals(
+    parseHarnessInteractiveChatStdioCliOptions([
+      "--chat-max-in-memory-events",
+      "0",
+    ], {}),
+    {
+      maxInMemoryEvents: 0,
+      help: false,
+    },
+  );
+  assertEquals(
     parseHarnessInteractiveChatStdioCliOptions([
       "--chat-session-db=/tmp/inline.sqlite",
+      "--chat-max-in-memory-events=2",
       "--help",
     ], {}),
     {
       sessionDbPath: "/tmp/inline.sqlite",
+      maxInMemoryEvents: 2,
       help: true,
     },
+  );
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions([
+        "--chat-max-in-memory-events",
+        "-1",
+      ], {}),
+    Error,
+    "--chat-max-in-memory-events requires a non-negative integer value",
+  );
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions([
+        "--chat-max-in-memory-events=1.5",
+      ], {}),
+    Error,
+    "--chat-max-in-memory-events requires a non-negative integer value",
+  );
+  assertThrows(
+    () =>
+      parseHarnessInteractiveChatStdioCliOptions([
+        "--chat-max-in-memory-events",
+      ], {}),
+    Error,
+    "--chat-max-in-memory-events requires a non-empty value",
   );
 });
 
