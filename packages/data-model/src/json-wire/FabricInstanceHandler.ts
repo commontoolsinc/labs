@@ -5,11 +5,7 @@ import {
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
 import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
-import type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
+import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 
 /**
  * Handler for `FabricInstance` values (custom protocol types, including
@@ -43,7 +39,7 @@ export const FabricInstanceHandler: TypeHandler = {
 
   serialize(
     value: FabricValue,
-    codec: TypeHandlerCodec,
+    tagHandler: TagHandler,
     recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
     const inst = value as FabricDeconstructable;
@@ -52,14 +48,14 @@ export const FabricInstanceHandler: TypeHandler = {
     // `state`.
     if (inst instanceof ExplicitTagValue) {
       const serializedState = recurse(inst.state);
-      return codec.wrapTag(inst.wireTypeTag, serializedState);
+      return tagHandler.wrapTag(inst.wireTypeTag, serializedState);
     }
 
     // General `FabricInstance`: use `[DECONSTRUCT]` and codec for tag.
     const state = inst[DECONSTRUCT]();
-    const tag = codec.getTagFor(inst);
+    const tag = tagHandler.getTagFor(inst);
     const serializedState = recurse(state);
-    return codec.wrapTag(tag, serializedState);
+    return tagHandler.wrapTag(tag, serializedState);
   },
 
   deserialize(

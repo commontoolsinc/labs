@@ -11,11 +11,7 @@ import type { FabricValue } from "@/interface.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
+import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
@@ -43,13 +39,13 @@ export const EpochNsecHandler: TypeHandler = {
 
   serialize(
     value: FabricValue,
-    codec: TypeHandlerCodec,
+    tagHandler: TagHandler,
     _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
     const nsec = (value as FabricEpochNsec).value;
     const bytes = bigintToMinimalTwosComplement(nsec);
     const b64 = toUnpaddedBase64url(bytes);
-    return codec.wrapTag(WIRE_TYPE_TAGS.EpochNsec, b64 as JsonWireValue);
+    return tagHandler.wrapTag(WIRE_TYPE_TAGS.EpochNsec, b64 as JsonWireValue);
   },
 
   deserialize(

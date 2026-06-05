@@ -2,11 +2,7 @@ import type { FabricValue } from "@/interface.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
+import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
@@ -31,7 +27,7 @@ export const RegExpHandler: TypeHandler = {
 
   serialize(
     value: FabricValue,
-    codec: TypeHandlerCodec,
+    tagHandler: TagHandler,
     recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
     const fab = value as FabricRegExp;
@@ -40,7 +36,7 @@ export const RegExpHandler: TypeHandler = {
       flags: fab.flags,
       flavor: fab.flavor,
     } as FabricValue;
-    return codec.wrapTag(WIRE_TYPE_TAGS.RegExp, recurse(state));
+    return tagHandler.wrapTag(WIRE_TYPE_TAGS.RegExp, recurse(state));
   },
 
   deserialize(

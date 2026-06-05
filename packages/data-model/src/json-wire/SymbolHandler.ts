@@ -1,11 +1,7 @@
 import type { FabricValue } from "@/interface.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
+import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
@@ -37,12 +33,12 @@ export const SymbolHandler: TypeHandler = {
 
   serialize(
     value: FabricValue,
-    codec: TypeHandlerCodec,
+    tagHandler: TagHandler,
     _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
     // `canSerialize()` already verified the symbol has a registry key.
     const key = Symbol.keyFor(value as symbol)!;
-    return codec.wrapTag(WIRE_TYPE_TAGS.Symbol, key);
+    return tagHandler.wrapTag(WIRE_TYPE_TAGS.Symbol, key);
   },
 
   deserialize(

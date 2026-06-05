@@ -24,7 +24,6 @@ export abstract class BaseFabricCodec implements FabricCodec {
   constructor(
     /** The preferred wire type tag. */
     wireTypeTag: string,
-
     /**
      * The unique class (constructor function), if any, whose _direct_ instances
      * this instance handles.

@@ -14,11 +14,7 @@ export {
 export { JsonEncodingContext } from "./JsonEncodingContext.ts";
 
 // Shared wire-format vocabulary.
-export type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
+export type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 
 // Type handler registry and factory.
 export { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";

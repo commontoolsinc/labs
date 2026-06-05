@@ -36,7 +36,7 @@ export type JsonWireValue =
  * This is NOT a public interface -- it exists to type the `codec` parameter
  * passed to type handlers by the internal tree-walking engine.
  */
-export interface TypeHandlerCodec {
+export interface TagHandler {
   /** Wraps a tag and state into the wire format's tagged representation. */
   wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
   /** Returns the wire format tag for a fabric instance's type. */
@@ -80,7 +80,7 @@ export interface TypeHandler {
    */
   serialize(
     value: FabricValue,
-    codec: TypeHandlerCodec,
+    tagHandler: TagHandler,
     recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue;
 

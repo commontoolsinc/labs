@@ -12,8 +12,8 @@ export const CODEC: unique symbol = Symbol.for("data-model.codec");
 export const DECONSTRUCT: unique symbol = Symbol.for("data-model.deconstruct");
 
 /**
-* Well-known symbol for binding the method
-* `FabricClass[RECONSTRUCT]`.
+ * Well-known symbol for binding the method
+ * `FabricClass[RECONSTRUCT]`.
  */
 export const RECONSTRUCT: unique symbol = Symbol.for("data-model.reconstruct");
 

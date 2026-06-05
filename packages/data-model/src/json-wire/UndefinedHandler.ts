@@ -1,11 +1,7 @@
 import type { FabricValue } from "@/interface.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import type {
-  JsonWireValue,
-  TypeHandler,
-  TypeHandlerCodec,
-} from "./interface.ts";
+import type { JsonWireValue, TagHandler, TypeHandler } from "./interface.ts";
 
 /**
  * Handler for `undefined`. Serializes to `WIRE_TYPE_TAGS.Undefined` tag with
@@ -31,10 +27,10 @@ export const UndefinedHandler: TypeHandler = {
 
   serialize(
     _value: FabricValue,
-    codec: TypeHandlerCodec,
+    tagHandler: TagHandler,
     _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
-    return codec.wrapTag(WIRE_TYPE_TAGS.Undefined, null);
+    return tagHandler.wrapTag(WIRE_TYPE_TAGS.Undefined, null);
   },
 
   deserialize(

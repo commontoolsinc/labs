@@ -11,7 +11,7 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
-import type { JsonWireValue, TypeHandlerCodec } from "./interface.ts";
+import type { JsonWireValue, TagHandler } from "./interface.ts";
 import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
 import {
   BaseFabricInstance,
@@ -106,8 +106,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
    *  throwing. */
   readonly lenient: boolean;
 
-  /** Narrow codec view for type handlers (avoids exposing private methods). */
-  private readonly codec: TypeHandlerCodec;
+  /** Narrow view for tag handlers (avoids exposing private methods). */
+  private readonly tagHandler: TagHandler;
 
   /**
    * Constructs an instance, optionally configured for lenient mode (which
@@ -116,8 +116,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
 
-    // Create a codec view that delegates to our private methods.
-    this.codec = {
+    // Create a tag-handler view that delegates to our private methods.
+    this.tagHandler = {
       wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
       getTagFor: (value: FabricInstance) =>
         BaseFabricInstance.wireTypeTagOf(value),
@@ -283,7 +283,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       const result = handler.serialize(
         value,
-        this.codec,
+        this.tagHandler,
         (v: FabricValue) => this.serialize(v, seen, registry),
       );
 

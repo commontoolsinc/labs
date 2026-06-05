@@ -5,8 +5,8 @@ import { toCompactDebugString } from "@/value-debug.ts";
 import { TypeHandlerRegistry } from "@/json-wire/TypeHandlerRegistry.ts";
 import type {
   JsonWireValue,
+  TagHandler,
   TypeHandler,
-  TypeHandlerCodec,
 } from "@/json-wire/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -45,7 +45,7 @@ class TestTypeHandler implements TypeHandler {
 
   serialize(
     _value: FabricValue,
-    _codec: TypeHandlerCodec,
+    _tagHandler: TagHandler,
     _recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
     throw new Error("Unimplemented.");
