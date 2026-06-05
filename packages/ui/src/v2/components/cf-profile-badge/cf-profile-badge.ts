@@ -124,25 +124,69 @@ export class CFProfileBadge extends BaseElement {
         display: block;
       }
 
-      /* The generative aura ring. It is transparent until the badge is verified;
-        when verified, the per-identity conic gradient is supplied inline (it is
-        a pure function of the owner DID), so the ring is unique-but-stable for
-        each person. The thin surface-colored gap separates the ring from the
-        avatar so the colors read cleanly at any size. */
+      /* The generative aura ring. Transparent until the badge is verified; when
+        verified, a separate aura-ring layer carries the per-identity conic
+        gradient (a pure function of the owner DID) behind the avatar, so the ring
+        is unique-but-stable for each person. Keeping it on its own layer lets it
+        spin on hover without rotating the avatar. */
       .aura {
+        position: relative;
         display: inline-flex;
         flex: 0 0 auto;
         border-radius: var(--cf-border-radius-full, 9999px);
         padding: 0;
       }
 
+      .aura-ring {
+        position: absolute;
+        inset: 0;
+        border-radius: var(--cf-border-radius-full, 9999px);
+        z-index: 0;
+        transform-origin: center;
+      }
+
+      .aura cf-avatar {
+        position: relative;
+        z-index: 1;
+      }
+
       .badge[data-state="verified"] .aura {
-        padding: 2px;
+        padding: 3px;
       }
 
       .badge[data-state="verified"] .aura cf-avatar {
-        box-shadow: 0 0 0 1.5px var(--cf-theme-color-surface, hsl(0, 0%, 99%));
+        box-shadow: 0 0 0 2px var(--cf-theme-color-surface, hsl(0, 0%, 99%));
         border-radius: var(--cf-border-radius-full, 9999px);
+      }
+
+      /* Hovering a verified badge spins the aura and lifts the glow — a small,
+        deliberate "this is special" tell that user-space chrome doesn't get. */
+      .badge[data-state="verified"] .aura:hover .aura-ring {
+        animation: cf-aura-spin 5s linear infinite;
+      }
+
+      .badge[data-state="verified"] .aura:hover {
+        transform: scale(1.04);
+        transition: transform 160ms ease-out;
+      }
+
+      .badge[data-state="verified"] .aura {
+        transition: transform 200ms ease-out;
+      }
+
+      @keyframes cf-aura-spin {
+        to {
+          transform: rotate(1turn);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .badge[data-state="verified"] .aura:hover .aura-ring {
+          animation: none;
+        }
+        .badge[data-state="verified"] .aura:hover {
+          transform: none;
+        }
       }
 
       /* When verified the seal mark is tinted with the identity's accent color
@@ -299,8 +343,13 @@ export class CFProfileBadge extends BaseElement {
 
   override render() {
     const verified = this._state === "verified" && this._seal !== undefined;
-    const auraStyle = verified
-      ? `background: ${this._seal!.ringGradient};`
+    // The aura ring layer carries the DID-derived conic gradient plus a soft glow
+    // in the identity's hue, so the fingerprint reads at badge scale.
+    const hue = this._seal?.hue ?? 0;
+    const ringStyle = verified
+      ? `background: ${
+        this._seal!.ringGradient
+      }; box-shadow: 0 0 0 1px hsl(${hue} 80% 58% / 0.3), 0 0 10px -1px hsl(${hue} 85% 60% / 0.7);`
       : "";
     const sealStyle = verified ? `color: ${this._seal!.accent};` : "";
     const sealTitle = verified
@@ -314,7 +363,12 @@ export class CFProfileBadge extends BaseElement {
         data-cf-profile-badge
         data-state="${this._state}"
       >
-        <span class="aura" part="aura" style="${auraStyle}">
+        <span class="aura" part="aura">
+          ${verified
+            ? html`
+              <span class="aura-ring" part="aura-ring" style="${ringStyle}"> </span>
+            `
+            : null}
           <cf-avatar
             part="avatar"
             exportparts="avatar"

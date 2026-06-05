@@ -67,9 +67,9 @@ export const normalizeDid = (did: string): string => {
   return /^did:/i.test(trimmed) ? "did:" + trimmed.slice(4) : trimmed;
 };
 
-const RING_STOPS = 5;
-const SATURATION = 68;
-const LIGHTNESS = 56;
+const RING_STOPS = 6;
+const SATURATION = 80;
+const LIGHTNESS = 58;
 
 /**
  * Derives the deterministic identity seal for a principal DID. Same input →
