@@ -17,6 +17,15 @@ import { relative } from "@std/path";
 // or add it here WITH a justification (it's genuinely internal-only / is the
 // chokepoint's own implementation). The goal is that "raw typeToTypeNode" is
 // always a reviewed decision, never an accident.
+//
+// NB: both bug classes share THIS producer set. The registry-degradation class
+// can't be caught at the consumer (SchemaGenerator) — by the time a degraded
+// node reaches it, the node has already been rewritten to an `unknown`-bearing
+// form, indistinguishable from an intentional `unknown`. So the producer-side
+// sweep below is the practical guard for the registry class too: migrating an
+// emit-reaching site to the chokepoint closes BOTH the import-leak and the
+// registry-degradation risk at once (the chokepoint normalizes AND registers).
+// Entries that can emit a concrete (non-keyword) type are marked [emit+concrete].
 
 const SRC_ROOT = new URL("../src/", import.meta.url);
 
@@ -26,17 +35,18 @@ const ALLOWED: Record<string, string> = {
   // The chokepoint's own implementation — this IS the sanctioned wrapper.
   "ast/type-building.ts": "chokepoint implementation (typeToTypeNodeWithRegistry)",
   // Internal-only: node is inspected for any/unknown and discarded, never emitted.
+  // No emit, no registry consumer → neither bug class applies.
   "transformers/schema-injection.ts": "internal-only: node checked for any/unknown, not emitted",
   // Shared low-level helper with try/catch; callers that emit should prefer the
   // chokepoint. Tracked for migration in the universal phase.
-  "ast/type-inference.ts": "low-level typeToTypeNode helper (try/catch); migrate emitting callers",
+  "ast/type-inference.ts": "[emit+concrete] low-level typeToTypeNode helper (try/catch); migrate emitting callers",
   // type-shrinking builds shrunk TypeNodes used in emitted lift/pattern type
   // args. Candidate for chokepoint migration; pinned here until then.
-  "transformers/type-shrinking.ts": "shrunk type nodes (emit-reaching); migrate to chokepoint",
+  "transformers/type-shrinking.ts": "[emit+concrete] shrunk type nodes; migrate to chokepoint (import-leak + registry-degrade)",
   // Compute-wrapper arrow return type (emit-reaching). Migrate to chokepoint.
-  "transformers/expression-rewrite/rewrite-helpers.ts": "compute-wrapper arrow return type; migrate to chokepoint",
+  "transformers/expression-rewrite/rewrite-helpers.ts": "[emit+concrete] compute-wrapper arrow return type; migrate to chokepoint",
   // Event parameter type for schema (emit-reaching). Migrate to chokepoint.
-  "closures/utils/schema-factory.ts": "event param type for schema; migrate to chokepoint",
+  "closures/utils/schema-factory.ts": "[emit+concrete] event param type for schema; migrate to chokepoint",
 };
 
 Deno.test("raw checker.typeToTypeNode call sites match the reviewed allowlist", async () => {
