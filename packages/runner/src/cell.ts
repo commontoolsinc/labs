@@ -16,6 +16,8 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
+import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
+import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -146,7 +148,6 @@ export type RawCellReadOptions = IReadOptions & {
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
-let sqliteQueryFactory: NodeFactory<any, any> | undefined;
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
@@ -456,6 +457,20 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
  * would corrupt a non-link column). Use an explicit column list or named params
  * (`:col`) to bind a Cell in those statements.
  */
+/**
+ * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
+ * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
+ * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
+ * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
+ * counts as a bound cell. (Lives here because it needs `isCell` /
+ * `instanceof CellImpl`; cf-link.ts already imports from cell.ts.)
+ */
+export function asBoundCell(value: unknown): Cell<unknown> | undefined {
+  if (isCell(value)) return value as Cell<unknown>;
+  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+  return undefined;
+}
+
 export function encodeSqliteParams(
   sql: string,
   params?: ReadonlyArray<unknown> | Record<string, unknown>,
@@ -469,31 +484,14 @@ export function encodeSqliteParams(
       );
     }
   };
-  // Recover a Cell from a value that is a Cell or carries a `toCell`
-  // back-pointer (matches encodeCfLinkValue/asCellOrUndefined on the read side,
-  // so db.exec and the sqliteQuery builtin agree on what counts as a bound cell).
-  const boundCell = (value: unknown): Cell<unknown> | undefined => {
-    if (isCell(value)) return value as Cell<unknown>;
-    if (value !== null && typeof value === "object") {
-      const fn = (value as { [toCell]?: unknown })[toCell];
-      if (typeof fn === "function") {
-        return (value as { [toCell]: () => Cell<unknown> })[toCell]();
-      }
-    }
-    return undefined;
-  };
   const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
     assertDefined(value);
-    const cell = boundCell(value);
+    const cell = asBoundCell(value);
     if (cell) {
       if (!isLinkCol) {
         throw new TypeError("cells may only be bound to _cf_link columns");
       }
-      return JSON.stringify(
-        createSigilLinkFromParsedLink(cell.getAsNormalizedFullLink(), {
-          includeSchema: false,
-        }),
-      );
+      return encodeCellToSigilString(cell);
     }
     return value;
   };
@@ -505,7 +503,7 @@ export function encodeSqliteParams(
         return encodeOne(v, isCfLinkColumn(cols[i % cols.length] ?? ""));
       }
       assertDefined(v);
-      if (boundCell(v)) {
+      if (asBoundCell(v)) {
         throw new TypeError(
           "sqlite: a Cell parameter must bind to a _cf_link column, but the " +
             "target column can't be determined from this statement. Use an " +
@@ -1869,13 +1867,7 @@ export class CellImpl<T extends FabricValue>
       reactOn?: unknown;
     },
   ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
-    if (!sqliteQueryFactory) {
-      sqliteQueryFactory = createNodeFactory({
-        type: "ref",
-        implementation: "sqliteQuery",
-      });
-    }
-    return sqliteQueryFactory({
+    return sqliteQueryNodeFactory({
       db: this,
       sql,
       params: options?.params,

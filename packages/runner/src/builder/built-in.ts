@@ -29,6 +29,7 @@ import type {
 } from "commonfabric";
 import { isRecord } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
+import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
 
 const WISH_ARGUMENT_SCHEMA = internSchema({
@@ -171,10 +172,10 @@ export const sqliteDatabase = createNodeFactory({
   implementation: "sqliteDatabase",
 }) as SqliteDatabaseFunction;
 
-export const sqliteQuery = createNodeFactory({
-  type: "ref",
-  implementation: "sqliteQuery",
-}) as SqliteQueryFunction;
+// Shares the single `sqliteQuery` node factory with `db.query` (cell.ts) — see
+// builtins/sqlite/query-node.ts — so both construct the same node.
+export const sqliteQuery =
+  sqliteQueryNodeFactory as unknown as SqliteQueryFunction;
 
 // ifElse with optional schema arguments (backward compatible)
 // See SIGNATURE_ARGS documentation above for why we use arguments.length
