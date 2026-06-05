@@ -319,7 +319,20 @@ export function qualifyCommonFabricTypeRefs(
     return node;
   };
 
-  return walk(typeNode, rootType);
+  const result = walk(typeNode, rootType);
+
+  // Carry the registry association forward. The walk returns a fresh node when
+  // it rewrites anything, which would otherwise orphan the original node's
+  // typeRegistry entry — downstream consumers (e.g. the SchemaGenerator) look
+  // the emitted node up by identity, and a missing entry silently degrades the
+  // generated schema (e.g. a precise JSXElement schema collapses to `true`).
+  // Registering here means callers that hand an already-built node to the
+  // normalizer can't forget to re-register it.
+  if (result !== typeNode && rootType && context.typeRegistry) {
+    context.typeRegistry.set(result, rootType);
+  }
+
+  return result;
 }
 
 /**

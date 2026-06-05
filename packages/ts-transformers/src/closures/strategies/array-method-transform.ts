@@ -5,8 +5,8 @@ import {
   getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
   registerSyntheticCallType,
+  typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
-import { typeToTypeNodeWithRegistry } from "../../ast/type-building.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
