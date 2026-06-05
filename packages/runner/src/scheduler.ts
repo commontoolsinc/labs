@@ -813,8 +813,12 @@ export class Scheduler {
     const timeout = new Promise<void>((resolve) => {
       timeoutId = setTimeout(resolve, ms);
     });
+    const syncedPromise = synced();
+    // If the timeout wins the race the sync promise is left pending; swallow a
+    // later rejection so it doesn't surface as an unhandled promise rejection.
+    syncedPromise.catch(() => {});
     try {
-      await Promise.race([Promise.resolve(synced()), timeout]);
+      await Promise.race([syncedPromise, timeout]);
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     }

@@ -509,6 +509,14 @@ type SchedulerRehydrationSubscriptionOptions = {
   };
 };
 
+// Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
+type RunnerRunOptions = {
+  doNotUpdateOnPatternChange?: boolean;
+  // Resumed-from-synced-state: hold each action's initial rehydration/run until
+  // the space has finished syncing, so consumers don't race the data.
+  awaitSyncBeforeInitialRun?: boolean;
+};
+
 function dedupeNormalizedLinks(
   links: readonly NormalizedFullLink[],
 ): NormalizedFullLink[] {
@@ -1375,10 +1383,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: {
-      doNotUpdateOnPatternChange?: boolean;
-      awaitSyncBeforeInitialRun?: boolean;
-    } = {},
+    options: RunnerRunOptions = {},
   ): void {
     const key = this.getDocKey(resultCell);
     if (this.cancels.has(key)) return;
@@ -1395,10 +1400,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: {
-      doNotUpdateOnPatternChange?: boolean;
-      awaitSyncBeforeInitialRun?: boolean;
-    } = {},
+    options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
@@ -1527,30 +1529,21 @@ export class Runner {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: {
-      doNotUpdateOnPatternChange?: boolean;
-      awaitSyncBeforeInitialRun?: boolean;
-    },
+    options?: RunnerRunOptions,
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: {
-      doNotUpdateOnPatternChange?: boolean;
-      awaitSyncBeforeInitialRun?: boolean;
-    },
+    options?: RunnerRunOptions,
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options: {
-      doNotUpdateOnPatternChange?: boolean;
-      awaitSyncBeforeInitialRun?: boolean;
-    } = {},
+    options: RunnerRunOptions = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
     const sourceKey = getTxDebugActionId(tx) ?? "none";
