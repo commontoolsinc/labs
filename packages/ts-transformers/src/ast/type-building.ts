@@ -117,12 +117,18 @@ export function qualifyCommonFabricTypeRefs(
       return undefined;
     }
     const memberName = member.typeName.text;
-    for (const constituent of constituents) {
-      if (commonFabricExportName(constituent) === memberName) {
-        return constituent;
-      }
-    }
-    return undefined;
+    // Require an UNAMBIGUOUS match. If two constituents share a commonfabric
+    // export name but differ in their type arguments (e.g. `Cell<A> | Cell<B>`,
+    // both printed as bare `Cell<...>`), name-matching alone can't tell which
+    // member pairs with which constituent. Picking the first would walk the
+    // member's nested type args against the wrong constituent's args and could
+    // mis-rewrite a nested generic. On ambiguity, return undefined: the member
+    // is left unpaired (un-normalized) rather than risk a wrong rewrite — the
+    // safe degradation this helper already documents.
+    const matches = constituents.filter(
+      (constituent) => commonFabricExportName(constituent) === memberName,
+    );
+    return matches.length === 1 ? matches[0] : undefined;
   };
 
   // For a TypeReference Type, get its Nth type argument. Different

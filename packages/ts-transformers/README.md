@@ -86,9 +86,11 @@ To see transformed output:
 deno task cf check --show-transformed [--no-run] packages/patterns/lunch-poll/main.tsx
 ```
 
-The command must be run on a pattern inside `labs/` for it to actually execute
-the transform (it resolves the pattern against the workspace). Add `--no-run` to
-emit the transformed output without running the pattern.
+Run it from the repository root, targeting a pattern that lives in the workspace
+(the path is repo-root-relative, e.g. `packages/patterns/lunch-poll/main.tsx`):
+`deno task cf` resolves the pattern against the workspace to execute the
+transform. Add `--no-run` to emit the transformed output without running the
+pattern.
 
 ### Adding New Transformations
 
