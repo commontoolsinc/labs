@@ -1,7 +1,4 @@
-import type {
-  FabricInstance,
-  FabricValue,
-} from "../interface.ts";
+import type { FabricInstance, FabricValue } from "../interface.ts";
 
 /**
  * Well-known symbol for reconstructing a fabric instance from its essential
@@ -38,7 +35,6 @@ export interface FabricValueConverter<T> {
    */
   [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
 }
-
 
 /**
  * The minimal interface that `[RECONSTRUCT]` implementations may depend on.

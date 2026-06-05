@@ -9,10 +9,7 @@ import type {
 } from "../../src/json-wire/interface.ts";
 import { UnknownValue } from "../../src/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
-import {
-  FabricInstance,
-  type FabricValue,
-} from "../../src/interface.ts";
+import { FabricInstance, type FabricValue } from "../../src/interface.ts";
 import type { ReconstructionContext } from "../../src/wire-common/interface.ts";
 
 /** Handy no-op `TypeHandler` base class for use in tests. */

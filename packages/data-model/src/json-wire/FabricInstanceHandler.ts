@@ -1,8 +1,4 @@
-import {
-  DECONSTRUCT,
-  FabricInstance,
-  type FabricValue,
-} from "../interface.ts";
+import { DECONSTRUCT, FabricInstance, type FabricValue } from "../interface.ts";
 import type { ReconstructionContext } from "../wire-common/interface.ts";
 import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
 import type {

@@ -1,7 +1,4 @@
-import type {
-  FabricInstance,
-  FabricValue,
-} from "../interface.ts";
+import type { FabricInstance, FabricValue } from "../interface.ts";
 import type { ReconstructionContext } from "../wire-common/interface.ts";
 
 /**

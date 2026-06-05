@@ -1,7 +1,4 @@
-import {
-  type FabricInstance,
-  type FabricValue,
-} from "../interface.ts";
+import { type FabricInstance, type FabricValue } from "../interface.ts";
 import {
   type FabricClass,
   RECONSTRUCT,

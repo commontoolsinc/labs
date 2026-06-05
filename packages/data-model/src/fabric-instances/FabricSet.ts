@@ -4,7 +4,10 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "../interface.ts";
-import { RECONSTRUCT, type ReconstructionContext } from "../wire-common/interface.ts";
+import {
+  RECONSTRUCT,
+  type ReconstructionContext,
+} from "../wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
 import { FrozenSet } from "../frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
