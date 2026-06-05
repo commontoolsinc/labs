@@ -105,3 +105,49 @@ describe("checkSqliteWriteCeiling", () => {
     ).toBeUndefined();
   });
 });
+
+// Regression: every one of these used to FAIL OPEN — a labeled value over the
+// `body` ceiling slipped through because its target column couldn't be resolved
+// and "no ceiling found" was treated as "no ceiling". They must now reject.
+describe("checkSqliteWriteCeiling — fail closed (was fail-open)", () => {
+  it("interleaved literal in VALUES (positional ? mis-maps)", () => {
+    // The `?` binds to `body` (capped), but a naive parser maps it to `subject`.
+    expect(
+      check("INSERT INTO emails (subject, body) VALUES ('x', ?)", [SECRET]),
+    )
+      .toMatch(/determined/);
+  });
+
+  it("UPDATE OR REPLACE (table keyword shadowed by the conflict action)", () => {
+    expect(
+      check("UPDATE OR REPLACE emails SET body = ? WHERE id = ?", [SECRET, 1]),
+    ).toMatch(/maxConfidentiality/);
+  });
+
+  it("named param whose key is NOT the target column", () => {
+    expect(check("INSERT INTO emails (body) VALUES (:x)", { x: SECRET }))
+      .toMatch(/determined/);
+  });
+
+  it("named param with a sigil-prefixed key still enforces the ceiling", () => {
+    expect(
+      check("INSERT INTO emails (body) VALUES (:body)", { ":body": SECRET }),
+    )
+      .toMatch(/maxConfidentiality/);
+  });
+
+  it("column-name case mismatch still enforces the ceiling", () => {
+    expect(check('INSERT INTO emails ("Body") VALUES (?)', [SECRET]))
+      .toMatch(/maxConfidentiality/);
+  });
+
+  it("schema-qualified target (table can't be resolved)", () => {
+    expect(check("INSERT INTO main.emails (body) VALUES (?)", [SECRET]))
+      .toMatch(/determined/);
+  });
+
+  it("undeclared column (no schema entry to verify against)", () => {
+    expect(check("INSERT INTO emails (mystery) VALUES (?)", [SECRET]))
+      .toMatch(/determined/);
+  });
+});

@@ -89,12 +89,28 @@ function unquoteIdent(raw: string): string {
  *  (e.g. a schema-qualified or unusual form). Used to resolve a column's `ifc`. */
 export function parseWriteTable(sql: string): string | undefined {
   const b = blankStringsAndComments(sql);
+  // The UPDATE alternative skips an optional `OR <conflict-action>` so the table
+  // isn't mis-read as the action keyword (`UPDATE OR REPLACE t` → `t`, not `OR`).
+  // INSERT/REPLACE reach the table via `INTO`, so their own `OR <action>` is
+  // already consumed by the lazy `[\s\S]*?`.
+  const ident = String.raw`"[^"]+"|\`[^\`]+\`|\[[^\]]+\]|[A-Za-z_][\w$]*`;
   const m = b.match(
-    /\b(?:insert|replace)\b[\s\S]*?\binto\b\s+("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)|\bupdate\b\s+("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)|\bdelete\b\s+from\s+("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)/i,
+    new RegExp(
+      String.raw`\b(?:insert|replace)\b[\s\S]*?\binto\b\s+(${ident})` +
+        String
+          .raw`|\bupdate\b\s+(?:or\s+(?:rollback|abort|replace|fail|ignore)\s+)?(${ident})` +
+        String.raw`|\bdelete\b\s+from\s+(${ident})`,
+      "i",
+    ),
   );
   if (!m) return undefined;
   const raw = m[1] ?? m[2] ?? m[3];
-  if (!raw || raw.includes(".")) return undefined; // qualified → fail closed
+  if (!raw) return undefined;
+  // Schema-qualified (`main.t`, `"main"."t"`): the identifier capture stops at
+  // the dot, so also reject when a `.` immediately follows the matched table
+  // token. Either way → fail closed (we don't model cross-schema columns).
+  const after = b.slice((m.index ?? 0) + m[0].length);
+  if (/^\s*\./.test(after) || raw.includes(".")) return undefined;
   return unquoteIdent(raw);
 }
 
@@ -121,6 +137,17 @@ export function parseWriteParamColumns(
     if (!m) return undefined; // columnless INSERT or INSERT…SELECT → fail closed
     const cols = m[1].split(",").map(unquoteIdent);
     if (cols.length === 0 || cols.some((c) => c.length === 0)) return undefined;
+    // Positional cycling (`cols[i % cols.length]`) is sound ONLY when every value
+    // slot is a bare `?`. An interleaved literal/expression (`VALUES ('x', ?)`,
+    // `VALUES (?, 1)`, `VALUES (lower(?))`) shifts the `?`→column alignment, so
+    // verify the value region (after VALUES, up to a top-level RETURNING — ON
+    // CONFLICT already rejected) contains ONLY `?`, parens, commas, whitespace.
+    // A blanked string shows as `''`; a number/identifier/operator shows
+    // literally — any of those → fail closed.
+    const afterValues = blanked.slice((m.index ?? 0) + m[0].length);
+    const retIdx = afterValues.search(/\breturning\b/i);
+    const region = retIdx === -1 ? afterValues : afterValues.slice(0, retIdx);
+    if (!/^[\s?(),]*$/.test(region)) return undefined;
     // Positional params cycle across multi-row `VALUES (?),(?)` tuples.
     return Array.from({ length: count }, (_, i) => cols[i % cols.length]);
   }

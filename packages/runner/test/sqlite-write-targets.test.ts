@@ -4,7 +4,10 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { parseWriteParamColumns } from "../src/builtins/sqlite/write-targets.ts";
+import {
+  parseWriteParamColumns,
+  parseWriteTable,
+} from "../src/builtins/sqlite/write-targets.ts";
 
 describe("parseWriteParamColumns — determinable shapes", () => {
   it("INSERT with explicit column list", () => {
@@ -78,4 +81,58 @@ describe("parseWriteParamColumns — fail closed (undefined)", () => {
     failsClosed("INSERT INTO t (a, b) VALUES (?1, ?2)"));
   it("WITH-prefixed write (unparsed shape)", () =>
     failsClosed("WITH c AS (SELECT 1) UPDATE t SET a = ? WHERE id = ?"));
+
+  // A VALUES tuple with an interleaved literal/expression breaks positional
+  // `?`→column attribution (the `?` no longer lines up with the column list).
+  it("INSERT with a literal interleaved in VALUES", () =>
+    failsClosed("INSERT INTO t (a, b) VALUES ('hi', ?)"));
+  it("INSERT with a numeric literal interleaved in VALUES", () =>
+    failsClosed("INSERT INTO t (a, b) VALUES (?, 1)"));
+  it("INSERT with an expression in VALUES", () =>
+    failsClosed("INSERT INTO t (a) VALUES (lower(?))"));
+});
+
+describe("parseWriteParamColumns — RETURNING after all-? VALUES still maps", () => {
+  it("attributes when the value tuples are bare ?", () => {
+    expect(parseWriteParamColumns("INSERT INTO t (a) VALUES (?) RETURNING id"))
+      .toEqual(["a"]);
+  });
+});
+
+describe("parseWriteTable", () => {
+  it("INSERT target", () =>
+    expect(parseWriteTable("INSERT INTO emails (a) VALUES (?)")).toBe(
+      "emails",
+    ));
+  it("INSERT OR REPLACE target", () =>
+    expect(parseWriteTable("INSERT OR REPLACE INTO emails (a) VALUES (?)"))
+      .toBe("emails"));
+  it("UPDATE target", () =>
+    expect(parseWriteTable("UPDATE emails SET a = ? WHERE id = ?"))
+      .toBe("emails"));
+  it("DELETE target", () =>
+    expect(parseWriteTable("DELETE FROM emails WHERE id = ?")).toBe("emails"));
+  it("quoted target", () =>
+    expect(parseWriteTable('INSERT INTO "emails" (a) VALUES (?)'))
+      .toBe("emails"));
+
+  // UPDATE OR <action> must not capture the conflict-action keyword as the table.
+  it("UPDATE OR REPLACE target", () =>
+    expect(parseWriteTable("UPDATE OR REPLACE emails SET a = ? WHERE id = ?"))
+      .toBe("emails"));
+  it("UPDATE OR IGNORE target", () =>
+    expect(parseWriteTable("UPDATE OR IGNORE emails SET a = ?")).toBe(
+      "emails",
+    ));
+
+  // Schema-qualified targets fail closed (the column ceiling lookup can't be
+  // trusted across an alias/schema we don't model).
+  it("schema-qualified INSERT → undefined", () =>
+    expect(parseWriteTable("INSERT INTO main.emails (a) VALUES (?)"))
+      .toBeUndefined());
+  it("schema-qualified UPDATE → undefined", () =>
+    expect(parseWriteTable("UPDATE main.emails SET a = ?")).toBeUndefined());
+  it("quoted schema-qualified → undefined", () =>
+    expect(parseWriteTable('INSERT INTO "main"."emails" (a) VALUES (?)'))
+      .toBeUndefined());
 });
