@@ -10,14 +10,6 @@ export {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-export {
-  DECONSTRUCT,
-  type FabricClass,
-  type FabricValueConverter,
-  RECONSTRUCT,
-  type ReconstructionContext,
-  type SerializationContext,
-} from "./wire-common/interface.ts";
 
 export {
   cloneForMutation,
