@@ -52,21 +52,22 @@ export const profileDisplayFromValue = (val: unknown): ProfileBadgeDisplay => {
 };
 
 /**
- * CFProfileBadge — trusted, official presentation of a profile.
+ * CFProfileBadge — official presentation of a profile (avatar + name).
  *
  * You bind it a *cell* containing a profile (e.g. `$profile={profileCell}`) and
- * it renders the person's avatar + name as system chrome. Because this component
- * runs on the trusted main thread (outside the iframe sandbox where patterns
- * run), any chrome it emits cannot be reproduced by user-space pattern code — a
- * pattern can place `<cf-profile-badge>` in its VNode tree, but it cannot forge
- * the component's implementation, the runtime IPC it makes, or `event.isTrusted`.
+ * it renders the person's avatar + name as system chrome. It runs on the trusted
+ * main thread (outside the iframe sandbox where patterns run), which makes it the
+ * right home for an *unspoofable* identity treatment — but that property is
+ * **deferred, not delivered by v1**: today the seal renders unconditionally and
+ * `_state` is always "presented", so a pattern could compose a visually identical
+ * badge. v1 just renders avatar + name from the cell.
  *
- * v1 renders the avatar + name from the cell in the "presented" state. The
- * deferred pass (see CT-1645 follow-ups) flips on real verification — reading the
- * cell's CFC label via `getCfcLabel()` (the `represents-principal` atom → owner
- * DID), comparing it to the authenticated identity, and drawing the unspoofable
- * "seal" effects only when verified. The seam is `_refreshVerification()` + the
- * `_state` field; reuse `authorshipStateForLabel` from `cf-cfc-authorship`.
+ * The deferred pass (see CT-1645 follow-ups) is what earns "unspoofable": read
+ * the cell's CFC label via `getCfcLabel()` (the `represents-principal` atom →
+ * owner DID), compare it to the authenticated identity, and draw the "seal"
+ * effects **only when verified** (gate on `_state === "verified"`). The seam is
+ * `_refreshVerification()` + the `_state` field; reuse `authorshipStateForLabel`
+ * from `cf-cfc-authorship`.
  *
  * @element cf-profile-badge
  * @attr {string} size - avatar size: xs | sm | md | lg | xl (default md)
