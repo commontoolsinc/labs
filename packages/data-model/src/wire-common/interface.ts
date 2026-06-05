@@ -1,14 +1,36 @@
 import type { FabricInstance, FabricValue } from "../interface.ts";
 
 /**
- * Well-known symbol for reconstructing a fabric instance from its essential
+ * Well-known symbol for deconstructing a fabric object into its essential
+ * state. The returned value may contain nested `FabricValue`s (including
+ * other fabric objects); the serialization system handles recursion.
+ * See Section 2.2 of the formal spec.
+ */
+export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
+
+/**
+ * Well-known symbol for reconstructing a fabric object from its essential
  * state. Static method on the class.
  * See Section 2.2 of the formal spec.
  */
 export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
- * Interface for classes that can reconstruct fabric instances from essential
+ * Interface for deconstructable fabric objects, which is all of them, but
+ * TypeScript doesn't let us say that given how the class/interface hierarchy
+ * under `FabricSpecialObject` is set up.
+ */
+export interface FabricDeconstructable {
+  /**
+   * Returns the essential state of this instance as a `FabricValue`.
+   * Implementations must _not_ recursively deconstruct nested values; the
+   * serialization system handles that.
+   */
+  [DECONSTRUCT](): FabricValue;
+}
+
+/**
+ * Interface for classes that can reconstruct fabric objects from essential
  * state. The static `[RECONSTRUCT]` method is separate from the constructor
  * to support reconstruction-specific context and instance interning.
  * See Section 2.4 of the formal spec.
@@ -24,7 +46,7 @@ export interface FabricClass<T extends FabricInstance> {
 
 /**
  * Converter that can reconstruct arbitrary values (not necessarily
- * `FabricInstance`s) from essential state. Used for built-in JS types like
+ * fabric _objects_) from essential state. Used for built-in JS types like
  * `Error` that participate in the serialization protocol but don't implement
  * `FabricInstance`. See Section 1.4.1 of the formal spec.
  */

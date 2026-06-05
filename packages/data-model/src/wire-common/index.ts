@@ -1,9 +1,9 @@
 export {
   DECONSTRUCT,
-  RECONSTRUCT,
-  type FabricDeconstructable,
   type FabricClass,
+  type FabricDeconstructable,
   type FabricValueConverter,
+  RECONSTRUCT,
   type ReconstructionContext,
   type SerializationContext,
 } from "./interface.ts";

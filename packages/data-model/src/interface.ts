@@ -29,14 +29,6 @@ export abstract class FabricSpecialObject {}
 //
 
 /**
- * Well-known symbol for deconstructing a fabric instance into its essential
- * state. The returned value may contain nested `FabricValue`s (including
- * other `FabricInstance`s); the serialization system handles recursion.
- * See Section 2.2 of the formal spec.
- */
-export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
-
-/**
  * Well-known symbol for deeply freezing a fabric instance in place. The method
  * freezes the instance's own internal slot(s) and recurses into any nested
  * `FabricValue`s via the provided `subFreeze` callback. This is an abstract
@@ -84,13 +76,6 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  * define a static member `[RECONSTRUCT]()`.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
-  /**
-   * Returns the essential state of this instance as a `FabricValue`.
-   * Implementations must NOT recursively deconstruct nested values -- the
-   * serialization system handles that.
-   */
-  abstract [DECONSTRUCT](): FabricValue;
-
   /**
    * Deeply freezes this instance in place: freezes this instance's own
    * internal slot(s) and recurses into each nested `FabricValue` by calling

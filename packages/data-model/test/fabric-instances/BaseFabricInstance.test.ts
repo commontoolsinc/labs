@@ -1,12 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  DECONSTRUCT,
   DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "../../src/interface.ts";
+import { DECONSTRUCT } from "../../src/wire-common/interface.ts";
 import { BaseFabricInstance } from "../../src/fabric-instances/BaseFabricInstance.ts";
 
 /**

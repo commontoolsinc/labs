@@ -1,5 +1,8 @@
 import type { FabricInstance, FabricValue } from "../interface.ts";
-import type { ReconstructionContext } from "../wire-common/interface.ts";
+import type {
+  FabricDeconstructable,
+  ReconstructionContext,
+} from "../wire-common/interface.ts";
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -37,7 +40,7 @@ export interface TypeHandlerCodec {
   /** Wraps a tag and state into the wire format's tagged representation. */
   wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
   /** Returns the wire format tag for a fabric instance's type. */
-  getTagFor(value: FabricInstance): string;
+  getTagFor(value: FabricInstance | FabricDeconstructable): string;
 }
 
 /**

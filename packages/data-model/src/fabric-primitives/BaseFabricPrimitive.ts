@@ -1,4 +1,5 @@
 import { FabricPrimitive } from "../interface.ts";
+import { FabricDeconstructable } from "../wire-common/interface.ts";
 
 /**
  * Abstract base class providing shared scaffolding for `FabricPrimitive`
@@ -28,7 +29,7 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    * the fully abstract `FabricPrimitive`. Throws a "shouldn't happen" error if
    * there's trouble.
    */
-  static wireTypeTagOf(value: FabricPrimitive): string {
+  static wireTypeTagOf(value: FabricPrimitive | FabricDeconstructable): string {
     if (!(value instanceof BaseFabricPrimitive)) {
       throw new Error(
         "Shouldn't happen: Encountered a `FabricPrimitive` which is not a `BaseFabricPrimitive`.",

@@ -1,10 +1,6 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "../interface.ts";
 import {
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
-} from "../interface.ts";
-import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "../wire-common/interface.ts";

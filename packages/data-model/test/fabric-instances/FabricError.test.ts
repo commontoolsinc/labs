@@ -1,13 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  DECONSTRUCT,
   DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "../../src/interface.ts";
-import { RECONSTRUCT } from "../../src/wire-common/interface.ts";
+import { DECONSTRUCT, RECONSTRUCT } from "../../src/wire-common/interface.ts";
 import { FabricError } from "../../src/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "../../src/fabric-instances/FabricNativeWrapper.ts";
 import {

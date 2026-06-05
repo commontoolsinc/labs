@@ -2,7 +2,6 @@
 // canonical public surface for all type declarations and the `FabricInstance`
 // base class.
 export {
-  DECONSTRUCT,
   type FabricArray,
   FabricInstance,
   type FabricNativeObject,
@@ -12,6 +11,7 @@ export {
   type FabricValueLayer,
 } from "./interface.ts";
 export {
+  DECONSTRUCT,
   type FabricClass,
   type FabricValueConverter,
   RECONSTRUCT,
