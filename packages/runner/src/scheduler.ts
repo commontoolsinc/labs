@@ -741,7 +741,10 @@ export class Scheduler {
       // stuck sync can't double the resumed startup delay: each step is bounded
       // by the time remaining until this common deadline.
       const deadline = performance.now() +
-        Math.max(0, options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS);
+        Math.max(
+          0,
+          options.timeoutMs ?? DEFAULT_INITIAL_REHYDRATION_TIMEOUT_MS,
+        );
       const remainingMs = () => Math.max(0, deadline - performance.now());
       if (options.awaitSync) {
         // Resumed from a synced state: hold the initial rehydration/run until
