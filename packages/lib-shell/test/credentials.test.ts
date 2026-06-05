@@ -4,6 +4,8 @@ import {
   AUTH_METHOD_KEYFILE,
   clearStoredCredential,
   createKeyFileCredential,
+  createPasskeyCredential,
+  getPublicKeyCredentialDescriptor,
   getStoredCredential,
   saveCredential,
 } from "@commonfabric/lib-shell/credentials";
@@ -66,6 +68,26 @@ Deno.test("keyfile credentials persist the imported DID and auth method", () =>
 
     clearStoredCredential();
     assertEquals(getStoredCredential(), null);
+  }));
+
+Deno.test("malformed stored credentials are ignored", () =>
+  withMockLocalStorage(() => {
+    localStorage.setItem("storedCredential", "{not-json");
+    assertEquals(getStoredCredential(), null);
+
+    localStorage.setItem(
+      "storedCredential",
+      JSON.stringify({ id: "abc", method: "unknown" }),
+    );
+    assertEquals(getStoredCredential(), null);
+  }));
+
+Deno.test("malformed passkey credential IDs are ignored", () =>
+  withMockLocalStorage(() => {
+    assertEquals(
+      getPublicKeyCredentialDescriptor(createPasskeyCredential("not base64!")),
+      undefined,
+    );
   }));
 
 Deno.test("PKCS8 keyfile import primitives round-trip into stored keyfile credential", () =>

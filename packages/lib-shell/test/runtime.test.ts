@@ -94,6 +94,25 @@ describe("RuntimeInternals", () => {
     }
   });
 
+  it("guards removePage after dispose", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(
+      client as any,
+      spaceDid,
+      undefined,
+      false,
+      spaceDid,
+    );
+
+    await runtime.dispose();
+
+    await expect(runtime.removePage("piece-789")).rejects.toThrow(
+      "RuntimeInternals disposed.",
+    );
+  });
+
   it("uses the default navigation event when no navigation callback is injected", async () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav-current" as DID;

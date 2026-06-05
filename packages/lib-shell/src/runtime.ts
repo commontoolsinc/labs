@@ -284,6 +284,7 @@ export class RuntimeInternals extends EventTarget {
   }
 
   async removePage(id: string): Promise<boolean> {
+    this.#check();
     return await this.#client.removePage(id);
   }
 
@@ -364,38 +365,38 @@ export class RuntimeInternals extends EventTarget {
     }
   };
 
-  #onNavigateRequest = async (
+  #onNavigateRequest = (
     e: RuntimeClientEvents["navigaterequest"][0],
   ) => {
-    try {
-      const { cell } = e;
-      const pieceId = cell.id();
-      logger.log("navigate", `Navigating to piece: ${pieceId}`);
-
-      const sameSpace = cell.space() === this.#space;
-
-      if (sameSpace) {
-        await this.registerNavigatedPiece(cell);
-        await this.#waitForNavigationConvergence();
-      } else {
-        await this.#waitForNavigationConvergence();
-      }
-
-      if (sameSpace && this.#spaceName) {
-        (this.#callbacks.navigate ?? defaultNavigate)({
-          spaceName: this.#spaceName,
-          pieceId,
-        });
-      } else {
-        (this.#callbacks.navigate ?? defaultNavigate)({
-          spaceDid: cell.space(),
-          pieceId: cell.id(),
-        });
-      }
-    } catch (error) {
-      console.error("[RuntimeInternals] Failed to navigate:", error);
-    }
+    void this.#handleNavigateRequest(e);
   };
+
+  async #handleNavigateRequest(
+    e: RuntimeClientEvents["navigaterequest"][0],
+  ): Promise<void> {
+    const { cell } = e;
+    const pieceId = cell.id();
+    logger.log("navigate", `Navigating to piece: ${pieceId}`);
+
+    const sameSpace = cell.space() === this.#space;
+
+    if (sameSpace) {
+      void this.registerNavigatedPiece(cell);
+    }
+    await this.#waitForNavigationConvergence();
+
+    if (sameSpace && this.#spaceName) {
+      (this.#callbacks.navigate ?? defaultNavigate)({
+        spaceName: this.#spaceName,
+        pieceId,
+      });
+    } else {
+      (this.#callbacks.navigate ?? defaultNavigate)({
+        spaceDid: cell.space(),
+        pieceId: cell.id(),
+      });
+    }
+  }
 
   #onError = (event: RuntimeClientEvents["error"][0]) => {
     if (this.#callbacks.onError) {

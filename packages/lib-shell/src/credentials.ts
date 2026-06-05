@@ -12,9 +12,27 @@ export interface StoredCredential {
   method: AuthMethod;
 }
 
+function isAuthMethod(method: unknown): method is AuthMethod {
+  return method === AUTH_METHOD_PASSKEY ||
+    method === AUTH_METHOD_PASSPHRASE ||
+    method === AUTH_METHOD_KEYFILE;
+}
+
+function isStoredCredential(value: unknown): value is StoredCredential {
+  return typeof value === "object" && value !== null &&
+    typeof (value as StoredCredential).id === "string" &&
+    isAuthMethod((value as StoredCredential).method);
+}
+
 export function getStoredCredential(): StoredCredential | null {
   const stored = localStorage.getItem("storedCredential");
-  return stored ? JSON.parse(stored) : null;
+  if (!stored) return null;
+  try {
+    const parsed = JSON.parse(stored);
+    return isStoredCredential(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function saveCredential(credential: StoredCredential): void {
@@ -63,12 +81,16 @@ export function getPublicKeyCredentialDescriptor(
   storedCredential: StoredCredential | null,
 ): PublicKeyCredentialDescriptor | undefined {
   if (storedCredential?.method === "passkey") {
-    // Convert base64url to base64 before decoding
-    const base64 = base64urlToBase64(storedCredential.id);
-    return {
-      id: Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
-      type: "public-key" as PublicKeyCredentialType,
-    };
+    try {
+      // Convert base64url to base64 before decoding
+      const base64 = base64urlToBase64(storedCredential.id);
+      return {
+        id: Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
+        type: "public-key" as PublicKeyCredentialType,
+      };
+    } catch {
+      return undefined;
+    }
   }
   return undefined;
 }
