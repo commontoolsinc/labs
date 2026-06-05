@@ -67,7 +67,8 @@ export class XAppView extends BaseView {
   private accessor _slugRevision = 0;
 
   private slugCancel: Cancel | undefined = undefined;
-  private slugPollInterval: number | undefined = undefined;
+  private slugPollInterval: ReturnType<typeof setInterval> | undefined =
+    undefined;
   private slugSubscriptionKey: string | undefined = undefined;
   private slugSubscriptionToken = 0;
   private slugTargetKey: string | undefined = undefined;

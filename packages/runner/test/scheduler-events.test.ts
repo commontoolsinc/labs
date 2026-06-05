@@ -32,7 +32,7 @@ async function waitForSchedulerCondition(
 }
 
 async function waitForSignal(signal: Promise<void>, message: string) {
-  let timeoutId: number | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       signal,
@@ -257,7 +257,7 @@ describe("event handling", () => {
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
 
     const idlePromise = runtime.idle();
-    let idleTimeoutId: number | undefined;
+    let idleTimeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       await waitForSignal(commitStarted, "queued event commit did not start");
       const idleResult = await Promise.race([
