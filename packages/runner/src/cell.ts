@@ -458,7 +458,8 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
  * (`:col`) to bind a Cell in those statements.
  */
 /**
- * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer.
+ * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
+ * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
  * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
  * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
  * counts as a bound cell. (Lives here because it needs `isCell` /
@@ -466,12 +467,7 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
  */
 export function asBoundCell(value: unknown): Cell<unknown> | undefined {
   if (isCell(value)) return value as Cell<unknown>;
-  if (value !== null && typeof value === "object") {
-    const fn = (value as { [toCell]?: unknown })[toCell];
-    if (typeof fn === "function") {
-      return (value as { [toCell]: () => Cell<unknown> })[toCell]();
-    }
-  }
+  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
   return undefined;
 }
 
