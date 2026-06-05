@@ -4,7 +4,7 @@
  * via a single shared implementation instead of repeating it.
  */
 
-import type { FabricInstance } from "../interface.ts";
+import type { FabricInstance } from "@/interface.ts";
 import type { ReconstructionContext } from "./interface.ts";
 
 /**

@@ -3,7 +3,7 @@ import type {
   FabricEpochNsecConstructor as ApiFabricEpochNsecConstructor,
 } from "@commonfabric/api";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).

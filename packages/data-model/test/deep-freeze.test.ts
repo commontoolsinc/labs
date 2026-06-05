@@ -4,10 +4,10 @@ import {
   deepFreeze,
   isDeepFrozen,
   isDeepFrozenFabricValue,
-} from "../src/deep-freeze.ts";
-import type { FabricValue } from "../src/interface.ts";
-import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+} from "@/deep-freeze.ts";
+import type { FabricValue } from "@/interface.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
 describe("deep-freeze", () => {
   describe("isDeepFrozen", () => {

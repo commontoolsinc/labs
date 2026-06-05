@@ -1,7 +1,7 @@
-import type { FabricValue } from "../interface.ts";
-import type { ReconstructionContext } from "../wire-common/interface.ts";
-import { FabricBytes } from "../fabric-primitives/FabricBytes.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import type { FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -11,7 +11,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricBytes`. Serializes to a flat base64url string

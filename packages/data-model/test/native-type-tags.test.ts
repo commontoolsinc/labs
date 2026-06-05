@@ -4,7 +4,7 @@ import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../src/native-type-tags.ts";
+} from "@/native-type-tags.ts";
 
 describe("native-type-tags", () => {
   describe("tagFromNativeValue()", () => {

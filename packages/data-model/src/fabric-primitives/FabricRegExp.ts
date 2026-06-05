@@ -1,5 +1,5 @@
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";

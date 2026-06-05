@@ -1,11 +1,11 @@
-import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "../interface.ts";
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../wire-common/interface.ts";
+} from "@/wire-common/interface.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
-import { deepFreeze } from "../deep-freeze.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When the

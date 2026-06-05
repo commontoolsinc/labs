@@ -1,13 +1,13 @@
-import type { FabricValue } from "../interface.ts";
-import type { ReconstructionContext } from "../wire-common/interface.ts";
-import { FabricRegExp } from "../fabric-primitives/FabricRegExp.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import type { FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricRegExp`. Serializes the essential state

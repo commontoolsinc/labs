@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FrozenMap, FrozenSet } from "../src/frozen-builtins.ts";
+import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 
 type MutableMapExtensions<K, V> = {
   getOrInsert(key: K, defaultValue: V): V;

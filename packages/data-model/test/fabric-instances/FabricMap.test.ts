@@ -5,12 +5,12 @@ import {
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
-} from "../../src/interface.ts";
-import { DECONSTRUCT, RECONSTRUCT } from "../../src/wire-common/interface.ts";
-import { FabricMap } from "../../src/fabric-instances/FabricMap.ts";
-import { FabricNativeWrapper } from "../../src/fabric-instances/FabricNativeWrapper.ts";
-import { FrozenMap } from "../../src/frozen-builtins.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
+} from "@/interface.ts";
+import { DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { FabricMap } from "@/fabric-instances/FabricMap.ts";
+import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
+import { FrozenMap } from "@/frozen-builtins.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { dummyContext, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricMap", () => {

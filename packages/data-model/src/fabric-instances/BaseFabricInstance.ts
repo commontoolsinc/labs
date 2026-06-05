@@ -1,8 +1,5 @@
-import { FabricInstance, type FabricValue } from "../interface.ts";
-import {
-  DECONSTRUCT,
-  FabricDeconstructable,
-} from "../wire-common/interface.ts";
+import { FabricInstance, type FabricValue } from "@/interface.ts";
+import { DECONSTRUCT, FabricDeconstructable } from "@/wire-common/interface.ts";
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`

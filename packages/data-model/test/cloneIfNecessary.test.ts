@@ -1,19 +1,19 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { cloneIfNecessary, type CloneOptions } from "../src/fabric-value.ts";
-import type { FabricValue } from "../src/fabric-value.ts";
-import { isDeepFrozen, isDeepFrozenFabricValue } from "../src/deep-freeze.ts";
-import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
-import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
-import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
-import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
-import { FabricSet } from "../src/fabric-instances/FabricSet.ts";
-import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
-import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
-import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
-import { FabricPrimitive, FabricSpecialObject } from "../src/interface.ts";
+import { cloneIfNecessary, type CloneOptions } from "@/fabric-value.ts";
+import type { FabricValue } from "@/fabric-value.ts";
+import { isDeepFrozen, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricMap } from "@/fabric-instances/FabricMap.ts";
+import { FabricSet } from "@/fabric-instances/FabricSet.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
 describe("cloneIfNecessary", () => {
   describe(`error cases`, () => {

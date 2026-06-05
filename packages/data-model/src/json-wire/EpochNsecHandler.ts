@@ -1,7 +1,7 @@
-import type { FabricValue } from "../interface.ts";
-import type { ReconstructionContext } from "../wire-common/interface.ts";
-import { FabricEpochNsec } from "../fabric-primitives/FabricEpochNsec.ts";
-import { WIRE_TYPE_TAGS } from "../wire-common/wire-type-tags.ts";
+import type { FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -15,7 +15,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricEpochNsec`. Serializes to a flat base64 string encoding

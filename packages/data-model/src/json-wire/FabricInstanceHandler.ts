@@ -1,10 +1,10 @@
-import { FabricInstance, type FabricValue } from "../interface.ts";
+import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DECONSTRUCT,
   type FabricDeconstructable,
   type ReconstructionContext,
-} from "../wire-common/interface.ts";
-import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
+} from "@/wire-common/interface.ts";
+import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import type {
   JsonWireValue,
   TypeHandler,

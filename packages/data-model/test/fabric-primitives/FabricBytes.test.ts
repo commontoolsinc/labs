@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
-import { FabricBytes } from "../../src/fabric-primitives/FabricBytes.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
 describe("FabricBytes", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the

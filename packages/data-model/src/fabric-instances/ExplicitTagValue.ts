@@ -1,4 +1,4 @@
-import type { FabricValue } from "../interface.ts";
+import type { FabricValue } from "@/interface.ts";
 import { BaseFabricInstance } from "./BaseFabricInstance.ts";
 
 /**

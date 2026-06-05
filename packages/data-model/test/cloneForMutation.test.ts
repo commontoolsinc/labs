@@ -1,13 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  cloneForMutation,
-  CloneForMutationError,
-} from "../src/fabric-value.ts";
-import type { FabricValue } from "../src/fabric-value.ts";
-import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
-import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { cloneForMutation, CloneForMutationError } from "@/fabric-value.ts";
+import type { FabricValue } from "@/fabric-value.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
 
 describe("cloneForMutation", () => {
   describe("empty path", () => {

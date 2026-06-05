@@ -1,5 +1,5 @@
-import { FabricPrimitive } from "../interface.ts";
-import { FabricDeconstructable } from "../wire-common/interface.ts";
+import { FabricPrimitive } from "@/interface.ts";
+import { FabricDeconstructable } from "@/wire-common/interface.ts";
 
 /**
  * Abstract base class providing shared scaffolding for `FabricPrimitive`
