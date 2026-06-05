@@ -87,8 +87,18 @@ function unquoteIdent(raw: string): string {
 /** The single target table of a write (`INSERT INTO t`, `UPDATE t`,
  *  `DELETE FROM t`), unquoted; undefined if it can't be confidently extracted
  *  (e.g. a schema-qualified or unusual form). Used to resolve a column's `ifc`. */
-export function parseWriteTable(sql: string): string | undefined {
-  const b = blankStringsAndComments(sql);
+/** Blank string literals/comments so the structural parsers can't be fooled by
+ *  `?`/keywords/commas inside them. Exposed so a caller parsing the SAME SQL for
+ *  both table and param-columns can blank once and pass it to both. */
+export function blankWriteSql(sql: string): string {
+  return blankStringsAndComments(sql);
+}
+
+export function parseWriteTable(
+  sql: string,
+  blanked: string = blankStringsAndComments(sql),
+): string | undefined {
+  const b = blanked;
   // The UPDATE alternative skips an optional `OR <conflict-action>` so the table
   // isn't mis-read as the action keyword (`UPDATE OR REPLACE t` → `t`, not `OR`).
   // INSERT/REPLACE reach the table via `INTO`, so their own `OR <action>` is
@@ -116,8 +126,8 @@ export function parseWriteTable(sql: string): string | undefined {
 
 export function parseWriteParamColumns(
   sql: string,
+  blanked: string = blankStringsAndComments(sql),
 ): (string | null)[] | undefined {
-  const blanked = blankStringsAndComments(sql);
   const { count, hasNonPositional } = placeholderInfo(blanked);
   if (hasNonPositional) return undefined; // mixed/named/numbered → fail closed
   if (count === 0) return [];

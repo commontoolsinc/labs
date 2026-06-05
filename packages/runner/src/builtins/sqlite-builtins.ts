@@ -33,6 +33,7 @@ import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
+import { columnDeclaresIfc } from "@commonfabric/memory/v2";
 
 type SqliteDbRef = {
   id: string;
@@ -243,7 +244,7 @@ export function labelResultSchema(
       continue;
     }
     const ifc = tables?.[c.table]?.properties?.[c.column]?.ifc;
-    if (ifc && typeof ifc === "object" && Object.keys(ifc).length > 0) {
+    if (columnDeclaresIfc(ifc)) {
       // Deep-clone to a fully extensible copy: the `ifc` read off `db.tables` is
       // part of a deep-frozen cell value exposed through a proxy, so embedding it
       // by reference makes the schema-policy walk proxy a non-extensible object
@@ -406,6 +407,17 @@ export function sqliteQuery(
       idempotencyKey: `sqliteQuery:${hash}`,
       kind: "sqlite-query",
       async flush() {
+        // Write an error result for THIS request, guarded against a newer query
+        // (different inputs -> different hash) that superseded it mid-flight.
+        const failQuery = (error: string) =>
+          runtime.editWithRetry((wtx) => {
+            if (result.withTx(wtx).get()?.requestHash !== hash) return;
+            result.withTx(wtx).set({
+              pending: false,
+              error,
+              requestHash: hash,
+            });
+          });
         const provider = runtime.storageManager.open(space);
         try {
           if (!provider.sqliteQuery) {
@@ -434,14 +446,7 @@ export function sqliteQuery(
               db.tables as Parameters<typeof labelResultSchema>[1],
             );
             if (error) {
-              await runtime.editWithRetry((wtx) => {
-                if (result.withTx(wtx).get()?.requestHash !== hash) return;
-                result.withTx(wtx).set({
-                  pending: false,
-                  error,
-                  requestHash: hash,
-                });
-              });
+              await failQuery(error);
               return;
             }
             labelSchema = schema;
@@ -477,24 +482,12 @@ export function sqliteQuery(
           // Surface a write-back failure as `q.error` rather than leaving the
           // query stuck `pending` (editWithRetry returns the error, not throws).
           if (wrote.error) {
-            await runtime.editWithRetry((wtx) => {
-              if (result.withTx(wtx).get()?.requestHash !== hash) return;
-              result.withTx(wtx).set({
-                pending: false,
-                error: wrote.error?.message ?? "sqlite: result write failed",
-                requestHash: hash,
-              });
-            });
+            await failQuery(
+              wrote.error.message ?? "sqlite: result write failed",
+            );
           }
         } catch (error) {
-          await runtime.editWithRetry((wtx) => {
-            if (result.withTx(wtx).get()?.requestHash !== hash) return;
-            result.withTx(wtx).set({
-              pending: false,
-              error: errMsg(error),
-              requestHash: hash,
-            });
-          });
+          await failQuery(errMsg(error));
         }
       },
     });

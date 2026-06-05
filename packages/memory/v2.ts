@@ -338,6 +338,14 @@ export interface SqliteResultColumn {
   column: string | null;
 }
 
+/** Whether a column's `ifc` annotation is present and non-empty — the single
+ *  predicate for "this column participates in CFC labeling". Shared by the
+ *  server's declares-ifc gate (which decides whether to capture column origins)
+ *  and the runner's per-column label schema, so the two can't drift. */
+export function columnDeclaresIfc(ifc: unknown): boolean {
+  return !!ifc && typeof ifc === "object" && Object.keys(ifc).length > 0;
+}
+
 export interface SqliteQueryResult {
   rows: unknown[];
   /** Per-result-column origin, present ONLY when the queried db declares

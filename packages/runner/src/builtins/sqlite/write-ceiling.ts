@@ -9,7 +9,11 @@
 // without a ceiling are unaffected (zero behavior change until `ifc` is used).
 
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
-import { parseWriteParamColumns, parseWriteTable } from "./write-targets.ts";
+import {
+  blankWriteSql,
+  parseWriteParamColumns,
+  parseWriteTable,
+} from "./write-targets.ts";
 
 interface ColumnIfc {
   maxConfidentiality?: readonly unknown[];
@@ -28,7 +32,9 @@ export function checkSqliteWriteCeiling(
   confidentialityOf: (value: unknown) => readonly unknown[],
 ): string | undefined {
   if (!tables || params === undefined) return undefined;
-  const table = parseWriteTable(sql);
+  // Blank string-literals/comments once; both parsers read the same SQL.
+  const blanked = blankWriteSql(sql);
+  const table = parseWriteTable(sql, blanked);
 
   const UNRESOLVED =
     "sqlite: a labeled value is bound in a write whose target column cannot be " +
@@ -68,7 +74,7 @@ export function checkSqliteWriteCeiling(
   };
 
   if (Array.isArray(params)) {
-    const cols = parseWriteParamColumns(sql);
+    const cols = parseWriteParamColumns(sql, blanked);
     for (let i = 0; i < params.length; i++) {
       const conf = confidentialityOf(params[i]);
       if (conf.length === 0) continue; // unlabeled → nothing to check

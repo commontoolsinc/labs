@@ -5,6 +5,7 @@ import {
   type CellScope,
   type ClientCommit,
   type ClientMessage,
+  columnDeclaresIfc,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
@@ -235,10 +236,7 @@ function declaresColumnIfc(
       ?.properties;
     if (!props) continue;
     for (const col of Object.values(props)) {
-      const ifc = (col as { ifc?: unknown })?.ifc;
-      if (ifc && typeof ifc === "object" && Object.keys(ifc).length > 0) {
-        return true;
-      }
+      if (columnDeclaresIfc((col as { ifc?: unknown })?.ifc)) return true;
     }
   }
   return false;
