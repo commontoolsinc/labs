@@ -714,7 +714,8 @@ export class Server {
     space: string,
     db: SqliteDbRef,
     sql: string,
-    params?: SqliteParamsWire,
+    params: SqliteParamsWire | undefined,
+    scopeKey: string,
   ): Promise<unknown[]> {
     // Apply the statement guard BEFORE the file-existence short-circuit, so a
     // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
@@ -722,7 +723,7 @@ export class Server {
     // than silently returning [].
     assertReadOnly(sql);
     const engine = await this.openEngine(space);
-    const path = this.#cellDbPath(engine, space, db.id);
+    const path = this.#cellDbPath(engine, space, db.id, scopeKey);
     // A never-written cell-db has no file yet (its schema is created on the
     // first write, via the attach path). Treat a missing file as an empty
     // result — but ONLY a genuinely-absent file: any other stat failure
@@ -833,9 +834,13 @@ export class Server {
     engine: Engine.Engine,
     space: string,
     operations: readonly Operation[],
+    scopeContext: { principal?: string; sessionId: string },
   ): Map<string, string> {
     const map = new Map<string, string>();
     const tablesById = new Map<string, Record<string, unknown> | undefined>();
+    // The db's scope qualifies its on-disk file the same way the read path does
+    // (so a write and a read of a user/session-scoped db hit the same file).
+    const scopeKeyById = new Map<string, string>();
     for (const op of operations) {
       if (op.op !== "sqlite") continue;
       const id = op.db.id;
@@ -862,7 +867,31 @@ export class Server {
           "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
         );
       }
-      if (map.has(id)) continue;
+      // Validate the declared scope on the WRITE path too. `sqlite.query`
+      // validates scope at parse time, but a folded op rides the loosely-parsed
+      // `transact` commit — an invalid value must fail loudly here, not silently
+      // degrade to space scoping (which would mis-place the file).
+      if (
+        op.db.scope !== undefined && op.db.scope !== "space" &&
+        op.db.scope !== "user" && op.db.scope !== "session"
+      ) {
+        throw new Engine.ProtocolError("sqlite op declares an invalid scope");
+      }
+      const scopeKey = Engine.resolveScopeKey(op.db.scope, {
+        principal: scopeContext.principal,
+        sessionId: scopeContext.sessionId,
+      });
+      if (map.has(id)) {
+        // Same db id appears twice in one commit: it must resolve to the same
+        // scoped file. A differing scope key would mean the second op silently
+        // writes into the first op's (different user/session) file — reject it.
+        if (scopeKeyById.get(id) !== scopeKey) {
+          throw new Engine.ProtocolError(
+            "conflicting scope for the same sqlite database in one commit",
+          );
+        }
+        continue;
+      }
       if (map.size >= 1) {
         throw new Engine.ProtocolError(
           "a commit may write to at most one sqlite database",
@@ -870,6 +899,7 @@ export class Server {
       }
       map.set(id, aliasForDbId(id));
       tablesById.set(id, op.db.tables);
+      scopeKeyById.set(id, scopeKey);
     }
     // Attach + create tables. If `ensureTables` throws (e.g. a malformed/hostile
     // `db.tables` payload — DDL validation rejects it), DETACH everything
@@ -880,17 +910,21 @@ export class Server {
     const attached: string[] = [];
     try {
       for (const [id, alias] of map) {
+        const scopeKey = scopeKeyById.get(id) ?? "space";
         attachDatabase(
           engine.database,
           alias,
-          this.#cellDbPath(engine, space, id),
+          this.#cellDbPath(engine, space, id, scopeKey),
         );
         attached.push(alias);
         const tables = tablesById.get(id);
         if (tables) {
-          // Run ensureTables only the first time this (space, id, schema) is
-          // seen; record AFTER it succeeds so a throw re-ensures next time.
-          const key = `${space}\0${id}\0${JSON.stringify(tables)}`;
+          // Run ensureTables only the first time this (space, id, scope, schema)
+          // is seen; record AFTER it succeeds so a throw re-ensures next time.
+          // The scope key is part of the identity: a user/session-scoped db has
+          // a distinct file per principal/session, so each needs its own DDL run
+          // even though (space, id, schema) match.
+          const key = `${space}\0${id}\0${scopeKey}\0${JSON.stringify(tables)}`;
           if (!this.#ensuredSchemas.has(key)) {
             ensureTables(
               engine.database,
@@ -915,9 +949,20 @@ export class Server {
   /** Path for a cell-derived db file. Sibling of the space db for file stores;
    *  a deterministic temp file for in-memory stores (so it survives the
    *  connection, unlike an `:memory:` attach). The space + id are hashed into
-   *  the filename so distinct (space, id) pairs never collide. */
-  #cellDbPath(engine: Engine.Engine, space: string, id: string): string {
-    const tag = `${hashToken(space)}-${hashToken(id)}`;
+   *  the filename so distinct (space, id) pairs never collide.
+   *
+   *  `scopeKey` is the resolved scope key (`Engine.resolveScopeKey`): `space`
+   *  for the default scope (left out of the name, so existing space-scoped files
+   *  keep their path — no migration), or `user:<did>` / `session:<did>:<sid>`
+   *  for a scoped db, hashed in so each user/session gets its own file. */
+  #cellDbPath(
+    engine: Engine.Engine,
+    space: string,
+    id: string,
+    scopeKey: string = "space",
+  ): string {
+    const scopeTag = scopeKey === "space" ? "" : `-${hashToken(scopeKey)}`;
+    const tag = `${hashToken(space)}-${hashToken(id)}${scopeTag}`;
     if (engine.url.protocol === "file:") {
       const dir = Path.dirname(Path.fromFileUrl(engine.url));
       return Path.join(dir, `cell-${tag}.sqlite`);
@@ -928,7 +973,8 @@ export class Server {
   async sqliteQuery(
     message: SqliteQueryRequest,
   ): Promise<ResponseMessage<SqliteQueryResult>> {
-    if (this.#sessions.get(message.space, message.sessionId) === null) {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
       return respondTypedError<SqliteQueryResult>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
@@ -938,7 +984,8 @@ export class Server {
       // All reads run unattached on a pooled read-only connection (no ATTACH,
       // real read-only, each file its own `main` namespace). The only
       // per-source difference is path resolution: an injected on-disk source's
-      // registered path, else the cell-derived path.
+      // registered path, else the cell-derived path (which the db's scope
+      // qualifies, per the session's principal / id).
       const disk = this.#diskSources.get(message.space, message.db.id);
       const rows = disk
         ? this.#readPool.query(disk.path, message.sql, message.params)
@@ -947,6 +994,10 @@ export class Server {
           message.db,
           message.sql,
           message.params,
+          Engine.resolveScopeKey(message.db.scope, {
+            principal: session.principal,
+            sessionId: message.sessionId,
+          }),
         );
       return { type: "response", requestId: message.requestId, ok: { rows } };
     } catch (error) {
@@ -1130,6 +1181,7 @@ export class Server {
         engine,
         message.space,
         commitPayload.operations,
+        { principal: session.principal, sessionId: message.sessionId },
       );
       let commit: Engine.AppliedCommit;
       try {
@@ -2170,11 +2222,14 @@ export const parseClientMessage = (
     parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
     (parsed.db.tables === undefined ||
       (isRecord(parsed.db.tables) &&
-        Object.keys(parsed.db.tables).length <= 256))
+        Object.keys(parsed.db.tables).length <= 256)) &&
+    (parsed.db.scope === undefined || parsed.db.scope === "space" ||
+      parsed.db.scope === "user" || parsed.db.scope === "session")
   ) {
     const db = {
       id: parsed.db.id,
       tables: isRecord(parsed.db.tables) ? parsed.db.tables : undefined,
+      scope: parsed.db.scope as CellScope | undefined,
     };
     const params = Array.isArray(parsed.params) || isRecord(parsed.params)
       ? parsed.params as SqliteParamsWire

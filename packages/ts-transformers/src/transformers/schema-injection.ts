@@ -879,13 +879,44 @@ function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
     callee.expression.name.text === "asScope";
 }
 
+/**
+ * A callee can receive a contextual scope if it is itself callable AND exposes
+ * an `asScope(scope)` method (the lowering target). This covers the schema-built
+ * pattern/node/module factories (which `isPatternFactoryCalleeExpression` also
+ * matches) plus opaque builtin factories like `sqliteDatabase`, whose public
+ * type is just `(...) => OpaqueRef<...>` with an `asScope` method and so lacks
+ * the `argumentSchema`/`resultSchema` shape that check keys on.
+ */
+function calleeExposesAsScope(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = unwrapExpression(expression);
+  try {
+    const type = checker.getTypeAtLocation(target);
+    if (checker.getSignaturesOfType(type, ts.SignatureKind.Call).length === 0) {
+      return false;
+    }
+    const asScope = type.getProperty("asScope");
+    if (!asScope) return false;
+    const asScopeType = checker.getTypeOfSymbolAtLocation(asScope, target);
+    return checker.getSignaturesOfType(asScopeType, ts.SignatureKind.Call)
+      .length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function maybeApplyFactoryContextualScope(
   node: ts.CallExpression,
   context: TransformationContext,
 ): ts.CallExpression | undefined {
   const { checker, factory } = context;
   if (isAlreadyScopedFactoryCall(node)) return undefined;
-  if (!isPatternFactoryCalleeExpression(node.expression, checker)) {
+  if (
+    !isPatternFactoryCalleeExpression(node.expression, checker) &&
+    !calleeExposesAsScope(node.expression, checker)
+  ) {
     return undefined;
   }
 

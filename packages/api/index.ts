@@ -2131,10 +2131,16 @@ export type SqliteDatabaseSource = {
   path: string;
 };
 
-export type SqliteDatabaseFunction = (
-  options?: { tables?: SqliteTableSchemas },
-  source?: SqliteDatabaseSource,
-) => OpaqueRef<SqliteDb>;
+export type SqliteDatabaseFunction = {
+  (
+    options?: { tables?: SqliteTableSchemas },
+    source?: SqliteDatabaseSource,
+  ): OpaqueRef<SqliteDb>;
+  /** Bind the db (and so its on-disk file) to a scope. The transformer lowers
+   *  `const db: PerUser<SqliteDb> = sqliteDatabase(...)` to `.asScope("user")`;
+   *  call it explicitly for the same effect. */
+  asScope(scope: CellScope): SqliteDatabaseFunction;
+};
 
 export type SqliteQueryParams = {
   db: Opaque<SqliteDatabase | SqliteDb>;
