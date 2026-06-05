@@ -32,6 +32,7 @@ import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 
 type SqliteDbRef = {
   id: string;
@@ -243,13 +244,16 @@ export function labelResultSchema(
     }
     const ifc = tables?.[c.table]?.properties?.[c.column]?.ifc;
     if (ifc && typeof ifc === "object" && Object.keys(ifc).length > 0) {
-      // Deep-clone via JSON: the `ifc` read off `db.tables` is part of a
-      // deep-frozen cell value exposed through a proxy. Embedding it by
-      // reference makes the schema-policy walk proxy a non-extensible object
-      // ("ownKeys … non-extensible"), and `structuredClone` can't clone the
-      // proxy. `ifc` is plain JSON, so a round-trip yields a fully extensible
-      // copy.
-      itemProps[c.output] = { ifc: JSON.parse(JSON.stringify(ifc)) };
+      // Deep-clone to a fully extensible copy: the `ifc` read off `db.tables` is
+      // part of a deep-frozen cell value exposed through a proxy, so embedding it
+      // by reference makes the schema-policy walk proxy a non-extensible object
+      // ("ownKeys … non-extensible"). `cloneIfNecessary(_, { frozen: false })`
+      // reads through the proxy and returns plain, mutable data.
+      itemProps[c.output] = {
+        ifc: cloneIfNecessary(ifc as Parameters<typeof cloneIfNecessary>[0], {
+          frozen: false,
+        }),
+      };
       anyLabeled = true;
     }
   }
@@ -451,7 +455,10 @@ export function sqliteQuery(
           // `prepareTxForCommit`, so the CFC-relevant labeled write commits and
           // the label persists.
           const resultRows = labelSchema
-            ? JSON.parse(JSON.stringify(rows))
+            ? cloneIfNecessary(
+              rows as Parameters<typeof cloneIfNecessary>[0],
+              { frozen: false },
+            )
             : rows;
           const wrote = await runtime.editWithRetry((wtx) => {
             // Stale-writeback guard: a newer query (different inputs -> different
