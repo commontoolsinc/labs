@@ -10,6 +10,7 @@ import {
   columnOriginAvailable,
   columnOrigins,
 } from "../v2/sqlite/column-origin.ts";
+import { ReadConnectionPool } from "../v2/sqlite/read-pool.ts";
 
 function seed(path: string): void {
   const db = new Database(path); // writable for setup
@@ -83,6 +84,31 @@ Deno.test({
     );
   } finally {
     ro.close();
+    Deno.removeSync(path);
+  }
+});
+
+Deno.test({
+  name:
+    "pool.queryWithOrigins returns rows + per-column origin (real pool path)",
+  sanitizeResources: false,
+}, () => {
+  const path = Deno.makeTempFileSync({ suffix: ".sqlite" });
+  seed(path);
+  const pool = new ReadConnectionPool();
+  try {
+    const { rows, columns } = pool.queryWithOrigins(
+      path,
+      "SELECT from_email AS sender, subject FROM emails ORDER BY subject",
+    );
+    assertEquals(rows, [{ sender: "a@x.com", subject: "hi" }]);
+    // Output name is the alias; origin is the TRUE source column.
+    assertEquals(columns, [
+      { output: "sender", table: "emails", column: "from_email" },
+      { output: "subject", table: "emails", column: "subject" },
+    ]);
+  } finally {
+    pool.close();
     Deno.removeSync(path);
   }
 });

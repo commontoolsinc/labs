@@ -15,7 +15,12 @@
 // other files.
 
 import { Database } from "@db/sqlite";
-import { runQuery, type SqliteParams } from "./exec.ts";
+import {
+  type QueryColumn,
+  runQuery,
+  runQueryWithOrigins,
+  type SqliteParams,
+} from "./exec.ts";
 
 export class ReadConnectionPool {
   #byPath = new Map<string, Database>();
@@ -62,6 +67,17 @@ export class ReadConnectionPool {
     params?: SqliteParams,
   ): Row[] {
     return runQuery<Row>(this.#connection(path), sql, params);
+  }
+
+  /** Like {@link query} but also returns each result column's TRUE origin
+   *  `(table, column)`, for CFC read-labeling. Used only when the db declares
+   *  per-column `ifc`. */
+  queryWithOrigins<Row = Record<string, unknown>>(
+    path: string,
+    sql: string,
+    params?: SqliteParams,
+  ): { rows: Row[]; columns: QueryColumn[] } {
+    return runQueryWithOrigins<Row>(this.#connection(path), sql, params);
   }
 
   close(): void {
