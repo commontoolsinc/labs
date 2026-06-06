@@ -1,11 +1,6 @@
 import { CODEC } from "@/wire-common/interface.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricError } from "@/fabric-instances/FabricError.ts";
-import { FabricMap } from "@/fabric-instances/FabricMap.ts";
-import { FabricSet } from "@/fabric-instances/FabricSet.ts";
+import { codecClasses as primitiveCodecClasses } from "@/fabric-primitives/index.ts";
+import { codecClasses as instanceCodecClasses } from "@/fabric-instances/index.ts";
 
 import { CodecRegistry } from "./CodecRegistry.ts";
 import { BigIntCodec } from "./BigIntCodec.ts";
@@ -14,31 +9,31 @@ import { SymbolCodec } from "./SymbolCodec.ts";
 import { UndefinedCodec } from "./UndefinedCodec.ts";
 
 /**
- * Creates a registry with the built-in codecs. Each fabric class that has a
- * fixed wire tag supplies its own codec via the static `[CODEC]` getter; the
- * four JS-primitive codecs (`bigint`, special `number`, interned `symbol`,
- * `undefined`) have no class to host a `[CODEC]`, so they are registered as
- * standalone codec instances.
+ * Creates a registry with the built-in codecs. Fabric classes whose instances
+ * have a fixed wire tag supply their codec via a static `[CODEC]`; the curated
+ * `codecClasses()` list from each of `fabric-primitives` and `fabric-instances`
+ * is the source of truth for which classes participate, so the wire-format
+ * surface is curated there rather than by the imports here. The four
+ * JS-primitive codecs (`bigint`, special `number`, interned `symbol`,
+ * `undefined`) have no owned class and are registered as standalone codecs.
  *
  * `null`, `boolean`, finite `number`, `string`, arrays, and plain objects are
  * handled as fallthrough in the serializer after no codec matches.
  *
- * Generic `FabricInstance` values are handled per-type by their `[CODEC]`s
- * (above); there is no catch-all instance handler. `ExplicitTagValue` /
- * `UnknownValue` / `ProblematicValue` are live-graph stand-ins that carry a
- * per-instance tag and are handled directly by the encoding context.
+ * `ExplicitTagValue` / `UnknownValue` / `ProblematicValue` are live-graph
+ * stand-ins that carry a per-instance tag and are handled directly by the
+ * encoding context, so they are not registered here.
  */
 export function createDefaultRegistry(): CodecRegistry {
   const registry = new CodecRegistry();
 
-  // Fabric classes with a fixed wire tag: codec lives on the class.
-  registry.register(FabricBytes[CODEC]);
-  registry.register(FabricEpochNsec[CODEC]);
-  registry.register(FabricEpochDays[CODEC]);
-  registry.register(FabricRegExp[CODEC]);
-  registry.register(FabricError[CODEC]);
-  registry.register(FabricMap[CODEC]);
-  registry.register(FabricSet[CODEC]);
+  // Codecs that live on a fabric class (primitives first, then instances).
+  for (const cls of primitiveCodecClasses()) {
+    registry.register(cls[CODEC]);
+  }
+  for (const cls of instanceCodecClasses()) {
+    registry.register(cls[CODEC]);
+  }
 
   // JS primitives that need tagged encoding (no owned class to host a codec).
   registry.register(new BigIntCodec());
