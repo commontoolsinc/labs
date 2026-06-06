@@ -589,18 +589,14 @@ describe("JsonEncodingContext", () => {
       expect(result.flag).toBe(Symbol.for("ready"));
     });
 
-    it("does not intercept `Symbol(desc)` (unique / uninterned)", () => {
-      // canSerialize() returns false for unique symbols. The handler does not
-      // claim them, which means they fall through to the registry's default
-      // unhandled-value treatment rather than being silently coerced into a
-      // registry symbol.
-      const uniq = Symbol("nope") as FabricValue;
-      const wire = toWireFormat(uniq);
-      // The result should NOT be a Symbol@1 wrapping. (It will be an
-      // UnknownValue or similar; the precise shape isn't what matters here --
-      // what matters is that we didn't spuriously fabricate a registry key.)
-      expect(typeof wire === "object" && wire !== null && "/Symbol@1" in wire)
-        .toBe(false);
+    it("loudly fails to encode `Symbol(desc)` (unique / uninterned)", () => {
+      // `SymbolCodec.canEncode()` returns false for unique symbols (no
+      // registry key), so no codec claims them. A default-configured context
+      // must then fail loudly rather than silently flatten the symbol to `{}`.
+      const { context } = makeTestContext();
+      expect(() => context.encode(Symbol("nope") as FabricValue)).toThrow(
+        "Cannot encode value of type `symbol`",
+      );
     });
 
     it("non-string state -> `ProblematicValue` (lenient)", () => {

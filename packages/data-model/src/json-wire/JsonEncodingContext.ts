@@ -102,7 +102,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   //
-  // `SerializationContext<string>` -- public boundary interface
+  // Instance members
   //
 
   /**
@@ -110,7 +110,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
-    return ENCODING_PREFIX_TAG + JSON.stringify(this.#encode(value));
+    return ENCODING_PREFIX_TAG + JSON.stringify(this.#encodeValue(value));
   }
 
   /**
@@ -127,31 +127,15 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
     const parsed = JsonEncodingContext.#parseWireText(json);
-    return this.#decode(parsed, context);
+    return this.#decodeValue(parsed, context);
   }
 
-  //
-  // Static helpers
-  //
-
   /**
-   * Indicates if the given text has a "first-blush" appearance as valid JSON
-   * encoded by this class -- that is, whether it carries the encoding prefix
-   * tag.
-   */
-  static seemsLikeEncoded(value: string): boolean {
-    return value.startsWith(ENCODING_PREFIX_TAG);
-  }
-
-  //
-  // Byte-level boundary (public for now -- used by serializeToBytes tests)
-  //
-
-  /**
-   * Serializes a fabric value to UTF-8 JSON bytes.
+   * Serializes a fabric value to UTF-8 JSON bytes. (Public for now -- used by
+   * byte-level round-trip tests.)
    */
   encodeToBytes(value: FabricValue): Uint8Array {
-    return this.toBytes(this.#encode(value));
+    return this.toBytes(this.#encodeValue(value));
   }
 
   /**
@@ -162,12 +146,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     context: ReconstructionContext,
   ): FabricValue {
     const tree = this.fromBytes(bytes);
-    return this.#decode(tree, context);
+    return this.#decodeValue(tree, context);
   }
-
-  //
-  // Tag wrapping/unwrapping (private)
-  //
 
   /**
    * Wraps a tag and state into the `/<tag>` wire format. Prepends `/` to the
@@ -198,15 +178,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return null;
     }
 
-    const key = Object.keys(data)[0];
-    const tag = key.slice(1);
-    const state = (data as Record<string, JsonWireValue>)[key];
-    return { tag, state };
+    // `isEncodedInstance()` guaranteed a single-property object, so this
+    // destructures that one entry.
+    const [[key, value]] = Object.entries(data);
+    return { tag: key.slice(1), state: value };
   }
-
-  //
-  // Byte conversion (private)
-  //
 
   /** Converts a wire-format tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonWireValue): Uint8Array {
@@ -219,15 +195,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return JsonEncodingContext.#parseWireText(json);
   }
 
-  //
-  // Tree-walking encode (private)
-  //
-
   /**
    * Encodes a fabric value into the wire-format tree. Recursively processes
    * nested values. See Section 4.5 of the formal spec.
    */
-  #encode(
+  #encodeValue(
     value: FabricValue,
     _seen?: Set<object>,
     registry: CodecRegistry = defaultRegistry,
@@ -248,7 +220,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       const tag = codec.wireTypeTag;
       const unprocessedState = codec.encode(value);
-      const finalState = this.#encode(unprocessedState, seen, registry);
+      const finalState = this.#encodeValue(unprocessedState, seen, registry);
       const result: JsonWireValue = { [`/${tag}`]: finalState };
 
       if (addedToSeen) {
@@ -271,7 +243,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       seen.add(value);
       const result = this.wrapTag(
         value.wireTypeTag,
-        this.#encode(value.state, seen, registry),
+        this.#encodeValue(value.state, seen, registry),
       );
       seen.delete(value);
       return result;
@@ -314,7 +286,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           result.push(this.wrapTag(WIRE_META_TAGS.hole, count));
         } else {
           result.push(
-            this.#encode(value[i] as FabricValue, seen, registry),
+            this.#encodeValue(value[i] as FabricValue, seen, registry),
           );
           i++;
         }
@@ -322,6 +294,15 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       seen.delete(value);
       return result as JsonWireValue;
+    }
+
+    // Anything reaching here is none of: a registered-codec value, an
+    // `ExplicitTagValue`, a `FabricInstance`, a primitive, or an array -- so
+    // the only legitimate remaining shape is a plain object. A non-object
+    // (e.g. an uninterned/unique `symbol`, which no codec accepts) is
+    // unencodable and must fail loudly rather than silently flatten to `{}`.
+    if (typeof value !== "object") {
+      throw new Error(`Cannot encode value of type \`${typeof value}\`.`);
     }
 
     // Plain objects
@@ -338,7 +319,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const result: Record<string, JsonWireValue> = {};
     const valueRec = value as Record<string, FabricValue>;
     for (const key of utf8SortedKeysOf(valueRec)) {
-      result[key] = this.#encode(valueRec[key], seen, registry);
+      result[key] = this.#encodeValue(valueRec[key], seen, registry);
     }
     seen.delete(value as object);
 
@@ -362,10 +343,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return result as JsonWireValue;
   }
 
-  //
-  // Tree-walking decode (private)
-  //
-
   /**
    * Decodes a wire-format tree back into fabric values. See Section 4.5 of
    * the formal spec.
@@ -375,7 +352,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * freeze. The unknown-tag fallback (`UnknownValue`) is a separate arm and is
    * intentionally NOT covered by this contract.
    */
-  #decode(
+  #decodeValue(
     data: JsonWireValue,
     context: ReconstructionContext,
     registry: CodecRegistry = defaultRegistry,
@@ -394,13 +371,13 @@ export class JsonEncodingContext implements SerializationContext<string> {
         const inner = rawState as Record<string, JsonWireValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
-          result[key] = this.#decode(val, context, registry);
+          result[key] = this.#decodeValue(val, context, registry);
         }
         return Object.freeze(result);
       }
 
       // Except for `/quote` and `/object`, the `state` needs to be fully decoded.
-      const state = this.#decode(rawState, context, registry);
+      const state = this.#decodeValue(rawState, context, registry);
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
@@ -474,7 +451,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           targetIndex += entryDecoded.state as number;
         } else {
-          result[targetIndex] = this.#decode(entry, context, registry);
+          result[targetIndex] = this.#decodeValue(entry, context, registry);
           targetIndex++;
         }
       }
@@ -493,9 +470,22 @@ export class JsonEncodingContext implements SerializationContext<string> {
           `object contains reserved /-prefixed key: "${key}"`,
         ) as unknown as FabricValue;
       }
-      result[key] = this.#decode(val, context, registry);
+      result[key] = this.#decodeValue(val, context, registry);
     }
     return Object.freeze(result);
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Indicates if the given text has a "first-blush" appearance as valid JSON
+   * encoded by this class -- that is, whether it carries the encoding prefix
+   * tag.
+   */
+  static seemsLikeEncoded(value: string): boolean {
+    return value.startsWith(ENCODING_PREFIX_TAG);
   }
 
   /**
