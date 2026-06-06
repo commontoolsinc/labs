@@ -15,6 +15,7 @@ import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { DECONSTRUCT } from "@/wire-common/interface.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
@@ -782,6 +783,55 @@ describe("JsonEncodingContext", () => {
 
     it("decodes non-object state to `ProblematicValue`", () => {
       const result = fromWireFormat({ "/RegExp@1": "nope" } as JsonWireValue);
+      expect(result).toBeInstanceOf(ProblematicValue);
+    });
+  });
+
+  describe("FabricHash", () => {
+    it("serializes to `/Hash@1` with the tagged hash string", () => {
+      const hash = new FabricHash(new Uint8Array([1, 2, 3]), "fid1");
+      const result = toWireFormat(hash as FabricValue) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(result)).toEqual(["/Hash@1"]);
+      expect(result["/Hash@1"]).toBe(hash.taggedHashString);
+    });
+
+    it("round-trips a hash", () => {
+      const hash = new FabricHash(
+        new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+        "fid1",
+      );
+      const result = roundTrip(hash as FabricValue) as unknown as FabricHash;
+      expect(result).toBeInstanceOf(FabricHash);
+      expect(result.tag).toBe("fid1");
+      expect(result.taggedHashString).toBe(hash.taggedHashString);
+    });
+
+    it("round-trips in a nested structure", () => {
+      const obj = {
+        ref: new FabricHash(new Uint8Array([7, 7, 7]), "fid1"),
+        label: "pointer",
+      } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result.label).toBe("pointer");
+      const h = result.ref as unknown as FabricHash;
+      expect(h).toBeInstanceOf(FabricHash);
+      expect(h.tag).toBe("fid1");
+    });
+
+    it("decodes non-string state to `ProblematicValue`", () => {
+      const result = fromWireFormat(
+        { "/Hash@1": { nope: true } } as JsonWireValue,
+      );
+      expect(result).toBeInstanceOf(ProblematicValue);
+    });
+
+    it("decodes a malformed hash string (no `:`) to `ProblematicValue`", () => {
+      const result = fromWireFormat(
+        { "/Hash@1": "no-colon-here" } as JsonWireValue,
+      );
       expect(result).toBeInstanceOf(ProblematicValue);
     });
   });

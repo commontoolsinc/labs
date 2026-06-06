@@ -78,25 +78,27 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     throw new Error("FabricSet: not yet implemented");
   }
 
-  static #codec = new (class FabricSetCodec extends BaseFabricCodec {
-    constructor() {
-      super(WIRE_TYPE_TAGS.Set, FabricSet);
-    }
+  static #codec = Object.freeze(
+    new (class FabricSetCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Set, FabricSet);
+      }
 
-    /** @inheritDoc */
-    encode(value: FabricSet): FabricValue {
-      return value[DECONSTRUCT]();
-    }
+      /** @inheritDoc */
+      encode(value: FabricSet): FabricValue {
+        return value[DECONSTRUCT]();
+      }
 
-    /** @inheritDoc */
-    decode(
-      _wireTypeTag: string,
-      state: FabricValue,
-      context: ReconstructionContext,
-    ): FabricValue {
-      return FabricSet[RECONSTRUCT](state, context);
-    }
-  })();
+      /** @inheritDoc */
+      decode(
+        _wireTypeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        return FabricSet[RECONSTRUCT](state, context);
+      }
+    })(),
+  );
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {

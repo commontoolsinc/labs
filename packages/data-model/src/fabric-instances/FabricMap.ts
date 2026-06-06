@@ -79,25 +79,27 @@ export class FabricMap
     throw new Error("FabricMap: not yet implemented");
   }
 
-  static #codec = new (class FabricMapCodec extends BaseFabricCodec {
-    constructor() {
-      super(WIRE_TYPE_TAGS.Map, FabricMap);
-    }
+  static #codec = Object.freeze(
+    new (class FabricMapCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Map, FabricMap);
+      }
 
-    /** @inheritDoc */
-    encode(value: FabricMap): FabricValue {
-      return value[DECONSTRUCT]();
-    }
+      /** @inheritDoc */
+      encode(value: FabricMap): FabricValue {
+        return value[DECONSTRUCT]();
+      }
 
-    /** @inheritDoc */
-    decode(
-      _wireTypeTag: string,
-      state: FabricValue,
-      context: ReconstructionContext,
-    ): FabricValue {
-      return FabricMap[RECONSTRUCT](state, context);
-    }
-  })();
+      /** @inheritDoc */
+      decode(
+        _wireTypeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        return FabricMap[RECONSTRUCT](state, context);
+      }
+    })(),
+  );
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {

@@ -52,42 +52,44 @@ export class FabricEpochDays extends BaseFabricPrimitive
   // Static members
   //
 
-  static #codec = new (class EpochDaysCodec extends BaseFabricCodec {
-    constructor() {
-      super(WIRE_TYPE_TAGS.EpochDays, FabricEpochDays);
-    }
-
-    /** @inheritDoc */
-    encode(value: FabricEpochDays): FabricValue {
-      return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
-    }
-
-    /** @inheritDoc */
-    decode(
-      wireTypeTag: string,
-      state: FabricValue,
-      _context: ReconstructionContext,
-    ): FabricValue {
-      if (typeof state !== "string") {
-        return new ProblematicValue(
-          wireTypeTag,
-          state,
-          `EpochDays: expected string state, got ${typeof state}`,
-        );
+  static #codec = Object.freeze(
+    new (class EpochDaysCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.EpochDays, FabricEpochDays);
       }
-      try {
-        return new FabricEpochDays(
-          bigintFromMinimalTwosComplement(fromBase64url(state)),
-        );
-      } catch {
-        return new ProblematicValue(
-          wireTypeTag,
-          state,
-          `EpochDays: invalid base64: ${state}`,
-        );
+
+      /** @inheritDoc */
+      encode(value: FabricEpochDays): FabricValue {
+        return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
       }
-    }
-  })();
+
+      /** @inheritDoc */
+      decode(
+        wireTypeTag: string,
+        state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (typeof state !== "string") {
+          return new ProblematicValue(
+            wireTypeTag,
+            state,
+            `EpochDays: expected string state, got ${typeof state}`,
+          );
+        }
+        try {
+          return new FabricEpochDays(
+            bigintFromMinimalTwosComplement(fromBase64url(state)),
+          );
+        } catch {
+          return new ProblematicValue(
+            wireTypeTag,
+            state,
+            `EpochDays: invalid base64: ${state}`,
+          );
+        }
+      }
+    })(),
+  );
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {

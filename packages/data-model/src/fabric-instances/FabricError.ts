@@ -403,25 +403,27 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return context.shouldDeepFreeze ? deepFreeze(result) : result;
   }
 
-  static #codec = new (class FabricErrorCodec extends BaseFabricCodec {
-    constructor() {
-      super(WIRE_TYPE_TAGS.Error, FabricError);
-    }
+  static #codec = Object.freeze(
+    new (class FabricErrorCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Error, FabricError);
+      }
 
-    /** @inheritDoc */
-    encode(value: FabricError): FabricValue {
-      return value[DECONSTRUCT]();
-    }
+      /** @inheritDoc */
+      encode(value: FabricError): FabricValue {
+        return value[DECONSTRUCT]();
+      }
 
-    /** @inheritDoc */
-    decode(
-      _wireTypeTag: string,
-      state: FabricValue,
-      context: ReconstructionContext,
-    ): FabricValue {
-      return FabricError[RECONSTRUCT](state, context);
-    }
-  })();
+      /** @inheritDoc */
+      decode(
+        _wireTypeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        return FabricError[RECONSTRUCT](state, context);
+      }
+    })(),
+  );
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {

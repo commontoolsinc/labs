@@ -98,41 +98,43 @@ export class FabricBytes extends BaseFabricPrimitive {
   // Static members
   //
 
-  static #codec = new (class BytesCodec extends BaseFabricCodec {
-    constructor() {
-      super(WIRE_TYPE_TAGS.Bytes, FabricBytes);
-    }
-
-    /** @inheritDoc */
-    decode(
-      wireTypeTag: string,
-      state: FabricValue,
-      _context: ReconstructionContext,
-    ): FabricBytes | ProblematicValue {
-      if (typeof state !== "string") {
-        return new ProblematicValue(
-          wireTypeTag,
-          state,
-          `Bytes: expected string state, got ${typeof state}`,
-        );
+  static #codec = Object.freeze(
+    new (class BytesCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Bytes, FabricBytes);
       }
-      try {
-        const bytes = fromBase64url(state);
-        return new FabricBytes(bytes);
-      } catch {
-        return new ProblematicValue(
-          wireTypeTag,
-          state,
-          `Bytes: invalid base64: ${state}`,
-        );
-      }
-    }
 
-    /** @inheritDoc */
-    encode(value: FabricBytes): FabricValue {
-      return toUnpaddedBase64url(value.#bytes);
-    }
-  })();
+      /** @inheritDoc */
+      decode(
+        wireTypeTag: string,
+        state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricBytes | ProblematicValue {
+        if (typeof state !== "string") {
+          return new ProblematicValue(
+            wireTypeTag,
+            state,
+            `Bytes: expected string state, got ${typeof state}`,
+          );
+        }
+        try {
+          const bytes = fromBase64url(state);
+          return new FabricBytes(bytes);
+        } catch {
+          return new ProblematicValue(
+            wireTypeTag,
+            state,
+            `Bytes: invalid base64: ${state}`,
+          );
+        }
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricBytes): FabricValue {
+        return toUnpaddedBase64url(value.#bytes);
+      }
+    })(),
+  );
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {

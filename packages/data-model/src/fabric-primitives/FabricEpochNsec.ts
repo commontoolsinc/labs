@@ -52,42 +52,44 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   // Static members
   //
 
-  static #codec = new (class EpochNsecCodec extends BaseFabricCodec {
-    constructor() {
-      super(WIRE_TYPE_TAGS.EpochNsec, FabricEpochNsec);
-    }
-
-    /** @inheritDoc */
-    encode(value: FabricEpochNsec): FabricValue {
-      return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
-    }
-
-    /** @inheritDoc */
-    decode(
-      wireTypeTag: string,
-      state: FabricValue,
-      _context: ReconstructionContext,
-    ): FabricValue {
-      if (typeof state !== "string") {
-        return new ProblematicValue(
-          wireTypeTag,
-          state,
-          `EpochNsec: expected string state, got ${typeof state}`,
-        );
+  static #codec = Object.freeze(
+    new (class EpochNsecCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.EpochNsec, FabricEpochNsec);
       }
-      try {
-        return new FabricEpochNsec(
-          bigintFromMinimalTwosComplement(fromBase64url(state)),
-        );
-      } catch {
-        return new ProblematicValue(
-          wireTypeTag,
-          state,
-          `EpochNsec: invalid base64: ${state}`,
-        );
+
+      /** @inheritDoc */
+      encode(value: FabricEpochNsec): FabricValue {
+        return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
       }
-    }
-  })();
+
+      /** @inheritDoc */
+      decode(
+        wireTypeTag: string,
+        state: FabricValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (typeof state !== "string") {
+          return new ProblematicValue(
+            wireTypeTag,
+            state,
+            `EpochNsec: expected string state, got ${typeof state}`,
+          );
+        }
+        try {
+          return new FabricEpochNsec(
+            bigintFromMinimalTwosComplement(fromBase64url(state)),
+          );
+        } catch {
+          return new ProblematicValue(
+            wireTypeTag,
+            state,
+            `EpochNsec: invalid base64: ${state}`,
+          );
+        }
+      }
+    })(),
+  );
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {
