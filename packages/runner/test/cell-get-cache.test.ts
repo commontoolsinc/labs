@@ -139,28 +139,4 @@ describe("Cell.get() per-transaction cache", () => {
     // cache hit would have skipped.
     expect(tx.getCfcState().prepare.status).toBe("invalidated");
   });
-
-  it("clears the cache when writing through writer().write()", () => {
-    const c = runtime.getCell(space, "writer-path", OBJECT_SCHEMA, tx);
-    c.set({ x: 1 });
-
-    const before = c.get(); // caches
-
-    const writer = tx.writer(space);
-    expect(writer.ok).toBeDefined();
-    // Merely obtaining a writer must not drop cached reads.
-    expect(c.get()).toBe(before);
-
-    // Writing through the raw writer bypasses write*/writeOrThrow*, but the
-    // wrapped writer still clears the per-tx read cache.
-    const link = c.getAsNormalizedFullLink();
-    writer.ok!.write(
-      { id: link.id, type: "application/json", path: ["value"] },
-      { x: 2 },
-    );
-
-    const after = c.get();
-    expect(after).not.toBe(before); // cache was cleared
-    expect(after).toEqual({ x: 2 });
-  });
 });

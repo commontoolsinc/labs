@@ -692,7 +692,8 @@ export interface IStorageTransaction {
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 }
 
-export interface IExtendedStorageTransaction extends IStorageTransaction {
+export interface IExtendedStorageTransaction
+  extends Omit<IStorageTransaction, "reader" | "writer"> {
   tx: IStorageTransaction;
 
   getCfcState(): Readonly<CfcTxState>;

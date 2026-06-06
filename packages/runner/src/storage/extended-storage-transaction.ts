@@ -18,10 +18,7 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
   MemorySpace,
-  ReaderError,
   ReadError,
   Result,
   StorageTransactionFailed,
@@ -409,10 +406,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.status();
   }
 
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return this.tx.reader(space);
-  }
-
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
@@ -452,28 +445,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): Immutable<FabricValue> {
     return this.readOrThrow(toMemorySpaceAddress(address), options);
-  }
-
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    this.assertWritable("writer()");
-    const result = this.tx.writer(space);
-    if (result.error) {
-      return result;
-    }
-    // Wrap the raw writer so that writes made through it -- which bypass this
-    // transaction's write*() methods -- still clear the per-tx read cache.
-    // Only write() invalidates; did()/read() pass through untouched, so merely
-    // obtaining a writer does not drop cached reads.
-    const inner = result.ok;
-    const wrapped: ITransactionWriter = {
-      did: () => inner.did(),
-      read: (address, options) => inner.read(address, options),
-      write: (address, value) => {
-        this.invalidateReadResultCache();
-        return inner.write(address, value);
-      },
-    };
-    return { ok: wrapped };
   }
 
   write(
@@ -914,10 +885,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.status();
   }
 
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return this.wrapped.reader(space);
-  }
-
   private transformReadOptions(options?: IReadOptions): IReadOptions {
     if (!this.options.nonReactive) {
       return options ?? {};
@@ -953,10 +920,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
       address,
       this.transformReadOptions(options),
     );
-  }
-
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    return this.wrapped.writer(space);
   }
 
   write(
