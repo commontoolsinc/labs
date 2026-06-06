@@ -210,6 +210,15 @@ describe("FabricHash", () => {
         );
         expect(decoded).toBeInstanceOf(ProblematicValue);
       });
+
+      it("decodes a malformed base64 `hash` to a `ProblematicValue`", () => {
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          { tag: "fid1", hash: "not valid base64!!" } as unknown as FabricValue,
+          context,
+        );
+        expect(decoded).toBeInstanceOf(ProblematicValue);
+      });
     });
   });
 });
