@@ -28,11 +28,11 @@ export {
   isPatternBuilderCall,
   isReactiveOriginCall,
   isReactiveOriginExpression,
+  isReactiveOriginTaggedTemplate,
   isReactiveValueExpression,
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
   isWildcardTraversalCall,
-  SYNTHETIC_MODULE_CALLBACK_PREFIX,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {

@@ -1,9 +1,9 @@
 /**
  * Contract tests for frozen-object safety.
  *
- * When `modernDataModel` is ON, `fabricFromNativeValueModern()` deep-freezes all
- * stored objects at commit time. Code paths that read these frozen objects from
- * storage must clone before mutating.
+ * `fabricFromNativeValueModern()` deep-freezes all stored objects at commit
+ * time. Code paths that read these frozen objects from storage must clone
+ * before mutating.
  *
  * The writeOrThrow tests use a two-transaction pattern to exercise the real
  * freeze:
@@ -21,14 +21,9 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { resetDataModelConfig } from "@commonfabric/data-model/fabric-value";
 
 const signer = await Identity.fromPassphrase("test frozen mutation");
 const space = signer.did();
-
-function resetAllConfigs() {
-  resetDataModelConfig();
-}
 
 describe("frozen-object safety contracts", () => {
   describe("writeOrThrow clones frozen parents before mutation", () => {
@@ -40,16 +35,12 @@ describe("frozen-object safety contracts", () => {
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        experimental: {
-          modernDataModel: true,
-        },
       });
     });
 
     afterEach(async () => {
       await runtime?.dispose();
       await storageManager?.close();
-      resetAllConfigs();
     });
 
     it("writes through a frozen parent when intermediate path is missing", async () => {

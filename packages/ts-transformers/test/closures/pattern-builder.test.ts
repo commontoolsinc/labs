@@ -1,12 +1,9 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertStringIncludes } from "@std/assert";
 import ts from "typescript";
 
 import { CrossStageState, TransformationContext } from "../../src/core/mod.ts";
 import type { CaptureTreeNode } from "../../src/utils/capture-tree.ts";
-import {
-  buildCallbackWithTopLevelCaptures,
-  PatternBuilder,
-} from "../../src/closures/utils/pattern-builder.ts";
+import { PatternBuilder } from "../../src/closures/utils/pattern-builder.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -75,37 +72,6 @@ function findFirstNode<T extends ts.Node>(
 
   return found;
 }
-
-Deno.test("buildCallbackWithTopLevelCaptures keeps rest bindings last", () => {
-  const { sourceFile, context } = createProgramAndContext(`
-    const callback = ({ item, ...rest }) => item;
-  `);
-  const originalCallback = findFirstNode(sourceFile, ts.isArrowFunction);
-  const captureTree = new Map<string, CaptureTreeNode>([
-    ["extra", { properties: new Map(), path: [] }],
-  ]);
-
-  const rebuilt = buildCallbackWithTopLevelCaptures(
-    originalCallback,
-    originalCallback.body,
-    captureTree,
-    context,
-  );
-
-  const paramName = rebuilt.parameters[0]?.name;
-  if (!paramName || !ts.isObjectBindingPattern(paramName)) {
-    throw new Error("Expected object binding parameter");
-  }
-
-  assertEquals(
-    paramName.elements.map((element) =>
-      ts.isIdentifier(element.name)
-        ? `${element.dotDotDotToken ? "..." : ""}${element.name.text}`
-        : element.getText(sourceFile)
-    ),
-    ["item", "extra", "...rest"],
-  );
-});
 
 Deno.test("PatternBuilder avoids capture collisions with nested explicit bindings", () => {
   const { sourceFile, context } = createProgramAndContext(`

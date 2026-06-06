@@ -24,6 +24,152 @@ interface Input {
     logs: Writable<HabitLog[]>;
     todayDate: string;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    logs: __cfHelpers.ReadonlyCell<HabitLog[]>;
+    habit: {
+        name: string;
+    };
+    todayDate: string;
+}, boolean>({
+    type: "object",
+    properties: {
+        logs: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/HabitLog"
+            },
+            asCell: ["readonly"]
+        },
+        habit: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        todayDate: {
+            type: "string"
+        }
+    },
+    required: ["logs", "habit", "todayDate"],
+    $defs: {
+        HabitLog: {
+            type: "object",
+            properties: {
+                habitName: {
+                    type: "string"
+                },
+                date: {
+                    type: "string"
+                },
+                completed: {
+                    type: "boolean"
+                }
+            },
+            required: ["habitName", "date", "completed"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ logs, habit, todayDate }) => {
+    const logList = logs.get();
+    return logList.some((log) => log.habitName === habit.name &&
+        log.date === todayDate &&
+        log.completed);
+});
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const habit = __cf_pattern_input.key("element");
+    const logs = __cf_pattern_input.key("params", "logs");
+    const todayDate = __cf_pattern_input.key("params", "todayDate");
+    const doneToday = __cfLift_1({
+        logs: logs,
+        habit: {
+            name: habit.key("name")
+        },
+        todayDate: todayDate
+    }).for("doneToday", true);
+    return <span>{__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        "enum": ["yes", "no"]
+    } as const satisfies __cfHelpers.JSONSchema, doneToday, "yes", "no")}</span>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Habit"
+        },
+        params: {
+            type: "object",
+            properties: {
+                logs: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/HabitLog"
+                    },
+                    asCell: ["readonly"]
+                },
+                todayDate: {
+                    type: "string"
+                }
+            },
+            required: ["logs", "todayDate"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        HabitLog: {
+            type: "object",
+            properties: {
+                habitName: {
+                    type: "string"
+                },
+                date: {
+                    type: "string"
+                },
+                completed: {
+                    type: "boolean"
+                }
+            },
+            required: ["habitName", "date", "completed"]
+        },
+        Habit: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-plain-array-some-alias-in-computed
 // Verifies: aliasing the result of .get() inside computed() still keeps nested plain-array callbacks plain
 //   const logList = logs.get()
@@ -34,154 +180,10 @@ export default pattern((__cf_pattern_input) => {
     const logs = __cf_pattern_input.key("logs");
     const todayDate = __cf_pattern_input.key("todayDate");
     return {
-        [UI]: <div>{habits.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const habit = __cf_pattern_input.key("element");
-                const logs = __cf_pattern_input.key("params", "logs");
-                const todayDate = __cf_pattern_input.key("params", "todayDate");
-                const doneToday = __cfHelpers.lift<{
-                    logs: __cfHelpers.ReadonlyCell<HabitLog[]>;
-                    habit: {
-                        name: string;
-                    };
-                    todayDate: string;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        logs: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/HabitLog"
-                            },
-                            asCell: ["readonly"]
-                        },
-                        habit: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        },
-                        todayDate: {
-                            type: "string"
-                        }
-                    },
-                    required: ["logs", "habit", "todayDate"],
-                    $defs: {
-                        HabitLog: {
-                            type: "object",
-                            properties: {
-                                habitName: {
-                                    type: "string"
-                                },
-                                date: {
-                                    type: "string"
-                                },
-                                completed: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["habitName", "date", "completed"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ logs, habit, todayDate }) => {
-                    const logList = logs.get();
-                    return logList.some((log) => log.habitName === habit.name &&
-                        log.date === todayDate &&
-                        log.completed);
-                })({
-                    logs: logs,
-                    habit: {
-                        name: habit.key("name")
-                    },
-                    todayDate: todayDate
-                }).for("doneToday", true);
-                return <span>{__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    "enum": ["yes", "no"]
-                } as const satisfies __cfHelpers.JSONSchema, doneToday, "yes", "no")}</span>;
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Habit"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            logs: {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/HabitLog"
-                                },
-                                asCell: ["readonly"]
-                            },
-                            todayDate: {
-                                type: "string"
-                            }
-                        },
-                        required: ["logs", "todayDate"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    HabitLog: {
-                        type: "object",
-                        properties: {
-                            habitName: {
-                                type: "string"
-                            },
-                            date: {
-                                type: "string"
-                            },
-                            completed: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["habitName", "date", "completed"]
-                    },
-                    Habit: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        [UI]: <div>{habits.mapWithPattern(__cfPattern_1, {
                 logs: logs,
                 todayDate: todayDate
-            })}</div>
+            })}</div>,
     };
 }, {
     type: "object",

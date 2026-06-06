@@ -265,8 +265,10 @@ const isSandboxPathWithinRoot = (root: string, path: string): boolean => {
 
 type HostSandboxMount = {
   kind: string;
+  name?: string;
   hostPath: string;
   sandboxPath: string;
+  readOnly?: boolean;
 };
 
 export class CfHarnessEngine {
@@ -310,11 +312,14 @@ export class CfHarnessEngine {
           kind: "workspace",
           hostPath: sandboxConfig.workspaceHostPath,
           sandboxPath: sandboxConfig.workspaceMountPath,
+          readOnly: false,
         },
         ...sandboxConfig.additionalMounts.map((mount) => ({
           kind: mount.kind,
+          ...(mount.kind === "host-bind" ? { name: mount.name } : {}),
           hostPath: mount.hostPath,
           sandboxPath: mount.sandboxPath,
+          readOnly: mount.readOnly,
         })),
       ]
       : this.workspaceHostPath !== undefined
@@ -322,6 +327,7 @@ export class CfHarnessEngine {
         kind: "workspace",
         hostPath: this.workspaceHostPath,
         sandboxPath: this.workspaceMountPath,
+        readOnly: false,
       }]
       : [];
     this.artifactStore = options.artifactStore ??
@@ -835,7 +841,10 @@ export class CfHarnessEngine {
     };
   }
 
-  #resolveHostPath(path: string): string {
+  #resolveHostMount(path: string): {
+    hostPath: string;
+    mount: HostSandboxMount;
+  } {
     if (this.#hostMounts.length === 0) {
       throw new Error(
         "bash-no-sandbox requires a host mount path to map sandbox paths",
@@ -853,14 +862,25 @@ export class CfHarnessEngine {
     }
     const sandboxRoot = normalizeSandboxRoot(mount.sandboxPath);
     if (sandboxPath === sandboxRoot) {
-      return normalizeHostPath(mount.hostPath);
+      return { hostPath: normalizeHostPath(mount.hostPath), mount };
     }
-    return normalizeHostPath(
-      joinHostPath(
-        mount.hostPath,
-        sandboxPath.slice(sandboxRoot.length + 1),
+    return {
+      hostPath: normalizeHostPath(
+        joinHostPath(
+          mount.hostPath,
+          sandboxPath.slice(sandboxRoot.length + 1),
+        ),
       ),
-    );
+      mount,
+    };
+  }
+
+  #resolveHostPath(path: string): string {
+    return this.#resolveHostMount(path).hostPath;
+  }
+
+  #resolveHostRootPath(path: string): string {
+    return normalizeHostPath(this.#resolveHostMount(path).mount.hostPath);
   }
 
   #hostPathToWorkspacePath(path: string): string | undefined {
@@ -1093,11 +1113,14 @@ export class CfHarnessEngine {
       skillRegistry: this.#runState.skillRegistry,
       skillActivations: this.#runState.skillActivations,
       allowedSkillScripts: this.config.allowedSkillScripts,
+      skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
+      browserAccess: this.config.browserAccess,
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>
         this.sandbox.resolvePath(path, this.#runState.currentDir),
       resolveHostPath: (path: string) => this.#resolveHostPath(path),
+      resolveHostRootPath: (path: string) => this.#resolveHostRootPath(path),
       hostPathToWorkspacePath: (path: string) =>
         this.#hostPathToWorkspacePath(path),
       isHostPathWithinWorkspace: (

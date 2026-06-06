@@ -96,7 +96,7 @@ export class OpaqueGetValidationTransformer extends HelpersOnlyTransformer {
    * - pattern/render callback inputs
    * - local variables initialized from reactive origin calls
    *
-   * Lift/handler/action/derive callback parameters keep their declared cell
+   * Lift/handler/action callback parameters keep their declared cell
    * semantics and must not be inferred as opaque from structure alone.
    */
   private isReactiveExpression(

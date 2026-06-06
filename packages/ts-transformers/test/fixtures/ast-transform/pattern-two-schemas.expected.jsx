@@ -19,6 +19,19 @@ interface Input {
 interface Result {
     doubled: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    count: number;
+}, number>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count * 2);
 // FIXTURE: pattern-two-schemas
 // Verifies: pattern with both input and output schemas already present preserves them
 //   pattern<Input, Result>(fn, inputSchema, outputSchema) → pattern(fn, inputSchema, outputSchema) (schemas kept)
@@ -27,19 +40,7 @@ interface Result {
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
-        doubled: __cfHelpers.lift<{
-            count: number;
-        }, number>({
-            type: "object",
-            properties: {
-                count: {
-                    type: "number"
-                }
-            },
-            required: ["count"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count * 2)({ count: count }).for(["__patternResult", "doubled"], true)
+        doubled: __cfLift_1({ count: count }).for(["__patternResult", "doubled"], true)
     };
 }, {
     type: "object",

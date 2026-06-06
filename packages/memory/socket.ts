@@ -5,14 +5,14 @@ import { traceAsync, traceSync } from "./telemetry.ts";
  */
 export const from = <
   In extends string | Uint8Array | Blob,
-  Out extends string | Uint8Array | Blob,
+  Out extends string | Uint8Array<ArrayBuffer> | Blob,
 >(
   socket: WebSocket,
 ): TransformStream<Out, In> => fromWithPrefix(socket, []);
 
 export const fromWithPrefix = <
   In extends string | Uint8Array | Blob,
-  Out extends string | Uint8Array | Blob,
+  Out extends string | Uint8Array<ArrayBuffer> | Blob,
 >(
   socket: WebSocket,
   prefix: readonly In[],

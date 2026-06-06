@@ -5,11 +5,11 @@ const identity = <T,>(value: T) => value;
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
 //   lifted as whole calls instead of lowering only inner argument expressions.
-//   identity(state.user.name)     -> derive-wrapped local-helper root
-//   identity(state.maybeUser?.name) -> derive-wrapped optional property access
-//   Math.max(state.a, state.b)    -> derive-wrapped free-function root
-//   parseInt(state.float)         -> derive-wrapped free-function root
-//   state.label ?? "Pending"      -> derive-wrapped nullish root
+//   identity(state.user.name)     -> lift-applied local-helper root
+//   identity(state.maybeUser?.name) -> lift-applied optional property access
+//   Math.max(state.a, state.b)    -> lift-applied free-function root
+//   parseInt(state.float)         -> lift-applied free-function root
+//   state.label ?? "Pending"      -> lift-applied nullish root
 //   state.items?.[0]              -> lowered optional element access
 export default pattern<{
   user: { name: string };

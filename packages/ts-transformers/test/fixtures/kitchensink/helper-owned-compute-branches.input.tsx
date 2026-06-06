@@ -32,16 +32,16 @@ export default pattern<{
 }>((state) => {
   // [TRANSFORM] new Writable: schema arg injected
   const fallbackMembers = new Writable(["ops", "sales"]);
-  // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
+  // [TRANSFORM] computed() -> lift(): captures state.showArchived, state.projects
   const visibleProjects = computed(() =>
     state.showArchived
       ? state.projects
       : state.projects.filter((project) => !project.archived)
   );
 
-  // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
+  // [TRANSFORM] computed() -> lift(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
   const rows = computed(() =>
-    // [TRANSFORM] .map() stays plain: visibleProjects is a captured derive input, plain inside this compute
+    // [TRANSFORM] .map() stays plain: visibleProjects is a captured computed input, plain inside this compute
     visibleProjects.map((project, projectIndex) => {
       // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
       const plainPreview = ["alpha", "beta"].map((label, labelIndex) =>
@@ -53,7 +53,7 @@ export default pattern<{
         project.badges.length > 0,
         <div>
           <h3>{project.name}</h3>
-          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside derive */}
+          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside computed */}
           {project.badges.map((badge, badgeIndex) => (
             <span>
               {badge.active
@@ -63,7 +63,7 @@ export default pattern<{
                 : ""}
             </span>
           ))}
-          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
+          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside computed */}
           {fallbackMembers.map((member, memberIndex) => (
             <small>
               {memberIndex === 0 ? `${project.name}-${member}` : member}
@@ -73,7 +73,7 @@ export default pattern<{
           {plainPreview.map((label) => <i>{label}</i>)}
         </div>,
         <div>
-          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside derive */}
+          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside computed */}
           {project.members.map((member, memberIndex) => (
             <span>
               {memberIndex === projectIndex

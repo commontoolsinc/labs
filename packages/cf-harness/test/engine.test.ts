@@ -152,6 +152,8 @@ Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing wor
     command: "ls",
     args: ["missing.txt"],
     cwd: workspaceHostPath,
+    clearEnv: true,
+    env: { PATH: runner.calls[0]!.env!.PATH },
     timeoutMs: 30_000,
   }]);
   assertEquals(result.output, {

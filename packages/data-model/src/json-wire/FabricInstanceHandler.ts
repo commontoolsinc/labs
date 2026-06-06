@@ -1,10 +1,10 @@
+import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DECONSTRUCT,
-  FabricInstance,
-  type FabricValue,
+  type FabricDeconstructable,
   type ReconstructionContext,
-} from "../interface.ts";
-import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
+} from "@/wire-common/interface.ts";
+import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import type {
   JsonWireValue,
   TypeHandler,
@@ -15,15 +15,27 @@ import type {
  * Handler for `FabricInstance` values (custom protocol types, including
  * `FabricError` and `ExplicitTagValue` subtypes). Serializes via
  * `[DECONSTRUCT]` and the codec's tag methods. Deserialization is not
- * dispatched via this handler's tag (since each instance type has its own
- * tag like `TAGS.Error`); instead, the deserializer falls back to the class
- * registry for those tags.
+ * dispatched via this handler's tag (since each instance type has its own tag
+ * like `WIRE_TYPE_TAGS.Error`); instead, the deserializer falls back to the
+ * class registry for those tags.
  */
 export const FabricInstanceHandler: TypeHandler = {
-  // This tag is not used for deserialization dispatch -- `FabricInstance`
-  // types are looked up by their individual tags. The handler is registered
-  // for serialization matching only.
-  tag: "",
+  /**
+   * This is not used for serialization dispatch, as it represents an abstract
+   * base class.
+   */
+  get classSource() {
+    return undefined;
+  },
+
+  /**
+   * This tag is not used for deserialization dispatch: `FabricInstance`
+   * types are looked up by their individual tags. The handler is registered
+   * for serialization matching only.
+   */
+  get wireTypeTag() {
+    return undefined;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricInstance;
@@ -34,13 +46,13 @@ export const FabricInstanceHandler: TypeHandler = {
     codec: TypeHandlerCodec,
     recurse: (v: FabricValue) => JsonWireValue,
   ): JsonWireValue {
-    const inst = value as FabricInstance;
+    const inst = value as FabricDeconstructable;
 
-    // `ExplicitTagValue` (`UnknownValue`, `ProblematicValue`): use
-    // preserved `.typeTag` and re-serialize their stored state.
+    // For `ExplicitTagValue`, use the preserved original `wireTypeTag` and
+    // `state`.
     if (inst instanceof ExplicitTagValue) {
       const serializedState = recurse(inst.state);
-      return codec.wrapTag(inst.typeTag, serializedState);
+      return codec.wrapTag(inst.wireTypeTag, serializedState);
     }
 
     // General `FabricInstance`: use `[DECONSTRUCT]` and codec for tag.

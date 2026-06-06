@@ -214,6 +214,16 @@ export class SESRuntime extends EventTarget {
     return this.internals.mapPosition(filename, line, column);
   }
 
+  /**
+   * Register a source map under `filename` so {@link mapPosition} (and stack
+   * parsing) can translate bundle coordinates back to original sources. The AMD
+   * isolate path does this implicitly via {@link SESIsolate.execute}; the ESM
+   * module-record loader composes a per-load bundle map and registers it here.
+   */
+  loadSourceMap(filename: string, sourceMap: SourceMap): void {
+    this.internals.loadSourceMap(filename, sourceMap);
+  }
+
   parseStack(stack: string): string {
     return this.internals.parseStack(stack);
   }

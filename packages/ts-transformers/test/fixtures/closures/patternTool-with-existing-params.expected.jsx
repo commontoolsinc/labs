@@ -7,13 +7,10 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { cell, derive, pattern, patternTool, type PatternToolResult } from "commonfabric";
+import { cell, computed, pattern, patternTool, type PatternToolResult } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ value, offset }) => {
-    return value * multiplier.get() + offset;
-});
 const multiplier = __cfHelpers.__cf_data(cell(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
@@ -25,40 +22,59 @@ type Output = {
         offset: number;
     }>;
 };
-// Test: patternTool with an existing extraParam, and a new capture
-// The function has { value: number, offset: number } as input type
-// We provide offset via extraParams, and the transformer should capture multiplier
-// FIXTURE: patternTool-with-existing-params
-// Verifies: patternTool merges auto-captured vars into pre-existing extraParams
-//   patternTool(fn, { offset }) → patternTool(fn, { multiplier, offset })
-//   callback signature gains captured param: ({ value, offset }) → ({ value, offset, multiplier })
-// Context: `offset` is already provided as an explicit extraParam. The transformer
-//   detects that `multiplier` (module-scoped cell) is also captured and merges it
-//   into the existing extraParams without duplicating `offset`.
-export default pattern(() => {
-    const tool = patternTool(({ value, offset, multiplier }: {
-        value: number;
-        offset: number;
-        multiplier: __cfHelpers.Cell<number>;
-    }) => {
-        return __cfHelpers.lift({
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                },
-                offset: {
-                    type: "number"
-                }
-            },
-            required: ["value", "offset"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+const __cfLift_1 = __cfHelpers.lift<{
+    value: number;
+    offset: number;
+}, number>({
+    type: "object",
+    properties: {
+        value: {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ value, offset });
-    }, {
-        multiplier: multiplier,
-        offset: offset.for(["tool", 1, "offset"], true)
-    });
+        },
+        offset: {
+            type: "number"
+        }
+    },
+    required: ["value", "offset"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, offset }) => {
+    return value * multiplier.get() + offset;
+});
+const __cfPattern_1 = pattern((__cf_pattern_input: {
+    value: number;
+    offset: number;
+}) => {
+    const value = __cf_pattern_input.key("value");
+    const offset = __cf_pattern_input.key("offset");
+    return __cfLift_1({
+        value: value,
+        offset: offset
+    }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        offset: {
+            type: "number"
+        }
+    },
+    required: ["value", "offset"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
+// FIXTURE: patternTool-with-existing-params
+// Verifies: patternTool's first arg is an explicit pattern() (CT-1655). The
+//   author supplies `offset` via extraParams (a genuine per-call input); the
+//   free module-scoped capture `multiplier` (read via .get()) is absorbed by the
+//   pattern into a module-scope lift closure rather than injected into
+//   extraParams — auto-capture-into-extraParams was removed when patternTool
+//   began requiring an explicit pattern.
+//   patternTool(pattern(({ value, offset }) => …multiplier.get()…), { offset })
+export default pattern(() => {
+    const tool = patternTool(__cfPattern_1, { offset: offset.for(["tool", 1, "offset"], true) });
     return { tool };
 }, {
     type: "object",

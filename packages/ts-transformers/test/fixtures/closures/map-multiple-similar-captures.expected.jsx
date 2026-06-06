@@ -22,149 +22,151 @@ interface State {
         discount: number;
     };
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    item: {
+        price: number;
+    };
+    state: {
+        checkout: {
+            discount: number;
+        };
+        upsell: {
+            discount: number;
+        };
+    };
+}, number>({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                checkout: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount"]
+                },
+                upsell: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount"]
+                }
+            },
+            required: ["checkout", "upsell"]
+        }
+    },
+    required: ["item", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<span>
+            {__cfLift_1({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            checkout: {
+                discount: state.key("checkout", "discount")
+            },
+            upsell: {
+                discount: state.key("upsell", "discount")
+            }
+        }
+    })}
+          </span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["price"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        checkout: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["discount"]
+                        },
+                        upsell: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["checkout", "upsell"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-multiple-similar-captures
 // Verifies: .map() correctly captures multiple state properties with the same leaf name
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {checkout: {discount}, upsell: {discount}}})
-//   expression → derive() with both discount paths distinguished
+//   expression → lift(...)(...) with both discount paths distinguished
 // Context: state.checkout.discount and state.upsell.discount share the name "discount" but are separate captures
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<span>
-            {__cfHelpers.lift<{
-                    item: {
-                        price: number;
-                    };
-                    state: {
-                        checkout: {
-                            discount: number;
-                        };
-                        upsell: {
-                            discount: number;
-                        };
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                price: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["price"]
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                checkout: {
-                                    type: "object",
-                                    properties: {
-                                        discount: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["discount"]
-                                },
-                                upsell: {
-                                    type: "object",
-                                    properties: {
-                                        discount: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["discount"]
-                                }
-                            },
-                            required: ["checkout", "upsell"]
-                        }
-                    },
-                    required: ["item", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)({
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        checkout: {
-                            discount: state.key("checkout", "discount")
-                        },
-                        upsell: {
-                            discount: state.key("upsell", "discount")
-                        }
-                    }
-                })}
-          </span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    checkout: {
-                                        type: "object",
-                                        properties: {
-                                            discount: {
-                                                type: "number"
-                                            }
-                                        },
-                                        required: ["discount"]
-                                    },
-                                    upsell: {
-                                        type: "object",
-                                        properties: {
-                                            discount: {
-                                                type: "number"
-                                            }
-                                        },
-                                        required: ["discount"]
-                                    }
-                                },
-                                required: ["checkout", "upsell"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     checkout: {
                         discount: state.key("checkout", "discount")

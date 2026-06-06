@@ -18,13 +18,14 @@ The home space provides a persistent, user-owned storage location for:
 
 - **Favorites** - A singleton list of favorited pieces that works across all
   spaces
+- **Profile** - A link to the user's shared profile default pattern
 - **Spaces** - A managed list of spaces the user has created or bookmarked
 - **Settings** - User-level preferences including `defaultAppUrl`
 
 ## Favorites
 
-Favorites are stored in the home space's `spaceCell.favorites` field. This
-design means:
+Favorites are stored on the home default pattern at
+`homeSpaceCell.defaultPattern.favorites`. This design means:
 
 1. **Singleton per user** - There is ONE favorites list per user, regardless of
    how many spaces they access
@@ -60,6 +61,38 @@ await removeFavorite(runtime, piece);
 const isFav = isFavorite(runtime, piece);
 const favoritesCell = getHomeFavorites(runtime);
 ```
+
+## Profile
+
+The home default pattern links to the user's shared profile through
+`homeSpaceCell.defaultPattern.profile`. The value is a cell link to the profile
+default pattern, not a root-level `profileSpace` field.
+
+If the link is missing, the system home pattern renders a profile-name input.
+Submitting a name starts `/api/patterns/system/profile-home.tsx` in a new
+profile space with `PatternFactory.inSpace(name)` and stores the resulting
+profile default-pattern link at `defaultPattern.profile`.
+The requested name is also mirrored into `defaultPattern.profileName` so
+viewer-specific `#profileName` wishes can update immediately while the linked
+profile default pattern finishes materializing.
+
+The `defaultPattern.profile` link is CFC-protected profile-link data. It must be
+created by the home default pattern's trusted profile creation flow; direct
+untrusted writes to the link are rejected. The inline `#profile` wish UI uses a
+trusted profile-create pattern surface for the same creation event and does not
+navigate away from the current view.
+
+Patterns can discover profile data from any space:
+
+```tsx
+const profile = wish({ query: "#profile" });
+const profileName = wish<string>({ query: "#profileName" });
+const portfolioItem = wish({ query: "#portfolio", scope: ["profile"] });
+```
+
+Shared pieces that directly render viewer-specific profile data should use a
+user-scoped result schema for that rendered output, so each authenticated viewer
+sees their own profile.
 
 ## Spaces
 
@@ -107,21 +140,19 @@ To share identity between browser and CLI:
 
 ```bash
 # 1. Create a mnemonic in the browser (login/register screen)
-# 2. Export a CLI key using fromMnemonic (not fromPassphrase):
-deno eval '
-import { Identity } from "./packages/identity/src/identity.ts";
-const mnemonic = "your 24-word mnemonic here";
-const id = await Identity.fromMnemonic(mnemonic, { implementation: "noble" });
-await Deno.writeFile("./browser.key", id.toPkcs8());
-'
+# 2. Export a matching CLI key with `cf id from-mnemonic`, reading the phrase
+#    from a file (`-- <file>`; or `-` for stdin) so it stays out of shell
+#    history and the process list:
+deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > ./browser.key
 
 # 3. Use that key with cf
 cf piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
 ```
 
 Note: `cf id derive <passphrase>` will NOT produce the same identity as the
-browser. You must use `fromMnemonic` with `implementation: "noble"` to get a
-PKCS8 key that matches the browser's identity.
+browser — it uses `Identity.fromPassphrase()`, whereas browser mnemonic login
+and `cf id from-mnemonic` use `Identity.fromMnemonic()`. Use `from-mnemonic` to
+get a PKCS8 key that matches the browser's identity.
 
 ## Default App URL
 
@@ -143,6 +174,8 @@ Both the home pattern and the default app pattern follow the same mechanism:
 2. If not, it creates one:
    - **Home space** (`space === userIdentityDID`): uses
      `/api/patterns/system/home.tsx`
+   - **Profile space** (explicit profile creation path): uses
+     `/api/patterns/system/profile-home.tsx`
    - **Other spaces**: reads `defaultAppUrl` from the home space; falls back to
      `/api/patterns/system/default-app.tsx`
 3. The pattern is compiled, run, and linked as `spaceCell.defaultPattern`

@@ -1,21 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FrozenMap, FrozenSet } from "../src/frozen-builtins.ts";
+
+import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 
 type MutableMapExtensions<K, V> = {
   getOrInsert(key: K, defaultValue: V): V;
   getOrInsertComputed(key: K, callback: (key: K) => V): V;
 };
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 describe("frozen-builtins", () => {
-  // --------------------------------------------------------------------------
-  // FrozenMap
-  // --------------------------------------------------------------------------
-
   describe("FrozenMap", () => {
     it("is instanceof `Map`", () => {
       const fm = new FrozenMap([["a", 1]]);
@@ -107,7 +100,7 @@ describe("frozen-builtins", () => {
       expect(fm.size).toBe(0);
     });
 
-    it("builder rejects writes after `finish()`", () => {
+    it("rejects builder writes after `finish()`", () => {
       const builder = FrozenMap.createBuilder<string, number>();
       builder.set("a", 1);
 
@@ -119,10 +112,6 @@ describe("frozen-builtins", () => {
       expect([...fm.entries()]).toEqual([["a", 1]]);
     });
   });
-
-  // --------------------------------------------------------------------------
-  // FrozenSet
-  // --------------------------------------------------------------------------
 
   describe("FrozenSet", () => {
     it("is instanceof `Set`", () => {
@@ -181,7 +170,7 @@ describe("frozen-builtins", () => {
       expect(fs.size).toBe(0);
     });
 
-    it("builder rejects writes after `finish()`", () => {
+    it("rejects builder writes after `finish()`", () => {
       const builder = FrozenSet.createBuilder<number>();
       builder.add(1);
 

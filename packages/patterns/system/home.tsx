@@ -2,12 +2,19 @@ import {
   computed,
   equals,
   handler,
+  ifElse,
   NAME,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
+import ProfileCreate, {
+  type CreateProfileEvent,
+  submitProfileCreation,
+  type TrustedProfileLink,
+} from "./profile-create.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
 // Types from favorites-manager.tsx
@@ -33,6 +40,18 @@ type JournalEntry = {
 type SpaceEntry = {
   name: string;
   did?: string;
+};
+
+type HomeOutput = {
+  [NAME]: string;
+  [UI]: unknown;
+  favorites: Writable<Favorite[]>;
+  journal: Writable<JournalEntry[]>;
+  learned: Writable<LearnedSection>;
+  spaces: Writable<SpaceEntry[]>;
+  defaultAppUrl: Writable<string>;
+  profile?: TrustedProfileLink;
+  createProfile: Stream<CreateProfileEvent>;
 };
 
 // Handler to add a favorite
@@ -103,13 +122,50 @@ const removeSpaceHandler = handler<
   spaces.set(filtered);
 });
 
-export default pattern((_) => {
+export default pattern<Record<string, never>, HomeOutput>((_) => {
   // OWN the data cells (.for for id stability)
   const favorites = new Writable<Favorite[]>([]).for("favorites");
   const journal = new Writable<JournalEntry[]>([]).for("journal");
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
+  // NOTE(CT-1628): the `as any` casts around `profile` below are required
+  // because the CFC wrapper types (TrustedProfileLink) don't yet compose with
+  // Writable/the pattern factory output type. Tracked for a proper type fix.
+  const profile = new Writable<TrustedProfileLink>(undefined).for("profile");
+  const profileName = new Writable("").for("profileName");
+  const createProfileStream = submitProfileCreation({
+    profile: profile as any,
+    profileName,
+  });
+  // Pass the owner-protected `profile` cell (TrustedProfileLink IFC schema)
+  // through unchanged. Creating a profile into a fresh home works: the runner's
+  // post-run cross-space-child handling commits the new profile space before the
+  // home link. The fix here is purely on the display side (below) — the create
+  // surface is only shown when no profile exists, so a created/existing profile
+  // is never re-submitted (re-creating over an existing link is a separate,
+  // not-yet-handled cross-space case). See docs/specs/shared-profile-space.md.
+  const profileCreate = ProfileCreate({
+    profile: profile as any,
+    profileName,
+    inputId: "home-profile-name-input",
+    buttonId: "home-profile-create-button",
+  });
+  // Existence is keyed off the durable profile *link* (`profile`), which is the
+  // source of truth; `profileName` is only a creation-latency fallback. The link
+  // points cross-space (into the name-derived profile space), so on the first
+  // render right after creation `profile.get()` is still `undefined` until that
+  // space loads — but the home-space `profileName` mirror, written alongside the
+  // link, reads immediately and covers that window. Keying primarily off the
+  // link means a home whose link is populated but whose `profileName` mirror is
+  // empty (e.g. a migrated/partially-populated home) still reports a profile and
+  // does not re-show the create form (which would let it overwrite a valid
+  // link). The `cf-render` below resolves and loads the cross-space profile for
+  // display.
+  const hasProfile = computed(() =>
+    profile.get() !== undefined ||
+    (profileName.get() ?? "").trim().length > 0
+  );
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -132,9 +188,38 @@ export default pattern((_) => {
           <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
           <cf-tab-panel value="profile">
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
-              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>
 
+              {ifElse(
+                hasProfile,
+                (
+                  <cf-vstack gap="2">
+                    <cf-hstack id="home-profile-summary" gap="2" align="center">
+                      {
+                        /*
+                        Show the home-space `profileName` mirror here rather than
+                        `profile.key("name")`: the latter reads cross-space (into
+                        the profile space) and renders empty inline. The live,
+                        editable name is shown by the `cf-render` below.
+                      */
+                      }
+                      <strong>{profileName}</strong>
+                    </cf-hstack>
+                    <cf-render $cell={profile as any} />
+                  </cf-vstack>
+                ),
+                profileCreate,
+              )}
+
+              {
+                /*
+                Free-form summary lives on learned.summary, independent of the
+                shared profile space. It is intentionally not resolved by the
+                #profile wish (which targets the profile pattern).
+              */
+              }
               <cf-vstack gap="1">
+                <h3 style={{ margin: 0, fontSize: "14px" }}>Profile Summary</h3>
                 <cf-textarea
                   $value={learned.key("summary")}
                   placeholder="Write a short profile summary about yourself..."
@@ -247,10 +332,16 @@ export default pattern((_) => {
     learned,
     spaces,
     defaultAppUrl,
+    profile,
+    // Exposed so #profileName can fall back to the name typed at creation while
+    // the owner-protected profile link is still resolving (creation latency);
+    // the live name comes from the profile's own `initialNameApplied`.
+    profileName,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
     removeFavorite: removeFavorite({ favorites }),
     addJournalEntry: addJournalEntry({ journal }),
+    createProfile: createProfileStream,
   };
 });

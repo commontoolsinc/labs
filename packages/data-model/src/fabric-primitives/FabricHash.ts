@@ -2,16 +2,16 @@ import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
 } from "@commonfabric/api";
-import { FabricPrimitive } from "../interface.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 
+import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
- * Extends `FabricPrimitive` -- treated like a primitive in the fabric
- * type system (always frozen, passes through conversion unchanged).
  *
  * Stringification produces `<tag>:<base64urlHash>` where
  * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
@@ -23,7 +23,7 @@ import {
  * freeze `ArrayBuffer` contents). The string form is cached internally so
  * that repeated `toString()` calls are O(1).
  */
-export class FabricHash extends FabricPrimitive implements ApiFabricHash {
+export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   readonly #hash: Uint8Array;
   readonly #tag: string;
   readonly #justHashString: string;
@@ -53,6 +53,11 @@ export class FabricHash extends FabricPrimitive implements ApiFabricHash {
     this.#justHashString = toUnpaddedBase64url(hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
     Object.freeze(this);
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Hash;
   }
 
   /**

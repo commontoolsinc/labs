@@ -42,6 +42,68 @@ const removeItem = handler({
         items.set(currentItems.toSpliced(index, 1));
     }
 });
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const items = __cf_pattern_input.key("params", "items");
+    return (<div>
+                  <span>{item.key("name")}</span>
+                  <button type="button" onClick={removeItem({ items, item })}>Remove</button>
+                </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    }
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-inside-ifelse-with-handler
 // Verifies: .map() inside an ifElse branch is still transformed to mapWithPattern
 //   .map(fn) → .mapWithPattern(pattern(...), {items: ...})
@@ -67,68 +129,7 @@ export default pattern((__cf_pattern_input) => {
                         properties: {}
                     }]
             } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, hasItems, <div>
-              {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const item = __cf_pattern_input.key("element");
-                    const items = __cf_pattern_input.key("params", "items");
-                    return (<div>
-                  <span>{item.key("name")}</span>
-                  <button type="button" onClick={removeItem({ items, item })}>Remove</button>
-                </div>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            $ref: "#/$defs/Item"
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                items: {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Item"
-                                    }
-                                }
-                            },
-                            required: ["items"]
-                        }
-                    },
-                    required: ["element", "params"],
-                    $defs: {
-                        Item: {
-                            type: "object",
-                            properties: {
-                                id: {
-                                    type: "number"
-                                },
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["id", "name"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
+              {items.mapWithPattern(__cfPattern_1, {
                     items: items
                 })}
             </div>, <div>No items</div>)}

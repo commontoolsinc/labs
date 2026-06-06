@@ -1,24 +1,26 @@
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
+
+import { type FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   type FabricClass,
-  type FabricInstance,
-  type FabricValue,
   RECONSTRUCT,
   type ReconstructionContext,
   type SerializationContext,
-} from "../interface.ts";
-import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
-import { deepFreeze } from "../deep-freeze.ts";
-import { UnknownValue } from "../fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
+} from "@/wire-common/interface.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue, TypeHandlerCodec } from "./interface.ts";
 import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
-import { FabricError } from "../fabric-instances/FabricError.ts";
-import { FabricMap } from "../fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../fabric-instances/FabricRegExp.ts";
-import { FabricSet } from "../fabric-instances/FabricSet.ts";
-import { TAGS } from "../fabric-type-tags.ts";
-import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
+import {
+  BaseFabricInstance,
+  FabricError,
+  FabricMap,
+  FabricSet,
+} from "@/fabric-instances/index.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { WIRE_META_TAGS } from "@/wire-common/wire-meta-tags.ts";
 
 /**
  * Tag prefix for the encoded form used by this module. We use this explicit
@@ -117,24 +119,24 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // Create a codec view that delegates to our private methods.
     this.codec = {
       wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) => this.getTagFor(value),
+      getTagFor: (value: FabricInstance) =>
+        BaseFabricInstance.wireTypeTagOf(value),
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
     // static `[RECONSTRUCT]` method is used by the class registry fallback
     // path in `deserialize()`.
-    this.registry.set(TAGS.Error, FabricError);
-    this.registry.set(TAGS.Map, FabricMap);
-    this.registry.set(TAGS.Set, FabricSet);
-    this.registry.set(TAGS.RegExp, FabricRegExp);
+    this.registry.set(WIRE_TYPE_TAGS.Error, FabricError);
+    this.registry.set(WIRE_TYPE_TAGS.Map, FabricMap);
+    this.registry.set(WIRE_TYPE_TAGS.Set, FabricSet);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // `SerializationContext<string>` -- public boundary interface
-  // -------------------------------------------------------------------------
+  //
 
   /**
-   * Encodes a fabric value to a JSON string. Serializes modern types into
+   * Encodes a fabric value to a JSON string. Serializes fabric types into
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
@@ -143,7 +145,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /**
    * Decodes a JSON string back into a fabric value. Parses the string,
-   * then deserializes tagged forms back into modern runtime types.
+   * then deserializes tagged forms back into runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): FabricValue {
     if (!JsonEncodingContext.seemsLikeEncoded(data)) {
@@ -158,9 +160,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return this.deserialize(parsed, runtime);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Static helpers
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Indicates if the given text has a "first-blush" appearance as valid JSON
@@ -171,9 +173,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return value.startsWith(ENCODING_PREFIX_TAG);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Byte-level boundary (public for now -- used by serializeToBytes tests)
-  // -------------------------------------------------------------------------
+  //
 
   /**
    * Serializes a fabric value to UTF-8 JSON bytes.
@@ -193,23 +195,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return this.deserialize(tree, runtime);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Tag wrapping/unwrapping (private)
-  // -------------------------------------------------------------------------
-
-  /** Returns the wire format tag for a fabric instance's type. */
-  private getTagFor(value: FabricInstance): string {
-    if (value instanceof ExplicitTagValue) {
-      return value.typeTag;
-    }
-    const typeTag = (value as { typeTag?: unknown }).typeTag;
-    if (typeof typeTag === "string") {
-      return typeTag;
-    }
-    throw new Error(
-      `JsonEncodingContext: no tag registered for value: ${value}`,
-    );
-  }
+  //
 
   /** Returns the class that can reconstruct instances for a given tag. */
   private getClassFor(
@@ -253,9 +241,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return { tag, state };
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Byte conversion (private)
-  // -------------------------------------------------------------------------
+  //
 
   /** Converts a wire-format tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonWireValue): Uint8Array {
@@ -268,12 +256,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return JsonEncodingContext.#parseWireText(json);
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Tree-walking serialization (private)
   //
-  // Moved from serialization.ts. These methods walk the value tree,
-  // dispatching to type handlers and applying structural escaping.
-  // -------------------------------------------------------------------------
 
   /**
    * Serializes a fabric value into wire format. Recursively processes nested
@@ -284,7 +269,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     _seen?: Set<object>,
     registry: TypeHandlerRegistry = defaultRegistry,
   ): JsonWireValue {
-    // --- Try type handlers first ---
+    // Try type handlers first
     const handler = registry.findSerializer(value);
     if (handler) {
       const seen = _seen ?? new Set<object>();
@@ -309,7 +294,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result;
     }
 
-    // --- Primitives ---
+    // Primitives
     if (
       value === null || typeof value === "boolean" ||
       typeof value === "number" || typeof value === "string"
@@ -317,7 +302,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return value as JsonWireValue;
     }
 
-    // --- Arrays ---
+    // Arrays
     if (Array.isArray(value)) {
       const seen = _seen ?? new Set<object>();
       if (seen.has(value)) {
@@ -334,7 +319,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
             count++;
             i++;
           }
-          result.push(this.wrapTag(TAGS.hole, count));
+          result.push(this.wrapTag(WIRE_META_TAGS.hole, count));
         } else {
           result.push(
             this.serialize(value[i] as FabricValue, seen, registry),
@@ -347,7 +332,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result as JsonWireValue;
     }
 
-    // --- Plain objects ---
+    // Plain objects
     const seen = _seen ?? new Set<object>();
     if (seen.has(value as object)) {
       throw new Error("Circular reference detected during serialization");
@@ -377,20 +362,20 @@ export class JsonEncodingContext implements SerializationContext<string> {
             Object.entries(result).map(([k, v]) => [k, unquote(v)]),
           ),
         );
-        return this.wrapTag(TAGS.quote, unquoted) as JsonWireValue;
+        return this.wrapTag(WIRE_META_TAGS.quote, unquoted) as JsonWireValue;
       }
-      return this.wrapTag(TAGS.object, result) as JsonWireValue;
+      return this.wrapTag(WIRE_META_TAGS.object, result) as JsonWireValue;
     }
 
     return result as JsonWireValue;
   }
 
-  // -------------------------------------------------------------------------
+  //
   // Tree-walking deserialization (private)
-  // -------------------------------------------------------------------------
+  //
 
   /**
-   * Deserializes a wire-format value back into modern runtime types.
+   * Deserializes a wire-format value back into runtime types.
    * See Section 4.5 of the formal spec.
    *
    * Frozen-ness contract: values returned via the type-handler dispatch arm
@@ -419,8 +404,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
         ) as unknown as FabricValue;
       }
 
-      // `TAGS.object` unwrapping (Section 5.6).
-      if (tag === TAGS.object) {
+      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
+      if (tag === WIRE_META_TAGS.object) {
         const inner = state as Record<string, JsonWireValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
@@ -429,12 +414,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return Object.freeze(result);
       }
 
-      // `TAGS.quote` literal handling (Section 5.6).
-      if (tag === TAGS.quote) {
+      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
+      if (tag === WIRE_META_TAGS.quote) {
         return state as FabricValue;
       }
 
-      // --- Type handler dispatch ---
+      // Type handler dispatch
       //
       // `TypeHandler.deserialize()` makes a contractual guarantee that its
       // results are deep-frozen, rather than relying on every caller to
@@ -470,7 +455,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         ));
       }
 
-      // --- Class registry fallback ---
+      // Class registry fallback
       const cls = this.getClassFor(tag);
       const deserializedState = this.deserialize(state, runtime, registry);
 
@@ -515,7 +500,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let logicalLength = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
+        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           logicalLength += entryDecoded.state as number;
         } else {
           logicalLength++;
@@ -526,7 +511,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let targetIndex = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === TAGS.hole) {
+        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           targetIndex += entryDecoded.state as number;
         } else {
           result[targetIndex] = this.deserialize(entry, runtime, registry);

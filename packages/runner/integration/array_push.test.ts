@@ -66,7 +66,7 @@ function createRuntime(identity: Identity, base: URL): Runtime {
       address: new URL("/api/storage/memory", base),
     }),
     experimental: {
-      modernDataModel: readExperimentalFlag("EXPERIMENTAL_MODERN_DATA_MODEL"),
+      modernCellRep: readExperimentalFlag("EXPERIMENTAL_MODERN_CELL_REP"),
       persistentSchedulerState: readExperimentalFlag(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),
@@ -174,7 +174,7 @@ Deno.test({
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
 
-    let timeoutHandle: number;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(() => {
         reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));

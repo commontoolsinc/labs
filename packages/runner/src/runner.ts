@@ -31,6 +31,7 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
+import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
   unsafe_noteParentOnPatterns,
@@ -358,6 +359,45 @@ const recordRawBuiltinResultSchemaPolicyInput = (
   );
 };
 
+/**
+ * Find the first write-redirect link within an output binding and return its
+ * FULLY RESOLVED normalized link (`id` and `space` populated). The output spot
+ * a pattern node writes through is reserved for that node, so its resolved
+ * coordinates form a stable, position-derived, program-independent identity —
+ * suitable as the cause for the node's result cell instead of hashing the
+ * pattern object (which drags in the session-varying `program`). Returns
+ * undefined if the binding contains no write redirect.
+ */
+function firstResolvedOutputRedirect(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  binding: unknown,
+  baseCell: Cell<any>,
+): NormalizedFullLink | undefined {
+  if (isWriteRedirectLink(binding)) {
+    return resolveLink(
+      runtime,
+      tx,
+      parseLink(binding, baseCell),
+      "writeRedirect",
+    );
+  }
+  if (Array.isArray(binding)) {
+    for (const child of binding) {
+      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (isRecord(binding) && !isCellLink(binding)) {
+    for (const child of Object.values(binding)) {
+      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
 const recordSetupProjectionPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -468,7 +508,16 @@ type SchedulerRehydrationSubscriptionOptions = {
     space: MemorySpace;
     pieceId: string;
     processGeneration: number;
+    awaitSync?: boolean;
   };
+};
+
+// Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
+type RunnerRunOptions = {
+  doNotUpdateOnPatternChange?: boolean;
+  // Resumed-from-synced-state: hold each action's initial rehydration/run until
+  // the space has finished syncing, so consumers don't race the data.
+  awaitSyncBeforeInitialRun?: boolean;
 };
 
 function dedupeNormalizedLinks(
@@ -499,6 +548,16 @@ export class Runner {
   private resultPatternCache = new Map<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
+  >();
+  // Per-transaction accumulator of cross-space child spaces, so that when a
+  // parent materializes several `Child.inSpace(...)` results into different
+  // spaces we commit ALL child spaces before the parent (the parent's link to
+  // each child must never be durable before that child's target). Each call
+  // re-supplies the full order rather than replacing it with just the latest
+  // child + parent. Keyed weakly by transaction so it is reclaimed with the tx.
+  private crossSpaceChildSpaces = new WeakMap<
+    IExtendedStorageTransaction,
+    MemorySpace[]
   >();
 
   constructor(readonly runtime: Runtime) {
@@ -818,11 +877,11 @@ export class Runner {
       meta: ignoreReadForScheduling,
     });
     // `fabricFromNativeValue()` below rebuilds a fresh tree from `internal`
-    // without mutating its inputs (true on both the modern and legacy paths),
-    // and `internal` isn't used after that. So the operands can be merged by
-    // reference: no defensive deep copy of `defaults` / `pattern.initial`, and
-    // no mutable (`frozen: false`) read of `previousInternal`, is needed --
-    // `Object.assign` only reads their top-level keys.
+    // without mutating its inputs, and `internal` isn't used after that. So the
+    // operands can be merged by reference: no defensive deep copy of `defaults`
+    // / `pattern.initial`, and no mutable (`frozen: false`) read of
+    // `previousInternal`, is needed -- `Object.assign` only reads their
+    // top-level keys.
     const internal = Object.assign(
       {},
       (defaults as unknown as { internal?: FabricValue })?.internal,
@@ -893,6 +952,23 @@ export class Runner {
 
     // Set the pattern in the resultCell as well
     resultCell.withTx(tx).setMetaRaw("pattern", getSigilLink(patternId));
+
+    // Also record the content-addressed {identity, symbol} reference when the
+    // pattern's entry identity is known (ESM cache path). On reload this lets
+    // the runtime load straight from the compiled cache by identity — no TS
+    // source pulled, no meta-cell roundtrip — falling back to the patternId
+    // load when the by-identity load is unavailable. See loadPatternByIdentity.
+    // The ref carries the authoritative export symbol (recorded at compile/load
+    // time); we never recompute it from `pattern`'s program here, since a
+    // source-free reloaded pattern only has a stub program (mainExport
+    // "default"), which would clobber a non-"default" export name.
+    const entryRef = this.runtime.patternManager.getPatternEntryRef(pattern);
+    if (entryRef) {
+      resultCell.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
+      });
+    }
 
     this.updateResultProjection(tx, pattern, resultCell.withTx(tx), {
       preserveName: previousPatternId === patternId,
@@ -1046,6 +1122,9 @@ export class Runner {
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
       rehydrateSchedulerFromStorage?: boolean;
+      // Resumed-from-synced-state: hold each action's initial rehydration/run
+      // until the space has finished syncing, so consumers don't race the data.
+      awaitSyncBeforeInitialRun?: boolean;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
@@ -1085,7 +1164,10 @@ export class Runner {
       const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
           false
         ? {}
-        : this.schedulerRehydrationOptions(resultCell);
+        : this.schedulerRehydrationOptions(
+          resultCell,
+          options.awaitSyncBeforeInitialRun,
+        );
       try {
         for (const node of pattern.nodes) {
           const baseCell = resultCell.withTx(actualTx);
@@ -1284,10 +1366,21 @@ export class Runner {
   ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
-      return this.runtime.patternManager.loadPattern(
-        patternId,
-        rootCell.space,
-      )
+      // Prefer the content-addressed {identity, symbol} reference when present:
+      // it loads straight from the compiled cache (no TS source, no meta-cell
+      // roundtrip). Fall back to the patternId load (which handles cold
+      // recovery from the stored source) when by-identity is unavailable.
+      const identityRef = getPatternIdentityRef(rootCell);
+      const pm = this.runtime.patternManager;
+      const loadPromise = identityRef
+        ? pm.loadPatternByIdentityAs(
+          patternId,
+          identityRef.identity,
+          identityRef.symbol,
+          rootCell.space,
+        ).then((byId) => byId ?? pm.loadPattern(patternId, rootCell.space))
+        : pm.loadPattern(patternId, rootCell.space);
+      return loadPromise
         .then((loaded) => {
           if (loaded) {
             return this.doStart(rootCell, seenCells);
@@ -1333,6 +1426,11 @@ export class Runner {
         try {
           this.startCore(rootCell, {
             givenPattern: resolvedPattern,
+            // This pattern is resumed from a synced state (it just awaited
+            // syncCellsForRunningPattern): hold each action's initial run until
+            // the space finishes syncing so we don't race the data (e.g. maps
+            // reconciling an empty array, then re-running once it streams in).
+            awaitSyncBeforeInitialRun: true,
           });
         } catch (err) {
           return Promise.reject(err);
@@ -1346,7 +1444,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: { doNotUpdateOnPatternChange?: boolean } = {},
+    options: RunnerRunOptions = {},
   ): void {
     const key = this.getDocKey(resultCell);
     if (this.cancels.has(key)) return;
@@ -1355,6 +1453,7 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
+      awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
     });
   }
 
@@ -1362,7 +1461,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
-    options: { doNotUpdateOnPatternChange?: boolean } = {},
+    options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
   ): void {
     const resultLink = resultCell.getAsNormalizedFullLink();
@@ -1409,6 +1508,59 @@ export class Runner {
     });
   }
 
+  private runPatternAfterSuccessfulCommit<T = any>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<T>,
+    pattern: Pattern,
+    inputs: FabricValue,
+    pullOnceAfterStart = false,
+  ): void {
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    tx.addCommitCallback((_committedTx, result) => {
+      if (result.error) return;
+
+      const startTx = this.runtime.edit();
+      const committedResultCell = this.runtime.getCellFromLink<T>(
+        resultLink,
+        pattern.resultSchema,
+        startTx,
+      );
+      try {
+        this.run(startTx, pattern, inputs, committedResultCell);
+        this.runtime.prepareTxForCommit(startTx);
+        startTx.commit().then(({ error }) => {
+          if (error) {
+            this.stop(committedResultCell);
+            logger.error(
+              "tx-commit-error",
+              "Error committing deferred cross-space pattern transaction",
+              error,
+            );
+            return;
+          }
+          if (pullOnceAfterStart) {
+            this.pullCellOnceInPullMode(committedResultCell);
+          }
+        }).catch((error) => {
+          this.stop(committedResultCell);
+          logger.error(
+            "tx-commit-error",
+            "Deferred cross-space pattern transaction rejected",
+            error,
+          );
+        });
+      } catch (error) {
+        startTx.abort(error);
+        logger.error(
+          "runner-start",
+          "Deferred cross-space pattern failed",
+          error,
+        );
+        throw error;
+      }
+    });
+  }
+
   /**
    * Run a pattern.
    *
@@ -1438,21 +1590,21 @@ export class Runner {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { doNotUpdateOnPatternChange?: boolean },
+    options?: RunnerRunOptions,
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { doNotUpdateOnPatternChange?: boolean },
+    options?: RunnerRunOptions,
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options: { doNotUpdateOnPatternChange?: boolean } = {},
+    options: RunnerRunOptions = {},
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
     const sourceKey = getTxDebugActionId(tx) ?? "none";
@@ -1593,13 +1745,10 @@ export class Runner {
     return `${space}/${scope}/${id}`;
   }
 
-  private schedulerRehydrationOptions(resultCell: Cell<any>): {
-    rehydrateFromStorage?: {
-      space: MemorySpace;
-      pieceId: string;
-      processGeneration: number;
-    };
-  } {
+  private schedulerRehydrationOptions(
+    resultCell: Cell<any>,
+    awaitSync?: boolean,
+  ): SchedulerRehydrationSubscriptionOptions {
     if (!getPersistentSchedulerStateConfig()) {
       return {};
     }
@@ -1609,8 +1758,31 @@ export class Runner {
         space,
         pieceId: `${scope}:${id}`,
         processGeneration: 0,
+        ...(awaitSync ? { awaitSync: true } : {}),
       },
     };
+  }
+
+  /**
+   * Sync the result cell's `internal` and `argument` meta-linked docs.
+   *
+   * They are separate content-addressed docs reached only via the result
+   * cell's meta links, so they are not loaded by syncing the result cell or the
+   * pattern's node inputs/outputs. `applySetupState` reads the persisted
+   * `internal` synchronously; awaiting these here keeps a build-time default
+   * from transiently clobbering a persisted value on a cold read (CT-1666).
+   *
+   * The result cell must already be synced so its meta links are readable.
+   */
+  private async syncMetaCells(resultCell: Cell<any>): Promise<void> {
+    const promises: Promise<unknown>[] = [];
+    for (const field of ["argument", "internal"] as const) {
+      const link = getMetaLink(resultCell, field);
+      if (link === undefined) continue;
+      const maybePromise = this.runtime.getCellFromLink(link).sync();
+      if (maybePromise instanceof Promise) promises.push(maybePromise);
+    }
+    await Promise.all(promises);
   }
 
   private async syncCellsForRunningPattern(
@@ -1639,6 +1811,16 @@ export class Runner {
     await Promise.all(promises);
 
     await resultCell.sync();
+
+    // Also load the `internal` and `argument` meta-linked docs. These live in
+    // separate content-addressed docs reached only via the result cell's meta
+    // links -- not through the schema/value graph synced above -- so they are
+    // not covered by `resultCell.sync()` or the node input/output sync below.
+    // `applySetupState` reads the persisted `internal` synchronously and merges
+    // the pattern's build-time defaults UNDER it (persisted wins). Without this
+    // awaited load that read races storage and can see `undefined`, letting a
+    // build-time default transiently clobber the persisted value (CT-1666).
+    await this.syncMetaCells(resultCell);
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -1850,11 +2032,16 @@ export class Runner {
       switch (module.type) {
         case "ref": {
           const refName = module.implementation as string;
+          const resolved = this.runtime.moduleRegistry.getModule(refName);
+          // `.asScope(scope)` records its scope on the *ref* module (the node's
+          // module), but resolving the ref swaps in the registry's module — so
+          // carry the declared default scope across, or it is silently dropped
+          // and the node falls back to "space".
           this.instantiateNode(
             tx,
-            this.runtime.moduleRegistry.getModule(
-              refName,
-            ),
+            module.defaultScope !== undefined
+              ? { ...resolved, defaultScope: module.defaultScope }
+              : resolved,
             inputBindings,
             outputBindings,
             resultCell,
@@ -1912,6 +2099,7 @@ export class Runner {
             resultCell,
             addCancel,
             pattern,
+            schedulerRehydration,
           );
           break;
         default:
@@ -2262,6 +2450,25 @@ export class Runner {
   }
 
   /**
+   * Attach a stable, content-addressed implementation identity to an action,
+   * derived from its bundle-relative source location. No-op when the harness
+   * cannot resolve the location (built-in or unmapped sources); the scheduler
+   * then falls back to the raw source location for its implementation
+   * fingerprint. See docs/specs/module-loading.md.
+   */
+  private applyImplementationHash(
+    action: Action,
+    sourceLocation: string,
+  ): void {
+    const implementationHash = this.runtime.harness
+      .implementationHashForSource?.(sourceLocation);
+    if (implementationHash) {
+      (action as { implementationHash?: string }).implementationHash =
+        implementationHash;
+    }
+  }
+
+  /**
    * If the final target of the link chain is a stream, return the first link.
    *
    * @param inputs
@@ -2384,6 +2591,31 @@ export class Runner {
     );
   }
 
+  /**
+   * Opt `tx` into multi-space writes for a cross-space child, accumulating the
+   * commit order so every child space committed in this transaction is ordered
+   * before `parentSpace`. Without accumulation, a second cross-space child would
+   * replace the order with `[child2, parent]`, dropping `child1` to after the
+   * parent (orderedCommitSpaces appends unlisted written spaces), which would
+   * make the parent's link to `child1` durable before `child1`'s target.
+   */
+  private enableCrossSpaceChildCommit(
+    tx: IExtendedStorageTransaction,
+    childSpace: MemorySpace,
+    parentSpace: MemorySpace,
+  ): void {
+    let childSpaces = this.crossSpaceChildSpaces.get(tx);
+    if (childSpaces === undefined) {
+      childSpaces = [];
+      this.crossSpaceChildSpaces.set(tx, childSpaces);
+    }
+    if (childSpace !== parentSpace && !childSpaces.includes(childSpace)) {
+      childSpaces.push(childSpace);
+    }
+    // All accumulated child spaces first, parent last.
+    tx.enableMultiSpaceWrites?.([...childSpaces, parentSpace]);
+  }
+
   private handleJavaScriptHandlerResult(
     tx: IExtendedStorageTransaction,
     result: any,
@@ -2402,13 +2634,50 @@ export class Runner {
     }
 
     const resultPattern = patternFromFrame(() => result);
-    const resultCell = this.handlerResultPatternMustStartAfterCommit(
+    const resultSpace = result === undefined
+      ? this.handlerResultPatternMaterializationSpace(
         resultPattern,
+        processCell.space,
       )
+      : processCell.space;
+    // navigateTo result patterns must start after the handler's transaction
+    // commits so the navigation target is durable. Cross-space children, by
+    // contrast, run inline in a multi-space transaction (below) so they keep
+    // their verified-function identity instead of being re-instantiated.
+    const deferForNavigate = this.handlerResultPatternHasNavigateTo(
+      resultPattern,
+    );
+    const crossSpace = resultSpace !== processCell.space;
+
+    if (deferForNavigate && result === undefined) {
+      const resultCell = this.runtime.getCell(
+        resultSpace,
+        { resultFor: cause },
+        undefined,
+        tx,
+      );
+      this.runPatternAfterSuccessfulCommit(
+        tx,
+        resultCell,
+        resultPattern,
+        undefined,
+        true,
+      );
+      addCancel(() => this.stop(resultCell));
+      return result;
+    }
+
+    if (crossSpace && !deferForNavigate) {
+      // Commit the child space first so the originating space's link to it is
+      // never durable before its target.
+      this.enableCrossSpaceChildCommit(tx, resultSpace, processCell.space);
+    }
+
+    const resultCell = deferForNavigate
       ? this.setupDeferredHandlerResultPattern(
         tx,
         resultPattern,
-        processCell,
+        resultSpace,
         cause,
       )
       : this.run(
@@ -2416,7 +2685,7 @@ export class Runner {
         resultPattern,
         undefined,
         this.runtime.getCell(
-          processCell.space,
+          resultSpace,
           { resultFor: cause },
           undefined,
           tx,
@@ -2462,20 +2731,55 @@ export class Runner {
     return result;
   }
 
-  private handlerResultPatternMustStartAfterCommit(pattern: Pattern): boolean {
+  /**
+   * Resolves any `PatternFactory.inSpace("name")` targets that the just-finished
+   * handler/action referenced but whose space DID was not yet cached, then
+   * throws {@link RetryImmediately} so the scheduler re-runs the handler/action.
+   * On the re-run the names resolve synchronously from the runtime cache (see
+   * the pattern builder's resolveInSpaceTargetSpace), so the child results are
+   * routed into the correct spaces from the start — no link rewriting required.
+   */
+  private async resolvePendingSpaceNamesAndRetry(
+    frame: Frame,
+  ): Promise<never> {
+    const names = [...(frame.pendingSpaceNames ?? [])];
+    await Promise.all(
+      names.map((name) => this.runtime.resolveSpaceName(name)),
+    );
+    throw new RetryImmediately(
+      `Resolving in-space target spaces: ${names.join(", ")}`,
+    );
+  }
+
+  private handlerResultPatternHasNavigateTo(
+    pattern: Pattern,
+  ): boolean {
     return pattern.nodes.some(({ module }) =>
       module.type === "ref" && module.implementation === "navigateTo"
     );
   }
 
+  private handlerResultPatternMaterializationSpace(
+    pattern: Pattern,
+    fallback: MemorySpace,
+  ): MemorySpace {
+    const targetSpaces = new Set<MemorySpace>();
+    for (const { module } of pattern.nodes) {
+      if (module.targetSpace !== undefined) {
+        targetSpaces.add(module.targetSpace);
+      }
+    }
+    return targetSpaces.size === 1 ? [...targetSpaces][0] : fallback;
+  }
+
   private setupDeferredHandlerResultPattern(
     tx: IExtendedStorageTransaction,
     resultPattern: Pattern,
-    processCell: Cell<any>,
+    resultSpace: MemorySpace,
     cause: Record<string, any>,
   ): Cell<any> {
     const resultCell = this.runtime.getCell(
-      processCell.space,
+      resultSpace,
       { resultFor: cause },
       undefined,
       tx,
@@ -2706,6 +3010,7 @@ export class Runner {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
 
+      let popFrameAfterReturn = true;
       try {
         const inputsCell = this.runtime.getImmutableCell(
           processCell.space,
@@ -2782,6 +3087,9 @@ export class Runner {
         const postRun = (result: any) => {
           logger.timeStart("stream", "postRun");
           try {
+            if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
+              return this.resolvePendingSpaceNamesAndRetry(frame);
+            }
             return this.handleJavaScriptHandlerResult(
               tx,
               result,
@@ -2797,14 +3105,30 @@ export class Runner {
           }
         };
 
-        return result instanceof Promise
+        const postRunResult = result instanceof Promise
           ? result.then(postRun)
           : postRun(result);
+        if (postRunResult instanceof Promise) {
+          popFrameAfterReturn = false;
+          return postRunResult.finally(() => popFrame(frame));
+        }
+        return postRunResult;
       } catch (error) {
+        // The handler body may throw while materializing a not-yet-resolved
+        // inSpace("name") child (e.g. set into a cell). If so, resolve the
+        // pending names and retry instead of surfacing the error.
+        if (
+          !(error instanceof RetryImmediately) &&
+          frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
+        ) {
+          popFrameAfterReturn = false;
+          return this.resolvePendingSpaceNamesAndRetry(frame)
+            .finally(() => popFrame(frame));
+        }
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
       } finally {
-        popFrame(frame);
+        if (popFrameAfterReturn) popFrame(frame);
       }
     };
 
@@ -2930,6 +3254,10 @@ export class Runner {
       const resultCell = patternResultCell;
 
       const handleErrorOutput = (error: unknown) => {
+        // RetryImmediately is an internal control-flow signal: re-throw it
+        // untouched so the scheduler re-runs the action instead of writing an
+        // error result into the binding.
+        if (error instanceof RetryImmediately) throw error;
         if (
           error !== null &&
           (typeof error === "object" || typeof error === "function")
@@ -2954,6 +3282,7 @@ export class Runner {
         throw error;
       };
 
+      let popFrameAfterReturn = true;
       try {
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
@@ -3025,6 +3354,9 @@ export class Runner {
         const postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
+            if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
+              return this.resolvePendingSpaceNamesAndRetry(frame);
+            }
             return this.writeJavaScriptActionResult(
               tx,
               module.resultSchema,
@@ -3043,13 +3375,29 @@ export class Runner {
           }
         };
 
-        return result instanceof Promise
+        const postRunResult = result instanceof Promise
           ? result.then(postRun).catch(handleErrorOutput)
           : postRun(result);
+        if (postRunResult instanceof Promise) {
+          popFrameAfterReturn = false;
+          return postRunResult.finally(() => popFrame(frame));
+        }
+        return postRunResult;
       } catch (error) {
+        // The action body may throw while materializing a not-yet-resolved
+        // inSpace("name") child. If so, resolve the pending names and retry
+        // instead of surfacing the error.
+        if (
+          !(error instanceof RetryImmediately) &&
+          frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0
+        ) {
+          popFrameAfterReturn = false;
+          return this.resolvePendingSpaceNamesAndRetry(frame)
+            .finally(() => popFrame(frame));
+        }
         handleErrorOutput(error);
       } finally {
-        popFrame(frame);
+        if (popFrameAfterReturn) popFrame(frame);
       }
     };
 
@@ -3059,6 +3407,7 @@ export class Runner {
         schedulerJavaScriptActionName(name, processCell, reads, writes),
         { setSrc: true },
       );
+      this.applyImplementationHash(action, name);
     }
 
     // Writable arguments alone do not make an output-producing action a
@@ -3299,6 +3648,32 @@ export class Runner {
       tx,
     );
 
+    // CT-1623: the output spot this node writes through is reserved for this
+    // node, so its fully-resolved coordinates are a stable, position-derived,
+    // program-independent identity. Builtins that mint a result container
+    // (map/flatmap/filter) key it on this instead of the serialized op /
+    // inputs cell (both of which drag in the session-varying `program`).
+    const resolvedOutputSpot = firstResolvedOutputRedirect(
+      this.runtime,
+      tx,
+      mappedOutputBindings,
+      processCell,
+    );
+
+    // The output spot's *declared* scope is not inherently on the resolved link
+    // (`.asScope("user")` lands on `module.defaultScope`, and a `PerUser<>`
+    // annotation on `module.resultSchema.scope`), so fold both in here and hand
+    // the builtin a fully-normalized output link carrying that scope + schema.
+    // Scope-aware builtins (sqliteDatabase) mint their result container at this
+    // scope; the rest ignore the extra argument.
+    const outputBinding = resolvedOutputSpot
+      ? {
+        ...resolvedOutputSpot,
+        scope: schemaCellScope(module.resultSchema) ??
+          module.defaultScope ?? resolvedOutputSpot.scope,
+      }
+      : undefined;
+
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
@@ -3342,9 +3717,28 @@ export class Runner {
           );
         },
         addCancel,
-        { inputs: inputsCell, parents: processCell.entityId },
+        {
+          inputs: inputsCell,
+          parents: processCell.entityId,
+          ...(resolvedOutputSpot
+            ? {
+              outputSpot: {
+                space: resolvedOutputSpot.space,
+                id: resolvedOutputSpot.id,
+                path: [...resolvedOutputSpot.path],
+              },
+            }
+            : {}),
+          // Propagate the resumed-from-synced-state flag so container-minting
+          // builtins (map/filter/flatmap) defer their per-element sub-pattern
+          // runs until sync completes too.
+          ...(schedulerRehydration.rehydrateFromStorage?.awaitSync
+            ? { awaitSync: true }
+            : {}),
+        },
         processCell,
         this.runtime,
+        outputBinding,
       );
     } finally {
       popFrame(builtinFrame);
@@ -3407,6 +3801,9 @@ export class Runner {
       }
     };
     setRunnableName(action, rawName, { setSrc: true });
+    if (impl.src) {
+      this.applyImplementationHash(action, impl.src);
+    }
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
@@ -3522,6 +3919,7 @@ export class Runner {
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions = {},
   ) {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
@@ -3563,19 +3961,57 @@ export class Runner {
       );
       sendToBindings = false;
     } else {
+      const resultScope = patternDefaultScope(patternImpl) ??
+        module.defaultScope;
+      const targetSpace = module.targetSpace ?? resultCell.space;
+      // CT-1623: identify the result cell by the (fully resolved) output spot
+      // reserved for this node — a stable, position-derived, program-independent
+      // identity — rather than hashing the pattern object (which drags in the
+      // session-varying `program` and forces `materializeRuntimeProgram`). We
+      // still mint a NEW cell and point the binding at it (`sendToBindings`
+      // below); we only borrow the resolved output link's coordinates as the
+      // cause. A pattern node always writes through a write redirect, so the
+      // absence of one is a bug (the legacy non-redirect variants are removed).
+      //
+      // Bind the output bindings first (as `instantiateRawNode` does), so the
+      // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
+      // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
+      // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
+      // the base result cell and collide on one shared child cell.
+      // `bindPatterns: false` — output bindings never carry sub-patterns to
+      // instantiate, so skip that work; we only need the pseudo-cell aliases
+      // resolved to their concrete links.
+      const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
+        this.runtime.cfc,
+        outputBindings,
+        argumentCellLink,
+        resultCell,
+      );
+      const outputRedirect = firstResolvedOutputRedirect(
+        this.runtime,
+        tx,
+        mappedOutputBindings,
+        resultCell,
+      );
+      if (!outputRedirect) {
+        throw new Error(
+          "instantiatePatternNode: result cell requires a write-redirect " +
+            "output binding to anchor a reload-stable identity",
+        );
+      }
       const baseResultCell = this.runtime.getCell(
-        resultCell.space,
+        targetSpace,
         {
-          pattern: module.implementation,
-          parent: resultCell.entityId,
-          inputBindings,
-          outputBindings,
+          resultFor: {
+            space: outputRedirect.space,
+            id: outputRedirect.id,
+            path: [...outputRedirect.path],
+          },
         },
         patternImpl.resultSchema,
         tx,
       );
-      const resultScope = patternDefaultScope(patternImpl) ??
-        module.defaultScope;
+
       childResultCell = baseResultCell;
       if (resultScope !== undefined && resultScope !== "space") {
         let resultCellLink = baseResultCell.getAsNormalizedFullLink();
@@ -3595,7 +4031,21 @@ export class Runner {
       `sendToBindings=${sendToBindings}`,
     ]);
 
-    this.run(tx, patternImpl, inputs, childResultCell);
+    if (childResultCell.space !== parentResultCell.space) {
+      // Cross-space child pattern: run it inline in a multi-space transaction
+      // (child space committed first) rather than re-instantiating it in a
+      // deferred second transaction, which would lose its verified-function
+      // identity. The journal allows the cross-space write once opted in.
+      this.enableCrossSpaceChildCommit(
+        tx,
+        childResultCell.space,
+        parentResultCell.space,
+      );
+    }
+    this.run(tx, patternImpl, inputs, childResultCell, {
+      awaitSyncBeforeInitialRun: schedulerRehydration.rehydrateFromStorage
+        ?.awaitSync,
+    });
 
     if (sendToBindings) {
       sendValueToBinding(
@@ -3629,4 +4079,25 @@ function getTxDebugActionId(
  */
 function getPatternId(resultCell: Cell<unknown>): URI | undefined {
   return getMetaLink(resultCell, "pattern")?.id;
+}
+
+/**
+ * Read the content-addressed {identity, symbol} pattern reference from a result
+ * cell, if one was recorded at setup (ESM cache path). Lets the reload path
+ * load the pattern straight from the compiled cache by identity. Returns
+ * undefined for legacy result cells that only carry the patternId link.
+ */
+function getPatternIdentityRef(
+  resultCell: Cell<unknown>,
+): { identity: string; symbol: string } | undefined {
+  const raw = resultCell.getMetaRaw("patternIdentity", {
+    meta: ignoreReadForScheduling,
+  });
+  if (
+    isRecord(raw) && typeof raw.identity === "string" &&
+    typeof raw.symbol === "string"
+  ) {
+    return { identity: raw.identity, symbol: raw.symbol };
+  }
+  return undefined;
 }

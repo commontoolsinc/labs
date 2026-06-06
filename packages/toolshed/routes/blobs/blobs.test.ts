@@ -12,12 +12,7 @@ import { JsonEncodingContext } from "@commonfabric/data-model/json-wire";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  type FabricValue,
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
+import { type FabricValue } from "@commonfabric/data-model/fabric-value";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -26,22 +21,6 @@ if (env.ENV !== "test") {
 const app = createApp()
   .route("/", memory)
   .route("/", router);
-
-const withModernDataModel = async <T>(
-  fn: () => Promise<T> | T,
-): Promise<T> => {
-  const previousDataModel = getDataModelConfig();
-  setDataModelConfig(true);
-  try {
-    return await fn();
-  } finally {
-    if (previousDataModel) {
-      setDataModelConfig(true);
-    } else {
-      resetDataModelConfig();
-    }
-  }
-};
 
 const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
   encodeMemoryBoundary(payload);
@@ -63,26 +42,24 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    await withModernDataModel(async () => {
-      const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: encodeBlobPayload(contents),
-      });
-      expect(post.status).toBe(201);
-      expect(await post.json()).toEqual({
-        id,
-        url: `blobs/${hash}.gif`,
-      });
-
-      const get = await app.request(`/${identity.did()}/blobs/${hash}.png`);
-      expect(get.status).toBe(200);
-      expect(get.headers.get("Content-Type")).toBe("image/gif");
-      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+    const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: encodeBlobPayload(contents),
     });
+    expect(post.status).toBe(201);
+    expect(await post.json()).toEqual({
+      id,
+      url: `blobs/${hash}.gif`,
+    });
+
+    const get = await app.request(`/${identity.did()}/blobs/${hash}.png`);
+    expect(get.status).toBe(200);
+    expect(get.headers.get("Content-Type")).toBe("image/gif");
+    expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
-  it("accepts blob upload encoding without ambient data model flags", async () => {
+  it("accepts blob upload encoding from an explicit codec, without ambient data-model flags", async () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-explicit-codec",
     );
@@ -94,25 +71,20 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    setDataModelConfig(false);
-    try {
-      const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: blobUploadEncoding.encode(contents as FabricValue),
-      });
-      expect(post.status).toBe(201);
-      expect(await post.json()).toEqual({
-        id,
-        url: `blobs/${hash}.gif`,
-      });
+    const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: blobUploadEncoding.encode(contents as FabricValue),
+    });
+    expect(post.status).toBe(201);
+    expect(await post.json()).toEqual({
+      id,
+      url: `blobs/${hash}.gif`,
+    });
 
-      const get = await app.request(`/${identity.did()}/blobs/${hash}.gif`);
-      expect(get.status).toBe(200);
-      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
-    } finally {
-      resetDataModelConfig();
-    }
+    const get = await app.request(`/${identity.did()}/blobs/${hash}.gif`);
+    expect(get.status).toBe(200);
+    expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
   it("stores blob contents as a cell document value", async () => {
@@ -126,64 +98,59 @@ describe("Blob Routes", () => {
     const cid = `cid:${id}` as const;
     const hash = id.slice("fid1:".length);
 
-    await withModernDataModel(async () => {
-      const post = await app.request(`/${identity.did()}/blobs/image.png`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: encodeBlobPayload(contents),
-      });
-      expect(post.status).toBe(201);
-
-      const document = await memoryServer.readDocument(
-        identity.did(),
-        cid,
-      );
-      expect(document?.value).toEqual(contents);
-
-      const server = Deno.serve({ port: 0 }, app.fetch);
-      const base = new URL(
-        `http://${server.addr.hostname}:${server.addr.port}`,
-      );
-      const runtime = new Runtime({
-        apiUrl: base,
-        storageManager: StorageManager.open({
-          as: identity,
-          address: new URL("/api/storage/memory", base),
-        }),
-        experimental: {
-          modernDataModel: true,
-        },
-      });
-
-      try {
-        const provider = runtime.storageManager.open(identity.did());
-        const sync = await provider.sync(cid, {
-          path: [],
-          schema: false,
-        });
-        expect(sync).toEqual({ ok: {} });
-
-        const cell = runtime.getCellFromLink<{
-          type: string;
-          body: FabricBytes;
-        }>({
-          id: cid,
-          path: [],
-          space: identity.did(),
-        });
-        await cell.sync();
-        await runtime.storageManager.synced();
-
-        const value = cell.get();
-        expect(value.type).toBe("image/png");
-        expect(value.body).toBeTruthy();
-        expect(value.body.constructor.name).toBe("FabricBytes");
-        expect((await post.json()).url).toBe(`blobs/${hash}.png`);
-      } finally {
-        await runtime.dispose();
-        await server.shutdown();
-      }
+    const post = await app.request(`/${identity.did()}/blobs/image.png`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: encodeBlobPayload(contents),
     });
+    expect(post.status).toBe(201);
+
+    const document = await memoryServer.readDocument(
+      identity.did(),
+      cid,
+    );
+    expect(document?.value).toEqual(contents);
+
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(
+      `http://${server.addr.hostname}:${server.addr.port}`,
+    );
+    const runtime = new Runtime({
+      apiUrl: base,
+      storageManager: StorageManager.open({
+        as: identity,
+        address: new URL("/api/storage/memory", base),
+      }),
+    });
+
+    try {
+      const provider = runtime.storageManager.open(identity.did());
+      const sync = await provider.sync(cid, {
+        path: [],
+        schema: false,
+      });
+      expect(sync).toEqual({ ok: {} });
+
+      const cell = runtime.getCellFromLink<{
+        type: string;
+        body: FabricBytes;
+      }>({
+        id: cid,
+        path: [],
+        space: identity.did(),
+      });
+      await cell.sync();
+      await runtime.storageManager.synced();
+
+      const value = cell.get();
+      expect(value.type).toBe("image/png");
+      expect(value.body).toBeTruthy();
+      expect(value.body.constructor.name).toBe("FabricBytes");
+      expect((await post.json()).url).toBe(`blobs/${hash}.png`);
+    } finally {
+      await runtime.dispose();
+      await server.shutdown();
+    }
   });
 
   it("returns 404 for an absent blob", async () => {
@@ -211,13 +178,11 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    const post = await withModernDataModel(() =>
-      app.request(`/${identity.did()}/blobs/image.toolonggg`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: encodeBlobPayload(contents),
-      })
-    );
+    const post = await app.request(`/${identity.did()}/blobs/image.toolonggg`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: encodeBlobPayload(contents),
+    });
 
     expect(post.status).toBe(201);
     expect(await post.json()).toEqual({
@@ -255,19 +220,17 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    await withModernDataModel(async () => {
-      const post = await app.request(`/${identity.did()}/blobs/page.html`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: encodeBlobPayload(contents),
-      });
-      expect(post.status).toBe(201);
-
-      const get = await app.request(`/${identity.did()}/blobs/${hash}.html`);
-      expect(get.status).toBe(200);
-      expect(get.headers.get("Content-Type")).toBe("application/octet-stream");
-      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+    const post = await app.request(`/${identity.did()}/blobs/page.html`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: encodeBlobPayload(contents),
     });
+    expect(post.status).toBe(201);
+
+    const get = await app.request(`/${identity.did()}/blobs/${hash}.html`);
+    expect(get.status).toBe(200);
+    expect(get.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
   it("rejects invalid blob payloads", async () => {

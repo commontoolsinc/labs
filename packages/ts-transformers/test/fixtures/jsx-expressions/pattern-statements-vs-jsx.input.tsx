@@ -15,8 +15,8 @@ const decrement = handler((_e, state: { value: Cell<number> }) => {
 // FIXTURE: pattern-statements-vs-jsx
 // Verifies: only JSX-context expressions are transformed; statement-context expressions are left alone
 //   const next = state.value + 1    → NOT transformed (statement context)
-//   <p>{state.value + 1}</p>        → derive({value}, ({state}) => state.value + 1) (JSX context)
-//   state.value > 10 ? "High":"Low" → ifElse(derive(...), "High", "Low") (JSX context)
+//   <p>{state.value + 1}</p>        → lift(({state}) => state.value + 1)({ value }) (JSX context)
+//   state.value > 10 ? "High":"Low" → ifElse(lift(...)(...), "High", "Low") (JSX context)
 // Context: Ensures the transformer distinguishes between statement and JSX expression contexts
 export default pattern<PatternState>((state) => {
   return {

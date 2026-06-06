@@ -41,12 +41,17 @@ const config: Config = {
       "$ENVIRONMENT": ENVIRONMENT,
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
-      "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
-        "EXPERIMENTAL_MODERN_DATA_MODEL",
+      "$EXPERIMENTAL_MODERN_CELL_REP": Deno.env.get(
+        "EXPERIMENTAL_MODERN_CELL_REP",
       ),
       "$EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE": Deno.env.get(
         "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
       ),
+      // The ESM module-record loader shares one env var with the server/runner
+      // side (`CF_ESM_MODULE_LOADER`), unlike the `EXPERIMENTAL_*`-named flags
+      // above, so the same var toggles it for both the Deno runtime and the
+      // browser worker.
+      "$EXPERIMENTAL_ESM_MODULE_LOADER": Deno.env.get("CF_ESM_MODULE_LOADER"),
       "$COMPILATION_CACHE_CLIENT": Deno.env.get(
         "COMPILATION_CACHE_CLIENT",
       ) ?? "true",

@@ -40,9 +40,14 @@ import {
   RESERVED_FACTORY_BINDINGS,
 } from "@commonfabric/utils/sandbox-contract";
 
-type BindingKind = "builder" | "data" | "function" | "import" | "unknown";
+export type BindingKind =
+  | "builder"
+  | "data"
+  | "function"
+  | "import"
+  | "unknown";
 
-interface BindingInfo {
+export interface BindingInfo {
   kind: BindingKind;
   dependencySpecifier?: string;
   trustedRuntimeName?: string;
@@ -50,6 +55,23 @@ interface BindingInfo {
   hardeningHelper?: boolean;
   bindingIdentityHelper?: boolean;
   functionRange?: { start: number; end: number };
+}
+
+/**
+ * Configuration that lets the format-agnostic security classifier
+ * ({@link classifyModuleItems}) serve both the AMD factory body and a
+ * per-module ESM record body. AMD passes the canonical wrapper shadow guards
+ * and reserved bindings; the ESM path passes empty sets (no `define`/
+ * `runtimeDeps`/`__cfAmdHooks` in scope to shadow). See
+ * docs/specs/module-loading-verifier-and-engine-design.md.
+ */
+export interface ModuleItemClassificationOptions {
+  /** Canonical shadow-guard statements that MUST be present (AMD) or none (ESM). */
+  requiredGuards: ReadonlySet<string>;
+  /** Reserved wrapper bindings authored code may not declare (AMD) or none (ESM). */
+  reservedBindings: ReadonlySet<string>;
+  /** Source offset used for the "missing required shadow guards" error. */
+  missingGuardsErrorAt: number;
 }
 
 const logger = getLogger("compiled-bundle-verifier");
@@ -64,6 +86,9 @@ const CANONICAL_BINDING_IDENTITY_HELPER = stripJsTrivia(
 const RESERVED_FACTORY_BINDING_SET = new Set<string>(RESERVED_FACTORY_BINDINGS);
 const CANONICAL_FACTORY_GUARD_STATEMENTS = createFactoryShadowGuardSource().map(
   (statement: string) => stripJsTrivia(statement),
+);
+const CANONICAL_FACTORY_GUARD_SET = new Set<string>(
+  CANONICAL_FACTORY_GUARD_STATEMENTS,
 );
 const DEFAULT_EXPORT_ALLOWED_BINDING_ERROR =
   "Default exports must be trusted builders, direct functions, verified data, or import re-exports";
@@ -207,147 +232,175 @@ function verifyAuthoredFactory(
       logger.timeEnd("verifyAuthoredFactory", "predeclareDependencies");
     }
 
-    logger.timeStart("verifyAuthoredFactory", "predeclareTopLevelBindings");
-    try {
-      predeclareTopLevelBindings(source, defineCall, env);
-    } finally {
-      logger.timeEnd("verifyAuthoredFactory", "predeclareTopLevelBindings");
-    }
+    classifyModuleItems(
+      source,
+      filename,
+      defineCall.factory.body.statements,
+      env,
+      {
+        requiredGuards: CANONICAL_FACTORY_GUARD_SET,
+        reservedBindings: RESERVED_FACTORY_BINDING_SET,
+        missingGuardsErrorAt: defineCall.statement.start,
+      },
+    );
+  } finally {
+    logger.time(start, "verifyAuthoredFactory");
+  }
+}
 
-    logger.timeStart("verifyAuthoredFactory", "statements");
-    try {
-      const missingRequiredGuards = new Set(CANONICAL_FACTORY_GUARD_STATEMENTS);
-      for (const statement of defineCall.factory.body.statements) {
-        const trimmed = trimRange(source, statement.start, statement.end);
-        if (trimmed.start >= trimmed.end) continue;
+/**
+ * Format-agnostic security classifier for a module's top-level items (compiled
+ * to CommonJS form). It seeds top-level bindings, then verifies each statement
+ * against the SES module-item rules (direct functions, trusted-builder calls
+ * with direct callbacks, `__cf_data`/`schema` wrappers, export assignments,
+ * reexport getters, function-hardening/binding-identity statements) and rejects
+ * everything else. `env` arrives pre-seeded with the module's imports
+ * (AMD: factory dependency params; ESM: record imports). Packaging differences
+ * (shadow guards, reserved bindings) are supplied via `options`, so the same
+ * core serves both the AMD factory body and a per-module ESM record body.
+ */
+export function classifyModuleItems(
+  source: string,
+  filename: string,
+  statements: readonly StatementChunk[],
+  env: Map<string, BindingInfo>,
+  options: ModuleItemClassificationOptions,
+): void {
+  predeclareTopLevelBindings(source, statements, env, options);
 
-        if (isStringDirectiveRange(source, trimmed.start, trimmed.end)) {
-          continue;
-        }
+  logger.timeStart("classifyModuleItems", "statements");
+  try {
+    const missingRequiredGuards = new Set(options.requiredGuards);
+    for (const statement of statements) {
+      const trimmed = trimRange(source, statement.start, statement.end);
+      if (trimmed.start >= trimmed.end) continue;
 
-        const normalized = stripJsTrivia(
+      if (isStringDirectiveRange(source, trimmed.start, trimmed.end)) {
+        continue;
+      }
+
+      const normalized = stripJsTrivia(
+        source,
+        statement.start,
+        statement.end,
+      );
+      if (isCompiledEsModuleMarkerNormalized(normalized)) continue;
+      if (isCompiledImportNormalizationRebindingNormalized(normalized, env)) {
+        continue;
+      }
+      if (
+        missingRequiredGuards.has(normalized)
+      ) {
+        missingRequiredGuards.delete(normalized);
+        continue;
+      }
+
+      const functionName = getFunctionDeclarationNameFromRange(
+        source,
+        trimmed.start,
+        trimmed.end,
+      );
+      if (functionName) {
+        assertFactoryBindingIsNotReserved(
           source,
+          filename,
           statement.start,
-          statement.end,
+          functionName,
+          options.reservedBindings,
         );
-        if (isCompiledEsModuleMarkerNormalized(normalized)) continue;
-        if (isCompiledImportNormalizationRebindingNormalized(normalized, env)) {
-          continue;
-        }
-        if (
-          missingRequiredGuards.has(normalized)
-        ) {
-          missingRequiredGuards.delete(normalized);
-          continue;
-        }
+        registerFunctionStatement(source, statement, env, functionName);
+        continue;
+      }
 
-        const functionName = getFunctionDeclarationNameFromRange(
+      const variableKind = getVariableStatementKindFromRange(
+        source,
+        trimmed.start,
+        trimmed.end,
+      );
+      if (variableKind) {
+        verifyVariableStatement(
           source,
-          trimmed.start,
-          trimmed.end,
+          filename,
+          statement,
+          env,
+          variableKind,
+          options.reservedBindings,
         );
-        if (functionName) {
-          assertFactoryBindingIsNotReserved(
+        continue;
+      }
+
+      if (isClassDeclarationRange(source, trimmed.start, trimmed.end)) {
+        throw verificationErrorAt(
+          source,
+          filename,
+          statement.start,
+          "Top-level class declarations are not allowed in SES mode",
+        );
+      }
+
+      if (
+        startsWithStatementWord(source, trimmed.start, trimmed.end, "exports")
+      ) {
+        verifyCompiledExportAssignment(source, filename, statement, env);
+        continue;
+      }
+      if (isCompiledImportNormalizationRebindingNormalized(normalized, env)) {
+        continue;
+      }
+
+      const reexport = tryParseCompiledReexportNormalized(normalized);
+      if (reexport) {
+        if (reexport.exportedName === "__esModule") {
+          continue;
+        }
+        if (reexport.exportedName !== "default") {
+          const binding = classifyNormalizedReferenceText(
             source,
             filename,
             statement.start,
-            functionName,
-          );
-          registerFunctionStatement(source, statement, env, functionName);
-          continue;
-        }
-
-        const variableKind = getVariableStatementKindFromRange(
-          source,
-          trimmed.start,
-          trimmed.end,
-        );
-        if (variableKind) {
-          verifyVariableStatement(
-            source,
-            filename,
-            statement,
+            reexport.target,
             env,
-            variableKind,
           );
-          continue;
-        }
-
-        if (isClassDeclarationRange(source, trimmed.start, trimmed.end)) {
-          throw verificationErrorAt(
-            source,
-            filename,
-            statement.start,
-            "Top-level class declarations are not allowed in SES mode",
-          );
-        }
-
-        if (
-          startsWithStatementWord(source, trimmed.start, trimmed.end, "exports")
-        ) {
-          verifyCompiledExportAssignment(source, filename, statement, env);
-          continue;
-        }
-        if (isCompiledImportNormalizationRebindingNormalized(normalized, env)) {
-          continue;
-        }
-
-        const reexport = tryParseCompiledReexportNormalized(normalized);
-        if (reexport) {
-          if (reexport.exportedName === "__esModule") {
-            continue;
-          }
-          if (reexport.exportedName !== "default") {
-            const binding = classifyNormalizedReferenceText(
+          if (binding.kind !== "import") {
+            throw verificationErrorAt(
               source,
               filename,
               statement.start,
-              reexport.target,
-              env,
+              "Compiled reexport getters must return imported bindings",
             );
-            if (binding.kind !== "import") {
-              throw verificationErrorAt(
-                source,
-                filename,
-                statement.start,
-                "Compiled reexport getters must return imported bindings",
-              );
-            }
-            env.set(reexport.exportedName, cloneBindingInfo(binding));
           }
-          continue;
+          env.set(reexport.exportedName, cloneBindingInfo(binding));
         }
-
-        if (isCompiledExportStarStatementNormalized(normalized)) continue;
-
-        if (
-          isAllowedFunctionHardeningStatementNormalized(normalized, env) ||
-          isAllowedBindingIdentityStatementNormalized(normalized, env)
-        ) {
-          continue;
-        }
-
-        throw verificationErrorAt(
-          source,
-          filename,
-          statement.start,
-          "Compiled AMD module contains unsupported top-level executable code",
-        );
+        continue;
       }
 
-      if (missingRequiredGuards.size > 0) {
-        throw verificationErrorAt(
-          source,
-          filename,
-          defineCall.statement.start,
-          "Compiled AMD factory is missing required wrapper shadow guards",
-        );
+      if (isCompiledExportStarStatementNormalized(normalized)) continue;
+
+      if (
+        isAllowedFunctionHardeningStatementNormalized(normalized, env) ||
+        isAllowedBindingIdentityStatementNormalized(normalized, env)
+      ) {
+        continue;
       }
-    } finally {
-      logger.timeEnd("verifyAuthoredFactory", "statements");
+
+      throw verificationErrorAt(
+        source,
+        filename,
+        statement.start,
+        "Compiled AMD module contains unsupported top-level executable code",
+      );
+    }
+
+    if (missingRequiredGuards.size > 0) {
+      throw verificationErrorAt(
+        source,
+        filename,
+        options.missingGuardsErrorAt,
+        "Compiled AMD factory is missing required wrapper shadow guards",
+      );
     }
   } finally {
-    logger.time(start, "verifyAuthoredFactory");
+    logger.timeEnd("classifyModuleItems", "statements");
   }
 }
 
@@ -391,17 +444,18 @@ function predeclareFactoryDependencies(
 
 function predeclareTopLevelBindings(
   source: string,
-  defineCall: ParsedDefineCall,
+  statements: readonly StatementChunk[],
   env: Map<string, BindingInfo>,
+  options: ModuleItemClassificationOptions,
 ): void {
   const start = performance.now();
   try {
-    for (const statement of defineCall.factory.body.statements) {
+    for (const statement of statements) {
       const trimmed = trimRange(source, statement.start, statement.end);
       if (trimmed.start >= trimmed.end) continue;
       const normalized = stripJsTrivia(source, statement.start, statement.end);
       if (
-        CANONICAL_FACTORY_GUARD_STATEMENTS.includes(normalized) ||
+        options.requiredGuards.has(normalized) ||
         isStringDirectiveRange(source, trimmed.start, trimmed.end) ||
         isCompiledEsModuleMarkerNormalized(normalized) ||
         isCompiledImportNormalizationRebindingNormalized(normalized, env)
@@ -415,7 +469,7 @@ function predeclareTopLevelBindings(
         trimmed.end,
       );
       if (functionName) {
-        if (RESERVED_FACTORY_BINDING_SET.has(functionName)) {
+        if (options.reservedBindings.has(functionName)) {
           continue;
         }
         registerFunctionStatement(source, statement, env, functionName);
@@ -428,7 +482,7 @@ function predeclareTopLevelBindings(
         continue;
       }
       for (const declarator of parseVariableDeclarators(source, statement)) {
-        if (RESERVED_FACTORY_BINDING_SET.has(declarator.name)) {
+        if (options.reservedBindings.has(declarator.name)) {
           continue;
         }
         const provisional = provisionalBindingForExpression(
@@ -460,6 +514,7 @@ function verifyVariableStatement(
     trimRange(source, statement.start, statement.end).start,
     trimRange(source, statement.start, statement.end).end,
   ),
+  reserved: ReadonlySet<string> = RESERVED_FACTORY_BINDING_SET,
 ): void {
   const start = performance.now();
   try {
@@ -478,6 +533,7 @@ function verifyVariableStatement(
         filename,
         declarator.initializer.start,
         declarator.name,
+        reserved,
       );
       const provisional = provisionalBindingForExpression(
         source,
@@ -1071,8 +1127,30 @@ function callbackIndexesForBuilder(
     case "action":
     case "computed":
       return args.length >= 1 ? [0] : [];
-    case "lift":
-      return args.length >= 3 ? [2] : args.length >= 1 ? [0] : [];
+    case "lift": {
+      // `lift` is overloaded on the TYPE of its leading arguments, not on
+      // arity (see the runtime dispatch in builder/module.ts): the callback is
+      // whichever of the first few positions is the function.
+      //   lift(fn, options?)                         → callback at 0
+      //   lift(argSchema, fn, options?)              → callback at 1
+      //   lift(argSchema, resSchema, fn, options?)   → callback at 2
+      // So index purely on arity is wrong — `lift(fn, options)` is a valid
+      // 2-arg form with the callback at 0, while `lift(false, fn)` (the
+      // no-input form, PR #3709) is a 2-arg form with the callback at 1.
+      // Mirror the runtime: pick the first position that parses as a direct
+      // callback. (Newly reachable at module scope as of CT-1644, which hoists
+      // `lift(...)()` computations to a module-scope const; previously these
+      // only appeared inline inside a handler/pattern body, unverified here.)
+      for (let i = 0; i < Math.min(args.length, 3); i++) {
+        if (resolveTrustedBuilderCallback(source, args[i]!, env)) {
+          return [i];
+        }
+      }
+      // No direct callback found in the leading positions; fall back to the
+      // canonical schema-prefixed slot so the caller still emits the
+      // "must receive a direct callback" diagnostic against the right argument.
+      return args.length >= 3 ? [2] : args.length >= 1 ? [args.length - 1] : [];
+    }
     case "handler":
       if (
         args.length >= 1 &&
@@ -1784,8 +1862,9 @@ function assertFactoryBindingIsNotReserved(
   filename: string,
   offset: number,
   name: string,
+  reserved: ReadonlySet<string> = RESERVED_FACTORY_BINDING_SET,
 ): void {
-  if (!RESERVED_FACTORY_BINDING_SET.has(name)) {
+  if (!reserved.has(name)) {
     return;
   }
   throw verificationErrorAt(

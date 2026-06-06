@@ -45,6 +45,95 @@ describe("verifyCompiledBundleModuleFactories()", () => {
     expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
   });
 
+  it("accepts the 2-arg no-input lift(false, fn) form at module scope", () => {
+    // CT-1644: Phase 2 hoists a `lift(false, fn)()` computation to a module-
+    // scope const, surfacing the 2-arg no-input form (PR #3709) to the
+    // authored-factory verifier. The callback is the SECOND argument; the
+    // verifier must read it at index 1, not 0 (where `false` sits).
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfLift_1 = (0, commonfabric_1.lift)(false, () => 42);
+    exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts the 2-arg lift(fn, options) form (callback at index 0)", () => {
+    // `lift` overloads on argument TYPE, not arity: `lift(fn, options)` is a
+    // valid 2-arg form whose callback is the FIRST argument (options second).
+    // The verifier must disambiguate by which position is the function — not
+    // assume a 2-arg lift always has its callback at index 1.
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfLift_1 = (0, commonfabric_1.lift)(() => 42, { materializerWriteInputPaths: [["x"]] });
+    exports.default = (0, commonfabric_1.handler)(false, false, () => [__cfLift_1()][0]);
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts a hoisted handler(...) call at module scope", () => {
+    // CT-1655: extends CT-1644's whole-call hoisting to `handler`. A reactive
+    // handler (or an `action` lowered to one) is hoisted to a module-scope
+    // const `__cfHandler_N = handler(eventSchema, stateSchema, cb)`, with the
+    // captures applied at the original site. The 3-arg form puts the callback
+    // at index 2; the verifier must accept this trusted-builder call at module
+    // scope and verify the callback there (previously the handler call only
+    // appeared inline inside a pattern/JSX body, unverified at module scope).
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfHandler_1 = (0, commonfabric_1.handler)(false, false, (_event, { count }) => count.set(count.get() + 1));
+    exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
+      inc: __cfHandler_1({ count: __cf_pattern_input.key("count") }),
+    }));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
+  it("accepts a hoisted pattern(...) call at module scope", () => {
+    // CT-1655: extends whole-call hoisting to `pattern`. A reactive map lowers
+    // to `receiver.mapWithPattern(pattern(cb, inSchema, outSchema), { params })`;
+    // the bare `pattern(...)` (the first mapWithPattern argument) is hoisted to a
+    // module-scope const `__cfPattern_N = pattern(...)` with the callback inline,
+    // and the call site reads `mapWithPattern(__cfPattern_N, { params })`. The
+    // verifier must accept this trusted-builder call at module scope and verify
+    // its callback (index 0) there.
+    const bundle = `
+((runtimeDeps = {}) => {
+  define("main", ["require", "exports", "commonfabric"], function (require, exports, commonfabric_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    const __cfPattern_1 = (0, commonfabric_1.pattern)((__cf_pattern_input) => {
+      const item = __cf_pattern_input.key("element");
+      return item.key("name");
+    }, false, false);
+    exports.default = (0, commonfabric_1.pattern)((__cf_pattern_input) => ({
+      names: __cf_pattern_input.key("items").mapWithPattern(__cfPattern_1, {}),
+    }));
+  });
+});
+`;
+
+    expect(() => verifyCompiledBundleModuleFactories(bundle)).not.toThrow();
+  });
+
   it("accepts a previously parsed compiled bundle", () => {
     const bundle = `
 ((runtimeDeps = {}) => {

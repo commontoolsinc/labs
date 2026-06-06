@@ -34,6 +34,7 @@ function wrapperKindForName(name: string): NodeWrapperKind | undefined {
     case "WriteonlyCell":
     case "ComparableCell":
     case "Stream":
+    case "SqliteDb":
     case "OpaqueCell":
       return name;
     default:
@@ -385,7 +386,8 @@ export function getNamedTypeKey(
     const nodeTypeName = getEntityNameText(typeNode.typeName);
     if (
       nodeTypeName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(nodeTypeName) ||
-      nodeTypeName === "Stream" || OPAQUE_WRAPPER_NAMES.has(nodeTypeName)
+      nodeTypeName === "Stream" || nodeTypeName === "SqliteDb" ||
+      OPAQUE_WRAPPER_NAMES.has(nodeTypeName)
     ) {
       return undefined;
     }
@@ -395,7 +397,8 @@ export function getNamedTypeKey(
   const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
   if (
     aliasName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(aliasName ?? "") ||
-    aliasName === "Stream" || aliasName === "OpaqueRef"
+    aliasName === "Stream" || aliasName === "SqliteDb" ||
+    aliasName === "OpaqueRef"
   ) {
     return undefined;
   }
@@ -457,7 +460,7 @@ export function getNamedTypeKey(
   if (name === "Array" || name === "ReadonlyArray") return undefined;
   if (
     CELL_LIKE_WRAPPER_NAMES.has(name ?? "") || name === "Stream" ||
-    name === "Default"
+    name === "SqliteDb" || name === "Default"
   ) {
     return undefined;
   }

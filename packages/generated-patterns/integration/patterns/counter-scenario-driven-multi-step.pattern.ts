@@ -1,8 +1,8 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -178,16 +178,13 @@ export const counterWithScenarioDrivenSteps = pattern<MultiStepArgs>(
     const steps = liftSanitizeStepEntries(stepLog);
     const completedPhases = liftCompletedPhases(phaseHistory);
 
-    const stepCount = derive(steps, (entries) => entries.length);
-    const lastRecordedTotal = derive(
-      { steps, current: currentValue },
-      ({ steps, current }) => {
-        if (steps.length === 0) {
-          return current;
-        }
-        return steps[steps.length - 1].total;
-      },
-    );
+    const stepCount = steps.length;
+    const lastRecordedTotal = computed(() => {
+      if (steps.length === 0) {
+        return currentValue;
+      }
+      return steps[steps.length - 1].total;
+    });
 
     const summary =
       str`Phase ${currentPhase} total ${currentValue} over ${stepCount} steps`;

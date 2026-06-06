@@ -5,6 +5,11 @@ import type {
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerSnapshotListResult,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
@@ -232,6 +237,26 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   listSchedulerActionSnapshots?(
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
+
+  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  sqliteQuery?(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult>;
+
+  // No `sqliteExecute`: SQLite writes go through the commit fold
+  // (recordSqliteWrite -> a `sqlite` op in the commit), never a standalone RPC.
+
+  /**
+   * Register an injected on-disk SQLite source (Phase 7, read-only v1). After
+   * this, server-side reads for `id` resolve against the on-disk file at `path`
+   * (attached read-only) instead of the cell-derived db; writes are rejected.
+   */
+  registerSqliteDiskSource?(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult>;
 }
 
 /**
@@ -475,6 +500,34 @@ export interface IStorageTransaction {
    */
   immediate?: boolean;
   /**
+   * Opt the transaction into writing to more than one memory space. By default
+   * a transaction may write to a single space only. When enabled, commit()
+   * commits each written space's changes as a separate per-space commit, in the
+   * provided order (or first-write order if omitted). The per-space commits run
+   * sequentially with NO cross-space atomicity, and STOP at the first per-space
+   * failure: spaces committed before the failure are durable and not rolled back
+   * (logged), while the failing space and every space after it are left
+   * uncommitted. (Stopping preserves the requested order — e.g. a child space
+   * before the parent that links to it — and avoids double-applying later writes
+   * on retry.)
+   *
+   * `order` is a sequencing hint ONLY: it controls the order in which written
+   * spaces are committed (spaces listed first commit first). It does NOT
+   * restrict which spaces may be written — a written space absent from `order`
+   * still commits, appended in first-write order. Authorization is unchanged:
+   * each space commits through its own authenticated session exactly as a
+   * single-space commit would, so this opt-in cannot grant access the caller
+   * does not already hold. Calling this more than once is allowed; the last
+   * non-undefined `order` wins.
+   *
+   * Partial-failure contract: because there is no rollback, a multi-space commit
+   * error means the cross-space state is INDETERMINATE — some spaces may be
+   * durably committed and others not. Callers must treat the error accordingly
+   * (the first per-space error is surfaced as the overall result; all per-space
+   * failures are logged).
+   */
+  enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
+  /**
    * Optional read-only mode hook used by runtime-generated fallback read
    * transactions.
    */
@@ -502,6 +555,16 @@ export interface IStorageTransaction {
    */
   setSchedulerObservation?(observation: unknown): void;
   getSchedulerObservation?(): unknown;
+
+  /**
+   * Optional: record a folded SQLite write onto this transaction so it commits
+   * ATOMICALLY with the cell ops targeting `space` (one commit = cell ops + a
+   * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
+   * write target (same write-isolation rules as a cell write) and throws if the
+   * tx is not writable. See
+   * docs/specs/sqlite-builtin/plans/sqlite-execute-commit-fold.md.
+   */
+  recordSqliteWrite?(space: MemorySpace, op: SqliteOperation): void;
 
   /**
    * Optional raw read observations recorded by this transaction.
@@ -1130,6 +1193,12 @@ export type NativeStorageCommitOperation =
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
   schedulerObservation?: unknown;
+  /**
+   * Folded SQLite write ops, applied in the same wire commit as `operations`
+   * (appended last). They are NOT entity revisions and stay out of the
+   * doc-pending / touched / notify machinery.
+   */
+  sqliteOps?: readonly SqliteOperation[];
 }
 
 export interface ITransaction {

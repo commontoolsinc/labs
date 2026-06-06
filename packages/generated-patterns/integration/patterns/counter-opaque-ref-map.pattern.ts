@@ -1,12 +1,4 @@
-import {
-  type Cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface OpaqueMapArgs {
   value: Default<number, 0>;
@@ -64,14 +56,10 @@ export const counterWithOpaqueRefMap = pattern<OpaqueMapArgs>(
     const safeHistory = liftClampToNumberArray(history);
     const labels = safeHistory.map((entry, index) => str`#${index}: ${entry}`);
 
-    const count = derive(
-      history,
-      (entries) => clampToNumberArray(entries).length,
-    );
-    const total = derive(
-      history,
-      (entries) =>
-        clampToNumberArray(entries).reduce((sum, item) => sum + item, 0),
+    const count = clampToNumberArray(history).length;
+    const total = clampToNumberArray(history).reduce(
+      (sum, item) => sum + item,
+      0,
     );
     const headline = str`${labelPrefix} ${value} (${count} entries)`;
 

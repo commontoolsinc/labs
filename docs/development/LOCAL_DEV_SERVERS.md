@@ -17,6 +17,23 @@
 ./scripts/check-local-dev.sh          # Health check both servers
 ```
 
+`start-local-dev.sh` validates required commands before launching anything and
+waits for both servers to bind their ports and return HTTP 200 before reporting
+success. Set `LOCAL_DEV_STARTUP_TIMEOUT` to adjust the readiness timeout in
+seconds.
+
+**Exit codes (`start-local-dev.sh`):**
+| Code | Meaning |
+|------|---------|
+| `0` | Both servers started and became ready. |
+| `3` | A server could not bind because its port is already in use; retry on a different port offset. |
+| other non-zero | Any other startup failure (build error, crash, readiness timeout). |
+
+Code `3` is reported only when a server's actual bind fails, not from a port
+pre-check, so it carries no check-then-bind race. The toolshed and the shell dev
+server exit with the same code, and `deno task integration` relies on it to
+retry a generated offset on a collision while aborting on any other failure.
+
 **URLs:**
 | What | URL |
 |------|-----|
@@ -27,9 +44,8 @@
 **Experimental flags:** Pass env vars to the start/restart scripts to enable
 experiments on both servers:
 ```bash
-EXPERIMENTAL_MODERN_DATA_MODEL=true \
-EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
-EXPERIMENTAL_EXAMPLE_EXPERIMENT=true \
+EXPERIMENTAL_EXAMPLE_NAME_1=true \
+EXPERIMENTAL_EXAMPLE_NAME_2=true \
 ./scripts/restart-local-dev.sh --force --dangerously-clear-all-spaces
 ```
 The same env vars must also be set when running `cf` CLI commands against the

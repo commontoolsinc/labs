@@ -65,7 +65,7 @@ export default pattern<SpaceOverviewInput, SpaceOverviewOutput>(() => {
   const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
     query: "#summaryIndex",
   }).result!;
-  const profileWish = wish<string>({ query: "#profile" });
+  const profileWish = wish<string>({ query: "#learnedSummary" });
   const profileText = computed(() => profileWish.result ?? "");
 
   const systemPrompt = computed(() => {

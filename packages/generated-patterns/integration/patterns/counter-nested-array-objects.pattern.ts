@@ -1,12 +1,4 @@
-import {
-  type Cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface EntryDetails {
   note: string;
@@ -145,8 +137,8 @@ const liftAllNotes = lift((items: { notes: string[] }[] | undefined) => {
 
 export const counterWithNestedArrayObjects = pattern<NestedArrayArgs>(
   ({ groups }) => {
-    const totals = derive(groups, countTotals);
-    const summaries = derive(groups, summarizeGroups);
+    const totals = countTotals(groups);
+    const summaries = summarizeGroups(groups);
     const allNotes = liftAllNotes(summaries);
 
     const headline = str`Nested total ${totals}`;

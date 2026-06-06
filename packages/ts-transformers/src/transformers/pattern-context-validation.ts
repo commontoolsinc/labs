@@ -12,13 +12,12 @@
  * - Reading from opaques IS allowed in:
  *   - computed()
  *   - action()
- *   - derive()
  *   - lift()
  *   - handler()
  *   - JSX expressions and other lowerable expression sites
- * - Local values created by computed()/derive() inside the current
- *   computed()/derive() callback remain reactive and cannot be used as plain
- *   values until a nested computed()/derive() consumes them.
+ * - Local values created by computed()/lift() inside the current
+ *   computed()/lift() callback remain reactive and cannot be used as plain
+ *   values until a nested computed()/lift() consumes them.
  *
  * - Function creation is NOT allowed in pattern context (must be at module scope)
  * - lift() and handler() must be defined at module scope, not inside patterns
@@ -32,8 +31,8 @@
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
- * - Local computed()/derive() aliases used as plain values in the same
- *   callback: ERROR (use a nested computed()/derive())
+ * - Local computed()/lift() aliases used as plain values in the same
+ *   callback: ERROR (use a nested computed()/lift())
  */
 import ts from "typescript";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
@@ -76,7 +75,7 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
   "pattern-tool",
   "pattern-builder",
   "render-builder",
-  "derive",
+  "lift-applied",
   "computed-builder",
   "action-builder",
   "lift-builder",
@@ -169,6 +168,9 @@ export class PatternContextValidationTransformer
       if (ts.isCallExpression(node)) {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
+
+        // patternTool's first argument must be a pattern() (CT-1655)
+        this.validatePatternToolFirstArgument(node, context, checker);
 
         const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
           node,
@@ -382,9 +384,9 @@ export class PatternContextValidationTransformer
         severity: "error",
         type: "compute-context:local-reactive-use",
         message: `Reactive value '${culprit.getText()}' is created in this ` +
-          `computed()/derive() callback and cannot be used as a plain value ` +
+          `computed()/lift() callback and cannot be used as a plain value ` +
           `here. Move this use into a nested computed(() => ...) or ` +
-          `derive(() => ...) callback.`,
+          `module-scope lift() callback.`,
         node: culprit,
       });
     };
@@ -441,7 +443,7 @@ export class PatternContextValidationTransformer
    *
    * This applies to any callback body that still classifies as pattern context
    * at validation time, which intentionally includes pattern-owned array method
-   * callbacks while excluding compute-owned wrappers like computed()/derive().
+   * callbacks while excluding compute-owned wrappers like computed()/lift().
    */
   private validateSupportedPatternStatements(
     func: ts.ArrowFunction | ts.FunctionExpression,
@@ -511,7 +513,7 @@ export class PatternContextValidationTransformer
             node,
             "pattern-context:let-declaration",
             `let declarations are not supported in pattern-owned callback bodies. ` +
-              `Use const, or move mutable logic into computed(), derive(), or a helper.`,
+              `Use const, or move mutable logic into computed(), module-scope lift(), or a helper.`,
           );
         } else if (
           (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0
@@ -520,7 +522,7 @@ export class PatternContextValidationTransformer
             node,
             "pattern-context:var-declaration",
             `var declarations are not supported in pattern-owned callback bodies. ` +
-              `Use const, or move mutable logic into computed(), derive(), or a module-scope helper.`,
+              `Use const, or move mutable logic into computed(), module-scope lift(), or a module-scope helper.`,
           );
         }
       }
@@ -536,7 +538,7 @@ export class PatternContextValidationTransformer
           node,
           "pattern-context:loop",
           `Loop statements are not supported in pattern-owned callback bodies. ` +
-            `Use array methods, helper-owned expressions, or move imperative iteration into computed(), derive(), or a helper.`,
+            `Use array methods, helper-owned expressions, or move imperative iteration into computed(), module-scope lift(), or a helper.`,
         );
       }
 
@@ -549,7 +551,7 @@ export class PatternContextValidationTransformer
           node,
           "pattern-context:assignment",
           `Reassignment is not supported in pattern-owned callback bodies. ` +
-            `Use straight-line data construction, or move mutable logic into computed(), derive(), or a helper.`,
+            `Use straight-line data construction, or move mutable logic into computed(), module-scope lift(), or a helper.`,
         );
       }
 
@@ -561,7 +563,7 @@ export class PatternContextValidationTransformer
 
   /**
    * Validates that functions are not created directly in pattern context.
-   * Functions inside safe wrappers (computed, action, derive, lift, handler)
+   * Functions inside safe wrappers (computed, action, lift, handler)
    * and inside JSX expressions are allowed since they get transformed.
    */
   private validateFunctionCreation(
@@ -569,7 +571,7 @@ export class PatternContextValidationTransformer
     context: TransformationContext,
     checker: ts.TypeChecker,
   ): void {
-    // Skip if inside safe wrapper callback (computed, action, derive, lift, handler)
+    // Skip if inside safe wrapper callback (computed, action, lift, handler)
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
 
     const boundarySemantics = !ts.isFunctionDeclaration(node)
@@ -597,7 +599,7 @@ export class PatternContextValidationTransformer
           type: "pattern-context:callback-container",
           message:
             `Callbacks passed to unsupported containers in pattern-facing JSX are not supported. ` +
-            `Use a supported array method/value call, an event handler, or move this work into computed(() => ...), derive(...), or a helper.`,
+            `Use a supported array method/value call, an event handler, or move this work into computed(() => ...), module-scope lift(), or a helper.`,
           node,
         });
       }
@@ -666,6 +668,40 @@ export class PatternContextValidationTransformer
     }
   }
 
+  /**
+   * Validates that `patternTool(...)`'s first argument is a `pattern(...)`, not a
+   * bare callback (CT-1655). Passing a function directly used to be auto-wrapped
+   * (`pattern(fn)`) by the runtime and auto-captured by a transformer strategy;
+   * both were removed in favor of an explicit, addressable pattern. Authors now
+   * wrap the callback themselves: `patternTool(pattern(fn), extraParams?)`.
+   */
+  private validatePatternToolFirstArgument(
+    node: ts.CallExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (detectCallKind(node, checker)?.kind !== "pattern-tool") {
+      return;
+    }
+    const firstArg = node.arguments[0];
+    if (
+      !firstArg ||
+      !(ts.isArrowFunction(firstArg) || ts.isFunctionExpression(firstArg))
+    ) {
+      return;
+    }
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:patterntool-requires-pattern",
+      message:
+        `patternTool()'s first argument must be a pattern(), not a bare callback. ` +
+        `Wrap the callback in pattern(): patternTool(pattern(fn), extraParams?). ` +
+        `Module-scoped reactive values the callback reads are captured by the ` +
+        `pattern automatically; per-instance values go in extraParams.`,
+      node: firstArg,
+    });
+  }
+
   private validateCallbackSelfContainment(
     func: ts.ArrowFunction | ts.FunctionExpression,
     boundarySemantics: CallbackBoundarySemantics,
@@ -731,7 +767,7 @@ export class PatternContextValidationTransformer
 
   /**
    * Validates that standalone functions don't use reactive operations like
-   * computed(), derive(), or .map() on CellLike types.
+   * computed(), lift(), or .map() on CellLike types.
    *
    * Standalone functions cannot have their closures captured automatically.
    * Users should either:
@@ -805,14 +841,16 @@ export class PatternContextValidationTransformer
             return;
           }
 
-          // Check for lift-applied calls (the lowered form of user-source derive())
+          // Check for lift-applied calls (the lowered form of computed() and
+          // other reactive lifted-function computations).
           if (callKind.kind === "lift-applied") {
             context.reportDiagnostic({
               severity: "error",
               type: "standalone-function:reactive-operation",
-              message: `derive() is not allowed inside standalone functions. ` +
+              message:
+                `Reactive computations are not allowed inside standalone functions. ` +
                 `Standalone functions cannot capture reactive closures. ` +
-                `Move the derive() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+                `Move the computed() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
               node,
             });
             return;

@@ -1,4 +1,4 @@
-import { Cell, derive, handler, NAME, pattern, str, UI } from "commonfabric";
+import { Cell, computed, handler, NAME, pattern, str, UI } from "commonfabric";
 
 const adder = handler((_, state: { values: Cell<string[]> }) => {
   state.values.push(Math.random().toString(36).substring(2, 15));
@@ -7,13 +7,13 @@ const adder = handler((_, state: { values: Cell<string[]> }) => {
 // FIXTURE: pattern-array-map
 // Verifies: .map() on a reactive array is transformed to .mapWithPattern()
 //   values.map((value, index) => JSX)  → values.mapWithPattern(pattern(fn, elementSchema, outputSchema), {})
-//   derive(values, fn)                 → derive(inputSchema, outputSchema, values, fn)
+//   computed(() => { ... })            → captures `values` into lift(inputSchema, outputSchema, fn)
 //   handler((_, state: {...}) => ...)  → handler(false, stateSchema, fn)
 //   pattern<{ values: string[] }>      → pattern(fn, inputSchema, outputSchema)
-// Context: Destructured pattern parameter; combines array map transform with derive and handler schemas
+// Context: Destructured pattern parameter; combines array map transform with computed and handler schemas
 export default pattern<{ values: string[] }>(
   ({ values }) => {
-    derive(values, (values) => {
+    computed(() => {
       console.log("values#", values?.length);
     });
     return {

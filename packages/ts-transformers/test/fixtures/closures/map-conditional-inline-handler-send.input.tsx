@@ -29,7 +29,7 @@ const castVote = handler<unknown, { votes: Cell<VoteEvent[]> }>(
 // Verifies: inline onClick handlers inside conditional JSX branches retain
 // imperative handler semantics when nested in reactive map callbacks.
 //   onClick={() => boundCastVote.send(...)} → bare handler callback body
-//   not derive(...boundCastVote.send(...))
+//   not lift(...)(...boundCastVote.send(...))
 // Context: The conditional branch makes expression rewriting recurse into the
 // handler subtree; the authored handler arrow must be treated as safe context.
 export default pattern<State>((state) => {

@@ -187,7 +187,8 @@ are:
   - avoid top-level `let`, `var`, classes, or ad hoc mutable caches
 - keep pattern-owned callback bodies straight-line:
   - avoid `let`, `var`, reassignment, and loop statements
-  - prefer array methods, `computed()`, `derive()`, or a module-scope helper
+  - prefer array methods, `computed()`, module-scope `lift()`, or a
+    module-scope helper
 - do not rely on authored timers or proxies:
   - `setTimeout()`, `setInterval()`, and `new Proxy()` are not part of the
     authored runtime surface yet
@@ -195,7 +196,8 @@ are:
   - use `safeDateNow()` instead of `Date.now()`
   - use `nonPrivateRandom()` instead of `Math.random()`
   - prefer calling them from `action()`, `handler()`, or one-time
-    initialization rather than inside `computed()` or `derive()`
+    initialization rather than inside re-running computations such as
+    `computed()` or `lift()`
 
 The current exported helper names are `safeDateNow()` and
 `nonPrivateRandom()`. Older shorthand such as `dateNow` or `insecureRandom`
@@ -245,9 +247,9 @@ truthy. That leads to subtle incorrect rendering because ternaries inside the
 `computed()` body are plain JS, not transformer-lowered conditionals.
 
 That distinction matters because explicit computation callbacks like
-`computed`, `derive`, `action`, `lift`, and `handler` are preserved-JavaScript
-control-flow boundaries. Inside those callback bodies, use `.get()` when you
-need the raw boolean value.
+`computed`, `lift`, `action`, and `handler` are preserved-JavaScript control-flow
+boundaries. Inside those callback bodies, use `.get()` when you need the raw
+boolean value.
 
 ### CORS and `fetchData`
 

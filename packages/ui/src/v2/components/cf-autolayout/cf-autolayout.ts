@@ -359,325 +359,325 @@ export class CFAutoLayout extends BaseElement {
             --cf-theme-color-border,
             #e0e0e0
           );
-        }
-        .mobile-bar .tabs {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          overflow-x: auto;
-          scrollbar-width: thin;
-          border: 0;
-        }
-        .mobile-bar .tab {
-          padding: var(--cf-theme-spacing-tight, 0.25rem)
-            var(--cf-theme-spacing-normal, 0.5rem);
-          border: none;
-          background: none;
-          cursor: pointer;
-          border-bottom: 2px solid transparent;
-          font-size: 0.9rem;
-        }
-        .mobile-bar .tab.active {
-          border-bottom-color: #007acc;
-          font-weight: 500;
-        }
-
-        /* Reserve space for the mobile bar so content is full height */
-        .layout {
-          padding-bottom: var(--cf-mobile-bar-height, 3rem);
-        }
-        :host([tabsposition="top"]) .layout {
-          padding-bottom: 0;
-          padding-top: var(--cf-mobile-bar-height, 3rem);
-        }
-        /* Show the bar on mobile */
-        .mobile-bar {
-          display: grid;
-        }
-
-        /* Hide desktop floating toggles on mobile */
-        .desktop-toggle {
-          display: none;
-        }
       }
-    `;
-
-    private _activeTab = 0;
-    private _children: Element[] = [];
-    private _leftEl: Element | null = null;
-    private _rightEl: Element | null = null;
-    private _hasLeft = false;
-    private _hasRight = false;
-    private _lastToggleEl: Element | null = null;
-
-    declare tabNames: string[];
-    declare leftTabName?: string;
-    declare rightTabName?: string;
-    declare tabsPosition: "top" | "bottom";
-    declare leftOpen: boolean;
-    declare rightOpen: boolean;
-
-    constructor() {
-      super();
-      this.tabNames = [];
-      this.leftTabName = "Left";
-      this.rightTabName = "Right";
-      this.tabsPosition = "bottom";
-      this.leftOpen = true;
-      this.rightOpen = true;
-    }
-
-    override connectedCallback() {
-      super.connectedCallback();
-      this._updateChildren();
-      this._updateActiveTab();
-      this._onKeydown = this._onKeydown.bind(this);
-      globalThis.addEventListener("keydown", this._onKeydown);
-    }
-
-    override disconnectedCallback(): void {
-      super.disconnectedCallback();
-      globalThis.removeEventListener("keydown", this._onKeydown);
-    }
-
-    // Keep attributes/props as the single source of truth and
-    // enforce mobile exclusivity even when set programmatically.
-    override updated(changed: Map<string, unknown>) {
-      if (changed.has("leftOpen") || changed.has("rightOpen")) {
-        // Enforce exclusivity on mobile when both become true.
-        if (this._isMobile() && this.leftOpen && this.rightOpen) {
-          const last = changed.has("leftOpen") ? "left" : "right";
-          if (last === "left") this.rightOpen = false;
-          else this.leftOpen = false;
-        }
-        // Emit change events so hosts can react even on attribute changes.
-        if (changed.has("leftOpen")) {
-          this.dispatchEvent(
-            new CustomEvent("cf-toggle-left", {
-              bubbles: true,
-              composed: true,
-              detail: { open: this.leftOpen },
-            }),
-          );
-        }
-        if (changed.has("rightOpen")) {
-          this.dispatchEvent(
-            new CustomEvent("cf-toggle-right", {
-              bubbles: true,
-              composed: true,
-              detail: { open: this.rightOpen },
-            }),
-          );
-        }
+      .mobile-bar .tabs {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow-x: auto;
+        scrollbar-width: thin;
+        border: 0;
       }
-      super.updated?.(changed as any);
-    }
-
-    private _updateChildren() {
-      this._children = Array.from(this.children);
-      this._leftEl = this._children.find((el) =>
-        el.getAttribute("slot") ===
-          "left"
-      ) ?? null;
-      this._rightEl = this._children.find((el) =>
-        el.getAttribute("slot") ===
-          "right"
-      ) ?? null;
-      this._hasLeft = !!this._leftEl;
-      this._hasRight = !!this._rightEl;
-    }
-
-    private _handleTabClick(index: number) {
-      this._activeTab = index;
-      this._updateActiveTab();
-      this.requestUpdate();
-    }
-
-    private _toggleLeft(trigger?: Element) {
-      if (!this._hasLeft) return;
-      this._lastToggleEl = trigger ?? null;
-      const opening = !this.leftOpen;
-      this.leftOpen = opening;
-      if (opening && this._isMobile()) {
-        this.rightOpen = false;
+      .mobile-bar .tab {
+        padding: var(--cf-theme-spacing-tight, 0.25rem)
+          var(--cf-theme-spacing-normal, 0.5rem);
+        border: none;
+        background: none;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        font-size: 0.9rem;
       }
-      this.dispatchEvent(
-        new CustomEvent("cf-toggle-left", {
-          bubbles: true,
-          composed: true,
-          detail: { open: this.leftOpen },
-        }),
-      );
-      this.requestUpdate();
-    }
-
-    private _toggleRight(trigger?: Element) {
-      if (!this._hasRight) return;
-      this._lastToggleEl = trigger ?? null;
-      const opening = !this.rightOpen;
-      this.rightOpen = opening;
-      if (opening && this._isMobile()) {
-        this.leftOpen = false;
+      .mobile-bar .tab.active {
+        border-bottom-color: #007acc;
+        font-weight: 500;
       }
-      this.dispatchEvent(
-        new CustomEvent("cf-toggle-right", {
-          bubbles: true,
-          composed: true,
-          detail: { open: this.rightOpen },
-        }),
-      );
-      this.requestUpdate();
-    }
 
-    private _isMobile(): boolean {
-      try {
-        return globalThis.matchMedia?.("(max-width: 768px)")?.matches ?? false;
-      } catch {
-        return false;
+      /* Reserve space for the mobile bar so content is full height */
+      .layout {
+        padding-bottom: var(--cf-mobile-bar-height, 3rem);
+      }
+      :host([tabsposition="top"]) .layout {
+        padding-bottom: 0;
+        padding-top: var(--cf-mobile-bar-height, 3rem);
+      }
+      /* Show the bar on mobile */
+      .mobile-bar {
+        display: grid;
+      }
+
+      /* Hide desktop floating toggles on mobile */
+      .desktop-toggle {
+        display: none;
       }
     }
+  `;
 
-    private _closePanels() {
-      const wasOpen = this.leftOpen || this.rightOpen;
-      this.leftOpen = false;
+  private _activeTab = 0;
+  private _children: Element[] = [];
+  private _leftEl: Element | null = null;
+  private _rightEl: Element | null = null;
+  private _hasLeft = false;
+  private _hasRight = false;
+  private _lastToggleEl: Element | null = null;
+
+  declare tabNames: string[];
+  declare leftTabName?: string;
+  declare rightTabName?: string;
+  declare tabsPosition: "top" | "bottom";
+  declare leftOpen: boolean;
+  declare rightOpen: boolean;
+
+  constructor() {
+    super();
+    this.tabNames = [];
+    this.leftTabName = "Left";
+    this.rightTabName = "Right";
+    this.tabsPosition = "bottom";
+    this.leftOpen = true;
+    this.rightOpen = true;
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this._updateChildren();
+    this._updateActiveTab();
+    this._onKeydown = this._onKeydown.bind(this);
+    globalThis.addEventListener("keydown", this._onKeydown);
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    globalThis.removeEventListener("keydown", this._onKeydown);
+  }
+
+  // Keep attributes/props as the single source of truth and
+  // enforce mobile exclusivity even when set programmatically.
+  override updated(changed: Map<string, unknown>) {
+    if (changed.has("leftOpen") || changed.has("rightOpen")) {
+      // Enforce exclusivity on mobile when both become true.
+      if (this._isMobile() && this.leftOpen && this.rightOpen) {
+        const last = changed.has("leftOpen") ? "left" : "right";
+        if (last === "left") this.rightOpen = false;
+        else this.leftOpen = false;
+      }
+      // Emit change events so hosts can react even on attribute changes.
+      if (changed.has("leftOpen")) {
+        this.dispatchEvent(
+          new CustomEvent("cf-toggle-left", {
+            bubbles: true,
+            composed: true,
+            detail: { open: this.leftOpen },
+          }),
+        );
+      }
+      if (changed.has("rightOpen")) {
+        this.dispatchEvent(
+          new CustomEvent("cf-toggle-right", {
+            bubbles: true,
+            composed: true,
+            detail: { open: this.rightOpen },
+          }),
+        );
+      }
+    }
+    super.updated?.(changed as any);
+  }
+
+  private _updateChildren() {
+    this._children = Array.from(this.children);
+    this._leftEl = this._children.find((el) =>
+      el.getAttribute("slot") ===
+        "left"
+    ) ?? null;
+    this._rightEl = this._children.find((el) =>
+      el.getAttribute("slot") ===
+        "right"
+    ) ?? null;
+    this._hasLeft = !!this._leftEl;
+    this._hasRight = !!this._rightEl;
+  }
+
+  private _handleTabClick(index: number) {
+    this._activeTab = index;
+    this._updateActiveTab();
+    this.requestUpdate();
+  }
+
+  private _toggleLeft(trigger?: Element) {
+    if (!this._hasLeft) return;
+    this._lastToggleEl = trigger ?? null;
+    const opening = !this.leftOpen;
+    this.leftOpen = opening;
+    if (opening && this._isMobile()) {
       this.rightOpen = false;
-      if (wasOpen && this._lastToggleEl instanceof HTMLElement) {
-        // Return focus to the last toggle trigger
-        this._lastToggleEl.focus();
-      }
-      this.requestUpdate();
     }
+    this.dispatchEvent(
+      new CustomEvent("cf-toggle-left", {
+        bubbles: true,
+        composed: true,
+        detail: { open: this.leftOpen },
+      }),
+    );
+    this.requestUpdate();
+  }
 
-    private _onKeydown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        if (this.leftOpen || this.rightOpen) {
-          e.stopPropagation();
-          this._closePanels();
-        }
-      }
+  private _toggleRight(trigger?: Element) {
+    if (!this._hasRight) return;
+    this._lastToggleEl = trigger ?? null;
+    const opening = !this.rightOpen;
+    this.rightOpen = opening;
+    if (opening && this._isMobile()) {
+      this.leftOpen = false;
     }
+    this.dispatchEvent(
+      new CustomEvent("cf-toggle-right", {
+        bubbles: true,
+        composed: true,
+        detail: { open: this.rightOpen },
+      }),
+    );
+    this.requestUpdate();
+  }
 
-    private _updateActiveTab() {
-      // Only default (content) panes participate in tab switching
-      const defaults = this._children.filter((el) => !el.getAttribute("slot"));
-      const panes: Element[] = [...defaults];
-
-      // Remove active-tab class from all children
-      this._children.forEach((child) => child.classList.remove("active-tab"));
-
-      // Add active-tab class to current pane
-      const active = panes[this._activeTab];
-      if (active) active.classList.add("active-tab");
-    }
-
-    override render() {
-      this._updateChildren();
-
-      // Build tab names for content panes only (exclude sidebars)
-      const defaults = this._children.filter((el) => !el.getAttribute("slot"));
-      const contentTabs: string[] = (this.tabNames.length === defaults.length)
-        ? this.tabNames
-        : defaults.map((_, i) => `Pane ${i + 1}`);
-
-      const layoutClass = classMap({
-        layout: true,
-        "has-left": this._hasLeft,
-        "has-right": this._hasRight,
-        "left-open": this._hasLeft && this.leftOpen,
-        "right-open": this._hasRight && this.rightOpen,
-        // On mobile, we always show the content container and only swap
-        // which default child is marked active.
-        "active-content": true,
-      });
-
-      return html`
-        <!-- Grid layout: left | content | right -->
-        <div class="${layoutClass}">
-          <div class="sidebar-left">
-            <slot name="left"></slot>
-          </div>
-          <div class="content">
-            <slot></slot>
-          </div>
-          <div class="sidebar-right">
-            <slot name="right"></slot>
-          </div>
-          <!-- Mobile-only overlays and toolbar (scoped within layout) -->
-          <div
-            class="scrim"
-            @click="${() => this._closePanels()}"
-            aria-hidden="true"
-          >
-          </div>
-
-          <div class="mobile-bar ${classMap({
-            top: this.tabsPosition === "top",
-          })}">
-            <cf-button
-              size="icon"
-              color="neutral"
-              variant="outline"
-              aria-label="Toggle left sidebar"
-              @click="${(e: Event) =>
-                this._toggleLeft(e.currentTarget as Element)}"
-            >
-              ←
-            </cf-button>
-            <div class="tabs">
-              ${contentTabs.map((name, index) =>
-                html`
-                  <button
-                    class="${classMap({
-                      tab: true,
-                      active: index === this._activeTab,
-                    })}"
-                    @click="${() => this._handleTabClick(index)}"
-                  >
-                    ${name}
-                  </button>
-                `
-              )}
-            </div>
-            <cf-button
-              size="icon"
-              color="neutral"
-              variant="outline"
-              aria-label="Toggle right sidebar"
-              @click="${(e: Event) =>
-                this._toggleRight(e.currentTarget as Element)}"
-            >
-              →
-            </cf-button>
-          </div>
-
-          <!-- Desktop floating toggles -->
-          <div class="desktop-toggle desktop-toggle-left">
-            <cf-button
-              size="icon"
-              color="neutral"
-              variant="outline"
-              aria-label="Toggle left sidebar"
-              @click="${(e: Event) =>
-                this._toggleLeft(e.currentTarget as Element)}"
-            >
-              ←
-            </cf-button>
-          </div>
-          <div class="desktop-toggle desktop-toggle-right">
-            <cf-button
-              size="icon"
-              color="neutral"
-              variant="outline"
-              aria-label="Toggle right sidebar"
-              @click="${(e: Event) =>
-                this._toggleRight(e.currentTarget as Element)}"
-            >
-              →
-            </cf-button>
-          </div>
-        </div>
-      `;
+  private _isMobile(): boolean {
+    try {
+      return globalThis.matchMedia?.("(max-width: 768px)")?.matches ?? false;
+    } catch {
+      return false;
     }
   }
 
-  globalThis.customElements.define("cf-autolayout", CFAutoLayout);
+  private _closePanels() {
+    const wasOpen = this.leftOpen || this.rightOpen;
+    this.leftOpen = false;
+    this.rightOpen = false;
+    if (wasOpen && this._lastToggleEl instanceof HTMLElement) {
+      // Return focus to the last toggle trigger
+      this._lastToggleEl.focus();
+    }
+    this.requestUpdate();
+  }
+
+  private _onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      if (this.leftOpen || this.rightOpen) {
+        e.stopPropagation();
+        this._closePanels();
+      }
+    }
+  }
+
+  private _updateActiveTab() {
+    // Only default (content) panes participate in tab switching
+    const defaults = this._children.filter((el) => !el.getAttribute("slot"));
+    const panes: Element[] = [...defaults];
+
+    // Remove active-tab class from all children
+    this._children.forEach((child) => child.classList.remove("active-tab"));
+
+    // Add active-tab class to current pane
+    const active = panes[this._activeTab];
+    if (active) active.classList.add("active-tab");
+  }
+
+  override render() {
+    this._updateChildren();
+
+    // Build tab names for content panes only (exclude sidebars)
+    const defaults = this._children.filter((el) => !el.getAttribute("slot"));
+    const contentTabs: string[] = (this.tabNames.length === defaults.length)
+      ? this.tabNames
+      : defaults.map((_, i) => `Pane ${i + 1}`);
+
+    const layoutClass = classMap({
+      layout: true,
+      "has-left": this._hasLeft,
+      "has-right": this._hasRight,
+      "left-open": this._hasLeft && this.leftOpen,
+      "right-open": this._hasRight && this.rightOpen,
+      // On mobile, we always show the content container and only swap
+      // which default child is marked active.
+      "active-content": true,
+    });
+
+    return html`
+      <!-- Grid layout: left | content | right -->
+      <div class="${layoutClass}">
+        <div class="sidebar-left">
+          <slot name="left"></slot>
+        </div>
+        <div class="content">
+          <slot></slot>
+        </div>
+        <div class="sidebar-right">
+          <slot name="right"></slot>
+        </div>
+        <!-- Mobile-only overlays and toolbar (scoped within layout) -->
+        <div
+          class="scrim"
+          @click="${() => this._closePanels()}"
+          aria-hidden="true"
+        >
+        </div>
+
+        <div class="mobile-bar ${classMap({
+          top: this.tabsPosition === "top",
+        })}">
+          <cf-button
+            size="icon"
+            color="neutral"
+            variant="outline"
+            aria-label="Toggle left sidebar"
+            @click="${(e: Event) =>
+              this._toggleLeft(e.currentTarget as Element)}"
+          >
+            ←
+          </cf-button>
+          <div class="tabs">
+            ${contentTabs.map((name, index) =>
+              html`
+                <button
+                  class="${classMap({
+                    tab: true,
+                    active: index === this._activeTab,
+                  })}"
+                  @click="${() => this._handleTabClick(index)}"
+                >
+                  ${name}
+                </button>
+              `
+            )}
+          </div>
+          <cf-button
+            size="icon"
+            color="neutral"
+            variant="outline"
+            aria-label="Toggle right sidebar"
+            @click="${(e: Event) =>
+              this._toggleRight(e.currentTarget as Element)}"
+          >
+            →
+          </cf-button>
+        </div>
+
+        <!-- Desktop floating toggles -->
+        <div class="desktop-toggle desktop-toggle-left">
+          <cf-button
+            size="icon"
+            color="neutral"
+            variant="outline"
+            aria-label="Toggle left sidebar"
+            @click="${(e: Event) =>
+              this._toggleLeft(e.currentTarget as Element)}"
+          >
+            ←
+          </cf-button>
+        </div>
+        <div class="desktop-toggle desktop-toggle-right">
+          <cf-button
+            size="icon"
+            color="neutral"
+            variant="outline"
+            aria-label="Toggle right sidebar"
+            @click="${(e: Event) =>
+              this._toggleRight(e.currentTarget as Element)}"
+          >
+            →
+          </cf-button>
+        </div>
+      </div>
+    `;
+  }
+}
+
+globalThis.customElements.define("cf-autolayout", CFAutoLayout);

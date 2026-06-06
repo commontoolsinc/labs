@@ -2,7 +2,6 @@ import {
   type Cell,
   cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -200,12 +199,13 @@ export const counterRangeSliderSimulation = pattern<RangeSliderArgs>(
 
     const sliderState = liftSliderState({ min, max, value });
 
-    const currentValue = derive(sliderState, (state) => state.value);
-    const minView = derive(sliderState, (state) => state.min);
-    const maxView = derive(sliderState, (state) => state.max);
-    const percentage = derive(
-      sliderState,
-      (state) => computePercentage(state.value, state.min, state.max),
+    const currentValue = sliderState.value;
+    const minView = sliderState.min;
+    const maxView = sliderState.max;
+    const percentage = computePercentage(
+      sliderState.value,
+      sliderState.min,
+      sliderState.max,
     );
 
     const stepSize = liftStepSize(step);

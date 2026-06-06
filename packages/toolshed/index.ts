@@ -55,7 +55,7 @@ const initializeRuntime = async () => {
         as: identity,
       }),
       experimental: {
-        modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
+        modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,
         persistentSchedulerState: env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
       },
       cachedCompiler,
@@ -143,7 +143,9 @@ async function startServer() {
   } catch (err) {
     if (err instanceof Deno.errors.AddrInUse) {
       console.error(`Port ${env.PORT} is already in use`);
-      Deno.exit(1);
+      // Distinct exit code so callers can tell a port collision from other
+      // startup failures and retry on a different port.
+      Deno.exit(3);
     }
     console.error("Failed to start server:", err);
     Deno.exit(1);

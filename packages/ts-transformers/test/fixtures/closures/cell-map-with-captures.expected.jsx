@@ -15,11 +15,89 @@ interface State {
     values: number[];
     multiplier: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    value: number;
+    state: {
+        multiplier: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        value: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["value", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ value, state }) => value * state.multiplier);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const value = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<span>{__cfLift_1({
+        value: value,
+        state: {
+            multiplier: state.key("multiplier")
+        }
+    })}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        multiplier: {
+                            type: "number"
+                        }
+                    },
+                    required: ["multiplier"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: cell-map-with-captures
 // Verifies: Cell.map() with outer-scope captures is transformed to mapWithPattern with params
 //   typedValues.map((value) => <span>{value * state.multiplier}</span>)
 //     → typedValues.mapWithPattern(pattern(...), { state: { multiplier: state.key("multiplier") } })
-//   value * state.multiplier → derive({ value, state: { multiplier } }, ...)
+//   value * state.multiplier → lift(...)({ value, state: { multiplier } })
 // Context: The map callback captures `state.multiplier` from the outer scope,
 //   which must be threaded through as a mapWithPattern param and re-derived inside.
 export default pattern((state) => {
@@ -32,83 +110,7 @@ export default pattern((state) => {
     } as const satisfies __cfHelpers.JSONSchema).for("typedValues", true);
     return {
         [UI]: (<div>
-        {typedValues.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const value = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<span>{__cfHelpers.lift<{
-                    value: number;
-                    state: {
-                        multiplier: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                multiplier: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["multiplier"]
-                        }
-                    },
-                    required: ["value", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ value, state }) => value * state.multiplier)({
-                    value: value,
-                    state: {
-                        multiplier: state.key("multiplier")
-                    }
-                })}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    multiplier: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["multiplier"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {typedValues.mapWithPattern(__cfPattern_1, {
                 state: {
                     multiplier: state.key("multiplier")
                 }

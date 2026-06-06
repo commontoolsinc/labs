@@ -1,0 +1,250 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { Runtime } from "../src/runtime.ts";
+import { Engine } from "../src/harness/engine.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+
+// Phase D3.2: the Engine ESM compile path (compileToRecordGraph) runs the real
+// CF transformer pipeline, emits per-module CommonJS, assembles content-
+// addressed records + runtime records, and security-verifies every body.
+describe("Engine.compileToRecordGraph", () => {
+  let runtime: Runtime;
+  let engine: Engine;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    engine = runtime.harness as Engine;
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("compiles a simple program into a verified record graph", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: "export default 42;" }],
+    };
+    const { graph, mainSpecifier } = await engine.compileToRecordGraph(program);
+
+    expect(mainSpecifier.startsWith("cf:module/")).toBe(true);
+    expect(graph.records.has(mainSpecifier)).toBe(true);
+    // Every authored module has a compiled body and a record.
+    expect(graph.compiledBodies.size).toBeGreaterThan(0);
+    // Runtime-module records are registered for cf:runtime/commonfabric.
+    expect(graph.records.has("cf:runtime/commonfabric")).toBe(true);
+    // (compileToRecordGraph throws if any body fails verification — reaching
+    // here means all authored bodies passed the ESM security verifier.)
+  });
+
+  it("compiles + evaluates a program through the ESM path", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents:
+          "export const answer = 42;\nexport const make = () => answer;\nexport default make;",
+      }],
+    };
+    const { main, loadId } = await engine.compileAndEvaluateModules(program);
+    expect(loadId).toBeTruthy();
+    expect(main).toBeDefined();
+    expect((main as { answer: number }).answer).toBe(42);
+    expect((main as { make(): number }).make()).toBe(42);
+    // default export resolves to the same function.
+    expect((main as { default(): number }).default()).toBe(42);
+  });
+
+  it("evaluates a multi-module program across an internal import", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/dep.ts", contents: "export const base = (): number => 20;" },
+        {
+          name: "/main.tsx",
+          contents:
+            `import { base } from "./dep.ts";\nexport const total = () => base() + 22;\nexport default total;`,
+        },
+      ],
+    };
+    const { main } = await engine.compileAndEvaluateModules(program);
+    expect((main as { total(): number }).total()).toBe(42);
+  });
+
+  it("rejects a program whose module contains disallowed top-level code", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        // Unwrapped top-level mutable export — the verifier must reject it.
+        contents: "export const leaked = globalThis;\nexport default leaked;",
+      }],
+    };
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
+  });
+
+  // Step 5 (option C): per-module identities (`cf:module/<hash>`) are
+  // entry-point independent — the whole-program `/<id>` prefix is stripped for
+  // identity computation, so a byte-identical module shared by two different
+  // programs gets the SAME identity (content-addressed cross-program dedup).
+  describe("entry-point-independent module identities", () => {
+    const depContents = "export const base = (): number => 20;";
+
+    const specifierFor = async (
+      program: RuntimeProgram,
+      path: string,
+    ): Promise<string> => {
+      const { graph } = await engine.compileToRecordGraph(program);
+      // specifierByPath is keyed by the resolved/prefixed path; find the entry
+      // whose path ends with the authored path.
+      for (const [p, spec] of graph.specifierByPath) {
+        if (p.endsWith(path)) return spec;
+      }
+      throw new Error(`no specifier for ${path}`);
+    };
+
+    it("gives a shared module the same identity across different programs", async () => {
+      const progA: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          { name: "/dep.ts", contents: depContents },
+          {
+            name: "/main.tsx",
+            contents:
+              `import { base } from "./dep.ts";\nexport default () => base() + 1;`,
+          },
+        ],
+      };
+      const progB: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          { name: "/dep.ts", contents: depContents },
+          {
+            name: "/main.tsx",
+            // Different entry → different whole-program id, same dep.ts bytes.
+            contents:
+              `import { base } from "./dep.ts";\nexport default () => base() * 99;`,
+          },
+        ],
+      };
+      const depA = await specifierFor(progA, "/dep.ts");
+      const depB = await specifierFor(progB, "/dep.ts");
+      expect(depA).toBe(depB);
+      // The prefix is gone from the identity: no whole-program hash leaks in.
+      expect(depA.startsWith("cf:module/")).toBe(true);
+
+      // The entry modules differ (different content), so their identities differ.
+      const mainA = await specifierFor(progA, "/main.tsx");
+      const mainB = await specifierFor(progB, "/main.tsx");
+      expect(mainA).not.toBe(mainB);
+    });
+  });
+
+  // Step 4.3.4: compileToRecordGraph returns serializable per-module artifacts
+  // and accepts a full set of cached bodies to skip the TypeScript compile.
+  describe("precompiled-module seam", () => {
+    const MULTI: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        { name: "/dep.ts", contents: "export const base = (): number => 20;" },
+        {
+          name: "/main.tsx",
+          contents:
+            `import { base } from "./dep.ts";\nexport const total = () => base() + 22;\nexport default total;`,
+        },
+      ],
+    };
+
+    // Build an identity-keyed precompiled set from a prior compile's module
+    // descriptors, tagging each body so we can prove it was reused verbatim.
+    const taggedFrom = (modules: { identity: string; js: string }[]) =>
+      new Map(
+        modules.map((
+          m,
+        ) => [m.identity, { js: `${m.js}\n//cached:${m.identity}` }]),
+      );
+
+    it("returns a descriptor per emitted module in identity space", async () => {
+      const { modules, entryIdentity, graph } = await engine
+        .compileToRecordGraph(MULTI);
+      // One descriptor per compiled body in the graph.
+      expect(modules.length).toBe(graph.compiledBodies.size);
+      // Filenames are normalized (no `/<id>` prefix leaks out).
+      const filenames = modules.map((m) => m.filename);
+      expect(filenames).toContain("/main.tsx");
+      expect(filenames).toContain("/dep.ts");
+      for (const f of filenames) {
+        expect(f).not.toMatch(/^\/[A-Za-z0-9_-]{20,}\//);
+      }
+      // The entry's identity is among the module identities.
+      expect(modules.some((m) => m.identity === entryIdentity)).toBe(true);
+      // Each descriptor carries non-empty source + js; main links to dep.
+      for (const m of modules) {
+        expect(m.source.length).toBeGreaterThan(0);
+        expect(m.js.length).toBeGreaterThan(0);
+      }
+      const main = modules.find((m) => m.filename === "/main.tsx")!;
+      const dep = modules.find((m) => m.filename === "/dep.ts")!;
+      expect(main.imports.some((i) => i.targetIdentity === dep.identity)).toBe(
+        true,
+      );
+    });
+
+    it("reuses a full set of precompiled bodies (cache hit) and still evaluates", async () => {
+      const first = await engine.compileToRecordGraph(MULTI);
+      const tagged = taggedFrom(first.modules);
+
+      const hit = await engine.compileToRecordGraph(MULTI, {
+        precompiledModules: tagged,
+      });
+      // Every returned body is exactly the cached body (no recompile).
+      for (const m of hit.modules) {
+        expect(m.js).toContain(`//cached:${m.identity}`);
+      }
+
+      // And a cache-hit graph still evaluates correctly.
+      const { main } = await engine.compileAndEvaluateModules(MULTI, {
+        precompiledModules: tagged,
+      });
+      expect((main as { total(): number }).total()).toBe(42);
+    });
+
+    it("still security-verifies cached bodies on a warm hit (no blind trust)", async () => {
+      // Step 4.3.6 / threat model: while the compiled-set integrity label is
+      // only client-asserted, a warm hit must NOT blindly trust cached bytes —
+      // the engine re-runs the ESM body verifier on every emitted body. Feed a
+      // full (so fullHit) set where one body has disallowed top-level code.
+      const first = await engine.compileToRecordGraph(MULTI);
+      const tampered = new Map(
+        first.modules.map((m) => [m.identity, { js: m.js }]),
+      );
+      tampered.set(first.entryIdentity, {
+        js: `"use strict";\nfetch("https://evil.example");\n`,
+      });
+      await expect(
+        engine.compileToRecordGraph(MULTI, { precompiledModules: tampered }),
+      ).rejects.toThrow();
+    });
+
+    it("ignores a partial precompiled set and recompiles the whole program", async () => {
+      const first = await engine.compileToRecordGraph(MULTI);
+      // Supply all but one module → not a full hit; the engine recompiles.
+      const partial = taggedFrom(first.modules.slice(1));
+      const result = await engine.compileToRecordGraph(MULTI, {
+        precompiledModules: partial,
+      });
+      // Recompiled from source: no body carries the cache tag.
+      for (const m of result.modules) {
+        expect(m.js).not.toContain("//cached");
+      }
+    });
+  });
+});

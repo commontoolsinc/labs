@@ -1,5 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "../interface.ts";
+import { runWrite } from "./sqlite/exec.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
 import {
@@ -17,6 +18,7 @@ import {
   type Reference,
   type SchedulerActionSnapshotCursor,
   type SessionId,
+  type SqliteOperation,
 } from "../v2.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
@@ -41,7 +43,7 @@ const resolveCommitSessionKey = (
 ): string =>
   principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
 
-const resolveScopeKey = (
+export const resolveScopeKey = (
   scope: CellScope | undefined,
   options: { principal?: string; sessionId?: SessionId },
 ): string => {
@@ -706,6 +708,11 @@ export interface ApplyCommitOptions {
   invocationPayload?: FabricValue;
   authorization?: AuthorizationRecord;
   commit: ClientCommit;
+  /** Map of cell-db id -> attach alias for `sqlite` ops in this commit. The
+   *  server attaches these BEFORE applyCommit (ATTACH can't run in a txn); the
+   *  apply loop executes the SQL inside the commit's transaction against the
+   *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
+  sqliteAttachments?: ReadonlyMap<string, string>;
 }
 
 export interface AppliedRevision {
@@ -1479,6 +1486,9 @@ const readStateForScopeKey = (
         opIndex: row.op_index,
       });
       break;
+    default:
+      // `sqlite` ops are never stored as revisions; unreachable.
+      throw new Error(`unexpected stored revision op: ${row.op}`);
   }
 
   return {
@@ -3072,6 +3082,7 @@ const applyCommitTransaction = (
     space,
     principal,
     commit,
+    sqliteAttachments,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
@@ -3189,6 +3200,13 @@ const applyCommitTransaction = (
 
   const revisions: AppliedRevision[] = [];
   for (const [opIndex, operation] of commit.operations.entries()) {
+    if (operation.op === "sqlite") {
+      // Execute the SQL inside this commit's transaction (atomic with the cell
+      // ops). It is NOT an entity revision — do not push to `revisions[]` so the
+      // revision/head/snapshot/dirty machinery never sees it.
+      applySqliteOperation(engine, operation, sqliteAttachments);
+      continue;
+    }
     const revision = writeOperation(engine, {
       branch,
       seq,
@@ -3238,13 +3256,39 @@ const applyCommitTransaction = (
   };
 };
 
+/**
+ * Apply a folded `sqlite` op inside the commit transaction. The target cell-db
+ * must already be ATTACHed by the caller (server, before applyCommit) under the
+ * alias in `attachments`; unqualified names in the SQL resolve to it. Throwing
+ * here (e.g. the guard rejecting DDL) rolls back the whole commit.
+ */
+const applySqliteOperation = (
+  engine: Engine,
+  op: SqliteOperation,
+  attachments: ReadonlyMap<string, string> | undefined,
+): void => {
+  // The server attaches exactly one cell-db (under an alias) before applyCommit;
+  // assert it's present, then run the statement UNQUALIFIED. Unqualified table
+  // names resolve to that single attached db — the ≤1-cell-db-per-commit rule
+  // (#attachCommitSqliteDbs) plus the core-table guard prevent ambiguity, so the
+  // alias is not used to qualify the SQL here (only the presence matters).
+  if (!attachments?.has(op.db.id)) {
+    throw new ProtocolError(
+      `sqlite op for db ${op.db.id} has no attachment (server must attach before applyCommit)`,
+    );
+  }
+  runWrite(engine.database, op.sql, op.params);
+};
+
 const writeOperation = (
   engine: Engine,
   options: {
     branch: BranchName;
     seq: number;
     opIndex: number;
-    operation: Operation;
+    // `sqlite` ops are handled in the apply loop (applySqliteOperation), never
+    // here — they are not entity revisions.
+    operation: Exclude<Operation, SqliteOperation>;
     principal?: string;
     sessionId: SessionId;
   },

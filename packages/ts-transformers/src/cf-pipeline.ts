@@ -1,5 +1,5 @@
 import {
-  BuilderCallbackHoistingTransformer,
+  BuilderCallHoistingTransformer,
   CastValidationTransformer,
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
@@ -79,12 +79,12 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
     create: (options) => new PatternCallbackLoweringTransformer(options),
   },
   {
-    name: "BuilderCallbackHoistingTransformer",
-    create: (options) => new BuilderCallbackHoistingTransformer(options),
-  },
-  {
     name: "SchemaInjectionTransformer",
     create: (options) => new SchemaInjectionTransformer(options),
+  },
+  {
+    name: "BuilderCallHoistingTransformer",
+    create: (options) => new BuilderCallHoistingTransformer(options),
   },
   {
     name: "SchemaGeneratorTransformer",

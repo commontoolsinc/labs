@@ -106,8 +106,8 @@ Deno.test(
       "HelperOwnedExpressionSiteLoweringTransformer",
       "WriteAuthorizedByValidationTransformer",
       "PatternCallbackLoweringTransformer",
-      "BuilderCallbackHoistingTransformer",
       "SchemaInjectionTransformer",
+      "BuilderCallHoistingTransformer",
       "SchemaGeneratorTransformer",
       "ReactiveVariableForTransformer",
       "ModuleScopeShadowingTransformer",
@@ -342,15 +342,39 @@ export default pattern<{
       output,
       "=> f.validationIssue !== undefined",
     );
-    // After CT-1615 Phase 1, the synthesized wrapper is lift-applied:
-    //   __cfHelpers.lift<...>(({ f }) => f.validationIssue !== undefined)(
-    //     { validationIssue: f.key("validationIssue") }
-    //   )
-    // The callback lives on the inner lift call; the input on the outer
-    // applied call.
+    // After CT-1644 Phase 2, the synthesized predicate wrapper is hoisted to a
+    // module-scope const and applied at the call site:
+    //   const __cfLift_N = __cfHelpers.lift(
+    //     argSchema, resSchema, ({ f }) => f.validationIssue !== undefined);
+    //   ...__cfLift_N({ f: { validationIssue: f.key("validationIssue") } })
+    // The callback lives on the hoisted lift decl; the input on the applied
+    // site. Anchor on the unique predicate callback text, walk back to the
+    // nearest `const __cfLift_N =` that owns it (decls don't nest, so the last
+    // such declaration before the callback is its owner), then assert that same
+    // id is applied with the `f` validationIssue capture.
+    const predicateIdx = output.indexOf(
+      "({ f }) => f.validationIssue !== undefined",
+    );
+    assert(
+      predicateIdx >= 0,
+      "expected the synthesized validationIssue predicate callback",
+    );
+    const declMatches = [
+      ...output.slice(0, predicateIdx).matchAll(
+        /const (__cfLift_\d+) = __cfHelpers\.lift/g,
+      ),
+    ];
+    assert(
+      declMatches.length > 0,
+      "expected a hoisted lift decl owning the validationIssue predicate",
+    );
+    const validationLiftId = declMatches[declMatches.length - 1][1];
     assertMatch(
       output,
-      /__cfHelpers\.lift\([\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)\(\{[\s\S]*validationIssue: f(?:\.validationIssue|\.key\("validationIssue"\))[\s\S]*\}\)/,
+      new RegExp(
+        validationLiftId +
+          '\\(\\{ f: \\{[\\s\\S]*?validationIssue: f(?:\\.validationIssue|\\.key\\("validationIssue"\\))[\\s\\S]*?\\} \\}\\)',
+      ),
     );
   },
 );
@@ -424,23 +448,29 @@ Deno.test(
       types: COMMONFABRIC_TYPES,
     });
 
-    const mapStart = output.indexOf("{examples.mapWithPattern(");
     assert(
-      mapStart >= 0,
-      "expected transformed examples.mapWithPattern callback",
+      output.includes("{examples.mapWithPattern("),
+      "expected transformed examples.mapWithPattern call site",
     );
-    const mapWindow = output.slice(mapStart, mapStart + 5000);
 
+    // CT-1655: the whole `pattern(...)` call for this map is hoisted to a
+    // module-scope `const __cfPattern_N = __cfHelpers.pattern(...)`, so the
+    // callback (and its `__cf_pattern_input.key("params", …)` prologue) now
+    // lives at module scope, ABOVE the `examples.mapWithPattern(__cfPattern_N,
+    // …)` call site rather than inline at it. The property this test guards is
+    // unchanged: the examples capture's params-keyed prologue survives the
+    // pipeline. Assert against the whole output (the prologue lines are unique
+    // to this map's callback).
     assertStringIncludes(
-      mapWindow,
+      output,
       'const selectedExampleId = __cf_pattern_input.key("params", "selectedExampleId");',
     );
     assertStringIncludes(
-      mapWindow,
+      output,
       'const currentItem = __cf_pattern_input.key("params", "currentItem");',
     );
     assertStringIncludes(
-      mapWindow,
+      output,
       'const examples = __cf_pattern_input.key("params", "examples");',
     );
   },
@@ -738,14 +768,14 @@ export default pattern(() => {
 );
 
 Deno.test(
-  "Pipeline regression: derive callbacks that rely on contextual typing still receive injected schemas",
+  "Pipeline regression: computed callbacks that rely on contextual typing still receive injected schemas",
   async () => {
-    const source = `import { derive, pattern } from "commonfabric";
+    const source = `import { computed, pattern } from "commonfabric";
 
 const summarize = (values: string[]) => values.length;
 
 export default pattern<{ values: string[] }>(({ values }) => {
-  const result = derive(values, (entries) => summarize(entries.get()));
+  const result = computed(() => summarize(values.get()));
   return { result };
 });
 `;
@@ -755,11 +785,12 @@ export default pattern<{ values: string[] }>(({ values }) => {
     });
     const normalized = output.replace(/\s+/g, " ");
 
-    // After CT-1615 Phase 1, derive(values, cb) lowers to lift(cb)(values):
-    // const result = __cfHelpers.lift(argSchema, resSchema, cb)(values).for(...)
+    // computed(() => summarize(values.get())) closure-extracts `values` and
+    // lowers to a hoisted lift; after CT-1644 Phase 2 the call site applies
+    // the hoisted const: const result = __cfLift_N({ values: values }).for(...)
     assertMatch(
       normalized,
-      /const result = __cfHelpers\.lift\([\s\S]*?, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\(values\)\.for\("result", true\);/,
+      /const result = __cfLift_\d+\(\{ values: values \}\)\.for\("result", true\);/,
     );
   },
 );
@@ -768,7 +799,7 @@ Deno.test(
   "Pipeline regression: local concise ternary event handlers stay function-valued",
   async () => {
     const source =
-      `import { derive, handler, pattern, UI, Writable } from "commonfabric";
+      `import { computed, handler, pattern, UI, Writable } from "commonfabric";
 
 interface Item {
   id: string;
@@ -797,10 +828,8 @@ export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
         <div>
           {items.map((item) => {
             const iid = item.id;
-            const myVote = derive(
-              { votes, itemId: iid },
-              ({ votes, itemId }) =>
-                votes.get().find((vote) => vote.itemId === itemId)?.vote,
+            const myVote = computed(() =>
+              votes.get().find((vote) => vote.itemId === iid)?.vote
             );
 
             const onVoteYes = () =>
@@ -827,9 +856,14 @@ export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
       output,
       'boundCastVote.send({ itemId: iid, vote: "yes" })',
     );
+    // After CT-1644 Phase 2 a genuinely reactive computed lowers to a hoisted
+    // lift whose call site is `const onVoteYes = __cfLift_N(...)`. The local
+    // event handler must stay a plain arrow, so no such hoisted application is
+    // assigned to onVoteYes.
     assert(
-      !output.includes("const onVoteYes = __cfHelpers.derive("),
-      "local event handler variable must not become a derive cell containing a function",
+      !output.includes("const onVoteYes = __cfHelpers.lift(") &&
+        !/const onVoteYes = __cfLift_\d+\(/.test(output),
+      "local event handler variable must not become a reactive cell containing a function",
     );
     assert(
       !output.includes("=> () => __cfHelpers.ifElse("),
@@ -866,8 +900,7 @@ export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
 Deno.test(
   "Pipeline regression: nullable computed capture keeps source array schema array-shaped",
   async () => {
-    const source =
-      `import { computed, derive, pattern, UI } from "commonfabric";
+    const source = `import { computed, pattern, UI } from "commonfabric";
 
 interface Option {
   title: string;
@@ -875,9 +908,8 @@ interface Option {
 }
 
 export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
-  const minimalNullable = derive(
-    options,
-    (o) => o.length > 0 ? o[0].title : null,
+  const minimalNullable = computed(() =>
+    options.length > 0 ? options[0].title : null
   );
 
   return {
@@ -896,14 +928,24 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    // After CT-1615 Phase 1, the user-authored `derive(options, ...)`
-    // lowers to `__cfHelpers.lift(...)(options)`.
+    // computed(() => options.length > 0 ? options[0].title : null) closure-
+    // extracts `options` and lowers to a hoisted lift. After CT-1644 Phase 2
+    // the schema-bearing decl lives at `const __cfLift_N = __cfHelpers.lift(`
+    // and the call site is `const minimalNullable = __cfLift_N({ options })`.
+    const minimalNullableSite = output.match(
+      /const minimalNullable = (__cfLift_\d+)\(/,
+    );
+    assert(
+      minimalNullableSite !== null,
+      "expected transformed minimalNullable lift-applied call",
+    );
+    const minimalNullableLiftId = minimalNullableSite[1];
     const minimalNullableStart = output.indexOf(
-      "const minimalNullable = __cfHelpers.lift(",
+      `const ${minimalNullableLiftId} = __cfHelpers.lift`,
     );
     assert(
       minimalNullableStart >= 0,
-      "expected transformed minimalNullable lift-applied call",
+      "expected hoisted minimalNullable lift declaration",
     );
     const minimalNullableWindow = output.slice(
       minimalNullableStart,
@@ -958,19 +1000,20 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["my
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    // After CT-1615 Phase 1, computed() lowers to lift-applied:
-    //   __cfHelpers.lift<...>({argSchema}, {resSchema}, cb)({inputObj})
-    // The lift call (with generic type args) begins the wrapper; the
-    // captured displayName lives in the outer applied call's input object.
-    // Match the lift identifier with optional type arguments via regex.
-    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    // After CT-1644 Phase 2, computed() lowers to a hoisted lift:
+    //   const __cfLift_N = __cfHelpers.lift({argSchema}, {resSchema}, cb);
+    // The hoisted decl carries the capture's input schema; it is the first
+    // __cfHelpers.lift( occurrence in the module.
+    // Hoisted lift may carry generic type args (`lift<In, Out>(`) or not
+    // (`lift(`); match the helper-call head either way.
+    const liftMatch = output.match(/__cfHelpers\.lift(?:<[\s\S]*?>)?\(/);
     assert(
       liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+      "expected computed() to lower to a hoisted lift; output had no __cfHelpers.lift(",
     );
     const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
 
-    // Capture-input properties appear in the outer applied call's argument.
+    // Capture-input properties appear in the hoisted lift's argument schema.
     assertStringIncludes(liftWindow, "displayName: {");
     assertStringIncludes(liftWindow, 'type: "string"');
     assertStringIncludes(liftWindow, '"default": ""');
@@ -997,11 +1040,14 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) 
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    // After CT-1615 Phase 1, computed() lowers to lift-applied.
-    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    // After CT-1644 Phase 2, computed() lowers to a hoisted lift whose decl is
+    // the first __cfHelpers.lift( occurrence in the module.
+    // Hoisted lift may carry generic type args (`lift<In, Out>(`) or not
+    // (`lift(`); match the helper-call head either way.
+    const liftMatch = output.match(/__cfHelpers\.lift(?:<[\s\S]*?>)?\(/);
     assert(
       liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+      "expected computed() to lower to a hoisted lift; output had no __cfHelpers.lift(",
     );
     const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
 
@@ -1031,11 +1077,14 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) 
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    // After CT-1615 Phase 1, computed() lowers to lift-applied.
-    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    // After CT-1644 Phase 2, computed() lowers to a hoisted lift whose decl is
+    // the first __cfHelpers.lift( occurrence in the module.
+    // Hoisted lift may carry generic type args (`lift<In, Out>(`) or not
+    // (`lift(`); match the helper-call head either way.
+    const liftMatch = output.match(/__cfHelpers\.lift(?:<[\s\S]*?>)?\(/);
     assert(
       liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+      "expected computed() to lower to a hoisted lift; output had no __cfHelpers.lift(",
     );
     const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
 
@@ -1069,12 +1118,19 @@ export default pattern<Input>(({ departments }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const liftMatch = output.match(/const init = __cfHelpers\.lift\s*</);
+    // After CT-1644 Phase 2 the materializer options live in the hoisted
+    // decl `const __cfLift_N = __cfHelpers.lift(...)`; the call site is
+    // `const init = __cfLift_N(...)`.
+    const initSite = output.match(/const init = (__cfLift_\d+)\(/);
     assert(
-      liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to lift()",
+      initSite !== null,
+      "expected computed() to lower to a hoisted lift call site for init",
     );
-    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
+    const initStart = output.indexOf(
+      `const ${initSite[1]} = __cfHelpers.lift`,
+    );
+    assert(initStart >= 0, "expected hoisted lift declaration for init");
+    const liftWindow = output.slice(initStart, initStart + 1400);
 
     assertStringIncludes(liftWindow, "materializerWriteInputPaths");
     assertStringIncludes(liftWindow, '["departments"]');
@@ -1100,12 +1156,19 @@ export default pattern<Input>(({ departments }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const liftMatch = output.match(/const count = __cfHelpers\.lift\s*</);
+    // After CT-1644 Phase 2 the schema/options live in the hoisted decl
+    // `const __cfLift_N = __cfHelpers.lift(...)`; the call site is
+    // `const count = __cfLift_N(...)`.
+    const countSite = output.match(/const count = (__cfLift_\d+)\(/);
     assert(
-      liftMatch && liftMatch.index !== undefined,
-      "expected computed() to lower to lift()",
+      countSite !== null,
+      "expected computed() to lower to a hoisted lift call site for count",
     );
-    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
+    const countStart = output.indexOf(
+      `const ${countSite[1]} = __cfHelpers.lift`,
+    );
+    assert(countStart >= 0, "expected hoisted lift declaration for count");
+    const liftWindow = output.slice(countStart, countStart + 1200);
 
     assert(
       !liftWindow.includes("materializerWriteInputPaths"),

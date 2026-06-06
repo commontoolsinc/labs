@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import {
@@ -19,15 +19,19 @@ import {
 } from "../src/cli.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
-import type {
-  HarnessPromptLoopResult,
-  RunHarnessPromptOptions,
-  RunHarnessTranscriptOptions,
+import {
+  CfHarnessPromptLoop,
+  type HarnessPromptLoopResult,
+  type RunHarnessPromptOptions,
+  type RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 
 const ONE_PIXEL_PNG = decodeBase64(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
 );
+
+const syntheticTmpProjectPath = (...segments: string[]): string =>
+  join(Deno.realPathSync("/tmp"), "project", ...segments);
 
 const createIoBuffers = (): {
   io: CfHarnessCliIO;
@@ -134,8 +138,49 @@ Deno.test("parseCfHarnessCliArgs rejects image attachments outside the workspace
         },
       ),
     Error,
-    "--image paths must stay within the workspace",
+    "--image must stay within the workspace or a host mount",
   );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts image attachments from a host mount", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mounted = await Deno.makeTempDir();
+  const launcherCwd = await Deno.makeTempDir();
+  const imagePath = join(mounted, "capture.png");
+  await Deno.writeFile(imagePath, ONE_PIXEL_PNG);
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=file-cabinet,source=${mounted},target=/file-cabinet,mode=readonly`,
+      "--image",
+      imagePath,
+      "--prompt",
+      "Describe the image",
+    ],
+    {
+      cwd: launcherCwd,
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.hostMounts, [{
+    name: "file-cabinet",
+    hostPath: await Deno.realPath(mounted),
+    sandboxPath: "/file-cabinet",
+    mode: "readonly",
+  }]);
+  assertEquals(parsed.imageAttachments.length, 1);
+  assertEquals(
+    parsed.imageAttachments[0].hostPath,
+    await Deno.realPath(imagePath),
+  );
+  assertEquals(parsed.imageAttachments[0].mediaType, "image/png");
 });
 
 Deno.test("parseCfHarnessCliArgs rejects image symlinks that resolve outside the workspace", async () => {
@@ -163,7 +208,7 @@ Deno.test("parseCfHarnessCliArgs rejects image symlinks that resolve outside the
         },
       ),
     Error,
-    "--image paths must stay within the workspace",
+    "--image must stay within the workspace or a host mount",
   );
 });
 
@@ -348,7 +393,10 @@ Deno.test({
       if ("help" in parsed) {
         throw new Error("expected config result");
       }
-      assertEquals(parsed.skillsRoot, join(workspace, "labs", "skills"));
+      assertEquals(
+        parsed.skillsRoot,
+        await Deno.realPath(join(workspace, "labs", "skills")),
+      );
       assertEquals(parsed.skillsRootSandboxPath, "/workspace/labs/skills");
       assertEquals(parsed.skillNames, ["pattern-dev", "cf"]);
       assertEquals(parsed.skillCatalogEnabled, false);
@@ -525,6 +573,8 @@ Deno.test({
           "deno-memory-profiler:scripts/memory.ts",
           "--allow-skill-script",
           "deno-memory-profiler:scripts/memory.ts",
+          "--skill-script-execution-target",
+          "host",
         ],
         {
           cwd: root,
@@ -540,10 +590,28 @@ Deno.test({
         skill: "deno-memory-profiler",
         path: "scripts/memory.ts",
       }]);
+      assertEquals(parsed.skillScriptExecutionTarget, "host");
     } finally {
       await Deno.remove(root, { recursive: true });
     }
   },
+});
+
+Deno.test("parseCfHarnessCliArgs rejects invalid skill script execution targets", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--skill-script-execution-target",
+          "remote",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "skill script execution target must be one of sandbox, host",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs rejects skill script allowlists without a skills root", async () => {
@@ -597,7 +665,7 @@ Deno.test("parseCfHarnessCliArgs supports structured result validation flags", a
   }
   assertEquals(
     parsed.structuredResult?.path,
-    "/tmp/project/results/capture.results.json",
+    syntheticTmpProjectPath("results", "capture.results.json"),
   );
   assertEquals(
     parsed.structuredResult?.sandboxPath,
@@ -734,6 +802,188 @@ Deno.test("parseCfHarnessCliArgs supports explicit browser subagent profile auth
   }
   assertEquals(parsed.allowedToolIds, ["delegate_task"]);
   assertEquals(parsed.allowedSubagentProfiles, ["browser"]);
+});
+
+Deno.test("parseCfHarnessCliArgs supports a Browser Access lease", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "browser",
+      "--browser-access-lease-id",
+      "pf-run-1",
+      "--browser-access-cdp-url",
+      "http://127.0.0.1:9363/",
+      "--browser-access-owner",
+      "pattern-factory",
+      "--browser-access-expires-at",
+      "2026-05-29T22:00:00Z",
+      "--browser-access-profile-mode",
+      "transient",
+      "--browser-access-account-access",
+      "none",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.browserAccess, {
+    type: "cf-harness.chat.browser-access-lease",
+    leaseId: "pf-run-1",
+    cdpUrl: "http://127.0.0.1:9363",
+    owner: "pattern-factory",
+    expiresAt: "2026-05-29T22:00:00Z",
+    profileMode: "transient",
+    accountAccess: "none",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects malformed Browser Access leases", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-lease-id requires a non-empty value",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-cdp-url is required",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "https://example.com:9363",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-cdp-url must be an http:// local origin with an explicit port",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-profile-mode",
+          "loggedout",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-profile-mode must be one of: persistent, transient",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-profile-mode",
+          "",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-profile-mode must be one of: persistent, transient",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-account-access",
+          "",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-account-access must be one of: available, none",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--browser-access-lease-id",
+          "pf-run-1",
+          "--browser-access-cdp-url",
+          "http://127.0.0.1:9363",
+          "--browser-access-expires-at",
+          "not-a-timestamp",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--browser-access-expires-at must be a valid timestamp",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs supports explicit web_fetch subagent profile authorization", async () => {
@@ -1122,6 +1372,14 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.nativeModelToolIds.includes("google_search"), true);
   assertEquals(
     capabilities.cliFlags.includes("--structured-result-path"),
+    true,
+  );
+  assertEquals(
+    capabilities.cliFlags.includes("--browser-access-cdp-url"),
+    true,
+  );
+  assertEquals(
+    capabilities.cliFlags.includes("--browser-access-profile-mode"),
     true,
   );
   assertEquals(capabilities.cliFlags.includes("--describe-capabilities"), true);
@@ -1536,6 +1794,74 @@ Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async (
     assertEquals(stdout.length, 1, testCase.name);
     assertEquals(stderr, [], testCase.name);
   }
+});
+
+Deno.test("runCfHarnessCli passes Browser Access leases to the prompt loop", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Use browser.",
+      "--gateway-auth-mode",
+      "none",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "browser",
+      "--browser-access-lease-id",
+      "pf-run-1",
+      "--browser-access-cdp-url",
+      "http://localhost:9363",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: () =>
+            Promise.resolve(
+              {
+                model: "gpt-5.4",
+                finalAssistantText: "Browser lease configured.",
+                transcript: [
+                  { role: "user", content: "Use browser." },
+                  {
+                    role: "assistant",
+                    content: "Browser lease configured.",
+                  },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-browser-access",
+                  status: "completed",
+                  createdAt: "2026-05-29T22:00:00.000Z",
+                  updatedAt: "2026-05-29T22:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              } satisfies HarnessPromptLoopResult,
+            ),
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(createdOptions?.browserAccess, {
+    type: "cf-harness.chat.browser-access-lease",
+    leaseId: "pf-run-1",
+    cdpUrl: "http://localhost:9363",
+  });
+  assertEquals(stdout.length, 1);
+  assertEquals(stderr, []);
 });
 
 Deno.test("runCfHarnessCli can override the prompt-slot role for testing", async () => {
@@ -1982,7 +2308,7 @@ Deno.test("runCfHarnessCli validates a top-level structured result sidecar", asy
       io,
       env: {},
       readTextFile: (path) => {
-        assertEquals(path, "/tmp/project/capture.results.json");
+        assertEquals(path, syntheticTmpProjectPath("capture.results.json"));
         return Promise.resolve(JSON.stringify({ ok: true, status: "done" }));
       },
       writeTextFile: (path, text) => {
@@ -2041,7 +2367,7 @@ Deno.test("runCfHarnessCli validates a top-level structured result sidecar", asy
   assertEquals(batchResult.structured_result.status, "valid");
   assertEquals(
     batchResult.structured_result.result_path,
-    "/tmp/project/capture.results.json",
+    syntheticTmpProjectPath("capture.results.json"),
   );
   assertEquals(
     batchResult.structured_result.schema_digest.startsWith("sha256:"),
@@ -2125,7 +2451,7 @@ Deno.test("runCfHarnessCli exits nonzero when top-level structured result is inv
     type: "cf-harness.structured-result-validation",
     status: "invalid",
     schema_digest: batchResult.structured_result.schema_digest,
-    result_path: "/tmp/project/capture.results.json",
+    result_path: syntheticTmpProjectPath("capture.results.json"),
     validation_error: "structured result did not match the schema",
   });
   assertEquals(
@@ -2238,6 +2564,162 @@ Deno.test({
           .type,
         "cf-harness.skill-activations",
       );
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "runCfHarnessCli passes host skill script execution target into run_skill_script",
+  permissions: { read: true, write: true, run: true, env: true },
+  async fn() {
+    const workspace = await Deno.makeTempDir({
+      prefix: "cf-harness-cli-host-skill-script-",
+    });
+    try {
+      const skillDir = join(workspace, "skills", "agent-browser");
+      const scriptSource = [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        'echo "target=$CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET"',
+        'echo "skill=$SKILL_NAME"',
+        'echo "cdp=$2"',
+        'echo "url=$3"',
+        "",
+      ].join("\n");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: agent-browser",
+          "description: Browser automation",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "capture-workflow.sh"),
+        scriptSource,
+        { mode: 0o755 },
+      );
+
+      const { io, stdout, stderr } = createIoBuffers();
+      const fetchCalls: RequestInit[] = [];
+      let engine: CfHarnessEngine | undefined;
+      const exitCode = await runCfHarnessCli(
+        [
+          "--workspace",
+          workspace,
+          "--prompt",
+          "Run the host skill script.",
+          "--gateway-auth-mode",
+          "none",
+          "--skills-root",
+          "skills",
+          "--skill",
+          "agent-browser",
+          "--allow-tool",
+          "run_skill_script",
+          "--allow-skill-script",
+          "agent-browser:scripts/capture-workflow.sh",
+          "--skill-script-execution-target",
+          "host",
+          "--browser-access-lease-id",
+          "lease-1",
+          "--browser-access-cdp-url",
+          "http://localhost:9362",
+          "--browser-access-owner",
+          "test",
+          "--browser-access-expires-at",
+          "2099-01-01T00:00:00Z",
+        ],
+        {
+          io,
+          env: {},
+          createPromptLoop: (options) => {
+            engine = options.engine;
+            return new CfHarnessPromptLoop({
+              ...options,
+              fetchFn: (_input, init) => {
+                fetchCalls.push(init ?? {});
+                const payload = fetchCalls.length === 1
+                  ? {
+                    choices: [{
+                      index: 0,
+                      message: {
+                        role: "assistant",
+                        content: "",
+                        tool_calls: [{
+                          id: "call-host-skill-script",
+                          type: "function",
+                          function: {
+                            name: "run_skill_script",
+                            arguments: JSON.stringify({
+                              skill: "agent-browser",
+                              path: "scripts/capture-workflow.sh",
+                              args: [
+                                "--cdp",
+                                "http://localhost:9362",
+                                "http://localhost:8000/piece",
+                              ],
+                            }),
+                          },
+                        }],
+                      },
+                    }],
+                  }
+                  : {
+                    choices: [{
+                      index: 0,
+                      message: {
+                        role: "assistant",
+                        content: "Host skill script completed.",
+                      },
+                    }],
+                  };
+                return Promise.resolve(
+                  new Response(JSON.stringify(payload), { status: 200 }),
+                );
+              },
+            });
+          },
+        },
+      );
+
+      assertEquals(exitCode, 0);
+      assertEquals(stderr, []);
+      assertStringIncludes(stdout[0], "Host skill script completed.");
+      assertEquals(fetchCalls.length, 2);
+
+      const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      const toolMessage = secondRequest.messages.at(-1);
+      assertEquals(toolMessage?.role, "tool");
+      const toolOutput = JSON.parse(toolMessage!.content) as {
+        status: string;
+        executionTarget?: string;
+        stdout?: string;
+      };
+      assertEquals(toolOutput.status, "executed");
+      assertEquals(toolOutput.executionTarget, "host");
+      assertStringIncludes(toolOutput.stdout ?? "", "target=host\n");
+      assertStringIncludes(toolOutput.stdout ?? "", "skill=agent-browser\n");
+      assertStringIncludes(
+        toolOutput.stdout ?? "",
+        "cdp=http://localhost:9362\n",
+      );
+      assertStringIncludes(
+        toolOutput.stdout ?? "",
+        "url=http://localhost:8000/piece\n",
+      );
+
+      const execution = engine!.getRunState().skillScriptExecutions
+        ?.executions[0];
+      assertEquals(execution?.executionTarget, "host");
+      assertEquals(execution?.status, "executed");
     } finally {
       await Deno.remove(workspace, { recursive: true });
     }
@@ -2724,6 +3206,171 @@ Deno.test("parseCfHarnessCliArgs rejects empty fabric-mount value", async () => 
   );
 });
 
+Deno.test("parseCfHarnessCliArgs parses explicit host mounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=file-cabinet,source=${mountRoot},target=/file-cabinet,mode=writable`,
+      "--cwd",
+      mountRoot,
+      "--prompt",
+      "hi",
+    ],
+    { cwd: workspace, env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.hostMounts, [{
+    name: "file-cabinet",
+    hostPath: await Deno.realPath(mountRoot),
+    sandboxPath: "/file-cabinet",
+    mode: "writable",
+  }]);
+  assertEquals(parsed.cwd, "/file-cabinet");
+});
+
+Deno.test("parseCfHarnessCliArgs rejects structured result paths in readonly host mounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--host-mount",
+          `name=docs,source=${mountRoot},target=/docs,mode=readonly`,
+          "--structured-result-path",
+          join(mountRoot, "result.json"),
+          "--structured-result-schema",
+          '{"type":"object"}',
+          "--prompt",
+          "hi",
+        ],
+        { cwd: workspace, env: {} },
+      ),
+    Error,
+    "--structured-result-path must be inside a writable host mount",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs allows structured result paths in writable host mounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=file-cabinet,source=${mountRoot},target=/file-cabinet,mode=writable`,
+      "--structured-result-path",
+      join(mountRoot, "result.json"),
+      "--structured-result-schema",
+      '{"type":"object"}',
+      "--prompt",
+      "hi",
+    ],
+    { cwd: workspace, env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(
+    parsed.structuredResult?.path,
+    join(await Deno.realPath(mountRoot), "result.json"),
+  );
+  assertEquals(
+    parsed.structuredResult?.sandboxPath,
+    "/file-cabinet/result.json",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs uses the most specific overlapping host mount", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+  const nestedRoot = join(mountRoot, "nested");
+  await Deno.mkdir(nestedRoot);
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--host-mount",
+      `name=outer,source=${mountRoot},target=/outer,mode=readonly`,
+      "--host-mount",
+      `name=inner,source=${nestedRoot},target=/inner,mode=writable`,
+      "--structured-result-path",
+      join(nestedRoot, "result.json"),
+      "--structured-result-schema",
+      '{"type":"object"}',
+      "--prompt",
+      "hi",
+    ],
+    { cwd: workspace, env: {} },
+  );
+
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(
+    parsed.structuredResult?.path,
+    join(await Deno.realPath(nestedRoot), "result.json"),
+  );
+  assertEquals(parsed.structuredResult?.sandboxPath, "/inner/result.json");
+});
+
+Deno.test("parseCfHarnessCliArgs rejects missing paths under symlink parents outside allowed roots", async () => {
+  const workspace = await Deno.makeTempDir();
+  const outside = await Deno.makeTempDir();
+  const linkedOutside = join(workspace, "linked-outside");
+  await Deno.symlink(outside, linkedOutside, { type: "dir" });
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--structured-result-path",
+          join(linkedOutside, "missing-result.json"),
+          "--structured-result-schema",
+          '{"type":"object"}',
+          "--prompt",
+          "hi",
+        ],
+        { cwd: workspace, env: {} },
+      ),
+    Error,
+    "--structured-result-path must stay within the workspace or a host mount",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects invalid host mount specs", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--host-mount",
+          `name=bad name,source=${mountRoot},target=/data`,
+          "--prompt",
+          "hi",
+        ],
+        { cwd: workspace, env: {} },
+      ),
+    Error,
+    "--host-mount name must start",
+  );
+});
+
 Deno.test("buildCfHarnessOperatorSystemPrompt includes fabric mount guidance", () => {
   const prompt = buildCfHarnessOperatorSystemPrompt({
     workspace: "/tmp/project",
@@ -2744,6 +3391,24 @@ Deno.test("buildCfHarnessOperatorSystemPrompt omits fabric guidance without moun
     systemPrompt: undefined,
   });
   assertEquals(prompt.includes("mounted at"), false);
+});
+
+Deno.test("buildCfHarnessOperatorSystemPrompt includes host mount guidance", () => {
+  const prompt = buildCfHarnessOperatorSystemPrompt({
+    workspace: "/tmp/project",
+    systemPrompt: undefined,
+    hostMounts: [{
+      name: "file-cabinet",
+      hostPath: "/host/File Cabinet",
+      sandboxPath: "/file-cabinet",
+      mode: "writable",
+    }],
+  });
+
+  assertEquals(
+    prompt.includes("/file-cabinet: writable (file-cabinet)"),
+    true,
+  );
 });
 
 Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", async () => {
@@ -2808,6 +3473,80 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   assertEquals(
     runPromptOptions?.systemPrompt?.includes(
       "A Common Fabric space is mounted at /fabric",
+    ),
+    true,
+  );
+});
+
+Deno.test("runCfHarnessCli threads host-mount into engine additionalMounts", async () => {
+  const workspace = await Deno.makeTempDir();
+  const mountRoot = await Deno.makeTempDir();
+  const { io, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      workspace,
+      "--prompt",
+      "Browse mounted files",
+      "--host-mount",
+      `name=file-cabinet,source=${mountRoot},target=/file-cabinet,mode=writable`,
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: (options) => {
+            runPromptOptions = options;
+            return Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Done.",
+                transcript: [
+                  { role: "user", content: "Browse mounted files" },
+                  { role: "assistant", content: "Done." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-host-mount",
+                  status: "completed",
+                  createdAt: "2026-04-30T00:00:00.000Z",
+                  updatedAt: "2026-04-30T00:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
+          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  const engine = createdOptions?.engine as CfHarnessEngine | undefined;
+  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  assertEquals(mounts?.[1], {
+    kind: "host-bind",
+    name: "file-cabinet",
+    hostPath: await Deno.realPath(mountRoot),
+    sandboxPath: "/file-cabinet",
+    readOnly: false,
+    mode: "writable",
+  });
+  assertEquals(
+    runPromptOptions?.systemPrompt?.includes(
+      "/file-cabinet: writable (file-cabinet)",
     ),
     true,
   );

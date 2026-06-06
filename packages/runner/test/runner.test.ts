@@ -910,128 +910,13 @@ describe("runPattern", () => {
     expect(cellValue?.counter).toEqual(2);
   });
 
-  it("should create separate copies of initial values for each pattern instance", async () => {
-    // Use a local runtime with modernDataModel OFF and mutable raw copies
-    // to verify legacy-mode initial values are independent.
-    const sm = StorageManager.emulate({ as: signer });
-    const localRuntime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-      experimental: { modernDataModel: false },
-    });
-
-    const pattern: Pattern = {
-      argumentSchema: {
-        type: "object",
-        properties: {
-          input: { type: "number" },
-        },
-      },
-      initial: {
-        internal: {
-          counter: 10,
-          nested: { value: "initial" },
-        },
-      },
-      resultSchema: {},
-      result: {
-        counter: { $alias: { partialCause: "counter", path: [] } },
-        nested: { $alias: { partialCause: "nested", path: [] } },
-      },
-      // Because we're setting the initial values, we need to provide these
-      // as derivedInternalCells. Normally, factoryFromPattern would build this
-      // for us from the other pattern information.
-      derivedInternalCells: [
-        {
-          partialCause: "nested",
-          scope: "space",
-          initial: { value: "initial" },
-        },
-        {
-          partialCause: "counter",
-          scope: "space",
-          initial: 10,
-        },
-      ],
-      nodes: [
-        {
-          module: {
-            type: "javascript",
-            implementation: (args: { input: number }) => {
-              return {
-                counter: args.input,
-              };
-            },
-          },
-          inputs: { $alias: { cell: "argument", path: ["input"] } },
-          outputs: { $alias: { partialCause: "counter", path: [] } },
-        },
-      ],
-    };
-
-    // Create first instance
-    const result1Cell = localRuntime.getCell(
-      space,
-      "should create separate copies of initial values 1",
-    );
-    const result1 = runTrusted(
-      localRuntime,
-      undefined,
-      pattern,
-      { input: 5 },
-      result1Cell,
-    );
-    await result1.pull();
-
-    // Create second instance
-    const result2Cell = localRuntime.getCell(
-      space,
-      "should create separate copies of initial values 2",
-    );
-    const result2 = runTrusted(
-      localRuntime,
-      undefined,
-      pattern,
-      { input: 10 },
-      result2Cell,
-    );
-    await result2.pull();
-
-    // Use getRawUntyped({ frozen: false }) for mutable copies
-    const internalCell1 = getDerivedInternalCell(result1, {
-      partialCause: "nested",
-    });
-    const internalCell2 = getDerivedInternalCell(result2, {
-      partialCause: "nested",
-    });
-    const nested1 = internalCell1.getRawUntyped({ frozen: false }) as any;
-    const nested2 = internalCell2.getRawUntyped({ frozen: false }) as any;
-
-    expect(nested1).toEqual({ value: "initial" });
-    // Verify they are different objects
-    expect(nested1).not.toBe(nested2);
-
-    // Modify nested object in first instance
-    nested1.value = "modified";
-
-    // Verify second instance is unaffected
-    expect(nested2.value).toBe("initial");
-    const result2Value = await result2.pull() as any;
-    expect(result2Value.nested.value).toBe("initial");
-
-    await localRuntime.storageManager.synced();
-    await localRuntime.dispose();
-    await sm.close();
-  });
-
-  it("should create separate copies of initial values (modern, frozen)", async () => {
+  it("should create separate copies of initial values (frozen)", async () => {
     // `getRaw()` returns frozen objects; verify independence via
     // `getRawUntyped({ frozen: false })` for mutable access.
     const sm = StorageManager.emulate({ as: signer });
     const localRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: true },
     });
 
     const pattern: Pattern = {

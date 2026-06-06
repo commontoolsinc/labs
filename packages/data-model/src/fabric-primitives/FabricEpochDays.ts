@@ -2,15 +2,16 @@ import type {
   FabricEpochDays as ApiFabricEpochDays,
   FabricEpochDaysConstructor as ApiFabricEpochDaysConstructor,
 } from "@commonfabric/api";
-import { FabricPrimitive } from "../interface.ts";
+
+import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
- * Wraps a `bigint` value. Used for date-only (no time) values. Direct member of
- * `FabricValue` (not a `FabricInstance`).
+ * Wraps a `bigint` value. Used for date-only (no time) values.
  * See Section 1.4.7 of the formal spec.
  */
-export class FabricEpochDays extends FabricPrimitive
+export class FabricEpochDays extends BaseFabricPrimitive
   implements ApiFabricEpochDays {
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
   readonly #value: bigint;
@@ -19,6 +20,11 @@ export class FabricEpochDays extends FabricPrimitive
     super();
     this.#value = value;
     Object.freeze(this);
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.EpochDays;
   }
 
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */

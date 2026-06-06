@@ -1,9 +1,10 @@
+import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 /**
  * Options for `cloneIfNecessary()`.
@@ -101,15 +102,40 @@ export function cloneIfNecessary<T extends FabricValue>(
 }
 
 /**
- * Shallow-thaws a `FabricValue` to a fresh mutable top-level copy: the
- * top-level container is always copied, while its children stay
- * identity-shared with the input. Equivalent to
- * `cloneIfNecessary(value, { frozen: false, deep: false, force: true })`.
+ * Returns a fresh **mutable top-level** copy of a `FabricValue` whose every
+ * bound child is guaranteed **deep-frozen**. This is the shape wanted by the
+ * "mutate the top, then deep-freeze the whole" pattern: a caller can freely
+ * write top-level properties/elements and then perform a single
+ * `Object.freeze()` (or `deepFreeze()`) on the result to obtain a
+ * fully-deep-frozen value, with no leftover mutable bits hiding underneath.
+ *
+ * Children are made safe via `cloneIfNecessary()` with its default (deep-frozen)
+ * options, so already-deep-frozen children are identity-passed (zero-copy) while
+ * mutable children are deep-cloned-and-frozen. The input is never mutated:
+ * mutable children are cloned, not frozen in place.
+ *
+ * Inherently-immutable inputs (primitives, `FabricPrimitive`s) are returned
+ * as-is, since there is no mutable top level to produce.
+ *
+ * Callers that need to preserve child identity / structural sharing (e.g. the
+ * persistent-structure spine thaw used in patch application) should reach for
+ * `cloneForMutation()` instead.
  *
  * @param value - An already-valid `FabricValue`.
  */
-export function shallowMutableClone<T extends FabricValue>(value: T): T {
-  return cloneIfNecessary(value, { frozen: false, deep: false, force: true });
+export function shallowMutableClone<T extends FabricValue>(
+  value: T,
+): T {
+  // Deep-freeze-clone first (cloning only where needed, never mutating the
+  // input, identity-passing already-deep-frozen subtrees), which makes every
+  // child safely shareable; then shallow-thaw just the top container so the
+  // immediate result is mutable while its children stay deep-frozen.
+  const deepFrozen = cloneIfNecessary(value, { frozen: true });
+  return cloneIfNecessary(deepFrozen, {
+    frozen: false,
+    deep: false,
+    force: true,
+  }) as T;
 }
 
 /**
@@ -153,8 +179,9 @@ export function cloneHelper(
     case NATIVE_TAGS.Primitive:
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
-    case NATIVE_TAGS.ContentHash:
     case NATIVE_TAGS.FabricBytes:
+    case NATIVE_TAGS.FabricRegExp:
+    case NATIVE_TAGS.Hash:
       return value;
 
     case NATIVE_TAGS.FabricInstance: {
@@ -414,7 +441,7 @@ export function cloneForMutation<T extends FabricValue>(
   // final value-at-`path` thaw if it's a plain container or `FabricInstance`.
   const cloneOpts = { frozen: false as const, deep: false as const, force };
 
-  // --- Empty-path fast path ---------------------------------------------
+  // Empty-path fast path
   if (path.length === 0) {
     if (!isMutableHandle(value)) {
       throw new CloneForMutationError(
@@ -429,10 +456,9 @@ export function cloneForMutation<T extends FabricValue>(
     return { value: newRoot, pathValue: newRoot };
   }
 
-  // --- Non-empty path ---------------------------------------------------
-  // The root must be a plain container; descent through a `FabricInstance`
-  // root would have nowhere to go (path-style access into FabricInstance
-  // internals isn't supported).
+  // Non-empty path: The root must be a plain container; descent through a
+  // `FabricInstance` root would have nowhere to go (path-style access into
+  // FabricInstance internals isn't supported).
   if (!isPlainContainer(value)) {
     throw new CloneForMutationError(
       "non-container-root",

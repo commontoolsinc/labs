@@ -43,6 +43,7 @@ What works today:
   - `view_image`
   - `web_fetch` (explicit parent allowlist or `web_fetch` subagent profile only)
   - `read_skill_resource`
+  - `run_skill_script`
   - `edit_file`
   - `write_file`
   - `delegate_task`
@@ -73,6 +74,8 @@ What works today:
 - runtime-generated supporting-resource indexes in `skill-registry.json`
 - text-first supporting-resource reads through `read_skill_resource`, recorded
   in `skill-resource-reads.json`
+- exact-allowlisted skill script execution through `run_skill_script`, recorded
+  in `skill-script-executions.json`
 
 The sandbox `bash` tool has a provisional direct-`curl` guard while sandbox
 networking is enabled: explicit `curl` invocations may target loopback HTTP(S)
@@ -103,7 +106,6 @@ What is not done yet:
 - first-class browser operation policy on top of the provisional browser
   subagent profile
 - dynamic/model-driven Agent Skills activation
-- skill script execution
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
@@ -278,16 +280,37 @@ with a `returnSchema`, parent-visible free-form strings are replaced by opaque
 links while raw observations stay in child artifacts. The browser child can read
 workspace files but does not receive `edit_file` or `write_file`, so it should
 return findings through the structured return channel rather than by writing
-browser observations into the workspace. The host shell is policy-restricted to
-`agent-browser` attached through an approved local CDP endpoint, `agent-browser`
-discovery (`which agent-browser`, `command -v agent-browser`), `pwd`, `ls`, and
-bounded workspace-local `find` commands. Page commands should use the Loom
-Browser Access endpoint supplied by the task, for example
+browser observations into the workspace.
+
+When the parent run has a skill registry, the browser profile activates the
+`agent-browser` skill in the child run, exposes `read_skill_resource`, and
+allows these exact skill scripts through `run_skill_script`:
+`agent-browser:scripts/form-automation.sh`,
+`agent-browser:scripts/capture-workflow.sh`. Those browser-profile scripts run
+through host execution because they need the host `agent-browser` CLI. They
+still use the normal skill-script safeguards: activated skill, run-start
+registry snapshot, exact script allowlist, digest/size match, and provenance
+artifacts.
+
+The host shell is policy-restricted to `agent-browser` attached through the
+exact Loom Browser Access CDP endpoint supplied to the child task,
+`agent-browser` discovery (`which agent-browser`, `command -v agent-browser`),
+`pwd`, `ls`, and bounded workspace-local `find` commands. Page commands should
+use the leased endpoint, for example
 `agent-browser --cdp http://host.docker.internal:9362 snapshot -i`. Bare
 `agent-browser open` / `snapshot` launches are denied so the child cannot race
-the host's live browser profile. `agent-browser eval` is not available in this
-profile; browser subagents should inspect pages with commands such as
-`snapshot`, `get`, `find`, locator actions, and normal browser interactions.
+the host's live browser profile. `agent-browser` is fail-closed to a small
+positive allowlist: `open` for HTTP(S) URLs, `snapshot`, `get title/url/text`,
+read-only `console` / `errors` inspection without mutation flags, bounded
+`wait`, and ref-based `fill`, `type`, `select`, `check`, `click`, and `press`.
+
+Host-target skill scripts run with a cleared subprocess environment plus a
+controlled `PATH` and explicit `CF_HARNESS_*` / `SKILL_*` variables. They do not
+inherit ambient provider tokens, developer secrets, app credentials, or other
+parent process environment. Credential-bearing workflows such as
+`agent-browser:scripts/authenticated-session.sh` are intentionally not in the
+default browser-profile allowlist; adding them should go through an explicit
+credential grant and origin-binding design.
 
 For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to

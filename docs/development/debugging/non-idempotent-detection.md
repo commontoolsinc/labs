@@ -1,6 +1,6 @@
 # Detecting Non-Idempotent Computations
 
-Patterns define reactive computations (`computed`, `lift`, `derive`) that must
+Patterns define reactive computations (`computed`, `lift`) that must
 be **idempotent**: given the same inputs, they must produce the same outputs.
 When they don't, the scheduler re-runs them repeatedly because each run produces
 new writes that trigger further runs. This manifests as the UI churning, high

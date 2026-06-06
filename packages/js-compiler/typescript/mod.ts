@@ -15,6 +15,8 @@ export {
 } from "./diagnostics/mod.ts";
 export { getCompilerOptions, TARGET } from "./options.ts";
 export {
+  collectImportSpecifiers,
+  resolveImportSpecifier,
   type ResolveModuleConfig,
   resolveProgram,
   type UnresolvedModuleHandling,

@@ -15,12 +15,14 @@ import type { Action } from "../scheduler.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
   narrowestCellScope,
+  outputSpotFromBinding,
   scopedCell,
 } from "./scope-policy.ts";
 
@@ -53,6 +55,7 @@ export function filter(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
+  outputBinding?: NormalizedFullLink,
 ): Action {
   let result: Cell<any[]> | undefined;
 
@@ -63,7 +66,14 @@ export function filter(
     { resultCell: Cell<any>; lastIndex: number }
   >();
 
+  // Only the initial (resume) reconcile defers its per-element sub-pattern runs
+  // until sync completes; elements from later (post-resume) reconciles are fresh
+  // and must not wait. Cleared once a non-empty resume batch is processed.
+  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
+    ?.awaitSync;
+
   return (tx: IExtendedStorageTransaction) => {
+    const elementAwaitSync = resumeBatchAwaitSync;
     const { list, op } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
       .withTx(tx).get();
 
@@ -81,13 +91,17 @@ export function filter(
         tx.getCfcState().implementationIdentity,
         "filter",
       );
+      // CT-1623: identify the result container by the reserved output spot
+      // (stable, program-independent). See map.ts for rationale.
+      const outputSpot = outputSpotFromBinding(outputBinding);
+      if (!outputSpot) {
+        throw new Error(
+          "filter: result container requires a write-redirect output binding",
+        );
+      }
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        {
-          filter: parentCell.entityId,
-          op: inputsCell.getAsQueryResult([], tx)?.op,
-          cause,
-        },
+        { filter: parentCell.entityId, outputSpot },
         resultSchema,
         tx,
       );
@@ -123,6 +137,8 @@ export function filter(
       throw new Error("filter currently only supports arrays");
     }
 
+    if (list.length > 0) resumeBatchAwaitSync = false;
+
     const keyCounts = new Map<string, number>();
     const newArrayValue: any[] = [];
     for (let i = 0; i < list.length; i++) {
@@ -142,7 +158,10 @@ export function filter(
             opPattern,
             createRunInput(list[i], i),
             existing.resultCell,
-            { doNotUpdateOnPatternChange: true },
+            {
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: elementAwaitSync,
+            },
           );
         }
         existing.lastIndex = i;
@@ -158,7 +177,10 @@ export function filter(
           opPattern,
           createRunInput(list[i], i),
           resultCell,
-          { doNotUpdateOnPatternChange: true },
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: elementAwaitSync,
+          },
         );
         // Link these individual cells to the top cell
         setResultCell(resultCell, parentCell);

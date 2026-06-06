@@ -1,11 +1,11 @@
-import { getDataModelConfig } from "@commonfabric/data-model/fabric-value";
+import { getModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
 import {
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-wire";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
@@ -86,7 +86,24 @@ export interface DeleteOperation {
   scope?: CellScope;
 }
 
-export type Operation = SetOperation | PatchOperation | DeleteOperation;
+/**
+ * A SQLite write folded into the commit, applied inside the same transaction as
+ * the cell ops (atomic). It is NOT an entity revision — it has no `id` and never
+ * enters the revision/head/snapshot/dirty machinery (see SqliteDbRef below /
+ * docs/specs/sqlite-builtin/plans/atomic-writes.md).
+ */
+export interface SqliteOperation {
+  op: "sqlite";
+  db: SqliteDbRef;
+  sql: string;
+  params?: SqliteParamsWire;
+}
+
+export type Operation =
+  | SetOperation
+  | PatchOperation
+  | DeleteOperation
+  | SqliteOperation;
 
 export interface ConfirmedRead {
   id: EntityId;
@@ -153,23 +170,17 @@ export interface SessionOpenResult {
 }
 
 export interface MemoryProtocolFlags {
-  modernDataModel: boolean;
+  modernCellRep: boolean;
   persistentSchedulerState: boolean;
 }
 
-/** Legacy field name accepted on the wire for backward compatibility. */
-const LEGACY_MODERN_DATA_MODEL_KEY = "richStorableValues";
-
-export type WireFlagsKey = "modernDataModel" | "richStorableValues";
-
 /**
- * Wire-format flags object. May use the canonical `modernDataModel` key or
- * the legacy `richStorableValues` alias. Use `parseMemoryProtocolFlags()` to
- * normalize to a `MemoryProtocolFlags`.
+ * Wire-format flags object.
  */
-export type WireMemoryProtocolFlags =
-  & { [K in WireFlagsKey]?: boolean }
-  & { persistentSchedulerState?: boolean };
+export type WireMemoryProtocolFlags = {
+  modernCellRep?: boolean;
+  persistentSchedulerState?: boolean;
+};
 
 export interface HelloMessage {
   type: "hello";
@@ -291,6 +302,63 @@ export interface GraphQueryRequest {
   query: GraphQuery;
 }
 
+// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+
+/** Wire form of SQLite bind parameters. */
+export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
+
+/** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
+ *  entity id) plus the declared table schemas (for additive create/migrate).
+ *
+ *  `scope` is the SqliteDb cell's declared scope (space/user/session). The
+ *  server folds it (with the request's principal / session id) into the on-disk
+ *  filename so a `user`/`session`-scoped db gets a per-user / per-session file;
+ *  `space` (or absent) keeps the original unqualified name. */
+export interface SqliteDbRef {
+  id: string;
+  tables?: Record<string, unknown>;
+  scope?: CellScope;
+}
+
+export interface SqliteQueryRequest {
+  type: "sqlite.query";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  db: SqliteDbRef;
+  sql: string;
+  params?: SqliteParamsWire;
+}
+
+export interface SqliteQueryResult {
+  rows: unknown[];
+}
+
+// NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
+// fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the
+// engine) — never a standalone, non-atomic write RPC. See db.exec in the runner.
+
+/**
+ * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
+ * link <piece> <field> sqlite:<absPath>` issues this so the server attaches the
+ * given file (read-only) for the handle id instead of the cell-derived path. The
+ * descriptor is server-side state — it is NOT written into the handle cell value.
+ */
+export interface SqliteRegisterDiskSourceRequest {
+  type: "sqlite.register-disk-source";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  /** Handle cell id (content-derived from (serviceSpace, absPath); see cf). */
+  id: string;
+  /** Absolute path to the on-disk SQLite file. */
+  path: string;
+}
+
+export interface SqliteRegisterDiskSourceResult {
+  registered: true;
+}
+
 export interface WatchSetRequest {
   type: "session.watch.set";
   requestId: string;
@@ -398,6 +466,8 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | SqliteQueryRequest
+  | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
   | SchedulerSnapshotListRequest
@@ -433,16 +503,9 @@ export function resetPersistentSchedulerStateConfig(): void {
 }
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
-  modernDataModel: getDataModelConfig(),
+  modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
 });
-
-export const sameMemoryProtocolFlags = (
-  left: MemoryProtocolFlags,
-  right: MemoryProtocolFlags,
-): boolean =>
-  left.modernDataModel === right.modernDataModel &&
-  left.persistentSchedulerState === right.persistentSchedulerState;
 
 /**
  * Scheduler-state persistence is an optional capability, not a data-model wire
@@ -453,18 +516,15 @@ export const sameMemoryProtocolFlags = (
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean => left.modernDataModel === right.modernDataModel;
+): boolean => left.modernCellRep === right.modernCellRep;
 
 /**
- * Parses and normalizes incoming wire-protocol flags. Accepts either the
- * current `modernDataModel` key or the legacy `richStorableValues` key (which
- * older peers may send). Returns `null` if the input is not a recognizable
- * flags object. The `wireKey` field captures which key the peer used, so
- * responders can echo the same key for backward compatibility.
+ * Parses and normalizes incoming wire-protocol flags. Returns `null` if the
+ * input is not a recognizable flags object.
  */
 export const parseMemoryProtocolFlags = (
   value: unknown,
-): { flags: MemoryProtocolFlags; wireKey: WireFlagsKey } | null => {
+): MemoryProtocolFlags | null => {
   if (!isRecord(value) || Array.isArray(value)) {
     return null;
   }
@@ -477,41 +537,27 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  if (typeof value.modernDataModel === "boolean") {
-    return {
-      flags: {
-        modernDataModel: value.modernDataModel,
-        persistentSchedulerState: persistentSchedulerState === true,
-      },
-      wireKey: "modernDataModel",
-    };
+  const modernCellRep = value.modernCellRep;
+  if (
+    modernCellRep !== undefined &&
+    typeof modernCellRep !== "boolean"
+  ) {
+    return null;
   }
 
-  const legacy = value[LEGACY_MODERN_DATA_MODEL_KEY];
-  if (typeof legacy === "boolean") {
-    return {
-      flags: {
-        modernDataModel: legacy,
-        persistentSchedulerState: persistentSchedulerState === true,
-      },
-      wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
-    };
-  }
-
-  return null;
+  return {
+    modernCellRep: modernCellRep === true,
+    persistentSchedulerState: persistentSchedulerState === true,
+  };
 };
 
 /**
- * Builds the wire-format flags object for a `hello`/`hello.ok` message,
- * using the given key. Defaults to the canonical `modernDataModel` key;
- * responders should pass the `wireKey` captured by
- * `parseMemoryProtocolFlags()` to echo back what the peer used.
+ * Builds the wire-format flags object for a `hello`/`hello.ok` message.
  */
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
-  wireKey: WireFlagsKey = "modernDataModel",
 ): WireMemoryProtocolFlags => ({
-  [wireKey]: flags.modernDataModel,
+  modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
 });
 

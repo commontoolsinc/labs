@@ -1,12 +1,4 @@
-import {
-  type Cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface NamedCounter {
   id: string;
@@ -143,9 +135,9 @@ export const counterWithSearchTermFilter = pattern<SearchFilterArgs>(
 
     const filtered = liftFilteredCounters(filteringInputs);
 
-    const totalCount = derive(sanitizedCounters, (values) => values.length);
-    const filteredCount = derive(filtered, (values) => values.length);
-    const hasMatches = derive(filteredCount, (count) => count > 0);
+    const totalCount = sanitizedCounters.length;
+    const filteredCount = filtered.length;
+    const hasMatches = filteredCount > 0;
 
     const filteredLabels = liftFilteredLabels(filtered);
 

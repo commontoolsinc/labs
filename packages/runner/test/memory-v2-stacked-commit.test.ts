@@ -5,10 +5,6 @@ import {
   assertStrictEquals,
 } from "@std/assert";
 import {
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-wire";
@@ -22,7 +18,7 @@ import {
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -266,14 +262,16 @@ class ScriptedServerModel {
     const touched = commit.operations.flatMap((operation) =>
       touchedWritesForOperation(operation)
     );
-    const revisions = commit.operations.map((operation, index) => ({
-      id: operation.id,
-      branch: "",
-      seq: this.serverSeq + 1,
-      opIndex: index,
-      commitSeq: this.serverSeq + 1,
-      op: operation.op,
-    }));
+    const revisions = commit.operations
+      .filter((operation) => operation.op !== "sqlite")
+      .map((operation, index) => ({
+        id: operation.id,
+        branch: "",
+        seq: this.serverSeq + 1,
+        opIndex: index,
+        commitSeq: this.serverSeq + 1,
+        op: operation.op,
+      }));
     const applied = {
       seq: ++this.serverSeq,
       branch: "",
@@ -281,6 +279,7 @@ class ScriptedServerModel {
     } as AppliedCommit;
 
     for (const operation of commit.operations) {
+      if (operation.op === "sqlite") continue;
       const next = applyOperation(
         operation,
         this.confirmed.get(operation.id as URI)?.value,
@@ -686,6 +685,7 @@ const readOverlapsWrite = (
 };
 
 const touchedWritesForOperation = (operation: Operation): TouchedWrite[] => {
+  if (operation.op === "sqlite") return []; // no entity writes
   if (operation.op !== "patch") {
     return [{ id: operation.id as URI, paths: [[]] }];
   }
@@ -713,6 +713,7 @@ const applyOperation = (
   operation: Operation,
   current: RootValue,
 ): RootValue => {
+  if (operation.op === "sqlite") return current; // not an entity write
   if (operation.op === "delete") {
     return undefined;
   }
@@ -2008,8 +2009,7 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
   }
 });
 
-Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric values", async () => {
-  setDataModelConfig(true);
+Deno.test("memory v2 stacked commits: pending visibility preserves fabric values", async () => {
   const harness = await createHarness();
   let commitPromise: Promise<any> | undefined;
   try {
@@ -2029,7 +2029,6 @@ Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric v
   } finally {
     await commitPromise?.catch(() => {});
     await harness.close();
-    resetDataModelConfig();
   }
 });
 

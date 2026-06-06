@@ -67,19 +67,19 @@ Each construct family is classified as one of:
 | `map` / `filter` / `flatMap` on reactive receivers in pattern-facing contexts | Supported | These operators are core language forms and may be structurally rewritten to explicit reactive collection operators |
 | Callback-local plain JS arrays in rewritten callbacks | Supported | Plain JS arrays inside callbacks stay plain; they are not implicitly promoted into pattern-owned array operators |
 | Direct JSX sink chains over structural array results | Supported | Terminal sink chains like `.filter(...).join(", ")` and ordinary receiver-method chains above that sink are valid JSX expression forms |
-| Receiver-method calls inside JSX expressions, explicit computation callbacks, or authored helper control flow | Supported | Receiver methods are valid in local authored expression contexts such as JSX interpolation, `computed` / `derive` / `action` / `lift` / `handler` callbacks, and helper control flow branches like `ifElse(show, name.trim(), "fallback")` |
+| Receiver-method calls inside JSX expressions, explicit computation callbacks, or authored helper control flow | Supported | Receiver methods are valid in local authored expression contexts such as JSX interpolation, `computed` / `action` / `lift` / `handler` callbacks, and helper control flow branches like `ifElse(show, name.trim(), "fallback")` |
 | Event-handler JSX attributes | Supported | Event handlers form an explicit callback boundary; they are part of the language but not part of ordinary expression-site lowering |
 | Dynamic key access inside JSX expressions, explicit computation callbacks, supported collection callbacks, or structural binding forms | Supported | Dynamic access like `selectedScopes[key]` is valid in local authored expression contexts or in binding forms that preserve the dynamic key directly |
 | Bare dynamic key access in top-level pattern-facing code | Unsupported | Forms like `input[key]` as a direct top-level pattern-body traversal are outside the intended declarative language and should move into JSX, an explicit computation callback, a supported collection callback, or a structural binding form |
 | Cell-style `.key(...)` traversal on explicitly cell-like values | Supported | When the authored value is truly `Cell`/`Writable`/`Stream`-like, `.key(...)` remains part of that value's direct API rather than an implementation artifact |
-| Cell-style `.get()` reads on explicitly cell-like values inside JSX expressions, authored helper control flow, or explicit computation callbacks | Supported | Eager cell reads remain valid when authored in JSX interpolation, helper control flow such as `ifElse` / `when` / `unless`, and explicit computation callbacks such as `computed`, `derive`, `action`, `lift`, and `handler` |
+| Cell-style `.get()` reads on explicitly cell-like values inside JSX expressions, authored helper control flow, or explicit computation callbacks | Supported | Eager cell reads remain valid when authored in JSX interpolation, helper control flow such as `ifElse` / `when` / `unless`, and explicit computation callbacks such as `computed`, `action`, `lift`, and `handler` |
 | Foreign callback / imperative container roots in JSX | Unsupported | Shapes like `[0, 1].forEach(() => list.map(...))` are not part of the intended reactive language core and should move into supported value expressions, wrappers, or helpers |
 | Residual callback-container pass-through behavior for invalid programs | Compatibility-only | Some invalid callback-container shapes may still survive as plain JS in current emitted output, but that is residual implementation behavior rather than supported language policy |
 | Optional-call on reactive receivers | Unsupported | Optional-call forms are outside the intended language because they are difficult to lower without semantic ambiguity |
 | Direct non-JSX receiver-method calls on reactive values in top-level pattern-body expression sites | Supported | Value-like receiver-method roots at top-level object-property, call-argument, variable-initializer, array-element, or return-expression sites lower to derived local value expressions |
-| Direct receiver-method roots inside supported collection callbacks | Supported | Callback-local value-like receiver-method roots lower to callback-local `derive(...)` expressions instead of remaining raw or requiring manual wrapper calls |
-| Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `derive`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
-| `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `derive` results, and other ordinary reactive values should be read directly rather than through `.get()` |
+| Direct receiver-method roots inside supported collection callbacks | Supported | Callback-local value-like receiver-method roots lower to callback-local lift-applied computations instead of remaining raw or requiring manual wrapper calls |
+| Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
+| `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `lift` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
 
 ## 4.1 Authoring Context Guide
@@ -109,8 +109,8 @@ Those container kinds appear to authors in three main buckets:
 3. callback-local value-expression sites inside supported reactive collection
    callbacks
 
-Explicit computation callbacks such as `computed`, `derive`, `action`, `lift`,
-and `handler` are important boundaries, but their bodies are **not** blanket
+Explicit computation callbacks such as `computed`, `action`, `lift`, and
+`handler` are important boundaries, but their bodies are **not** blanket
 "lower everything here" regions. The shared container list above does not imply
 that nested compute-context JSX/control-flow receives pattern-context lowering;
 current-main behavior preserves authored JavaScript control flow there.
@@ -177,7 +177,7 @@ Why:
 
 ### Explicit Computation Callbacks
 
-`computed`, `derive`, `action`, `lift`, and `handler` callbacks are explicit
+`computed`, `action`, `lift`, and `handler` callbacks are explicit
 imperative/value-computation boundaries.
 
 **Good here**
@@ -407,7 +407,7 @@ construct is only supportable by compatibility behavior such as:
 
 1. leaving the foreign container authored as plain JS
 2. or, in older/rarer cases, wrapping the whole foreign container as one
-   compute/derive island
+   compute island
 
 that is strong evidence it should be rejected from the target language rather
 than elevated into the core language.
@@ -495,8 +495,8 @@ The intended split is:
      - `computed(() => input.key("foo").get())`
      - JSX expression sites like `{input.key("foo").get()}`
      - `ifElse(show, count.get(), 0)`
-     - `lift` / `handler` / `action` / `derive` callbacks that preserve
-       declared cell semantics
+     - `lift` / `handler` / `action` callbacks that preserve declared cell
+       semantics
 3. **direct top-level eager read in pattern-owned reactive context**
    - not part of the target language, even for true cells
    - example:

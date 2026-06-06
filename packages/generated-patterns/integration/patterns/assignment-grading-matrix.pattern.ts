@@ -1,12 +1,4 @@
-import {
-  type Cell,
-  Default,
-  derive,
-  handler,
-  lift,
-  pattern,
-  str,
-} from "commonfabric";
+import { type Cell, Default, handler, lift, pattern, str } from "commonfabric";
 
 interface StudentInput {
   id?: string;
@@ -574,11 +566,8 @@ export const assignmentGradingMatrix = pattern<AssignmentGradingMatrixArgs>(
       students: sanitizedStudents,
       assignments: sanitizedAssignments,
     });
-    const topPerformer = derive(gradeMatrix, identifyTopPerformer);
-    const standoutAssignment = derive(
-      gradeMatrix,
-      (matrix) => highlightAssignment(matrix.assignmentStats),
-    );
+    const topPerformer = identifyTopPerformer(gradeMatrix);
+    const standoutAssignment = highlightAssignment(gradeMatrix.assignmentStats);
     const classAverageText = liftClassAverageText(gradeMatrix);
     const studentCountText = liftStudentCountText(gradeMatrix);
     const assignmentCountText = liftAssignmentCountText(gradeMatrix);

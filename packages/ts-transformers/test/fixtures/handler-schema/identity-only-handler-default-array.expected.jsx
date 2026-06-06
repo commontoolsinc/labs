@@ -1,0 +1,62 @@
+function __cfHardenFn(fn: Function) {
+    Object.freeze(fn);
+    const prototype = fn.prototype;
+    if (prototype && typeof prototype === "object") {
+        Object.freeze(prototype);
+    }
+    return fn;
+}
+import { __cfHelpers } from "commonfabric";
+import { Default, equals, handler, Writable } from "commonfabric";
+const define = undefined;
+const runtimeDeps = undefined;
+const __cfAmdHooks = undefined;
+type MentionablePiece = {
+    title?: string;
+    isHidden?: boolean;
+    mentioned?: MentionablePiece[];
+    backlinks?: MentionablePiece[];
+};
+// CT-1639 Gap B: the array carries a `Default<[]>` union member. The items must
+// still shrink to `{ type: "unknown", asCell: ["comparable"] }` — identical to
+// the non-Default `identity-only-handler-payload` fixture — so that the
+// equals()/findIndex removal idiom keeps matching live links. Before the fix the
+// expanded `Default<[]>` union dropped the items `comparable`, silently breaking
+// equals()-based removal.
+const removePiece = handler({
+    type: "object",
+    properties: {
+        piece: {
+            type: "unknown",
+            asCell: ["comparable"]
+        }
+    },
+    required: ["piece"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        allPieces: {
+            type: "array",
+            items: {
+                type: "unknown",
+                asCell: ["comparable"]
+            },
+            "default": [],
+            asCell: ["cell"]
+        }
+    },
+    required: ["allPieces"]
+} as const satisfies __cfHelpers.JSONSchema, ({ piece }, { allPieces }) => {
+    const current = allPieces.get();
+    const idx = current.findIndex((c) => equals(c, piece));
+    if (idx >= 0)
+        allPieces.set(current.toSpliced(idx, 1));
+});
+// FIXTURE: identity-only-handler-default-array
+// Verifies: a `Writable<T[] | Default<[]>>` array used only for identity removal
+// keeps `asCell: ["comparable"]` on its items (with `default: []` from the
+// Default<[]> collapse), matching the non-Default identity-only fixture. (CT-1639)
+export { removePiece };
+// @ts-ignore: Internals
+function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
+__cfHardenFn(h);

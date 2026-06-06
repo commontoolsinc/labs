@@ -11,18 +11,6 @@ import { NAME, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const entry = __cf_pattern_input.key("element");
-    const row = EntryRow({
-        piece: entry.key("piece"),
-        name: entry.key("name"),
-        backlinks: entry.key("backlinks"),
-    });
-    return {
-        ui: row.key(__cfHelpers.UI),
-        n: row.key(__cfHelpers.NAME),
-    };
-});
 interface Entry {
     piece: string;
     name: string;
@@ -77,10 +65,61 @@ const EntryRow = pattern((input) => ({
     },
     required: ["rendered", "$UI", "$NAME"]
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    const row = EntryRow({
+        piece: entry.key("piece"),
+        name: entry.key("name"),
+        backlinks: entry.key("backlinks"),
+    });
+    return {
+        ui: row.key(__cfHelpers.UI),
+        n: row.key(__cfHelpers.NAME),
+    };
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                piece: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                },
+                backlinks: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["piece", "name", "backlinks"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        ui: {
+            type: "string"
+        },
+        n: {
+            type: "string"
+        }
+    },
+    required: ["ui", "n"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-pattern-factory-result-key-access (CT-1586)
 // Verifies: `row[K]` where K is a well-known CF computed key (UI or NAME)
 // and row is a pattern-factory result inside a JSX-context map callback
-// lowers to `row.key(__cfHelpers.K)` — not a derive wrapper.
+// lowers to `row.key(__cfHelpers.K)` — not a lift-applied wrapper.
 // Context: `EntryRow(...)` is recognized as an opaque-origin call via
 // structural pattern-factory detection, so `row` is tracked as a local
 // opaque binding. The reordered visitor in pattern-body-reactive-root-
@@ -91,46 +130,7 @@ export default pattern((__cf_pattern_input) => {
     const filtered = __cf_pattern_input.key("filtered");
     return ({
         [UI]: (<div>
-      {filtered.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Entry"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Entry: {
-                        type: "object",
-                        properties: {
-                            piece: {
-                                type: "string"
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            backlinks: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            }
-                        },
-                        required: ["piece", "name", "backlinks"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    ui: {
-                        type: "string"
-                    },
-                    n: {
-                        type: "string"
-                    }
-                },
-                required: ["ui", "n"]
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+      {filtered.mapWithPattern(__cfPattern_1, {})}
     </div>),
     });
 }, {

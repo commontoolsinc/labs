@@ -1,13 +1,11 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
-import { FrozenSet } from "../frozen-builtins.ts";
+} from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
@@ -16,10 +14,13 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  * wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<FabricValue>) {
     super();
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Set;
   }
 
   [DECONSTRUCT](): FabricValue {

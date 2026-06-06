@@ -9,7 +9,7 @@ interface Item {
 // Verifies: once a ternary JSX branch is wholly compute-wrapped, compute-owned
 // array maps inside that branch stay plain Array.map() calls.
 //   showList ? (() => { const itemCount = count + " items"; return <div>{sorted.map(...)}</div>; })() : ...
-//     → ifElse(showList, derive(() => { const itemCount = ...; return <div>{sorted.map(...)}</div>; }), ...)
+//     → ifElse(showList, lift(() => { const itemCount = ...; return <div>{sorted.map(...)}</div>; })(...), ...)
 // Context: the branch contains both a local compute-only alias and a map over
 //   a computed array result, so the whole branch should be handled as compute-owned.
 export default pattern<{ items: Item[] }>((state) => {

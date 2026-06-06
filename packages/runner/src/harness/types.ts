@@ -4,6 +4,10 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
+import type {
+  CachedCompiledModule,
+  CompiledModuleGraph,
+} from "../sandbox/module-record-compiler.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 
 export type HarnessedFunction = (input: any) => void;
@@ -27,6 +31,49 @@ export interface TypeScriptHarnessProcessOptions {
   getTransformedProgram?: (program: Program) => void;
   // Show verbose TypeScript error messages instead of simplified hints.
   verboseErrors?: boolean;
+  // Cached per-module compiled bodies keyed by content-addressed module
+  // identity (the prefix-free `cf:module/<hash>` minus the scheme). Used only on
+  // the ESM record-graph path: when every emitted module is present,
+  // `compileToRecordGraph` skips the TypeScript compile and builds the record
+  // graph from these bodies instead. A partial set is ignored (the engine
+  // recompiles the whole program) because per-module identities are
+  // transitively sensitive — a closure either hits in full or not at all.
+  precompiledModules?: Map<string, CompiledModuleArtifact>;
+  // Lazy variant of `precompiledModules`: invoked once, after the engine has
+  // resolved the program and computed per-module identities (so the cache can
+  // be queried by content identity without a separate resolve pass). Returns the
+  // identity-keyed cached bodies, or undefined for a miss. `precompiledModules`
+  // takes precedence when both are set.
+  precompiledModulesFor?: (info: {
+    entryIdentity: string;
+    identities: string[];
+  }) => Promise<Map<string, CompiledModuleArtifact> | undefined>;
+}
+
+/** A cached/compiled per-module artifact: emitted JS plus optional source map. */
+export interface CompiledModuleArtifact {
+  js: string;
+  sourceMap?: unknown;
+}
+
+/**
+ * Everything the content-addressed compilation cache needs to persist (and
+ * later reload) one module, surfaced by `compileToRecordGraph` in identity
+ * space — callers never see the engine's internal `/<id>` path prefix.
+ */
+export interface CacheableModule {
+  /** Prefix-free content identity (the `cf:module/<hash>` hash, no scheme). */
+  identity: string;
+  /** Normalized authored module path (no `/<id>` prefix; e.g. `/main.tsx`). */
+  filename: string;
+  /** Resolved TypeScript source whose bytes are folded into `identity`. */
+  source: string;
+  /** Compiled CommonJS body. */
+  js: string;
+  /** Per-module source map, when available. */
+  sourceMap?: unknown;
+  /** Internal import edges: specifier → the dependency module's identity. */
+  imports: { specifier: string; targetIdentity: string }[];
 }
 
 export type Exports = Record<string, any>;
@@ -46,6 +93,15 @@ export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
   loadId?: string;
+  /**
+   * Per-module namespaces keyed by content identity (the prefix-free
+   * `cf:module/<identity>` hash). Lets the runner register every module in a
+   * just-evaluated bundle into an in-memory identity->Pattern cache, so a later
+   * by-identity load of a sub-pattern reuses the already-live module instead of
+   * re-reading the closure from storage and re-evaluating it (CT-1623).
+   * Populated only on the ESM evaluate paths.
+   */
+  exportsByIdentity?: Map<string, Exports>;
 }
 
 export interface EvaluateOptions {
@@ -73,6 +129,52 @@ export interface Harness extends EventTarget {
     files: Source[],
     options?: EvaluateOptions,
   ): Promise<EvaluateResult>;
+
+  // Compile + evaluate a program through the ESM module-record path (the
+  // `esmModuleLoader` flag route), returning the same shape as `evaluate`.
+  // Optional: present only on harnesses that implement the ESM loader.
+  compileAndEvaluateModules?(
+    program: RuntimeProgram,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<EvaluateResult>;
+
+  // Compile a program to a verified ESM record graph, returning the graph plus
+  // the per-module cache descriptors (in content-identity space). Split from
+  // evaluation so a caller can write the descriptors to the content-addressed
+  // cache between compile and evaluate. Optional (ESM-loader harnesses only).
+  compileToRecordGraph?(
+    program: RuntimeProgram,
+    options?: TypeScriptHarnessProcessOptions,
+  ): Promise<{
+    id: string;
+    graph: CompiledModuleGraph;
+    mainSpecifier: string;
+    entryIdentity: string;
+    modules: CacheableModule[];
+  }>;
+
+  // Evaluate a verified ESM record graph produced by `compileToRecordGraph`.
+  evaluateRecordGraph?(
+    id: string,
+    graph: CompiledModuleGraph,
+    mainSpecifier: string,
+    files: Source[],
+  ): EvaluateResult;
+
+  // Warm load: build + verify + evaluate a pattern directly from cached compiled
+  // modules (by content identity) — no TS source, no resolve, no recompile.
+  evaluateCachedModules?(
+    modules: readonly CachedCompiledModule[],
+    entryIdentity: string,
+    options?: { sourceFiles?: Source[] },
+  ): Promise<EvaluateResult>;
+
+  // Cold recovery: recompile cacheable modules from the stored (already-resolved,
+  // inject-transformed) source set — e.g. after a runtimeVersion bump.
+  compileResolvedToRecordGraph?(
+    resolvedFiles: Source[],
+    entryFilename: string,
+  ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's
   // configuration.
@@ -122,4 +224,18 @@ export interface Harness extends EventTarget {
     value: unknown,
     options: UnsafeHostTrustOptions,
   ): void;
+
+  // Translate a source-location string (`/<id>/file.tsx:line:col`, as found on
+  // an action's `src`) into a stable, content-addressed implementation hash
+  // (`cf:module/<moduleHash>:line:col`). Returns undefined when the source
+  // location does not correspond to a loaded module, in which case callers fall
+  // back to the raw source location. See docs/specs/module-loading.md.
+  implementationHashForSource?(sourceLocation: string): string | undefined;
+
+  // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`, as
+  // returned by `mapPosition`) into the reload-stable canonical source
+  // `cf:module/<moduleHash>/<authoredPath>`, keeping the authored path for
+  // debuggability. Returns undefined for built-in / non-program sources, so
+  // callers fall back to the raw value.
+  canonicalModuleSource?(source: string): string | undefined;
 }

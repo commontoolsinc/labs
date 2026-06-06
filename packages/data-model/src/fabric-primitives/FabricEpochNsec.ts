@@ -2,15 +2,16 @@ import type {
   FabricEpochNsec as ApiFabricEpochNsec,
   FabricEpochNsecConstructor as ApiFabricEpochNsecConstructor,
 } from "@commonfabric/api";
-import { FabricPrimitive } from "../interface.ts";
+
+import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
- * Wraps a `bigint` value. Used for high-precision timestamps. Direct member of
- * `FabricValue` (not a `FabricInstance`).
+ * Wraps a `bigint` value. Used for high-precision timestamps.
  * See Section 1.4.6 of the formal spec.
  */
-export class FabricEpochNsec extends FabricPrimitive
+export class FabricEpochNsec extends BaseFabricPrimitive
   implements ApiFabricEpochNsec {
   /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
   readonly #value: bigint;
@@ -19,6 +20,11 @@ export class FabricEpochNsec extends FabricPrimitive
     super();
     this.#value = value;
     Object.freeze(this);
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.EpochNsec;
   }
 
   /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */

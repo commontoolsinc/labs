@@ -2102,7 +2102,7 @@ function handleSchema(
 ): { type: string; value: any } {
   const schema = getCellSchema(resolved.cellRef) ?? {};
   // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-  // cloneSchemaMutable() before turning on modern data-model.
+  // cloneSchemaMutable() here.
   const value = JSON.parse(JSON.stringify(schema));
   return { type: "json", value };
 }
@@ -2872,7 +2872,7 @@ async function startRequest(
       description:
         "Call this tool to present a structured result. This stores the result for the caller.",
       // TODO(danfuzz): Replace JSON.parse(JSON.stringify(...)) with
-      // cloneSchemaMutable() before turning on modern data-model.
+      // cloneSchemaMutable() here.
       inputSchema: prepareSchemaForLLM(
         JSON.parse(JSON.stringify(userResultSchema)),
       ),

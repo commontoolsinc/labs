@@ -16,10 +16,48 @@ interface Problem {
     discount: number;
     tax: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    price: number;
+    discount: number;
+}, number>({
+    type: "object",
+    properties: {
+        price: {
+            type: "number"
+        },
+        discount: {
+            type: "number"
+        }
+    },
+    required: ["price", "discount"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ price, discount }) => price - discount);
+const __cfLift_2 = __cfHelpers.lift<{
+    price: number;
+    discount: number;
+    tax: number;
+}, number>({
+    type: "object",
+    properties: {
+        price: {
+            type: "number"
+        },
+        discount: {
+            type: "number"
+        },
+        tax: {
+            type: "number"
+        }
+    },
+    required: ["price", "discount", "tax"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ price, discount, tax }) => (price - discount) * (1 + tax));
 // FIXTURE: complex-expressions
-// Verifies: multi-variable arithmetic in JSX is wrapped in derive() with captured refs
-//   {price - discount}             → derive({price, discount}, (...) => price - discount)
-//   {(price - discount) * (1+tax)} → derive({price, discount, tax}, (...) => ...)
+// Verifies: multi-variable arithmetic in JSX is wrapped in a lift-applied computation with captured refs
+//   {price - discount}             → lift((...) => price - discount)({ price, discount })
+//   {(price - discount) * (1+tax)} → lift((...) => ...)({ price, discount, tax })
 export default pattern((__cf_pattern_input) => {
     const price = __cf_pattern_input.key("price");
     const discount = __cf_pattern_input.key("discount");
@@ -27,47 +65,11 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
           <p>Price: {price}</p>
-          <p>Discount: {__cfHelpers.lift<{
-            price: number;
-            discount: number;
-        }, number>({
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                },
-                discount: {
-                    type: "number"
-                }
-            },
-            required: ["price", "discount"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ price, discount }) => price - discount)({
+          <p>Discount: {__cfLift_1({
             price: price,
             discount: discount
         })}</p>
-          <p>With tax: {__cfHelpers.lift<{
-            price: number;
-            discount: number;
-            tax: number;
-        }, number>({
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                },
-                discount: {
-                    type: "number"
-                },
-                tax: {
-                    type: "number"
-                }
-            },
-            required: ["price", "discount", "tax"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, ({ price, discount, tax }) => (price - discount) * (1 + tax))({
+          <p>With tax: {__cfLift_2({
             price: price,
             discount: discount,
             tax: tax

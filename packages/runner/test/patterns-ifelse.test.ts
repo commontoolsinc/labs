@@ -1,5 +1,5 @@
-// Conditional logic: ifElse branching, interaction with derive, and patterns
-// where control flow determines which values propagate.
+// Conditional logic: ifElse branching, interaction with lifted values, and
+// patterns where control flow determines which values propagate.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -20,7 +20,7 @@ describe("Pattern Runner - ifElse", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  let derive: ReturnType<typeof createBuilder>["commonfabric"]["derive"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let ifElse: ReturnType<typeof createBuilder>["commonfabric"]["ifElse"];
@@ -36,7 +36,7 @@ describe("Pattern Runner - ifElse", () => {
 
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
-      derive,
+      lift,
       pattern,
       handler,
       ifElse,
@@ -49,7 +49,7 @@ describe("Pattern Runner - ifElse", () => {
     await storageManager?.close();
   });
 
-  it("correctly handles the ifElse values with nested derives", async () => {
+  it("correctly handles the ifElse values with nested lifts", async () => {
     const InputSchema = {
       "type": "object",
       "properties": {
@@ -75,8 +75,8 @@ describe("Pattern Runner - ifElse", () => {
 
     const ifElsePattern = pattern<{ expandChat: boolean }>(
       ({ expandChat }) => {
-        const optionA = derive(expandChat, (t) => t ? "A" : "a");
-        const optionB = derive(expandChat, (t) => t ? "B" : "b");
+        const optionA = lift((t: boolean) => t ? "A" : "a")(expandChat);
+        const optionB = lift((t: boolean) => t ? "B" : "b")(expandChat);
 
         return {
           expandChat,

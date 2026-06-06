@@ -21,6 +21,67 @@ interface TestOutput {
     title: string;
     count: number;
 }
+const __cfHandler_1 = __cfHelpers.handler({
+    type: "object",
+    properties: {},
+    additionalProperties: false
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        self: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                }
+            },
+            required: ["title"]
+        }
+    },
+    required: ["self"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { self }) => {
+    console.log("self.title:", self.title);
+});
+const __cfHandler_2 = __cfHelpers.handler({
+    type: "object",
+    properties: {},
+    additionalProperties: false
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        self: {
+            $ref: "#/$defs/TestOutput"
+        },
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["self", "count"],
+    $defs: {
+        TestOutput: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                count: {
+                    type: "number"
+                },
+                $NAME: {
+                    type: "string"
+                },
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["title", "count", "$NAME", "$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, (_, { self, count }) => {
+    console.log("self:", self);
+    count.set(count.get() + 1);
+});
 // FIXTURE: action-self-closure
 // Verifies: action() closing over SELF captures self properties in the handler
 //   action(() => console.log(self.title)) → handler(eventSchema, { self: { title } }, (_, { self }) => ...)({ self: { title: self.key("title") } })
@@ -33,72 +94,13 @@ export default pattern((__cf_pattern_input) => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     // Action closing over `self` — works because all inputs use Default<>
-    const showSelf = __cfHelpers.handler({
-        type: "object",
-        properties: {},
-        additionalProperties: false
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            self: {
-                type: "object",
-                properties: {
-                    title: {
-                        type: "string"
-                    }
-                },
-                required: ["title"]
-            }
-        },
-        required: ["self"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { self }) => {
-        console.log("self.title:", self.title);
-    })({
+    const showSelf = __cfHandler_1({
         self: {
             title: self.key("title")
         }
     }).for({ stream: "showSelf" }, true);
     // Action closing over both `self` and `count`
-    const incrementWithSelf = __cfHelpers.handler({
-        type: "object",
-        properties: {},
-        additionalProperties: false
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            self: {
-                $ref: "#/$defs/TestOutput"
-            },
-            count: {
-                type: "number",
-                asCell: ["cell"]
-            }
-        },
-        required: ["self", "count"],
-        $defs: {
-            TestOutput: {
-                type: "object",
-                properties: {
-                    title: {
-                        type: "string"
-                    },
-                    count: {
-                        type: "number"
-                    },
-                    $NAME: {
-                        type: "string"
-                    },
-                    $UI: {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }
-                },
-                required: ["title", "count", "$NAME", "$UI"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, (_, { self, count }) => {
-        console.log("self:", self);
-        count.set(count.get() + 1);
-    })({
+    const incrementWithSelf = __cfHandler_2({
         self: self,
         count: count
     }).for({ stream: "incrementWithSelf" }, true);

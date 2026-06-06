@@ -5,15 +5,35 @@ import {
   Pattern,
   Schema,
   unsafe_originalPattern,
-  unsafe_verifiedLoadId,
 } from "./builder/types.ts";
+import {
+  getPatternProgram,
+  getVerifiedLoadId,
+  isTrustedPattern,
+  setPatternProgram,
+  setVerifiedLoadId,
+} from "./builder/pattern-metadata.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Cell, createCell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
-import type { CompileResult } from "./harness/types.ts";
+import type {
+  CacheableModule,
+  CompiledModuleArtifact,
+  CompileResult,
+  EvaluateResult,
+  Exports,
+} from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
+import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  COMPILE_CACHE_RUNTIME_VERSION,
+  loadCompiledClosure,
+  ROOT_LINK_SPECIFIER,
+  writeCompiledDocs,
+  writeSourceDocs,
+} from "./compilation-cache/cell-cache.ts";
 import { getTopFrame } from "./builder/pattern.ts";
 import { URI } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
@@ -28,6 +48,11 @@ const logger = getLogger("pattern-manager");
  * Set conservatively to prevent OOM in long-running processes and tests.
  */
 const MAX_PATTERN_CACHE_SIZE = 100;
+// Bound for the in-memory identity->module cache. Higher than the pattern cache
+// because a single bundle contributes one entry per module (a big space-root
+// bundle is ~10 modules), and entries are cheap (a reference to an already-live
+// namespace).
+const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 
 export const patternMetaSchema = internSchema(
   {
@@ -36,6 +61,13 @@ export const patternMetaSchema = internSchema(
       spec: { type: "string" },
       parents: { type: "array", items: { type: "string" } },
       patternName: { type: "string" },
+      // Content identity of the entry module (the prefix-free `cf:module/<hash>`
+      // minus the scheme), learned on the first cold ESM compile. Persisting it
+      // here is what makes the resolve-free by-identity fast path fire on every
+      // later load: `compilePatternOnce` reads it back and passes it as
+      // `knownEntryIdentity`. Absent on legacy/AMD patterns (the load simply
+      // falls back to resolve + compile, then re-learns + stores it).
+      entryIdentity: { type: "string" },
       program: {
         type: "object",
         properties: {
@@ -68,11 +100,59 @@ export class PatternManager {
   private patternIdMap = new Map<URI, Pattern>();
   // Map from pattern object instance to patternId
   private patternToIdMap = new WeakMap<Pattern, URI>();
+  // Map from pattern object instance to its content-addressed {identity, symbol}
+  // reference — the entry module's identity (prefix-free `cf:module/<hash>`
+  // minus the scheme) and the export name this pattern was selected by. Learned
+  // on the ESM cache path; lets a result cell reference a pattern by
+  // {identity, symbol} and load it straight from the compiled cache without the
+  // program/meta indirection. The symbol is recorded from the authored program
+  // (cold) or the load symbol (warm) — never recomputed from a source-free
+  // pattern's stub program, which would lose a non-"default" export name.
+  private patternToEntryRef = new WeakMap<
+    Pattern,
+    { identity: string; symbol: string }
+  >();
   private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
+  // ESM content-addressed compile-cache instrumentation.
+  private esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
+  // In-memory identity -> module-namespace cache (CT-1623). Populated for EVERY
+  // module of an evaluated ESM bundle (keyed by prefix-free content identity),
+  // so a by-identity load of a sub-pattern reuses the already-live module from
+  // its parent's bundle instead of re-reading the closure from storage and
+  // re-evaluating it in SES. Content-addressed, so a hit is always the same
+  // bytes — never stale. Bounded (FIFO) to cap memory.
+  private modulesByIdentity = new Map<
+    string,
+    { exports: Exports; loadId?: string }
+  >();
+  // In-flight compiled-cache write-backs (fire-and-forget); awaited by
+  // flushCompileCacheWrites() for graceful shutdown / deterministic tests.
+  private compileCacheWrites = new Set<Promise<unknown>>();
 
   constructor(readonly runtime: Runtime) {}
+
+  /**
+   * Counters for the ESM content-addressed compile cache:
+   * - `byIdentityHits`: warm loads served directly by entry identity (no
+   *   resolve, no compile — the fast path);
+   * - `hits`: warm loads that still resolved but reused cached bodies (skipped
+   *   only the TS compile);
+   * - `misses`: cold compiles (also written back).
+   */
+  getCompileCacheStats(): {
+    hits: number;
+    misses: number;
+    byIdentityHits: number;
+  } {
+    return { ...this.esmCacheStats };
+  }
+
+  /** Resolve once all in-flight compiled-cache write-backs have settled. */
+  async flushCompileCacheWrites(): Promise<void> {
+    await Promise.allSettled([...this.compileCacheWrites]);
+  }
 
   /**
    * Evict oldest patterns if cache exceeds MAX_PATTERN_CACHE_SIZE.
@@ -164,29 +244,39 @@ export class PatternManager {
   private seedVerifiedLoadIds(
     value: unknown,
     verifiedLoadId: string,
-    seen = new Set<unknown>(),
+    seen = new Map<unknown, boolean>(),
+    trusted = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
     }
-    if (seen.has(value)) {
+
+    // Trust is rooted at a builder-produced (`isTrustedPattern`) value; nested
+    // subpatterns within a trusted pattern's serialized node graph are legit
+    // (and unbranded), so once inside a trusted subtree we propagate to
+    // structurally-`isPattern` values too. A `__cf_data`-forged pattern-shaped
+    // value at the top level (trusted === false) is never seeded, so it cannot
+    // launder a CFC identity into the side-tables.
+    const subtreeTrusted = trusted || isTrustedPattern(value);
+
+    // `seen` records the trust level a node was visited at, so a node reached
+    // first via an untrusted path is still re-processed (and seeded) when later
+    // reached via a trusted path — order-independent. A trusted visit is final.
+    const prior = seen.get(value);
+    if (prior === true || (prior === false && !subtreeTrusted)) {
       return;
     }
-    seen.add(value);
+    seen.set(value, subtreeTrusted);
 
-    if (isPattern(value)) {
+    if (subtreeTrusted && isPattern(value)) {
       const originalPattern = this.findOriginalPattern(value);
       if (!this.patternToVerifiedLoadId.has(originalPattern)) {
         this.patternToVerifiedLoadId.set(originalPattern, verifiedLoadId);
       }
-      if (
-        Object.isExtensible(value) &&
-        (value as Pattern)[unsafe_verifiedLoadId] !== verifiedLoadId
-      ) {
-        Object.defineProperty(value, unsafe_verifiedLoadId, {
-          value: verifiedLoadId,
-          configurable: true,
-        });
+      // Side-table storage works even when `value` has been frozen by the
+      // loader (no own-property write needed).
+      if (getVerifiedLoadId(value) !== verifiedLoadId) {
+        setVerifiedLoadId(value, verifiedLoadId);
       }
     }
 
@@ -199,6 +289,7 @@ export class PatternManager {
         descriptor.value,
         verifiedLoadId,
         seen,
+        subtreeTrusted,
       );
     }
   }
@@ -235,7 +326,9 @@ export class PatternManager {
     let patternId: URI | undefined;
     if ("patternId" in input) {
       patternId = input.patternId;
-    } else if (input && typeof input === "object") {
+    } else if (
+      input && (typeof input === "object" || typeof input === "function")
+    ) {
       patternId = this.patternToIdMap.get(
         this.findOriginalPattern(input as Pattern),
       );
@@ -244,11 +337,14 @@ export class PatternManager {
     if (!patternId) throw new Error("Pattern is not registered");
 
     const cell = this.patternMetaCellById.get(patternId);
-    if (cell) return cell.get();
+    if (cell) {
+      const meta = cell.get();
+      if (meta) return meta;
+    }
 
     // If we don't have a stored cell yet, return whatever pending/meta we have
     const pending = this.pendingMetaById.get(patternId) ?? {};
-    const source = this.patternIdMap.get(patternId)?.program;
+    const source = getPatternProgram(this.patternIdMap.get(patternId));
     if (!source && Object.keys(pending).length === 0) {
       throw new Error(`Pattern ${patternId} has no metadata available`);
     }
@@ -267,19 +363,19 @@ export class PatternManager {
     pattern = this.findOriginalPattern(pattern as Pattern);
     const verifiedLoadId = getTopFrame()?.verifiedLoadId ??
       this.patternToVerifiedLoadId.get(pattern as Pattern) ??
-      (pattern as Pattern)[unsafe_verifiedLoadId];
+      getVerifiedLoadId(pattern as Pattern);
     if (verifiedLoadId) {
       this.seedVerifiedLoadIds(pattern as Pattern, verifiedLoadId);
     }
 
-    if (src && !pattern.program) {
+    if (src && !getPatternProgram(pattern)) {
       if (typeof src === "string") {
-        pattern.program = {
+        setPatternProgram(pattern, {
           main: "/main.tsx",
           files: [{ name: "/main.tsx", contents: src }],
-        };
+        });
       } else {
-        pattern.program = src;
+        setPatternProgram(pattern, src);
       }
     }
 
@@ -330,7 +426,7 @@ export class PatternManager {
       return true;
     }
 
-    const program = this.patternIdMap.get(patternId)?.program;
+    const program = getPatternProgram(this.patternIdMap.get(patternId));
     if (!program) return false;
 
     const pending = this.pendingMetaById.get(patternId) ?? {};
@@ -419,7 +515,21 @@ export class PatternManager {
     return pattern;
   }
 
-  async compilePattern(input: string | RuntimeProgram): Promise<Pattern> {
+  async compilePattern(
+    input: string | RuntimeProgram,
+    cacheCtx?: {
+      space: MemorySpace;
+      tx?: IExtendedStorageTransaction;
+      // When the entry module's content identity is already known (e.g. stored
+      // in pattern metadata from a prior compile), the ESM cache path loads the
+      // compiled closure by identity and skips resolve + compile entirely.
+      knownEntryIdentity?: string;
+      // Invoked once the entry module's content identity is known for this
+      // compile (warm-by-identity or cold). Lets the caller persist it (e.g.
+      // into pattern metadata) so subsequent loads can take the fast path.
+      onEntryIdentity?: (entryIdentity: string) => void;
+    },
+  ): Promise<Pattern> {
     let program: RuntimeProgram;
     if (typeof input === "string") {
       program = {
@@ -428,6 +538,30 @@ export class PatternManager {
       };
     } else {
       program = input;
+    }
+
+    // ESM module-record loader path (experimental, default off).
+    if (
+      this.runtime.experimental.esmModuleLoader === true &&
+      this.runtime.harness.compileToRecordGraph &&
+      this.runtime.harness.evaluateRecordGraph
+    ) {
+      // Use the content-addressed cell cache when we have a target space and
+      // CFC is enforced (the compiled-set integrity label only persists — and
+      // is only trusted on read — under an enforcing mode; see cell-cache).
+      if (cacheCtx && this.runtime.cfcEnforcementMode !== "disabled") {
+        return await this.compileViaCellCache(program, cacheCtx);
+      }
+      const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
+        .harness.compileToRecordGraph(program);
+      cacheCtx?.onEntryIdentity?.(entryIdentity);
+      const result = this.runtime.harness.evaluateRecordGraph(
+        id,
+        graph,
+        mainSpecifier,
+        program.files,
+      );
+      return this.patternFromEvaluation(result, program);
     }
 
     const { cachedCompiler } = this.runtime;
@@ -454,17 +588,419 @@ export class PatternManager {
     return this.evaluateToPattern(compileResult, program);
   }
 
+  /**
+   * ESM compile + evaluate backed by the content-addressed cell cache in
+   * `cacheCtx.space`. On a warm full hit the per-module compiled bodies are
+   * reused (no TypeScript compile / transformer pipeline / SES re-verify); on a
+   * miss the program is compiled and its modules are written back (source +
+   * integrity-stamped compiled docs) on a fresh transaction, fire-and-forget.
+   */
+  private async compileViaCellCache(
+    program: RuntimeProgram,
+    cacheCtx: {
+      space: MemorySpace;
+      tx?: IExtendedStorageTransaction;
+      knownEntryIdentity?: string;
+      onEntryIdentity?: (entryIdentity: string) => void;
+    },
+  ): Promise<Pattern> {
+    const harness = this.runtime.harness;
+    const { space } = cacheCtx;
+    const compilerDid = this.runtime.userIdentityDID;
+    const cacheOpts = {
+      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      compilerDid,
+    };
+
+    // Fast path — warm load BY IDENTITY: if the entry's content identity is
+    // already known (stored from a prior compile), load the compiled closure
+    // directly and build+evaluate from it, skipping `resolve` and `compile`
+    // entirely. Falls through to the compile path on any miss/incompleteness
+    // (evaluateCachedModules re-verifies the graph, so an incomplete closure
+    // throws and we recompile).
+    if (cacheCtx.knownEntryIdentity) {
+      const byIdentity = await this.tryWarmLoadByIdentity(
+        cacheCtx.knownEntryIdentity,
+        space,
+        cacheOpts,
+        program,
+      );
+      if (byIdentity) {
+        this.esmCacheStats.byIdentityHits++;
+        cacheCtx.onEntryIdentity?.(cacheCtx.knownEntryIdentity);
+        return byIdentity;
+      }
+    }
+
+    // Read the cache on a dedicated, owned transaction (used read-only — the
+    // load path only reads, and it is aborted below, never committed) so
+    // cache-cell reads never enter the caller's transaction (whose commit must
+    // not gain dependencies on, or race, the fire-and-forget write-back), and
+    // so repeated compiles don't accumulate open transactions.
+    const readTx = this.runtime.edit();
+
+    let warmHit = false;
+    let compiled;
+    try {
+      compiled = await harness.compileToRecordGraph!(program, {
+        precompiledModulesFor: async ({ entryIdentity, identities }) => {
+          // Concurrency-safe timing: explicit start (no shared timer key, which
+          // parallel compiles would clobber). Same for the others below.
+          const readStart = performance.now();
+          const closure = await loadCompiledClosure(
+            this.runtime,
+            space,
+            entryIdentity,
+            cacheOpts,
+            readTx,
+          );
+          logger.time(readStart, "compile-cache", "read");
+          // Full hit only: every emitted module must be present (and
+          // integrity-valid). A partial set cannot be trusted (transitively
+          // sensitive identities), so fall back to a full recompile.
+          if (!identities.every((identity) => closure.has(identity))) {
+            return undefined;
+          }
+          const bodies = new Map<string, CompiledModuleArtifact>();
+          for (const [identity, doc] of closure) {
+            bodies.set(
+              identity,
+              doc.sourceMap === undefined
+                ? { js: doc.code }
+                : { js: doc.code, sourceMap: doc.sourceMap },
+            );
+          }
+          warmHit = true;
+          return bodies;
+        },
+      });
+    } finally {
+      // Release the read-only cache transaction (no commit needed) so repeated
+      // compiles don't accumulate open transactions.
+      readTx.abort?.("compile-cache read complete");
+    }
+    const { id, graph, mainSpecifier, entryIdentity, modules } = compiled;
+    cacheCtx.onEntryIdentity?.(entryIdentity);
+
+    const evalStart = performance.now();
+    const result = harness.evaluateRecordGraph!(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
+    logger.time(evalStart, "compile-cache", "evaluate");
+
+    if (warmHit) {
+      this.esmCacheStats.hits++;
+    } else {
+      this.esmCacheStats.misses++;
+      // Cold/partial: persist the freshly compiled module set for next time.
+      // Fire-and-forget — the pattern is already returned below, so cache
+      // persistence never blocks the load. Tracked for flush/shutdown.
+      const writeBack = this.writeBackCompileCache(
+        space,
+        modules,
+        entryIdentity,
+        cacheOpts,
+      );
+      this.compileCacheWrites.add(writeBack);
+      writeBack.finally(() => this.compileCacheWrites.delete(writeBack));
+    }
+
+    return this.patternFromEvaluation(result, program, entryIdentity);
+  }
+
+  /**
+   * Resolve-free warm load: fetch the integrity-valid compiled closure for
+   * `entryIdentity` and build + evaluate the pattern directly from those cached
+   * bodies (no `resolve`, no `compile`). Returns the pattern, or `undefined`
+   * if the closure is absent/incomplete/invalid (caller then recompiles).
+   */
+  private async tryWarmLoadByIdentity(
+    entryIdentity: string,
+    space: MemorySpace,
+    cacheOpts: { runtimeVersion: string; compilerDid: string },
+    program: RuntimeProgram,
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
+    const readTx = this.runtime.edit();
+    let closure;
+    try {
+      const readStart = performance.now();
+      closure = await loadCompiledClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        cacheOpts,
+        readTx,
+      );
+      logger.time(readStart, "compile-cache", "read-by-identity");
+    } finally {
+      readTx.abort?.("compile-cache by-identity read complete");
+    }
+    if (!closure.has(entryIdentity)) return undefined;
+
+    const cachedModules: CachedCompiledModule[] = [...closure].map(
+      ([identity, doc]) => ({
+        identity,
+        filename: doc.filename,
+        code: doc.code,
+        ...(doc.sourceMap !== undefined
+          ? { sourceMap: doc.sourceMap as never }
+          : {}),
+        // Drop the synthetic entry→root links (cfc.ts etc.); only real
+        // require/export-* edges resolve module records.
+        imports: doc.imports
+          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
+      }),
+    );
+
+    try {
+      const result = await harness.evaluateCachedModules!(
+        cachedModules,
+        entryIdentity,
+        { sourceFiles: program.files },
+      );
+      return this.patternFromEvaluation(result, program, entryIdentity);
+    } catch (error) {
+      // Incomplete/invalid cached closure — fall back to recompile.
+      logger.warn("compile-cache-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        String(error),
+      ]);
+      return undefined;
+    }
+  }
+
+  /**
+   * Load a pattern referenced purely by content identity — the
+   * `{identity, symbol}` result-cell reference — straight from the compiled
+   * cache, with NO TypeScript program in hand and NO meta-cell roundtrip. The
+   * pattern's TS source is never pulled on this path; it is only needed for cold
+   * recovery, which the caller handles by falling back to the patternId load.
+   *
+   * Returns the pattern, or `undefined` when the by-identity load is
+   * unavailable (ESM loader off / CFC not enforcing / closure absent or
+   * incomplete / invalid) so the caller can fall back to `loadPattern`.
+   */
+  async loadPatternByIdentity(
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): Promise<Pattern | undefined> {
+    const harness = this.runtime.harness;
+    if (
+      this.runtime.experimental.esmModuleLoader !== true ||
+      !harness.evaluateCachedModules ||
+      this.runtime.cfcEnforcementMode === "disabled"
+    ) {
+      return undefined;
+    }
+    // In-memory fast path (CT-1623): the module may already be live from a
+    // parent bundle's evaluation (e.g. a sub-pattern of the just-loaded
+    // space root). Reuse it directly — no storage closure read, no SES re-eval.
+    const live = this.patternFromEvaluatedModule(entryIdentity, symbol);
+    if (live) {
+      this.esmCacheStats.byIdentityHits++;
+      return live;
+    }
+    const cacheOpts = {
+      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      compilerDid: this.runtime.userIdentityDID,
+    };
+
+    const readTx = this.runtime.edit();
+    let closure;
+    try {
+      const readStart = performance.now();
+      closure = await loadCompiledClosure(
+        this.runtime,
+        space,
+        entryIdentity,
+        cacheOpts,
+        readTx,
+      );
+      logger.time(readStart, "compile-cache", "load-pattern-by-identity");
+    } finally {
+      readTx.abort?.("load-pattern-by-identity read complete");
+    }
+    if (!closure.has(entryIdentity)) return undefined;
+
+    const cachedModules: CachedCompiledModule[] = [...closure].map(
+      ([identity, doc]) => ({
+        identity,
+        filename: doc.filename,
+        code: doc.code,
+        ...(doc.sourceMap !== undefined
+          ? { sourceMap: doc.sourceMap as never }
+          : {}),
+        imports: doc.imports
+          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
+      }),
+    );
+
+    try {
+      // Source-free: no sourceFiles. Sub-patterns fall back to identity.
+      const result = await harness.evaluateCachedModules(
+        cachedModules,
+        entryIdentity,
+      );
+      const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      this.esmCacheStats.byIdentityHits++;
+      return pattern;
+    } catch (error) {
+      logger.warn("load-pattern-by-identity-miss", () => [
+        `entry=${entryIdentity}`,
+        `symbol=${symbol}`,
+        String(error),
+      ]);
+      return undefined;
+    }
+  }
+
+  /**
+   * Build a pattern object from an evaluation result by export `symbol`, with
+   * NO program attached (the source-free by-identity path). Mirrors
+   * `patternFromEvaluation` minus `setPatternProgram` — recovery of the program
+   * happens by identity via the source closure, not from the pattern object.
+   */
+  private patternFromMain(
+    result: EvaluateResult,
+    symbol: string,
+    entryIdentity: string,
+  ): Pattern {
+    this.registerEvaluatedModules(result);
+    const { main, loadId } = result;
+    if (!main) {
+      throw new Error("Pattern compilation produced no exports.");
+    }
+    if (!(symbol in main)) {
+      throw new Error(`No "${symbol}" export found in compiled pattern.`);
+    }
+    const pattern = main[symbol] as Pattern;
+    if (isTrustedPattern(pattern)) {
+      this.patternToEntryRef.set(pattern, { identity: entryIdentity, symbol });
+      if (loadId) {
+        this.seedVerifiedLoadIds(pattern, loadId);
+      }
+    }
+    return pattern;
+  }
+
+  /**
+   * Index every module of a just-evaluated ESM bundle by its content identity
+   * (CT-1623). Lets `loadPatternByIdentity` reuse a sub-pattern module already
+   * evaluated as part of its parent's bundle — no storage read, no SES re-eval.
+   */
+  private registerEvaluatedModules(result: EvaluateResult): void {
+    const byId = result.exportsByIdentity;
+    if (!byId) return;
+    for (const [identity, exports] of byId) {
+      // Refresh insertion order (Map is FIFO-ordered) so eviction is ~LRU.
+      this.modulesByIdentity.delete(identity);
+      this.modulesByIdentity.set(identity, { exports, loadId: result.loadId });
+      // Give each pattern-exporting sub-module a content-addressed entry ref so
+      // its result cell reloads BY IDENTITY (and hits the in-memory module
+      // cache / cell cache) instead of falling back to a source recompile via
+      // loadPattern. Without this only the bundle entry carried a ref, so every
+      // sub-pattern cold-recompiled on reload (CT-1623). Don't overwrite an
+      // existing ref (the entry's is set authoritatively by the caller).
+      for (const exportName of Object.keys(exports)) {
+        if (exportName === "__esModule") continue;
+        const value = exports[exportName];
+        if (
+          (typeof value === "object" || typeof value === "function") &&
+          value !== null && isTrustedPattern(value as Pattern) &&
+          !this.patternToEntryRef.has(value as Pattern)
+        ) {
+          this.patternToEntryRef.set(value as Pattern, {
+            identity,
+            symbol: exportName,
+          });
+        }
+      }
+    }
+    while (this.modulesByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+      const oldest = this.modulesByIdentity.keys().next().value;
+      if (oldest === undefined) break;
+      this.modulesByIdentity.delete(oldest);
+    }
+  }
+
+  /**
+   * Reuse a module already evaluated in-memory (as part of any bundle) for a
+   * by-identity load, skipping the storage closure read + SES re-evaluation.
+   * Returns undefined on a miss so the caller falls back to the cache path.
+   */
+  private patternFromEvaluatedModule(
+    entryIdentity: string,
+    symbol: string,
+  ): Pattern | undefined {
+    const cached = this.modulesByIdentity.get(entryIdentity);
+    if (!cached || !(symbol in cached.exports)) return undefined;
+    const pattern = cached.exports[symbol] as Pattern;
+    if (!isTrustedPattern(pattern)) return undefined;
+    // Refresh recency.
+    this.modulesByIdentity.delete(entryIdentity);
+    this.modulesByIdentity.set(entryIdentity, cached);
+    this.patternToEntryRef.set(pattern, { identity: entryIdentity, symbol });
+    if (cached.loadId) this.seedVerifiedLoadIds(pattern, cached.loadId);
+    return pattern;
+  }
+
+  /**
+   * Write the source + compiled document sets for an emitted module set into
+   * `space`, on its own transaction, independent of the caller's. Uses
+   * `editWithRetry` so a commit conflict (e.g. the cache write racing the
+   * pattern's own space writes) retries rather than silently dropping the
+   * entry; a final failure is logged (not thrown) since the cache is an
+   * optimization, never on the correctness path.
+   */
+  private async writeBackCompileCache(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+    opts: { runtimeVersion: string; compilerDid: string },
+  ): Promise<void> {
+    const writebackStart = performance.now();
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
+      writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
+    });
+    logger.time(writebackStart, "compile-cache", "writeback");
+    if (error) {
+      logger.error("compile-cache-writeback-failed", () => [
+        `entry=${entryIdentity}`,
+        error.message,
+      ]);
+    }
+  }
+
   private async evaluateToPattern(
     { id, jsScript }: CompileResult,
     program: RuntimeProgram,
     options?: { skipBundleValidation?: boolean },
   ): Promise<Pattern> {
-    const { main, loadId } = await this.runtime.harness.evaluate(
+    const result = await this.runtime.harness.evaluate(
       id,
       jsScript,
       program.files,
       options,
     );
+    return this.patternFromEvaluation(result, program);
+  }
+
+  // Resolve a Pattern from an evaluate result (shared by the AMD and ESM paths).
+  private patternFromEvaluation(
+    result: EvaluateResult,
+    program: RuntimeProgram,
+    entryIdentity?: string,
+  ): Pattern {
+    this.registerEvaluatedModules(result);
+    const { main, loadId } = result;
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
     }
@@ -475,11 +1011,36 @@ export class PatternManager {
       );
     }
     const pattern = main[exportName] as Pattern;
-    pattern.program = program;
-    if (loadId) {
-      this.seedVerifiedLoadIds(pattern, loadId);
+    // Only a trusted (builder-produced) entry pattern receives rehydration /
+    // verified-load metadata; a forged pattern-shaped export gets none and so
+    // cannot masquerade as a verified-loaded pattern in the side-tables.
+    if (isTrustedPattern(pattern)) {
+      setPatternProgram(pattern, program);
+      if (entryIdentity) {
+        this.patternToEntryRef.set(pattern, {
+          identity: entryIdentity,
+          symbol: exportName,
+        });
+      }
+      if (loadId) {
+        this.seedVerifiedLoadIds(pattern, loadId);
+      }
     }
     return pattern;
+  }
+
+  /**
+   * The content-addressed {identity, symbol} reference for a pattern object, if
+   * known (learned on the ESM cache path). Lets callers persist a result cell's
+   * reference so the pattern reloads straight from the compiled cache. Returns
+   * undefined for legacy/AMD patterns.
+   */
+  getPatternEntryRef(
+    pattern: Pattern | Module,
+  ): { identity: string; symbol: string } | undefined {
+    return this.patternToEntryRef.get(
+      this.findOriginalPattern(pattern as Pattern),
+    );
   }
 
   /**
@@ -487,9 +1048,16 @@ export class PatternManager {
    * Provides single-flight deduplication based on program content.
    *
    * @param input - Source code string or RuntimeProgram to compile
+   * @param space - When provided, routes the ESM compile through the
+   *   content-addressed cell cache in this space (CT-1623): cold compiles write
+   *   their module set back, and subsequent loads of the same source skip the TS
+   *   compile. Without it (e.g. tests), compilation is uncached as before.
    * @returns The compiled pattern (from cache, in-flight compilation, or new)
    */
-  compileOrGetPattern(input: string | RuntimeProgram): Promise<Pattern> {
+  compileOrGetPattern(
+    input: string | RuntimeProgram,
+    space?: MemorySpace,
+  ): Promise<Pattern> {
     // Normalize to RuntimeProgram
     let program: RuntimeProgram;
     if (typeof input === "string") {
@@ -518,8 +1086,12 @@ export class PatternManager {
       return inProgress;
     }
 
-    // Compile with single-flight pattern
-    const compilationPromise = this.compilePattern(program)
+    // Compile with single-flight pattern. Pass the cell-cache context when a
+    // space is available so nested/dynamic compiles benefit from the cache too.
+    const compilationPromise = this.compilePattern(
+      program,
+      space ? { space } : undefined,
+    )
       .then((pattern) => {
         // Register directly with pre-computed patternId to avoid double-hashing
         // (registerPattern would recompute the same hash from program)
@@ -573,12 +1145,34 @@ export class PatternManager {
     }
 
     const source = patternMeta.program!;
-    const pattern = await this.compilePattern(source);
+    // A previously-stored entry identity (set on the first cold ESM compile)
+    // lets the cache path skip resolve + compile and load by identity.
+    const knownEntryIdentity = patternMeta.entryIdentity;
+    let learnedEntryIdentity: string | undefined;
+    // Pass the target space so the ESM path can use the per-space cell cache.
+    const pattern = await this.compilePattern(source, {
+      space,
+      tx,
+      knownEntryIdentity,
+      onEntryIdentity: (id) => {
+        learnedEntryIdentity = id;
+      },
+    });
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());
     this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
+    // Persist the entry identity once learned (cold compile) so the next load
+    // takes the by-identity fast path. Fire-and-forget — never blocks the load,
+    // but tracked alongside the cache writes so shutdown / tests can flush it.
+    if (learnedEntryIdentity && learnedEntryIdentity !== knownEntryIdentity) {
+      const metaWrite = this.setPatternMetaFields(patternId, {
+        entryIdentity: learnedEntryIdentity,
+      });
+      this.compileCacheWrites.add(metaWrite);
+      metaWrite.finally(() => this.compileCacheWrites.delete(metaWrite));
+    }
     return pattern;
   }
 
@@ -608,6 +1202,37 @@ export class PatternManager {
   }
 
   /**
+   * Load a pattern by its content-addressed {identity, symbol} reference and
+   * register it under `patternId` so `patternById(patternId)` resolves it (the
+   * reload path keys on patternId everywhere). The source-free fast path: no TS
+   * program, no meta-cell sync. Returns undefined when the by-identity load is
+   * unavailable, so the caller falls back to `loadPattern(patternId)`.
+   */
+  async loadPatternByIdentityAs(
+    patternId: URI,
+    entryIdentity: string,
+    symbol: string,
+    space: MemorySpace,
+  ): Promise<Pattern | undefined> {
+    const existing = this.patternIdMap.get(patternId);
+    if (existing) {
+      this.touchPattern(patternId);
+      return existing;
+    }
+    const pattern = await this.loadPatternByIdentity(
+      entryIdentity,
+      symbol,
+      space,
+    );
+    if (!pattern) return undefined;
+    this.patternIdMap.set(patternId, pattern);
+    this.patternToIdMap.set(pattern, patternId);
+    this.associateVerifiedFunctions(patternId, pattern);
+    this.evictIfNeeded();
+    return pattern;
+  }
+
+  /**
    * Set or update metadata fields for a pattern before or after saving.
    * If the metadata cell already exists, it updates it in-place.
    * Otherwise, it stores the fields to be applied on the next save.
@@ -632,13 +1257,9 @@ export class PatternManager {
     patternId: URI,
     value: Pattern | Module,
   ): void {
-    const originalPattern = this.findOriginalPattern(value as Pattern) as
-      & Pattern
-      & {
-        program?: RuntimeProgram;
-      };
+    const originalPattern = this.findOriginalPattern(value as Pattern);
     const verifiedLoadId = this.patternToVerifiedLoadId.get(originalPattern);
-    if (!originalPattern.program && !verifiedLoadId) {
+    if (!getPatternProgram(originalPattern) && !verifiedLoadId) {
       return;
     }
     this.runtime.harness.associatePattern(

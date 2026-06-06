@@ -55,6 +55,9 @@ function getWrapperSchemaFromCallable(
   if (wrapperInfo?.kind === "Cell") {
     return { asCell: ["cell"] };
   }
+  if (wrapperInfo?.kind === "SqliteDb") {
+    return { asCell: ["sqlite"] };
+  }
 
   // Also check if it's an OpaqueRef wrapping a Stream or Cell
   if (wrapperInfo?.kind === "OpaqueRef") {
@@ -69,6 +72,9 @@ function getWrapperSchemaFromCallable(
       }
       if (innerWrapperInfo?.kind === "Cell") {
         return { asCell: ["cell"] };
+      }
+      if (innerWrapperInfo?.kind === "SqliteDb") {
+        return { asCell: ["sqlite"] };
       }
     }
   }

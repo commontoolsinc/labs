@@ -3,6 +3,7 @@ import { createCell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { narrowestScope, scopeRank } from "../scope.ts";
 import {
@@ -30,6 +31,21 @@ export function scopedCell<T>(
     return cell;
   }
   return createCell<T>(runtime, { ...link, scope }, tx);
+}
+
+/**
+ * The position-derived identity coordinates (`space`/`id`/`path`) of a node's
+ * resolved output binding — the stable, program-independent cause that
+ * map/filter/flatMap key their result container on (CT-1623). Deliberately
+ * drops `scope`/`schema` so the identity stays scope-independent (a scoped vs
+ * unscoped container at the same spot share one id; scope re-addresses the
+ * instance, it does not fork identity).
+ */
+export function outputSpotFromBinding(
+  binding: NormalizedFullLink | undefined,
+): { space: string; id: string; path: readonly unknown[] } | undefined {
+  if (!binding) return undefined;
+  return { space: binding.space, id: binding.id, path: [...binding.path] };
 }
 
 export function cellIdentityKey(cell: Cell<any>): {

@@ -43,13 +43,58 @@ export async function login(page: Page, identity: Identity): Promise<void> {
 
   await page!.evaluate<
     Promise<void>,
-    [TransferrableInsecureCryptoKeyPair]
+    [TransferrableInsecureCryptoKeyPair, string]
   >(
-    async (rawId) => {
+    async (rawId, nextDID) => {
+      const currentIdentity = globalThis.app.state().identity;
+      if (currentIdentity && currentIdentity.did() !== nextDID) {
+        await globalThis.app.apply({
+          type: "set-identity",
+          identity: undefined,
+        });
+        await new Promise<void>((resolve, reject) => {
+          const startedAt = performance.now();
+          const check = () => {
+            if (!globalThis.commonfabric?.rt) {
+              resolve();
+              return;
+            }
+            if (performance.now() - startedAt > 30_000) {
+              reject(new Error("Timed out waiting for runtime logout"));
+              return;
+            }
+            setTimeout(check, 50);
+          };
+          check();
+        });
+      }
       await globalThis.app.setIdentity(rawId);
+      await new Promise<void>((resolve, reject) => {
+        const startedAt = performance.now();
+        const check = async () => {
+          try {
+            const rt = globalThis.commonfabric?.rt;
+            const home = await rt?.getHomeSpaceCell?.();
+            const ref = home?.ref?.();
+            if (ref?.space === nextDID) {
+              await rt?.idle?.();
+              resolve();
+              return;
+            }
+          } catch {
+            // Runtime is still initializing; retry until the deadline.
+          }
+          if (performance.now() - startedAt > 30_000) {
+            reject(new Error("Timed out waiting for runtime login"));
+            return;
+          }
+          setTimeout(check, 50);
+        };
+        void check();
+      });
     },
     {
-      args: [transferrableId],
+      args: [transferrableId, identity.did()],
     },
   );
 }

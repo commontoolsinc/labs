@@ -14,30 +14,31 @@ const __cfAmdHooks = undefined;
 interface State {
     counter: Cell<number>;
 }
+const __cfHandler_1 = __cfHelpers.handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                counter: {
+                    type: "number",
+                    asCell: ["cell"]
+                }
+            },
+            required: ["counter"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { state }) => state.counter.set(state.counter.get() + 1));
 // FIXTURE: handler-unused-event
 // Verifies: inline handler with an unused event param (_) still generates an event schema placeholder
 //   onClick={(_: unknown) => state.counter.set(...)) → handler(event schema, capture schema, (_, { state }) => ...)({ state })
 // Context: Event param is named _ (unused); transformer emits a generic event schema placeholder
 export default pattern((state) => {
     return {
-        [UI]: (<button type="button" onClick={__cfHelpers.handler({
-            type: "unknown"
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        counter: {
-                            type: "number",
-                            asCell: ["cell"]
-                        }
-                    },
-                    required: ["counter"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, (_, { state }) => state.counter.set(state.counter.get() + 1))({
+        [UI]: (<button type="button" onClick={__cfHandler_1({
             state: {
                 counter: state.key("counter")
             }

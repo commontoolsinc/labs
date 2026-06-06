@@ -1,12 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricEpochDays } from "../../src/fabric-primitives/FabricEpochDays.ts";
-import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
-import {
-  resetDataModelConfig,
-  setDataModelConfig,
-  shallowFabricFromNativeValue,
-} from "../../src/fabric-value.ts";
+
+import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 
 describe("FabricEpochDays", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -51,14 +48,9 @@ describe("FabricEpochDays", () => {
   // of the class, so it lives directly under the class `describe()`.
   describe("shallowFabricFromNativeValue() integration", () => {
     it("passes through unchanged even with `freeze=false`", () => {
-      setDataModelConfig(true);
-      try {
-        const days = new FabricEpochDays(456n);
-        // freeze=false should still return the same instance (not a copy).
-        expect(shallowFabricFromNativeValue(days, false)).toBe(days);
-      } finally {
-        resetDataModelConfig();
-      }
+      const days = new FabricEpochDays(456n);
+      // freeze=false should still return the same instance (not a copy).
+      expect(shallowFabricFromNativeValue(days, false)).toBe(days);
     });
   });
 });

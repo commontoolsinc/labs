@@ -17,6 +17,32 @@ interface BaseState {
 }
 // Partial<BaseState> should make both 'a' and 'b' optional in the schema
 type PartState = Partial<BaseState>;
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        a: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "undefined"
+                }],
+            asCell: ["readonly"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, (_, { a }) => console.log(a));
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        b: {
+            anyOf: [{
+                    type: "number"
+                }, {
+                    type: "undefined"
+                }],
+            asCell: ["readonly"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b));
 // FIXTURE: action-partial
 // Verifies: Partial<BaseState> produces optional (anyOf undefined|type) capture schemas in handlers
 //   action(() => console.log(a)) → handler(false, { a: { anyOf: [undefined, string] } }, ...)({ a })
@@ -25,34 +51,10 @@ export default pattern((__cf_pattern_input) => {
     const a = __cf_pattern_input.key("a");
     const b = __cf_pattern_input.key("b");
     return {
-        readA: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                a: {
-                    anyOf: [{
-                            type: "string"
-                        }, {
-                            type: "undefined"
-                        }],
-                    asCell: ["readonly"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => console.log(a))({
+        readA: __cfHandler_1({
             a: a
         }).for({ stream: ["__patternResult", "readA"] }, true),
-        readB: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                b: {
-                    anyOf: [{
-                            type: "number"
-                        }, {
-                            type: "undefined"
-                        }],
-                    asCell: ["readonly"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b))({
+        readB: __cfHandler_2({
             b: b
         }).for({ stream: ["__patternResult", "readB"] }, true)
     };

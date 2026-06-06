@@ -15,6 +15,82 @@ interface TodoItem {
     title: string;
     done: boolean;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    return item.key("title");
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/TodoItem"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        TodoItem: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["title", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return ({
+        title: item.key("title"),
+        done: item.key("done"),
+        position: index,
+    });
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/TodoItem"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        TodoItem: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["title", "done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        title: {
+            type: "string"
+        },
+        done: {
+            type: "boolean"
+        },
+        position: {
+            type: "number"
+        }
+    },
+    required: ["title", "done", "position"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: opaque-ref-map
 // Verifies: .map() on typed arrays is transformed to .mapWithPattern() with generated schemas
 //   items.map((item) => item.title) → items.mapWithPattern(pattern(...), {})
@@ -23,83 +99,9 @@ interface TodoItem {
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     // Map on opaque ref arrays should be transformed to mapWithPattern
-    const mapped = items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        return item.key("title");
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                $ref: "#/$defs/TodoItem"
-            }
-        },
-        required: ["element"],
-        $defs: {
-            TodoItem: {
-                type: "object",
-                properties: {
-                    title: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["title", "done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {}).for("mapped", true);
+    const mapped = items.mapWithPattern(__cfPattern_1, {}).for("mapped", true);
     // This should also be transformed
-    const filtered = items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const item = __cf_pattern_input.key("element");
-        const index = __cf_pattern_input.key("index");
-        return ({
-            title: item.key("title"),
-            done: item.key("done"),
-            position: index,
-        });
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                $ref: "#/$defs/TodoItem"
-            },
-            index: {
-                type: "number"
-            }
-        },
-        required: ["element"],
-        $defs: {
-            TodoItem: {
-                type: "object",
-                properties: {
-                    title: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["title", "done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            title: {
-                type: "string"
-            },
-            done: {
-                type: "boolean"
-            },
-            position: {
-                type: "number"
-            }
-        },
-        required: ["title", "done", "position"]
-    } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
+    const filtered = items.mapWithPattern(__cfPattern_2, {}).for("filtered", true);
     return { mapped, filtered };
 }, {
     type: "object",

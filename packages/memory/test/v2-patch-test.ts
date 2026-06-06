@@ -273,6 +273,53 @@ Deno.test("memory v2 patch rejects missing array indices in parent traversal", (
   });
 });
 
+Deno.test("memory v2 patch rejects add through a missing key into an array index", () => {
+  // The intermediate `0` would land inside a freshly-created (empty) array,
+  // which has no element 0 to traverse into -- so this must be rejected, not
+  // silently fabricated.
+  const original = {};
+
+  let error: Error | null = null;
+  try {
+    applyPatch(original, [
+      { op: "add", path: "/missingKey/0/x", value: 1 },
+    ]);
+  } catch (caught) {
+    error = caught as Error;
+  }
+
+  assertEquals(error instanceof Error, true);
+  assertEquals(original, {});
+});
+
+Deno.test("memory v2 patch rejects add through a missing key into an array append marker", () => {
+  const original = {};
+
+  let error: Error | null = null;
+  try {
+    applyPatch(original, [
+      { op: "add", path: "/missingKey/-/x", value: 1 },
+    ]);
+  } catch (caught) {
+    error = caught as Error;
+  }
+
+  assertEquals(error instanceof Error, true);
+  assertEquals(original, {});
+});
+
+Deno.test("memory v2 patch appends via the `-` marker on an existing array", () => {
+  const original = { items: ["a"] };
+
+  const out = applyPatch(original, [
+    { op: "add", path: "/items/-", value: "b" },
+  ]) as typeof original;
+
+  assertEquals(out, { items: ["a", "b"] });
+  // Input untouched.
+  assertEquals(original, { items: ["a"] });
+});
+
 Deno.test("memory v2 patch reuses unchanged branches across sibling updates", () => {
   const original = {
     left: {

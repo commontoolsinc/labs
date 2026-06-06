@@ -1,4 +1,4 @@
-import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
+import { BaseIncrementalHasher } from "@/BaseIncrementalHasher.ts";
 
 /**
  * Size of the small-data buffer.

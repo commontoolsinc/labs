@@ -9,6 +9,7 @@ import {
   getPieceView,
   inspectPiece,
   linkPieces,
+  linkSqliteDiskSource,
   LinkValidationError,
   listPieces,
   MapFormat,
@@ -26,6 +27,7 @@ import {
   stepPiece,
 } from "../lib/piece.ts";
 import { renderPiece } from "../lib/piece-render.ts";
+import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commonfabric/utils/encoding";
 import { cliText } from "../lib/cli-name.ts";
@@ -604,6 +606,12 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     ),
     `Link well-known "allPieces" list to a piece field.`,
   )
+  .example(
+    cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} sqlite:/data/reference.db bafypiece1/refDb`,
+    ),
+    `Inject a read-only on-disk SQLite file as a piece's SqliteDb input (Phase 7).`,
+  )
   .arguments("<source:string> <target:string>")
   .option("--no-start", "Only link without starting the pieces")
   .option(
@@ -613,6 +621,31 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   .action(async (options, sourceRef, targetRef) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
+
+    // Phase 7: `cf piece link sqlite:<absPath> <piece>/<field>` injects a
+    // read-only on-disk SQLite source into the target field (v1). Detect this
+    // BEFORE parseLink (the sqlite: scheme is not a piece ref).
+    const sqliteSource = parseSqliteSource(sourceRef);
+    if (sqliteSource) {
+      const target = parseLink(targetRef);
+      if (!target.path) {
+        throw new ValidationError(
+          `Target reference must include a path. Expected: pieceId/path/to/field`,
+          { exitCode: 1 },
+        );
+      }
+      await linkSqliteDiskSource(
+        spaceConfig,
+        sqliteSource.path,
+        target.pieceId,
+        target.path,
+        { start: options.start, targetScope: target.scope },
+      );
+      render(`Linked ${sourceRef} to ${targetRef} (read-only on-disk source)`);
+      hint(cliText(`NEXT STEPS:
+  → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
+      return;
+    }
 
     // Parse source and target references - handle both pieceId/path and well-known IDs
     const source = parseLink(sourceRef, { allowWellKnown: true });

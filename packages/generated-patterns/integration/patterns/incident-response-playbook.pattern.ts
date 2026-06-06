@@ -1,8 +1,8 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -489,26 +489,23 @@ export const incidentResponsePlaybook = pattern<IncidentResponsePlaybookArgs>(
 
     const timeline = liftTimeline(history);
 
-    const latestLogEntry = derive(timeline, (entries) => {
-      if (entries.length === 0) {
+    const latestLogEntry = computed(() => {
+      if (timeline.length === 0) {
         return "ready";
       }
-      return entries[entries.length - 1];
+      return timeline[timeline.length - 1];
     });
 
     const activeStepId = liftActiveStepId(activeStep);
 
-    const activeStepTitle = derive(
-      { list: stepsView, active: activeStep },
-      ({ list, active }) => {
-        const id = active;
-        if (!id) {
-          return "idle";
-        }
-        const target = list.find((step) => step.id === active.get());
-        return target ? target.title : "idle";
-      },
-    );
+    const activeStepTitle = computed(() => {
+      const id = activeStep.get();
+      if (!id) {
+        return "idle";
+      }
+      const target = stepsView.find((step) => step.id === id);
+      return target ? target.title : "idle";
+    });
 
     const clockMinutes = liftClockMinutes(clock);
 

@@ -1,4 +1,8 @@
-import { isPattern, unsafe_verifiedLoadId } from "../builder/types.ts";
+import { isPattern } from "../builder/types.ts";
+import {
+  isTrustedPattern,
+  setVerifiedLoadId,
+} from "../builder/pattern-metadata.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-contract";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
@@ -270,12 +274,8 @@ export class ExecutableRegistry {
       }
     }
 
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
-      this.recordVerifiedFunctions(loadId, descriptor.value, seen);
+    for (const child of verifiedWalkChildValues(value as object)) {
+      this.recordVerifiedFunctions(loadId, child, seen);
     }
   }
 
@@ -293,29 +293,41 @@ export class ExecutableRegistry {
   private annotateVerifiedPatterns(
     value: unknown,
     loadId: string,
-    seen = new Set<unknown>(),
+    seen = new Map<unknown, boolean>(),
+    trusted = false,
   ): void {
     if (!value || (typeof value !== "object" && typeof value !== "function")) {
       return;
     }
-    if (seen.has(value)) {
+
+    // Trust is rooted at a builder-produced (`isTrustedPattern`) value; once
+    // inside a trusted pattern's subtree, nested (serialized, unbranded)
+    // subpatterns inherit the id via structural `isPattern`. A `__cf_data`-forged
+    // pattern-shaped value at the top level (trusted === false) is never
+    // annotated, so it cannot launder a CFC identity into the side-table.
+    const subtreeTrusted = trusted || isTrustedPattern(value);
+
+    // `seen` records the trust level a node was visited at, so a node reached
+    // first via an untrusted path is still re-processed when later reached via a
+    // trusted path — order-independent. A trusted visit is final.
+    const prior = seen.get(value);
+    if (prior === true || (prior === false && !subtreeTrusted)) {
       return;
     }
-    seen.add(value);
+    seen.set(value, subtreeTrusted);
 
-    if (isPattern(value) && Object.isExtensible(value)) {
-      Object.defineProperty(value, unsafe_verifiedLoadId, {
-        value: loadId,
-        configurable: true,
-      });
+    if (subtreeTrusted && isPattern(value)) {
+      // Side-table storage works on frozen patterns too (no own-property write).
+      setVerifiedLoadId(value, loadId);
     }
 
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
-      this.annotateVerifiedPatterns(descriptor.value, loadId, seen);
+    for (const child of verifiedWalkChildValues(value as object)) {
+      this.annotateVerifiedPatterns(
+        child,
+        loadId,
+        seen,
+        subtreeTrusted,
+      );
     }
   }
 
@@ -365,13 +377,9 @@ export class ExecutableRegistry {
       registry.set(associated.implementationRef, associated.implementation);
     }
 
-    for (const key of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, key);
-      if (!descriptor || !("value" in descriptor)) {
-        continue;
-      }
+    for (const child of verifiedWalkChildValues(value as object)) {
       this.collectAssociatedFunctions(
-        descriptor.value,
+        child,
         registry,
         seen,
         fallbackLookup,
@@ -460,6 +468,73 @@ export class ExecutableRegistry {
     hardenVerifiedFunction(implementation as (...args: any[]) => unknown);
     return implementationRef;
   }
+}
+
+/**
+ * Yield the child values to recurse into when walking a verified value graph
+ * (used by {@link ExecutableRegistry.recordVerifiedFunctions},
+ * `annotateVerifiedPatterns`, and `collectAssociatedFunctions`).
+ *
+ * Data properties — the AMD/CommonJS bundle shape (`exports.x = …`) — expose
+ * their value directly. SES module-namespace exports — the ESM module-record
+ * loader shape — are live-binding ACCESSOR properties (`get`/`set`, no `value`).
+ * Reading only `descriptor.value` therefore never descends into an ESM module's
+ * exports, so verified functions, their binding metadata
+ * (`__cfVerifiedBindingIdentity`), and exported patterns defined by ESM-loaded
+ * modules were never registered/annotated. That left the writer's verified
+ * binding identity (`sourceFile`/`bindingPath`) unresolved, so CFC
+ * `writeAuthorizedBy` rejected trusted-action writes under the ESM loader
+ * (CT-1623).
+ *
+ * Reading via [[Get]] is scoped to genuine module namespaces (see
+ * {@link isModuleNamespaceObject}), whose getters are spec-defined live bindings
+ * with no user-controlled side effects. Getters on ordinary objects are
+ * deliberately NOT invoked, preserving the side-effect-free walk over data
+ * values.
+ */
+export function* verifiedWalkChildValues(value: object): Generator<unknown> {
+  const isModuleNamespace = isModuleNamespaceObject(value);
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) {
+      continue;
+    }
+    if ("value" in descriptor) {
+      yield descriptor.value;
+    } else if (isModuleNamespace && typeof descriptor.get === "function") {
+      try {
+        yield (value as Record<PropertyKey, unknown>)[key];
+      } catch {
+        // A live binding that throws on read carries nothing to register.
+      }
+    }
+  }
+}
+
+/**
+ * Detect a module-namespace object WITHOUT invoking user code.
+ *
+ * We must not use `Object.prototype.toString.call(value)` or read
+ * `value[Symbol.toStringTag]`: both perform a `[[Get]]` that would invoke a
+ * user-defined `@@toStringTag` getter as a side effect on every value walked —
+ * exactly the side-effect-free property this traversal is meant to preserve.
+ *
+ * Instead we match the exact `@@toStringTag` shape of a Module Namespace Exotic
+ * Object (ECMAScript 28.3 / 10.4.6): an own, non-writable, non-enumerable,
+ * non-configurable DATA property whose value is "Module" (verified: SES
+ * namespaces expose precisely this). Reading the own descriptor never invokes a
+ * getter, and the strict attribute match keeps the classifier from being
+ * tricked by an ordinary object that merely carries a (writable/enumerable/
+ * configurable) `@@toStringTag` data property or exposes one via an accessor —
+ * so getters on non-namespace objects are never run.
+ */
+function isModuleNamespaceObject(value: object): boolean {
+  const tag = Object.getOwnPropertyDescriptor(value, Symbol.toStringTag);
+  return tag !== undefined &&
+    "value" in tag && tag.value === "Module" &&
+    tag.writable === false &&
+    tag.enumerable === false &&
+    tag.configurable === false;
 }
 
 function readVerifiedBindingMetadata(

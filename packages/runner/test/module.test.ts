@@ -15,7 +15,6 @@ import {
 } from "../src/builder/types.ts";
 import {
   action,
-  derive,
   handler,
   lift,
   parseStackFrame,
@@ -500,11 +499,11 @@ describe("module", () => {
       expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
 
-    it("attaches source location through derive", () => {
+    it("attaches source location through lift", () => {
       const fn = (x: number) => x * 2;
-      derive(opaqueRef(5), fn);
+      lift(fn)(opaqueRef(5));
 
-      // derive calls lift internally, should still track the original function
+      // lift should track the original function's source location
       expect(fn.name).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
 

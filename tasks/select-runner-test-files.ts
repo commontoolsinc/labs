@@ -15,6 +15,19 @@ const RUNNER_TEST_WEIGHT_OVERRIDES: Record<string, number> = {
   // This file is much slower than its byte size suggests because it compiles
   // and evaluates many SES modules. Keep it as a heavy shard anchor.
   "engine.test.ts": 700_000,
+  // These files are small-to-medium on disk but dominate CI wall time. Keep
+  // them separated so one runner shard does not become the long pole.
+  "piece-helpers.test.ts": 320_000,
+  "json-utils.test.ts": 210_000,
+  "reactive-dependencies.test.ts": 180_000,
+  "pattern-manager.test.ts": 145_000,
+  "runner.test.ts": 100_000,
+  "memory-v2-watch-refresh-race.test.ts": 95_000,
+  "wish.test.ts": 95_000,
+  "data-updating.test.ts": 80_000,
+  "navigate-handler.test.ts": 80_000,
+  "scheduler-ordering.test.ts": 80_000,
+  "pattern-scope.test.ts": 75_000,
 };
 
 export function parseShard(raw: string): Shard {

@@ -1,7 +1,9 @@
 import { Console } from "./console.ts";
 import {
+  type CacheableModule,
   type CompileResult,
   type EvaluateOptions,
+  type EvaluateResult,
   type Exports,
   type Harness,
   type HarnessedFunction,
@@ -26,7 +28,34 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
-import { pretransformProgram } from "./pretransform.ts";
+import {
+  pretransformProgram,
+  pretransformProgramForModules,
+} from "./pretransform.ts";
+import {
+  computeModuleHashes,
+  resolveModuleImports,
+} from "./module-identity.ts";
+import {
+  buildRecordsFromCompiled,
+  type CachedCompiledModule,
+  type CompiledModuleGraph,
+  compileSourcesToRecords,
+  computeModuleIdentities,
+} from "../sandbox/module-record-compiler.ts";
+import {
+  composeBundleSourceMap,
+  type SourceMap,
+} from "@commonfabric/js-compiler";
+import {
+  loadModuleGraph,
+  runtimeModuleRecords,
+  type VirtualModuleRecord,
+} from "../sandbox/esm-module-loader.ts";
+import {
+  verifyCompiledModuleBody,
+  verifyModuleGraph,
+} from "../sandbox/module-record-verifier.ts";
 import { popFrame, pushFrame } from "../builder/pattern.ts";
 import {
   ensureSESLockdown,
@@ -124,6 +153,15 @@ export class Engine extends EventTarget implements Harness {
   private sesRuntime: SESRuntime | undefined;
   private loadIds = new WeakMap<JsScript, string>();
   private nextLoadId = 0;
+  // Content-addressed module hash per prefixed source path (`/<id>/file.tsx`),
+  // populated at evaluate() time. Used to translate an action's bundle-relative
+  // source location into a stable implementation identity.
+  private moduleHashByPrefixedSource = new Map<string, string>();
+  // Canonical content-addressed source per prefixed source path, i.e.
+  // `/<programHash>/<authoredPath>` -> `cf:module/<moduleHash>/<authoredPath>`.
+  // Used to rewrite a function's `src` into a reload-stable identity that does
+  // not depend on which bundle/entry-point compiled the module.
+  private canonicalSourceByPrefixed = new Map<string, string>();
   private readonly bundleValidator = new CompiledBundleValidator();
   private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
@@ -226,6 +264,618 @@ export class Engine extends EventTarget implements Harness {
     }
   }
 
+  /**
+   * Compile a program to a verified ESM module-record graph (the
+   * `esmModuleLoader` compile path). Runs the same resolution + CF transformer
+   * pipeline as {@link compile}, emits per-module CommonJS via
+   * `compileToModules`, assembles content-addressed records (plus runtime-
+   * module records), and security-verifies every authored module body with
+   * the ESM verifier. Returns the graph and the entry specifier for evaluation.
+   */
+  async compileToRecordGraph(
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<
+    {
+      id: string;
+      graph: CompiledModuleGraph;
+      mainSpecifier: string;
+      entryIdentity: string;
+      modules: CacheableModule[];
+    }
+  > {
+    logger.timeStart("compileToRecordGraph");
+    try {
+      const id = options.identifier ?? computeId(program);
+      const mappedProgram = pretransformProgramForModules(program, id);
+      const resolver = new EngineProgramResolver(
+        mappedProgram,
+        this.ctRuntime.staticCache,
+      );
+      const resolvedProgram = await this.resolve(resolver);
+
+      // Authored (non-.d.ts) sources are the modules that must have a body.
+      const moduleFiles = resolvedProgram.files.filter((f) =>
+        !f.name.endsWith(".d.ts")
+      );
+
+      // Prefix-free content identity per resolved module path. Computed here
+      // (cheap, no TS compile) so the cache-hit check and the write-back
+      // descriptors agree with the graph's `cf:module/<hash>` specifiers.
+      const identityByPath = computeModuleIdentities(moduleFiles, {
+        idPrefix: `/${id}`,
+      });
+      const entryIdentity = identityByPath.get(mappedProgram.main)!;
+
+      // Cache hit: every emitted module already has a cached compiled body
+      // (keyed by identity), so skip the TypeScript compile entirely and build
+      // the record graph from the cached bodies. Per-module identities are
+      // transitively sensitive, so a partial set cannot be trusted — fall back
+      // to a full recompile. The cache is queried by identity (directly, or
+      // lazily once identities are known) without leaking the engine's prefix.
+      const cached = options.precompiledModules ??
+        (options.precompiledModulesFor
+          ? await options.precompiledModulesFor({
+            entryIdentity,
+            identities: [...new Set(identityByPath.values())],
+          })
+          : undefined);
+      const fullHit = cached !== undefined &&
+        moduleFiles.every((f) => cached.has(identityByPath.get(f.name)!));
+
+      const precompiledBodies = new Map<string, string>();
+      // Carry per-module source maps so the ESM loader can compose a per-load
+      // bundle map (CFC verified-source / fn.src coordinate resolution).
+      const precompiledSourceMaps = new Map<string, SourceMap>();
+
+      if (fullHit) {
+        logger.info("compile-cache-hit", () => ["compileToRecordGraph", id]);
+        for (const file of moduleFiles) {
+          const artifact = cached!.get(identityByPath.get(file.name)!)!;
+          precompiledBodies.set(file.name, artifact.js);
+          if (artifact.sourceMap !== undefined) {
+            precompiledSourceMaps.set(
+              file.name,
+              artifact.sourceMap as SourceMap,
+            );
+          }
+        }
+      } else {
+        const { compiler } = await this.getCompilerInternals();
+        const modules = compiler.compileToModules(resolvedProgram, {
+          noCheck: options.noCheck,
+          runtimeModules: Engine.runtimeModuleNames(),
+          beforeTransformers: (program) => {
+            const pipeline = new CommonFabricTransformerPipeline();
+            return {
+              factories: pipeline.toFactories(program),
+              getDiagnostics: () => pipeline.getDiagnostics(),
+            };
+          },
+        });
+
+        // Every authored source must have an emitted body; a missing one would
+        // otherwise be silently dropped and only fail later at import.
+        for (const file of moduleFiles) {
+          if (!modules.has(file.name)) {
+            throw new Error(
+              `ESM compile produced no module body for '${file.name}'`,
+            );
+          }
+        }
+        for (const [name, out] of modules) {
+          precompiledBodies.set(name, out.js);
+          if (out.sourceMap) precompiledSourceMaps.set(name, out.sourceMap);
+        }
+      }
+      const { runtimeExports } = await this.getRuntimeInternals();
+      const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
+        runtimeExports?.[name]
+      );
+      const runtimeModulesOption = Object.fromEntries(
+        runtimeNames.map((name) => [
+          name,
+          Object.keys(runtimeExports?.[name] ?? {}),
+        ]),
+      );
+      const graph = compileSourcesToRecords(moduleFiles, {
+        precompiledBodies,
+        precompiledSourceMaps,
+        runtimeModules: runtimeModulesOption,
+        // Strip the whole-program `/<id>` prefix from per-module identities so
+        // `cf:module/<hash>` is entry-point independent and dedupes across
+        // programs (the content-addressed cache keys off these identities).
+        idPrefix: `/${id}`,
+        // Reuse the identities already computed above (cache-hit check); avoids
+        // a second hashing/import-resolution pass over the module set.
+        identityByPath,
+      });
+
+      // Register runtime-module records so cf:runtime/* imports resolve.
+      const runtimeRecordExports: Record<string, Record<string, unknown>> = {};
+      for (const name of runtimeNames) {
+        runtimeRecordExports[name] = runtimeExports?.[name] as Record<
+          string,
+          unknown
+        >;
+      }
+      for (
+        const [spec, record] of runtimeModuleRecords(runtimeRecordExports)
+      ) {
+        graph.records.set(spec, record as VirtualModuleRecord);
+      }
+
+      // Security-verify every authored module body before it can execute.
+      for (const [specifier, body] of graph.compiledBodies) {
+        verifyCompiledModuleBody(body, specifier);
+      }
+
+      const mainSpecifier = graph.specifierByPath.get(mappedProgram.main);
+      if (mainSpecifier === undefined) {
+        throw new Error(
+          "ESM compile produced no record for the program entry",
+        );
+      }
+
+      // Structurally verify the whole record graph (content-addressed
+      // specifiers, well-formed records, and that every import edge resolves to
+      // a content-addressed target). This must run here because the loader is
+      // invoked with `verify: false` in evaluateRecordGraph — graph
+      // verification happens once, at compile time, before any module executes.
+      verifyModuleGraph(graph.records, mainSpecifier);
+
+      // Serializable per-module descriptors for write-back to the cache, in
+      // identity space (the engine's `/<id>` path prefix never leaks out). Each
+      // carries the resolved TS source (for the source set), the compiled JS
+      // (for the compiled set), and the internal import edges as
+      // specifier → dependency-identity links. On a cache hit these mirror the
+      // artifacts just loaded.
+      const importEdges = resolveModuleImports({
+        main: "",
+        files: moduleFiles,
+      });
+      const modules: CacheableModule[] = moduleFiles.map((file) => {
+        const identity = identityByPath.get(file.name)!;
+        const sourceMap = precompiledSourceMaps.get(file.name);
+        const imports = (importEdges.get(file.name)?.internalDeps ?? []).map((
+          dep,
+        ) => ({
+          specifier: dep.specifier,
+          targetIdentity: identityByPath.get(dep.target)!,
+        }));
+        return {
+          identity,
+          filename: stripModuleIdPrefix(file.name, id),
+          source: file.contents,
+          js: precompiledBodies.get(file.name)!,
+          ...(sourceMap === undefined ? {} : { sourceMap }),
+          imports,
+        };
+      });
+
+      return { id, graph, mainSpecifier, entryIdentity, modules };
+    } finally {
+      logger.timeEnd("compileToRecordGraph");
+    }
+  }
+
+  /**
+   * Cold-recovery path: recompile cacheable modules from the
+   * inject-helper-transformed module set already stored in the content-addressed
+   * **source set** (`pattern:<identity>` cells), loaded by identity — i.e.
+   * recreate the pattern from its stored TypeScript alone. Skips **pretransform**
+   * (the source already carries the helper import and prefix-free normalized
+   * paths, so re-injecting/re-prefixing would corrupt it and shift identities)
+   * but still **resolves** to supply the runtime `.d.ts` type environment the CF
+   * transformer needs for schema generation (those types are TCB, from the
+   * static cache, not stored per pattern). Used when the compiled set misses
+   * (e.g. a runtimeVersion bump invalidates `compileCache:<rtver>/...`).
+   *
+   * Per-module identities recompute to the same content-addressed values (the
+   * module bodies + names are unchanged), so the rebuilt compiled set is
+   * addressable — and writable-back — under the new runtimeVersion. Returns the
+   * `CacheableModule[]` (feed to {@link evaluateCachedModules}) + entry identity.
+   * `entryFilename` is the entry module's normalized path.
+   */
+  async compileResolvedToRecordGraph(
+    resolvedFiles: Source[],
+    entryFilename: string,
+  ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
+    const { compiler } = await this.getCompilerInternals();
+    // Resolve to add the runtime `.d.ts` type environment, WITHOUT pretransform
+    // (no re-inject/re-prefix — the stored source is already transformed).
+    const resolver = new EngineProgramResolver(
+      { main: entryFilename, files: resolvedFiles },
+      this.ctRuntime.staticCache,
+    );
+    const resolvedProgram = await this.resolve(resolver);
+    const moduleFiles = resolvedProgram.files.filter((f) =>
+      !f.name.endsWith(".d.ts")
+    );
+    // Identities recompute prefix-free over the (already-normalized) closure —
+    // they match the stored identities the source docs were keyed by.
+    const identityByPath = computeModuleIdentities(moduleFiles);
+
+    const emitted = compiler.compileToModules(resolvedProgram, {
+      runtimeModules: Engine.runtimeModuleNames(),
+      beforeTransformers: (program) => {
+        const pipeline = new CommonFabricTransformerPipeline();
+        return {
+          factories: pipeline.toFactories(program),
+          getDiagnostics: () => pipeline.getDiagnostics(),
+        };
+      },
+    });
+    for (const file of moduleFiles) {
+      if (!emitted.has(file.name)) {
+        throw new Error(
+          `Recompile from source produced no body for '${file.name}'`,
+        );
+      }
+    }
+
+    const importEdges = resolveModuleImports({ main: "", files: moduleFiles });
+    const modules: CacheableModule[] = moduleFiles.map((file) => {
+      const out = emitted.get(file.name)!;
+      const imports = (importEdges.get(file.name)?.internalDeps ?? []).map((
+        dep,
+      ) => ({
+        specifier: dep.specifier,
+        targetIdentity: identityByPath.get(dep.target)!,
+      }));
+      return {
+        identity: identityByPath.get(file.name)!,
+        filename: file.name,
+        source: file.contents,
+        js: out.js,
+        ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        imports,
+      };
+    });
+    const entryIdentity = identityByPath.get(entryFilename)!;
+    return { modules, entryIdentity };
+  }
+
+  /**
+   * Compile + evaluate a program through the ESM module-record path (the
+   * `esmModuleLoader` route). Returns the same `{ main, exportMap, loadId }`
+   * shape as {@link evaluate}, so callers can branch on the flag and treat the
+   * result identically.
+   */
+  async compileAndEvaluateModules(
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<EvaluateResult> {
+    // Ensure runtime exports + exportsCallback are initialized.
+    await this.getRuntimeInternals();
+    const { id, graph, mainSpecifier } = await this.compileToRecordGraph(
+      program,
+      options,
+    );
+    return this.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
+  }
+
+  /**
+   * Evaluate a verified ESM record graph: load it synchronously via `importNow`
+   * in a locked-down compartment whose globals are the hardened runtime globals
+   * (runtime-module records, already in the graph, supply the trusted host
+   * APIs), and return the entry namespace as `main` plus the per-module export
+   * map. The graph was security-verified at compile time, so verification is
+   * not repeated.
+   */
+  /**
+   * Evaluate a verified ESM record graph (public so the PatternManager can run
+   * compile → cache write-back → evaluate as discrete steps). Thin wrapper over
+   * {@link evaluateGraph} with the source-compile registration strategy: module
+   * identities are recomputed from `files`, paths carry the `/<id>` prefix, and
+   * `files` flow into the export map for sub-pattern re-instantiation.
+   */
+  evaluateRecordGraph(
+    id: string,
+    graph: CompiledModuleGraph,
+    mainSpecifier: string,
+    files: Source[],
+  ): EvaluateResult {
+    const prefix = `/${id}`;
+    // Register module hashes up front so the canonical `cf:module/<hash>/<path>`
+    // sources are available for the verified set below. Derive them from the
+    // graph's RESOLVED per-module identities (the same content-addressed
+    // `cf:module/<identity>` the cache + source-free reload use), NOT by
+    // re-hashing the raw `files` — those disagree (the resolved set folds the
+    // injected modules into each module's Merkle hash), which would make a
+    // function's `fn.src` (hence its implementationRef) differ between this
+    // source-based compile and a source-free by-identity reload, breaking
+    // `getExecutableFunction` for resumed callables (CT-1623).
+    this.registerModuleHashesFromGraph(id, graph);
+    const verifiedSources = new Set<string>();
+    const addVerifiedSource = (value: string | undefined) => {
+      if (typeof value !== "string" || value.length === 0) return;
+      verifiedSources.add(normalizeVerifiedSource(value));
+      if (value.startsWith(`${prefix}/`)) {
+        verifiedSources.add(
+          normalizeVerifiedSource(value.slice(id.length + 1)),
+        );
+      }
+    };
+    for (const file of files) addVerifiedSource(file.name);
+    for (const path of graph.specifierByPath.keys()) addVerifiedSource(path);
+    // Canonical `cf:module/<hash>/<path>` forms — functions carry these as their
+    // `fn.src`, so CFC's isVerifiedSourceInLoad must recognize them too.
+    for (const canonical of this.canonicalVerifiedSources(id, files)) {
+      addVerifiedSource(canonical);
+    }
+
+    return this.evaluateGraph(graph, mainSpecifier, {
+      loadIdPrefix: id,
+      // Already registered above (idempotent); keep as a no-op so evaluateGraph
+      // doesn't recompute the hashes a second time.
+      registerHashes: () => {},
+      verifiedSources,
+      fileNameForPath: (path) =>
+        path.startsWith(prefix) ? path.slice(prefix.length) : path,
+      filesForExports: files,
+    });
+  }
+
+  /**
+   * Evaluate a record graph. Shared core for both the source-compile path
+   * ({@link evaluateRecordGraph}) and the resolve-free cached-load path
+   * ({@link evaluateCachedModules}); `ctx` supplies the path/identity handling
+   * that differs between them (prefixed authored paths vs prefix-free cached
+   * identities). The graph is assumed already security-verified.
+   */
+  private evaluateGraph(
+    graph: CompiledModuleGraph,
+    mainSpecifier: string,
+    ctx: {
+      loadIdPrefix: string;
+      registerHashes(): void;
+      verifiedSources: Set<string>;
+      fileNameForPath(path: string): string;
+      filesForExports: Source[];
+    },
+  ): EvaluateResult {
+    logger.timeStart("evaluateRecordGraph");
+    try {
+      const loadId = `${ctx.loadIdPrefix}:esm:${this.nextLoadId++}`;
+      this.executableRegistry.beginVerifiedLoad(loadId);
+      // Register per-module content hashes for parity with the AMD evaluate
+      // path. This wires the scheduler's content-addressed implementation hash;
+      // it becomes effective once source-location resolution under the ESM
+      // loader is wired (see the sourceURL note in module-record-compiler.ts).
+      ctx.registerHashes();
+
+      const globals = createModuleCompartmentGlobals({
+        console: this.consoleShim,
+      });
+      // Concatenated module bodies give the source-location frame a `script`
+      // for fn.src `indexOf` resolution. (Insertion order need not match the
+      // import-execution order; resolveLocationFromFunctionSource falls back to
+      // a from-zero scan, and any mis-attribution degrades fail-closed at the
+      // CFC identity layer — see the fn.src note in the design doc.)
+      const script = [...graph.compiledBodies.values()].join("\n");
+      this.executableRegistry.setVerifiedLoadBundleId(
+        loadId,
+        hashOf(script).toString(),
+      );
+      // Register a composed bundle source map for `${loadId}.js` so that
+      // `fn.src` / CFC verified-source coordinates (resolved against `script`)
+      // map back to the original authored sources — without this the ESM loader
+      // yields raw bundle coordinates and CFC verified-source fails closed.
+      // Full module path per specifier (the verified-source set is keyed by
+      // these, not the basename the compiler records in the map's `sources`).
+      const sourceNameBySpecifier = new Map<string, string>();
+      for (const [name, specifier] of graph.specifierByPath) {
+        sourceNameBySpecifier.set(specifier, name);
+      }
+      const bundleSourceMap = composeBundleSourceMap(
+        [...graph.compiledBodies].map(([specifier, body]) => ({
+          body,
+          map: graph.moduleSourceMaps.get(specifier),
+          source: sourceNameBySpecifier.get(specifier),
+        })),
+        `${loadId}.js`,
+      );
+      if (bundleSourceMap) {
+        this.getSESRuntime().loadSourceMap(`${loadId}.js`, bundleSourceMap);
+      }
+      // ALSO register each module's map under its eval `//# sourceURL` (its
+      // sanitized source name). The browser surfaces the per-module eval frame
+      // in `new Error().stack`, and `annotateFunctionDebugMetadata` resolves
+      // `fn.src` from that frame FIRST (the indexOf-into-`script` fallback that
+      // `${loadId}.js` covers only wins when the stack frame is absent, e.g.
+      // under Deno's tamed SES stacks). The frame is keyed on the per-module
+      // sourceURL with eval-relative line numbers, so register the per-module
+      // map shifted by the factory-wrapper line (`(function (...) {\n` = +1).
+      for (const [name, specifier] of graph.specifierByPath) {
+        const map = graph.moduleSourceMaps.get(specifier);
+        if (!map) continue;
+        const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
+        const moduleMap = composeBundleSourceMap(
+          [{ body: "", map, source: name }],
+          sourceUrl,
+          1, // the `(function (exports, require, module) {` wrapper line
+        );
+        if (moduleMap) this.getSESRuntime().loadSourceMap(sourceUrl, moduleMap);
+      }
+      // Verified-load sources (the function source locations CFC's
+      // isVerifiedSourceInLoad recognizes) are computed by the caller, since the
+      // path/prefix convention — and the canonical `cf:module/<hash>/<path>`
+      // form — differs between the source-compile and cached load paths.
+      this.executableRegistry.setVerifiedLoadSources(
+        loadId,
+        ctx.verifiedSources,
+      );
+
+      // Register functions defined during this load as verified, mirroring the
+      // AMD path's verified-execution model.
+      const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
+        this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
+      );
+      const frame = pushFrame({
+        runtime: this.ctRuntime,
+        verifiedLoadId: loadId,
+        sourceLocationContext: {
+          script,
+          filename: `${loadId}.js`,
+          nextSearchOffset: 0,
+        },
+      });
+
+      let loaded: ReturnType<typeof loadModuleGraph>;
+      try {
+        loaded = loadModuleGraph(mainSpecifier, {
+          records: graph.records,
+          globals,
+          verify: false, // already verified at compile time
+        });
+      } finally {
+        popFrame(frame);
+        restoreVerifiedFunctionRegistrar();
+      }
+
+      const main = loaded.namespace as Exports;
+      this.executableRegistry.captureVerifiedValue(loadId, main);
+
+      // Build the per-module export map (keyed by normalized source path) from
+      // the SAME load, and map each exported value back to its RuntimeProgram
+      // for sub-pattern resolution.
+      const exportMap: Record<string, Exports> = {};
+      const exportsByValue = new Map<unknown, RuntimeProgram>();
+      // Per-module namespaces keyed by content identity (stripped from the
+      // `cf:module/<identity>` specifier) for the in-memory identity cache.
+      const exportsByIdentity = new Map<string, Exports>();
+      const MODULE_SPECIFIER_PREFIX = "cf:module/";
+      for (const [path, specifier] of graph.specifierByPath) {
+        const namespace = loaded.importNow(specifier) as Exports;
+        const fileName = ctx.fileNameForPath(path);
+        exportMap[fileName] = namespace;
+        if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
+          exportsByIdentity.set(
+            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
+            namespace,
+          );
+        }
+        for (const [exportName, value] of Object.entries(namespace)) {
+          // Only object/function exports are sub-pattern candidates. Skip the
+          // `__esModule` flag and primitives, which would otherwise collide in
+          // this value-keyed map (e.g. every module's `true`).
+          if (exportName === "__esModule") continue;
+          if (typeof value !== "object" && typeof value !== "function") {
+            continue;
+          }
+          if (value === null) continue;
+          exportsByValue.set(value, {
+            main: fileName,
+            mainExport: exportName,
+            files: ctx.filesForExports,
+          });
+        }
+      }
+      // Capture the export map too, so verified values from non-entry modules
+      // are indexed by the registry exactly as on the AMD path.
+      this.executableRegistry.captureVerifiedValue(loadId, exportMap);
+      this.runtimeInternals?.exportsCallback(exportsByValue);
+
+      return { main, exportMap, loadId, exportsByIdentity };
+    } finally {
+      logger.timeEnd("evaluateRecordGraph");
+    }
+  }
+
+  /**
+   * Warm load path: build a record graph **directly from cached compiled
+   * modules** (no TS source, no `resolve`, no recompile — see
+   * {@link buildRecordsFromCompiled}), register runtime records, security-verify
+   * (still re-verified while the integrity label is client-asserted), and
+   * evaluate. `entryIdentity` is the content identity of the entry module
+   * (`cf:module/<entryIdentity>`). Optional `sourceFiles` (the cached source
+   * closure) flow into the export map so sub-pattern re-instantiation keeps a
+   * program to recompile from; omit them and sub-patterns fall back to identity.
+   */
+  async evaluateCachedModules(
+    modules: readonly CachedCompiledModule[],
+    entryIdentity: string,
+    options: { sourceFiles?: Source[] } = {},
+  ): Promise<EvaluateResult> {
+    await this.getRuntimeInternals();
+    const { runtimeExports } = await this.getRuntimeInternals();
+    const runtimeNames = Engine.runtimeModuleNames().filter((name) =>
+      runtimeExports?.[name]
+    );
+    const runtimeModulesOption = Object.fromEntries(
+      runtimeNames.map((name) => [
+        name,
+        Object.keys(runtimeExports?.[name] ?? {}),
+      ]),
+    );
+
+    const graph = buildRecordsFromCompiled(modules, {
+      runtimeModules: runtimeModulesOption,
+    });
+
+    // Register runtime-module records so cf:runtime/* imports resolve.
+    const runtimeRecordExports: Record<string, Record<string, unknown>> = {};
+    for (const name of runtimeNames) {
+      runtimeRecordExports[name] = runtimeExports?.[name] as Record<
+        string,
+        unknown
+      >;
+    }
+    for (const [spec, record] of runtimeModuleRecords(runtimeRecordExports)) {
+      graph.records.set(spec, record as VirtualModuleRecord);
+    }
+
+    // Security-verify every cached body + the whole graph before executing —
+    // the cache's integrity label is still only client-asserted, so cached
+    // bytes are not trusted unverified (mirrors the compile path).
+    for (const [specifier, body] of graph.compiledBodies) {
+      verifyCompiledModuleBody(body, specifier);
+    }
+    const mainSpecifier = `cf:module/${entryIdentity}`;
+    if (!graph.records.has(mainSpecifier)) {
+      throw new Error(
+        `Cached closure is missing the entry module ${mainSpecifier}`,
+      );
+    }
+    verifyModuleGraph(graph.records, mainSpecifier);
+
+    // Verified-load sources: normalized module paths (no `/<id>` prefix — the
+    // cached records use prefix-free filenames as their sourceURLs) plus the
+    // canonical `cf:module/<identity><filename>` forms that functions carry as
+    // their `fn.src` (so CFC's isVerifiedSourceInLoad recognizes them).
+    const verifiedSources = new Set<string>();
+    for (const m of modules) {
+      verifiedSources.add(normalizeVerifiedSource(m.filename));
+      verifiedSources.add(
+        normalizeVerifiedSource(`cf:module/${m.identity}${m.filename}`),
+      );
+    }
+    for (const path of graph.specifierByPath.keys()) {
+      verifiedSources.add(normalizeVerifiedSource(path));
+    }
+
+    return this.evaluateGraph(graph, mainSpecifier, {
+      loadIdPrefix: entryIdentity,
+      // Register the KNOWN identities (keyed by normalized filename = the record
+      // sourceURL) instead of recomputing from source — we have no source here,
+      // and the identities are authoritative. Also populate the canonical
+      // source map so `fn.src` resolves to `cf:module/<identity>/<path>`.
+      registerHashes: () => {
+        for (const m of modules) {
+          this.moduleHashByPrefixedSource.set(m.filename, m.identity);
+          this.canonicalSourceByPrefixed.set(
+            m.filename,
+            `cf:module/${m.identity}${m.filename}`,
+          );
+        }
+      },
+      verifiedSources,
+      fileNameForPath: (path) => path, // already normalized
+      filesForExports: options.sourceFiles ?? [],
+    });
+  }
+
   // Evaluate pre-compiled JS, returning exports.
   // `id` is the content-derived prefix from compile(); `files` are the
   // original source files for the export map.
@@ -242,6 +892,7 @@ export class Engine extends EventTarget implements Harness {
       if (!options.skipBundleValidation) {
         this.bundleValidator.verify(jsScript, `${id}.js`);
       }
+      this.registerModuleHashes(id, files);
       const { runtime, runtimeExports, exportsCallback } = await this
         .getRuntimeInternals();
       const loadId = this.getLoadId(id, jsScript);
@@ -252,7 +903,14 @@ export class Engine extends EventTarget implements Harness {
       );
       this.executableRegistry.setVerifiedLoadSources(
         loadId,
-        collectVerifiedLoadSources(id, jsScript, files),
+        // Include canonical `cf:module/<hash>/<path>` forms so CFC recognizes the
+        // reload-stable source locations functions now carry (lockstep).
+        [
+          ...collectVerifiedLoadSources(id, jsScript, files),
+          ...this.canonicalVerifiedSources(id, files).map(
+            normalizeVerifiedSource,
+          ),
+        ],
       );
       const isolate = runtime.getIsolate(loadId);
       const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
@@ -411,6 +1069,102 @@ export class Engine extends EventTarget implements Harness {
     this.executableRegistry.trustHostValue(value, options);
   }
 
+  // Record the content-addressed hash of every module in a load, keyed by its
+  // prefixed source path (`/<id>/file.tsx`) so it can be matched against the
+  // source-map `source` that appears in an action's source location.
+  private registerModuleHashes(id: string, files: Source[]): void {
+    // No `runtimeFingerprint` is passed: the scheduler tracks runtime/TCB
+    // changes on its own `runtimeFingerprint` axis, so the implementation
+    // identity is intentionally pure code identity (runtime-module import
+    // leaves hash with the empty fingerprint).
+    const hashes = computeModuleHashes({ main: "", files });
+    for (const [path, hash] of hashes) {
+      // `path` is the authored file path (e.g. `/api/.../notebook.tsx`); the
+      // per-module hash already incorporates it, so the canonical source is a
+      // 1:1, reload-stable identity that keeps the path for debuggability.
+      this.moduleHashByPrefixedSource.set(`/${id}${path}`, hash);
+      this.canonicalSourceByPrefixed.set(
+        `/${id}${path}`,
+        `cf:module/${hash}${path}`,
+      );
+    }
+  }
+
+  /**
+   * Like {@link registerModuleHashes}, but takes the RESOLVED per-module
+   * identities straight from the compiled graph (`cf:module/<identity>` in
+   * `graph.specifierByPath`) instead of re-hashing the raw program files.
+   *
+   * The two must agree: the cache key, the record-graph specifiers, and the
+   * source-free by-identity reload (`evaluateCachedModules`) all use the
+   * resolved identity (which folds the injected/resolved modules into each
+   * module's Merkle hash). Re-hashing the raw `program.files` here would yield a
+   * DIFFERENT hash for the same module, so a function's `fn.src` — and thus its
+   * minted `implementationRef` — would differ between this source-based compile
+   * and a source-free reload, and `getExecutableFunction` would miss when a
+   * resumed piece invokes a callable (CT-1623). Keying matches the source map's
+   * bundle paths (`/<id>/<authoredPath>`, plus injected modules under their own
+   * specifier path), and the canonical value matches the source-free form.
+   */
+  private registerModuleHashesFromGraph(
+    id: string,
+    graph: CompiledModuleGraph,
+  ): void {
+    const prefix = `/${id}`;
+    for (const [name, specifier] of graph.specifierByPath) {
+      if (!specifier.startsWith("cf:module/")) continue;
+      const identity = specifier.slice("cf:module/".length);
+      const authoredPath = name.startsWith(`${prefix}/`)
+        ? name.slice(prefix.length)
+        : name;
+      this.moduleHashByPrefixedSource.set(name, identity);
+      this.canonicalSourceByPrefixed.set(
+        name,
+        `cf:module/${identity}${authoredPath}`,
+      );
+    }
+  }
+
+  // Translate a bundle-prefixed source path (`/<programHash>/<authoredPath>`,
+  // as returned by the source map) into the reload-stable canonical source
+  // `cf:module/<moduleHash>/<authoredPath>`. Returns undefined for unmapped
+  // (built-in / non-program) sources so callers can fall back to the raw value.
+  canonicalModuleSource(source: string): string | undefined {
+    return this.canonicalSourceByPrefixed.get(source) ??
+      (source.startsWith("/")
+        ? undefined
+        : this.canonicalSourceByPrefixed.get(`/${source}`));
+  }
+
+  // Canonical verified-source forms for a load, so CFC's isVerifiedSourceInLoad
+  // recognizes the `cf:module/<hash>/<path>` locations that functions now carry.
+  private canonicalVerifiedSources(id: string, files: Source[]): string[] {
+    const out: string[] = [];
+    for (const file of files) {
+      const canonical = this.canonicalSourceByPrefixed.get(
+        `/${id}${file.name}`,
+      );
+      if (canonical) out.push(canonical);
+    }
+    return out;
+  }
+
+  // Translate a source-location string into a stable content-addressed
+  // implementation identity. See the Harness interface for the contract.
+  implementationHashForSource(sourceLocation: string): string | undefined {
+    const match = sourceLocation.match(/^(.*):(\d+):(\d+)$/);
+    const sourcePath = match ? match[1] : sourceLocation;
+    const suffix = match ? `:${match[2]}:${match[3]}` : "";
+    // `fn.src` is already canonical (`cf:module/<hash>/<path>`); reduce it to the
+    // pure per-module code identity `cf:module/<hash>` for the fingerprint.
+    const canonical = sourcePath.match(/^cf:module\/([^/]+)/);
+    if (canonical) {
+      return `cf:module/${canonical[1]}${suffix}`;
+    }
+    const hash = this.moduleHashByPrefixedSource.get(sourcePath);
+    return hash === undefined ? undefined : `cf:module/${hash}${suffix}`;
+  }
+
   // Map a single position to its original source location.
   // Returns null if no source map is loaded for the filename.
   mapPosition(
@@ -473,6 +1227,8 @@ export class Engine extends EventTarget implements Harness {
     this.nextLoadId = 0;
     this.executableRegistry.clear();
     this.bundleValidator.clear();
+    this.moduleHashByPrefixedSource.clear();
+    this.canonicalSourceByPrefixed.clear();
   }
 
   private getSESRuntime(): SESRuntime {
@@ -560,4 +1316,14 @@ function computeId(program: Program): string {
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
   return hashOf(source).toString();
+}
+
+/**
+ * Strip the whole-program `/<id>` prefix from a resolved module path to recover
+ * the normalized authored path (e.g. `/<id>/main.tsx` → `/main.tsx`). Modules
+ * resolved without the prefix (the injected `cfc.ts` helper) are returned as-is.
+ */
+function stripModuleIdPrefix(name: string, id: string): string {
+  const prefix = `/${id}`;
+  return name.startsWith(`${prefix}/`) ? name.slice(prefix.length) : name;
 }

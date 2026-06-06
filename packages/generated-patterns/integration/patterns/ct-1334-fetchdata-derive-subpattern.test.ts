@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "../pattern-harness.ts";
 import type { PatternIntegrationScenario } from "../pattern-harness.ts";
 
-// CT-1334: fetchData() + derive() inside sub-pattern causes callback:error
+// CT-1334: fetchData() + computed() projection inside sub-pattern causes
+// callback:error
 //
 // This test goes through the full ts-transformer pipeline (via default-on CTS transforms)
 // to verify that computed() closures capturing pattern params in template
@@ -10,7 +11,7 @@ import type { PatternIntegrationScenario } from "../pattern-harness.ts";
 
 let originalFetch: typeof globalThis.fetch;
 
-describe("CT-1334: fetchData + derive inside sub-pattern (transformed)", () => {
+describe("CT-1334: fetchData + computed inside sub-pattern (transformed)", () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = async (
@@ -51,7 +52,7 @@ describe("CT-1334: fetchData + derive inside sub-pattern (transformed)", () => {
 
   const scenario: PatternIntegrationScenario<{ token: string }> = {
     name:
-      "CT-1334: sub-pattern with computed template literal + fetchData + derive",
+      "CT-1334: sub-pattern with computed template literal + fetchData + computed",
     module: new URL(
       "./ct-1334-fetchdata-derive-subpattern.pattern.ts",
       import.meta.url,

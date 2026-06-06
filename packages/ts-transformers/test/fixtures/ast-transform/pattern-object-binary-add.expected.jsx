@@ -11,34 +11,35 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count + 1);
 // FIXTURE: pattern-object-binary-add
 // Verifies: top-level non-JSX arithmetic in an object property is lowered after
-//   closure normalization into a direct derive wrapper rather than left as raw
-//   arithmetic over opaque values.
+//   closure normalization into a direct lift-applied computation rather than left
+//   as raw arithmetic over opaque values.
 //   return { next: state.count + 1 }
-//   → return { next: derive(state.count + 1) }
+//   → return { next: lift(({ state }) => state.count + 1)({ state }) }
 export default pattern((state) => ({
-    next: __cfHelpers.lift<{
-        state: {
-            count: number;
-        };
-    }, number>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    count: {
-                        type: "number"
-                    }
-                },
-                required: ["count"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count + 1)({ state: {
+    next: __cfLift_1({ state: {
             count: state.key("count")
         } }).for(["__patternResult", "next"], true)
 }), {

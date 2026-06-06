@@ -1,4 +1,4 @@
-import { Cell, Default, derive, handler, pattern } from "commonfabric";
+import { Cell, computed, Default, handler, pattern } from "commonfabric";
 
 interface DelayedCounterArgs {
   value: Default<number, 0>;
@@ -18,17 +18,14 @@ const scheduleIncrement = handler(
 
 export const counterWithDelayedIncrement = pattern<DelayedCounterArgs>(
   ({ value, pending }) => {
-    const drainPending = derive(
-      { pending, value },
-      ({ pending, value }) => {
-        const queued = [...(pending ?? [])];
-        if (queued.length === 0) return value ?? 0;
+    const drainPending = computed(() => {
+      const queued = [...(pending ?? [])];
+      if (queued.length === 0) return value ?? 0;
 
-        const total = queued.reduce((sum, amount) => sum + amount, 0);
-        const current = value ?? 0;
-        return current + total;
-      },
-    );
+      const total = queued.reduce((sum, amount) => sum + amount, 0);
+      const current = value ?? 0;
+      return current + total;
+    });
 
     return {
       value: drainPending,

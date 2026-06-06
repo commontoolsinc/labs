@@ -12,20 +12,23 @@ import {
   type IncrementalHasher,
   sha256,
 } from "@commonfabric/content-hash";
-import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "./fabric-primitives/FabricHash.ts";
-import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
-import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
-import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-// ---------------------------------------------------------------------------
+import { isDeepFrozen } from "./deep-freeze.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { shallowFabricFromNativeValue } from "./native-conversion.ts";
+import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+
+//
 // Type tag bytes (Section 2 of the byte-level spec)
-// ---------------------------------------------------------------------------
+//
 
 // Meta (0x0N)
 const TAG_END = 0x00;
@@ -46,15 +49,16 @@ const TAG_BYTES = 0x25;
 const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
-const TAG_CONTENT_HASH = 0x29;
+const TAG_HASH = 0x29;
 const TAG_SYMBOL = 0x2a;
+const TAG_REGEXP = 0x2b;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
 
-// ---------------------------------------------------------------------------
+//
 // Pre-allocated tag byte arrays (avoids per-call allocation)
-// ---------------------------------------------------------------------------
+//
 
 const TAG_END_BYTES = new Uint8Array([TAG_END]);
 const TAG_HOLE_BYTES = new Uint8Array([TAG_HOLE]);
@@ -70,12 +74,13 @@ const TAG_BYTES_BYTES = new Uint8Array([TAG_BYTES]);
 const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
-const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
+const TAG_HASH_BYTES = new Uint8Array([TAG_HASH]);
 const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
+const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
 
-// ---------------------------------------------------------------------------
+//
 // Core: recursive value feeding
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Maximum encoded length of a string which is represented in just-encoded form.
@@ -268,9 +273,9 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.ContentHash: {
+    case NATIVE_TAGS.Hash: {
       const cid = value as FabricHash;
-      hasher.update(TAG_CONTENT_HASH_BYTES);
+      hasher.update(TAG_HASH_BYTES);
       hasher.update(getStringRep(cid.tag));
       // TODO(@danfuzz): Look into avoiding making a copy of bytes here.
       // This could be a performance issue.
@@ -297,17 +302,21 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.FabricInstance: {
-      // Generic `FabricInstance` (protocol path via `[DECONSTRUCT]`).
+      const fabInst = value as BaseFabricInstance;
       hasher.update(TAG_INSTANCE_BYTES);
-      const typeTag = (value as { typeTag?: unknown }).typeTag;
-      if (typeof typeTag !== "string") {
-        throw new Error(
-          `hashOf: FabricInstance missing typeTag property`,
-        );
-      }
-      hasher.update(getStringRep(typeTag));
-      const state = (value as FabricInstance)[DECONSTRUCT]();
+      const wireTypeTag = BaseFabricInstance.wireTypeTagOf(fabInst);
+      hasher.update(getStringRep(wireTypeTag));
+      const state = fabInst[DECONSTRUCT]();
       feedValue(hasher, state);
+      return;
+    }
+
+    case NATIVE_TAGS.FabricRegExp: {
+      const fab = value as FabricRegExp;
+      hasher.update(TAG_REGEXP_BYTES);
+      feedValue(hasher, fab.source);
+      feedValue(hasher, fab.flags);
+      feedValue(hasher, fab.flavor);
       return;
     }
 
@@ -316,7 +325,7 @@ function feedObjectValue(
     case NATIVE_TAGS.Uint8Array: {
       // Native instances that have a well-defined `FabricValue` conversion.
       // Convert on-the-fly and hash the converted value.
-      const converted = shallowFabricFromNativeValueModern(value, false);
+      const converted = shallowFabricFromNativeValue(value, false);
       feedValue(hasher, converted);
       return;
     }
@@ -383,9 +392,9 @@ function feedPlainObject(
   hasher.update(TAG_END_BYTES);
 }
 
-// ---------------------------------------------------------------------------
+//
 // Uncached hash computation
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Computes the hash of a value without consulting or populating any cache.
@@ -406,9 +415,9 @@ function computeHashAsString(value: unknown): string {
   return hasher.digest("base64url");
 }
 
-// ---------------------------------------------------------------------------
+//
 // Caches
-// ---------------------------------------------------------------------------
+//
 
 /** Pre-computed constant hashes (these values never change). */
 const NULL_HASH = computeHash(null);
@@ -452,9 +461,9 @@ function cachedPrimitiveHash(
   return result;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Public API
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Common helper for the two exported hash functions, which _might_ return a

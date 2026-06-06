@@ -19,133 +19,136 @@ interface State {
     points: Point[];
     scale: number;
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    x: number;
+    state: {
+        scale: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        x: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                scale: {
+                    type: "number"
+                }
+            },
+            required: ["scale"]
+        }
+    },
+    required: ["x", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ x, state }) => x * state.scale);
+const __cfLift_2 = __cfHelpers.lift<{
+    y: number;
+    state: {
+        scale: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        y: {
+            type: "number"
+        },
+        state: {
+            type: "object",
+            properties: {
+                scale: {
+                    type: "number"
+                }
+            },
+            required: ["scale"]
+        }
+    },
+    required: ["y", "state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ y, state }) => y * state.scale);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const x = __cf_pattern_input.key("element", "x");
+    const y = __cf_pattern_input.key("element", "y");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>
+            Point: ({__cfLift_1({
+        x: x,
+        state: {
+            scale: state.key("scale")
+        }
+    })}, {__cfLift_2({
+        y: y,
+        state: {
+            scale: state.key("scale")
+        }
+    })})
+          </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                x: {
+                    type: "number"
+                },
+                y: {
+                    type: "number"
+                }
+            },
+            required: ["x", "y"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        scale: {
+                            type: "number"
+                        }
+                    },
+                    required: ["scale"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-destructured-param
 // Verifies: object destructuring in .map() param is lowered to key() calls on each property
 //   .map(({ x, y }) => ...) → key("element", "x"), key("element", "y")
-//   x * state.scale, y * state.scale → derive() calls with captured state
+//   x * state.scale, y * state.scale → lift(...)(...) calls with captured state
 // Context: Captures state.scale from outer scope; destructured element properties used in expressions
 export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.key("points").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const x = __cf_pattern_input.key("element", "x");
-                const y = __cf_pattern_input.key("element", "y");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<div>
-            Point: ({__cfHelpers.lift<{
-                    x: number;
-                    state: {
-                        scale: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        x: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                scale: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["scale"]
-                        }
-                    },
-                    required: ["x", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ x, state }) => x * state.scale)({
-                    x: x,
-                    state: {
-                        scale: state.key("scale")
-                    }
-                })}, {__cfHelpers.lift<{
-                    y: number;
-                    state: {
-                        scale: number;
-                    };
-                }, number>({
-                    type: "object",
-                    properties: {
-                        y: {
-                            type: "number"
-                        },
-                        state: {
-                            type: "object",
-                            properties: {
-                                scale: {
-                                    type: "number"
-                                }
-                            },
-                            required: ["scale"]
-                        }
-                    },
-                    required: ["y", "state"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, ({ y, state }) => y * state.scale)({
-                    y: y,
-                    state: {
-                        scale: state.key("scale")
-                    }
-                })})
-          </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            x: {
-                                type: "number"
-                            },
-                            y: {
-                                type: "number"
-                            }
-                        },
-                        required: ["x", "y"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    scale: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["scale"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("points").mapWithPattern(__cfPattern_1, {
                 state: {
                     scale: state.key("scale")
                 }

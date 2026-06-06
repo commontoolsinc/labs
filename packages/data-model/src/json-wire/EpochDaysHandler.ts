@@ -1,6 +1,3 @@
-import type { FabricValue, ReconstructionContext } from "../interface.ts";
-import { FabricEpochDays } from "../fabric-primitives/FabricEpochDays.ts";
-import { TAGS } from "../fabric-type-tags.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -9,23 +6,37 @@ import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
 } from "@commonfabric/utils/bigint";
+
+import type { FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for `FabricEpochDays`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochDays@1": "<base64>" }`. `FabricEpochDays` is a direct
- * member of `FabricValue` (not a `FabricInstance`), so this handler uses
- * `instanceof` directly. Same flat encoding approach as `EpochNsecHandler`.
+ * Wire format: `{ "/EpochDays@1": "<base64>" }`. Matches by `instanceof`.
+ * Same flat encoding approach as `EpochNsecHandler`.
  * See Section 5.3 of the formal spec.
  */
 export const EpochDaysHandler: TypeHandler = {
-  tag: TAGS.EpochDays,
+  /** @inheritDoc */
+  get classSource() {
+    // Alas, this project doesn't let us just say the type "arbitrary function,"
+    // and the cast here is the best we can do.
+    return FabricEpochDays as unknown as ((...args: any[]) => any);
+  },
+
+  /** @inheritDoc */
+  get wireTypeTag() {
+    return WIRE_TYPE_TAGS.EpochDays;
+  },
 
   canSerialize(value: FabricValue): boolean {
     return value instanceof FabricEpochDays;
@@ -39,7 +50,7 @@ export const EpochDaysHandler: TypeHandler = {
     const days = (value as FabricEpochDays).value;
     const bytes = bigintToMinimalTwosComplement(days);
     const b64 = toUnpaddedBase64url(bytes);
-    return codec.wrapTag(TAGS.EpochDays, b64 as JsonWireValue);
+    return codec.wrapTag(WIRE_TYPE_TAGS.EpochDays, b64 as JsonWireValue);
   },
 
   deserialize(
@@ -48,8 +59,8 @@ export const EpochDaysHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
-        TAGS.EpochDays,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.EpochDays,
         state,
         `EpochDays: expected string state, got ${typeof state}`,
       );
@@ -59,8 +70,8 @@ export const EpochDaysHandler: TypeHandler = {
       const bigint = bigintFromMinimalTwosComplement(bytes);
       return new FabricEpochDays(bigint) as unknown as FabricValue;
     } catch {
-      return makeProblematic(
-        TAGS.EpochDays,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.EpochDays,
         state,
         `EpochDays: invalid base64: ${state}`,
       );

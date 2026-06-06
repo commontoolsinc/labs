@@ -23,6 +23,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getCompilerOptions, TARGET } from "./options.ts";
 import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
+import type { SourceMap } from "../interface.ts";
 import { resolveProgram } from "./resolver.ts";
 import {
   Checker,
@@ -299,6 +300,102 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
   ): Promise<JsScript> {
     const program = await this.resolveProgram(resolver, options);
     return await this.compile(program, options);
+  }
+
+  /**
+   * Compile a program to per-module CommonJS, running the SAME type-check and
+   * Common Fabric transformer pipeline as {@link compile}, but emitting one
+   * CommonJS file per source (no AMD `outFile` bundle). Returns the compiled
+   * body + source map per original source name — the inputs the ESM module-
+   * record loader and verifier consume. Used by the `esmModuleLoader` path.
+   */
+  compileToModules(
+    program: Program,
+    inputOptions: TypeScriptCompilerOptions = {},
+  ): Map<string, { js: string; sourceMap?: SourceMap }> {
+    const noCheck = inputOptions.noCheck ?? false;
+    const runtimeModules = inputOptions.runtimeModules ?? [];
+
+    validateSource(program);
+    const sourceNames = program.files.map(({ name }) => name);
+    const tsOptions = getCompilerOptions();
+    // Per-module CommonJS instead of the bundled AMD output.
+    tsOptions.module = ts.ModuleKind.CommonJS;
+    tsOptions.esModuleInterop = true;
+    delete tsOptions.outFile;
+    delete tsOptions.ignoreDeprecations;
+    // The bundled `outFile` path tolerates the trimmed virtual lib .d.ts files;
+    // the multi-file path type-checks them and surfaces lib-internal errors
+    // (e.g. FormData in dom.d.ts). We only need to type-check authored code, so
+    // skip checking the declaration libs themselves.
+    tsOptions.skipLibCheck = true;
+
+    const host = new TypeScriptHost(program, this.typeLibs, runtimeModules);
+    const tsProgram = ts.createProgram(sourceNames, tsOptions, host);
+
+    const checker = new Checker(tsProgram, {
+      messageTransformer: inputOptions.diagnosticMessageTransformer,
+    });
+    if (!noCheck) {
+      checker.typeCheck();
+    }
+    checker.declarationCheck();
+
+    const { beforeTransformers, getDiagnostics } = createTransformers(
+      tsProgram,
+      inputOptions,
+    );
+
+    // Emit ALL source files (not just main), so every module gets a body.
+    const { diagnostics, emitSkipped } = tsProgram.emit(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { before: beforeTransformers },
+    );
+    checker.check(diagnostics);
+
+    if (getDiagnostics) {
+      const errors = getDiagnostics().filter((d) => d.severity === "error");
+      if (errors.length > 0) {
+        const sources = new Map<string, string>();
+        for (const file of program.files) sources.set(file.name, file.contents);
+        throw new TransformerError(errors, sources);
+      }
+    }
+    if (emitSkipped) {
+      throw new Error("Emit skipped. Check diagnostics.");
+    }
+
+    // Map emitted `<name>.js` outputs back to their original source names.
+    const sourceByStem = new Map<string, string>();
+    for (const name of sourceNames) {
+      if (name.endsWith(".d.ts")) continue;
+      const stem = name.replace(/\.[^./]+$/, "");
+      const existing = sourceByStem.get(stem);
+      if (existing !== undefined) {
+        // Two sources emit to the same `<stem>.js` (e.g. `/a.ts` and `/a.tsx`).
+        // The output→source mapping would be ambiguous; fail loudly.
+        throw new Error(
+          `Ambiguous emit target: '${existing}' and '${name}' both compile to '${stem}.js'`,
+        );
+      }
+      sourceByStem.set(stem, name);
+    }
+    const writes = host.getWrites();
+    const result = new Map<string, { js: string; sourceMap?: SourceMap }>();
+    for (const [outName, contents] of Object.entries(writes)) {
+      if (!outName.endsWith(".js")) continue;
+      const stem = outName.replace(/\.js$/, "");
+      const sourceName = sourceByStem.get(stem);
+      if (sourceName === undefined) continue;
+      result.set(sourceName, {
+        js: contents,
+        sourceMap: parseSourceMap(writes[`${outName}.map`]),
+      });
+    }
+    return result;
   }
 
   // Compiles `source` into `JsArtifact`.

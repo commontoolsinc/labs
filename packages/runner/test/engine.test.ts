@@ -1347,8 +1347,8 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { patternTool } from "commonfabric";',
-            "export default patternTool(() => ({ ok: true }));",
+            'import { pattern, patternTool } from "commonfabric";',
+            "export default patternTool(pattern(() => ({ ok: true })));",
           ].join("\n"),
         },
       ],
@@ -1357,6 +1357,36 @@ describe("Engine in SES mode", () => {
     await expect(engine.compile(program)).rejects.toThrow(
       "Only trusted builder calls",
     );
+  });
+
+  it("compiles and evaluates a patternTool whose pattern is hoisted to module scope", async () => {
+    // CT-1655: patternTool's `pattern(...)` argument is hoisted to a module-scope
+    // const by BuilderCallHoistingTransformer. Compile + evaluate end-to-end (not
+    // just transformer goldens) to confirm the hoisted pattern doesn't trip a
+    // module-load error and the tool survives. The pattern returns a plain-data
+    // object (as patternTool patterns do); `count` is supplied per-call.
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import { pattern, patternTool } from "commonfabric";',
+            "export default pattern(() => {",
+            "  const tool = patternTool(",
+            "    pattern(({ count }: { count: number }) => ({ doubled: count * 2 })),",
+            "  );",
+            "  return { tool };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const { main } = await engine.evaluate(id, jsScript, program.files);
+
+    expect(main?.default).toBeDefined();
   });
 
   it("allows trusted-builder callbacks that capture top-level schema snapshots", async () => {

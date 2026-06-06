@@ -17,7 +17,8 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress } from "./cfc/types.ts";
-import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
+import { canFollowScopedLink } from "./scope.ts";
+import type { SchemaScope } from "./builder/types.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -64,10 +65,14 @@ const recordDereferenceHop = (
   });
 };
 
-const schemaScopeForLink = (link: NormalizedFullLink) =>
-  isRecord(link.schema) && isSchemaScope(link.schema.scope)
-    ? link.schema.scope
-    : undefined;
+// The scope cap a link's schema imposes on the next link it permits a read to
+// follow (see ContextualFlowControl.getSchemaScopeCap for the precedence). This
+// caps *which* link scopes may be followed; it must never be copied onto the
+// followed link itself.
+const schemaScopeForLink = (
+  link: NormalizedFullLink,
+): SchemaScope | undefined =>
+  ContextualFlowControl.getSchemaScopeCap(link.schema);
 
 const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
   ...link,
@@ -249,12 +254,22 @@ export function resolveLink(
 
     if (nextHop !== undefined) {
       if (!canFollowLinkHop(link, nextHop.link)) {
-        logger.info("scope: blocked narrower link follow", () => [{
-          schemaScope: schemaScopeForLink(link),
-          linkScope: nextHop.link.scope,
-          source: cfcAddressFromLink(link),
-          target: cfcAddressFromLink(nextHop.link),
-        }]);
+        // Blocked narrower-scope follow during link resolution — resolves to
+        // undefined silently. Warn (not info) so the drop is observable; see
+        // the matching site in traverse.ts followPointer (CT-1642).
+        const schemaScope = schemaScopeForLink(link);
+        logger.warn("scope: blocked narrower link follow", () => [
+          `a "${schemaScope}"-scoped read cannot follow a ` +
+          `"${nextHop.link.scope}"-scoped link, so it resolves to undefined. ` +
+          `If this is inside a .map()/lift, resolve the narrower-scoped value ` +
+          `at the top level and pass the value down.`,
+          {
+            schemaScope,
+            linkScope: nextHop.link.scope,
+            source: cfcAddressFromLink(link),
+            target: cfcAddressFromLink(nextHop.link),
+          },
+        ]);
         link = undefinedDataLink(link);
         break;
       }

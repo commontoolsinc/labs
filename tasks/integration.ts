@@ -24,7 +24,6 @@ const DEFAULT_PACKAGES_WITH_SERVER = [
   "runner",
   "runtime-client",
   "shell",
-  "background-charm-service",
   "patterns",
   "cli",
 ];
@@ -52,7 +51,6 @@ const ALL_PACKAGES = [...DEFAULT_PACKAGES, ...OPTIONAL_PACKAGES_WITH_SERVER];
 // Packages that need HEADLESS=1 for browser tests
 const HEADLESS_PACKAGES = [
   "shell",
-  "background-charm-service",
   "patterns",
   "patterns-reload",
 ];
@@ -94,11 +92,18 @@ async function stopServers(portOffset: number, rootDir: string): Promise<void> {
   );
 }
 
+// start-local-dev.sh exits with this code when a requested port is already in
+// use. Other failures use different codes and are not worth retrying.
+const PORT_IN_USE_EXIT = 3;
+
+// Starts the dev servers for the given offset. Returns the start-local-dev.sh
+// exit code: 0 on success, PORT_IN_USE_EXIT on a port collision, or another
+// non-zero code for any other startup failure.
 async function startServers(
   portOffset: number,
   rootDir: string,
   env: Record<string, string> = {},
-): Promise<boolean> {
+): Promise<number> {
   console.log(`Starting servers with PORT_OFFSET=${portOffset}...`);
   const result = await runCommand(
     ["bash", "scripts/start-local-dev.sh", `--port-offset=${portOffset}`],
@@ -107,14 +112,14 @@ async function startServers(
 
   if (!result.success) {
     console.error("Failed to start servers");
-    return false;
+    return result.code;
   }
 
   // Wait a bit more for servers to be fully ready
   console.log("Waiting for servers to be fully ready...");
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  return true;
+  return 0;
 }
 
 /**
@@ -531,6 +536,20 @@ Log files (after servers start):
 `);
 }
 
+/**
+ * Parse a port offset, exiting with a clear error if it is not a non-negative
+ * integer. Shared by --port-offset and the PORT_OFFSET env var so an invalid
+ * value fails fast instead of becoming NaN in URLs and command arguments.
+ */
+function parsePortOffset(value: string, source: string): number {
+  const offset = parseInt(value, 10);
+  if (Number.isNaN(offset) || offset < 0) {
+    console.error(`Invalid port offset from ${source}: "${value}"`);
+    Deno.exit(1);
+  }
+  return offset;
+}
+
 async function main(): Promise<void> {
   const args = Deno.args;
 
@@ -547,11 +566,7 @@ async function main(): Promise<void> {
 
   for (const arg of args) {
     if (arg.startsWith("--port-offset=")) {
-      cliPortOffset = parseInt(arg.split("=")[1], 10);
-      if (isNaN(cliPortOffset) || cliPortOffset < 0) {
-        console.error(`Invalid port offset: ${arg}`);
-        Deno.exit(1);
-      }
+      cliPortOffset = parsePortOffset(arg.split("=")[1], "--port-offset");
     } else if (arg.startsWith("--junit-dir=")) {
       junitDir = arg.split("=")[1];
     } else if (!arg.startsWith("-")) {
@@ -576,25 +591,26 @@ async function main(): Promise<void> {
 
   const rootDir = Deno.cwd();
 
-  // Priority: CLI arg > env var > random
-  const envPortOffset = Deno.env.get("PORT_OFFSET");
+  // Priority: CLI arg > env var > generated. An explicit offset is reused as-is
+  // and its servers are left running; a generated offset is tried at random,
+  // retried on a port collision, and stopped after the run.
+  // An empty or whitespace PORT_OFFSET is treated as unset (use a generated
+  // offset); a non-empty value is validated so a typo fails fast.
+  const envPortOffsetRaw = Deno.env.get("PORT_OFFSET");
+  const envPortOffset =
+    envPortOffsetRaw !== undefined && envPortOffsetRaw.trim() !== ""
+      ? parsePortOffset(envPortOffsetRaw, "PORT_OFFSET")
+      : undefined;
   const portOffsetWasSet = cliPortOffset !== undefined ||
     envPortOffset !== undefined;
-  const portOffset = cliPortOffset ??
-    (envPortOffset ? parseInt(envPortOffset, 10) : undefined) ??
-    Math.floor(Math.random() * 901) + 100; // 100-1000
-
-  const apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
-
-  console.log("Integration Test Runner");
-  console.log("=======================");
   const offsetSource = cliPortOffset !== undefined
     ? " (from --port-offset)"
     : envPortOffset !== undefined
     ? " (from env)"
     : " (generated)";
-  console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
-  console.log(`API_URL: ${apiUrl}`);
+
+  console.log("Integration Test Runner");
+  console.log("=======================");
   if (packageFilter) {
     console.log(`Package filter: ${packageFilter}`);
   }
@@ -611,27 +627,89 @@ async function main(): Promise<void> {
     ALL_PACKAGES_WITH_SERVER.includes(pkg)
   );
 
+  // An explicit offset is used directly; a generated offset is replaced with a
+  // free one just before the servers start.
+  let portOffset = cliPortOffset ?? envPortOffset ?? 0;
+  let apiUrl = "";
+
+  // A generated-offset run owns the servers it starts and stops them on the way
+  // out, including after a failure. An explicit offset is left running.
+  let ownsServers = false;
   let serverStarted = false;
+  let cleanedUp = false;
+  let exitCode = 0;
+
+  const cleanup = async (): Promise<void> => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    if (ownsServers) {
+      console.log("\nCleaning up servers...");
+      await stopServers(portOffset, rootDir);
+    } else if (serverStarted) {
+      console.log("\nLeaving servers running (PORT_OFFSET was set).");
+    }
+  };
+
+  // A signal terminates the process without running `finally`, so stop the
+  // servers from the handler before exiting.
+  const onSignal = () => {
+    console.log("\nInterrupted, cleaning up...");
+    cleanup().finally(() => Deno.exit(130));
+  };
+  Deno.addSignalListener("SIGINT", onSignal);
+  Deno.addSignalListener("SIGTERM", onSignal);
 
   try {
     if (needsServer) {
-      // If PORT_OFFSET was set, stop existing servers first
-      if (portOffsetWasSet) {
-        await stopServers(portOffset, rootDir);
-      }
-
-      // Start servers
       const serverEnv: Record<string, string> = {};
       if (packagesToRun.includes("patterns-reload")) {
         serverEnv.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE = "true";
       }
 
-      const started = await startServers(portOffset, rootDir, serverEnv);
-      if (!started) {
-        console.error("Failed to start servers, aborting.");
-        Deno.exit(1);
+      if (portOffsetWasSet) {
+        // Reuse the requested offset, stopping anything already on its ports.
+        await stopServers(portOffset, rootDir);
+        apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
+        console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
+        console.log(`API_URL: ${apiUrl}`);
+        if (await startServers(portOffset, rootDir, serverEnv) !== 0) {
+          console.error("Failed to start servers, aborting.");
+          exitCode = 1;
+          return;
+        }
+        serverStarted = true;
+      } else {
+        // Try a random offset and let the servers report a real port collision
+        // by failing to bind (PORT_IN_USE_EXIT); retry on a fresh offset only in
+        // that case. Any other failure is not port-related and would recur on
+        // every offset, so it stops the run.
+        const maxStartAttempts = 5;
+        for (let attempt = 1; attempt <= maxStartAttempts; attempt++) {
+          portOffset = Math.floor(Math.random() * 901) + 100; // 100-1000
+          apiUrl = `http://localhost:${ports.toolshed + portOffset}`;
+          console.log(`PORT_OFFSET: ${portOffset}${offsetSource}`);
+          console.log(`API_URL: ${apiUrl}`);
+          // Once an offset is chosen, this run is responsible for stopping
+          // anything started on it, including after a failed attempt.
+          ownsServers = true;
+          const startCode = await startServers(portOffset, rootDir, serverEnv);
+          if (startCode === 0) {
+            serverStarted = true;
+            break;
+          }
+          if (startCode !== PORT_IN_USE_EXIT) {
+            break;
+          }
+          console.warn(
+            `Offset ${portOffset} hit a port collision; retrying...`,
+          );
+        }
+        if (!serverStarted) {
+          console.error("Failed to start servers, aborting.");
+          exitCode = 1;
+          return;
+        }
       }
-      serverStarted = true;
     }
 
     // Run integration tests
@@ -686,17 +764,20 @@ async function main(): Promise<void> {
 
     if (failed.length > 0) {
       console.log(`Failed: ${failed.map((r) => r.pkg).join(", ")}`);
-      Deno.exit(1);
+      exitCode = 1;
     }
+  } catch (error) {
+    console.error("Integration run failed:", error);
+    exitCode = 1;
   } finally {
-    // Clean up: stop servers if we started them and PORT_OFFSET was NOT originally set
-    if (serverStarted && !portOffsetWasSet) {
-      console.log("\nCleaning up servers...");
-      await stopServers(portOffset, rootDir);
-    } else if (serverStarted && portOffsetWasSet) {
-      console.log("\nLeaving servers running (PORT_OFFSET was set).");
-    }
+    Deno.removeSignalListener("SIGINT", onSignal);
+    Deno.removeSignalListener("SIGTERM", onSignal);
+    await cleanup();
+    Deno.exit(exitCode);
   }
 }
 
-main();
+main().catch((error) => {
+  console.error("Integration run failed:", error);
+  Deno.exit(1);
+});

@@ -11,9 +11,33 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    a: __cfHelpers.ReadonlyCell<number>;
+    b: __cfHelpers.ReadonlyCell<number>;
+    c: __cfHelpers.ReadonlyCell<number>;
+}, number>({
+    type: "object",
+    properties: {
+        a: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        b: {
+            type: "number",
+            asCell: ["readonly"]
+        },
+        c: {
+            type: "number",
+            asCell: ["readonly"]
+        }
+    },
+    required: ["a", "b", "c"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ a, b, c }) => (a.get() * b.get() + c.get()) / 2);
 // FIXTURE: computed-complex-expression
 // Verifies: computed(() => expr) with three cell captures in an arithmetic expression
-//   computed(() => (a.get() * b.get() + c.get()) / 2) → derive(captureSchema, resultSchema, { a, b, c }, ({ a, b, c }) => ...)
+//   computed(() => (a.get() * b.get() + c.get()) / 2) → lift(({ a, b, c }) => ...)({ a, b, c })
 //   All three cells (a, b, c) are captured with asCell: true in the schema.
 export default pattern(() => {
     const a = new Writable(10, {
@@ -25,30 +49,7 @@ export default pattern(() => {
     const c = new Writable(5, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("c", true);
-    const result = __cfHelpers.lift<{
-        a: __cfHelpers.ReadonlyCell<number>;
-        b: __cfHelpers.ReadonlyCell<number>;
-        c: __cfHelpers.ReadonlyCell<number>;
-    }, number>({
-        type: "object",
-        properties: {
-            a: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            b: {
-                type: "number",
-                asCell: ["readonly"]
-            },
-            c: {
-                type: "number",
-                asCell: ["readonly"]
-            }
-        },
-        required: ["a", "b", "c"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, ({ a, b, c }) => (a.get() * b.get() + c.get()) / 2)({
+    const result = __cfLift_1({
         a: a,
         b: b,
         c: c

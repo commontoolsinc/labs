@@ -1,8 +1,9 @@
 import type { FabricValue } from "../interface.ts";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneForMutation,
+  CloneForMutationError,
   cloneIfNecessary,
-  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
 import type { PatchOp } from "../v2.ts";
@@ -45,14 +46,13 @@ const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
  * The function is therefore on the hot path for any read that reconstructs
  * a document from its stored patch list.
  *
- * Mutation discipline: each `applyOp` call uses `shallowMutableClone()` to
- * produce a new top-level copy of the container being modified, then
- * recurses into the path; containers off the modified path remain
- * frozen-by-reference. The returned tree is then fully deep-frozen at the
- * function boundary, completing the shallow-clone / mutate / deep-freeze
- * pattern: shallow clones at the immediate containers on the modified
- * path, deep-freeze of the assembled result before it leaves the function.
- * Callers can rely on the return value being deeply frozen.
+ * Mutation discipline: each op is applied via a copy-on-write descent. The
+ * spine of containers from the root down to the mutated container is thawed to
+ * fresh mutable copies (via `cloneForMutation()`), the leaf operation is applied
+ * to that mutable container, and subtrees off the spine stay frozen-by-reference
+ * (structural sharing). The assembled tree is then fully deep-frozen at the
+ * `applyPatch` boundary, so callers can rely on the return value being deeply
+ * frozen.
  */
 export const applyPatch = (
   state: FabricValue,
@@ -86,158 +86,149 @@ const applyOp = (state: FabricValue, op: PatchOp): FabricValue => {
   }
 };
 
+/**
+ * Copy-on-write thaw of the spine of `root` down to `thawPath`, returning the
+ * new root and the mutable container at `thawPath`. Subtrees off the spine are
+ * shared by identity (structural sharing); the caller's input is left untouched
+ * (`cloneForMutation` defaults to `force: true`). `cloneForMutation`'s typed
+ * errors are translated into this module's path-style messages, and a
+ * value-at-path that isn't a plain container is rejected (patch ops only mutate
+ * objects/arrays). `fullPath` is used for error messages.
+ */
+const thawSpine = (
+  root: FabricValue,
+  thawPath: string[],
+  fullPath: string[],
+  options?: { createMissing?: boolean; nextKeyAfterPath?: string },
+): { root: FabricValue; container: PatchContainer } => {
+  let value: FabricValue;
+  let pathValue: FabricValue;
+  try {
+    ({ value, pathValue } = cloneForMutation(root, thawPath, options));
+  } catch (e) {
+    if (e instanceof CloneForMutationError) {
+      throw new Error(
+        e.kind === "missing-segment"
+          ? `missing path ${encodePointer(fullPath)}`
+          : `path is not traversable at ${encodePointer(fullPath)}`,
+      );
+    }
+    throw e;
+  }
+  if (!isContainer(pathValue)) {
+    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+  }
+  return { root: value, container: pathValue };
+};
+
 const replaceAtPath = (
   root: FabricValue,
   path: string[],
   value: FabricValue,
-  fullPath: string[] = path,
 ): FabricValue => {
   if (path.length === 0) {
     return cloneValue(value);
   }
+  const { root: newRoot, container } = thawSpine(root, path.slice(0, -1), path);
+  const key = path[path.length - 1]!;
+  if (Array.isArray(container)) {
+    container[requireExistingArrayIndex(container, key, path)] = cloneValue(
+      value,
+    );
+  } else {
+    container[key] = cloneValue(value);
+  }
+  return newRoot;
+};
 
-  if (Array.isArray(root)) {
-    const index = requireExistingArrayIndex(root, path[0]!, fullPath);
-    const next = shallowMutableClone(root) as FabricValue[];
-    if (path.length === 1) {
-      next[index] = cloneValue(value);
-      return next;
+/**
+ * Read-only check of `add`'s spine: missing *object* keys are fine (they get
+ * created during the mutating descent), but a present array must already contain
+ * any index traversed through, and a present non-container can't be traversed.
+ * This is what keeps `add` from fabricating missing array indices (which
+ * `cloneForMutation`'s `createMissing` would otherwise do).
+ */
+const validateAddSpine = (root: FabricValue, path: string[]): void => {
+  let current: FabricValue = root;
+  // Becomes true once we pass a missing object key: everything below is freshly
+  // created, so all containers from there down are empty.
+  let creating = false;
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i]!;
+    if (creating) {
+      // A freshly-created array is empty, so an intermediate array index (or the
+      // `-` append marker) can never resolve to an existing element to traverse
+      // into -- reject it rather than fabricate one. Plain object keys are fine;
+      // they get created on the way down.
+      if (isArraySegment(segment) || segment === "-") {
+        throw new Error(`missing path ${encodePointer(path)}`);
+      }
+      continue;
     }
-
-    const child = root[index];
-    if (!isContainer(child)) {
-      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+    if (Array.isArray(current)) {
+      current = current[requireExistingArrayIndex(current, segment, path)];
+    } else if (isPatchObject(current)) {
+      if (!Object.hasOwn(current, segment)) {
+        creating = true;
+        continue;
+      }
+      current = current[segment];
+    } else {
+      throw new Error(`path is not traversable at ${encodePointer(path)}`);
     }
-    next[index] = replaceAtPath(child, path.slice(1), value, fullPath);
-    return next;
   }
-
-  if (!isPatchObject(root)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-
-  const next = shallowMutableClone(root) as PatchObject;
-  const key = path[0]!;
-  if (path.length === 1) {
-    next[key] = cloneValue(value);
-    return next;
-  }
-
-  if (!Object.hasOwn(root, key)) {
-    throw new Error(`missing path ${encodePointer(fullPath)}`);
-  }
-
-  const child = root[key];
-  if (!isContainer(child)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-  next[key] = replaceAtPath(child, path.slice(1), value, fullPath);
-  return next;
 };
 
 const addAtPath = (
   root: FabricValue,
   path: string[],
   value: FabricValue,
-  fullPath: string[] = path,
 ): FabricValue => {
   if (path.length === 0) {
     return cloneValue(value);
   }
-
-  if (Array.isArray(root)) {
-    const next = shallowMutableClone(root) as FabricValue[];
-    const segment = path[0]!;
-    if (path.length === 1) {
-      if (segment === "-") {
-        next.push(cloneValue(value));
-      } else {
-        const index = parseArrayInsertIndex(segment, root.length);
-        next.splice(index, 0, cloneValue(value));
-      }
-      return next;
+  validateAddSpine(root, path);
+  const key = path[path.length - 1]!;
+  const { root: newRoot, container } = thawSpine(
+    root,
+    path.slice(0, -1),
+    path,
+    {
+      createMissing: true,
+      nextKeyAfterPath: key,
+    },
+  );
+  if (Array.isArray(container)) {
+    if (key === "-") {
+      container.push(cloneValue(value));
+    } else {
+      container.splice(
+        parseArrayInsertIndex(key, container.length),
+        0,
+        cloneValue(value),
+      );
     }
-
-    const index = requireExistingArrayIndex(root, segment, fullPath);
-    const child = root[index];
-    if (!isContainer(child)) {
-      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-    }
-    next[index] = addAtPath(child, path.slice(1), value, fullPath);
-    return next;
+  } else {
+    container[key] = cloneValue(value);
   }
-
-  if (!isPatchObject(root)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-
-  const next = shallowMutableClone(root) as PatchObject;
-  const key = path[0]!;
-  if (path.length === 1) {
-    next[key] = cloneValue(value);
-    return next;
-  }
-
-  const child = Object.hasOwn(root, key)
-    ? root[key]
-    : createContainer(path[1]!);
-  if (!isContainer(child)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-
-  next[key] = addAtPath(child, path.slice(1), value, fullPath);
-  return next;
+  return newRoot;
 };
 
-const removeAtPath = (
-  root: FabricValue,
-  path: string[],
-  fullPath: string[] = path,
-): FabricValue => {
+const removeAtPath = (root: FabricValue, path: string[]): FabricValue => {
   if (path.length === 0) {
     throw new Error("root remove must be represented as a delete operation");
   }
-
-  if (Array.isArray(root)) {
-    const index = requireExistingArrayIndex(root, path[0]!, fullPath);
-    const next = shallowMutableClone(root) as FabricValue[];
-    if (path.length === 1) {
-      next.splice(index, 1);
-      return next;
+  const { root: newRoot, container } = thawSpine(root, path.slice(0, -1), path);
+  const key = path[path.length - 1]!;
+  if (Array.isArray(container)) {
+    container.splice(requireExistingArrayIndex(container, key, path), 1);
+  } else {
+    if (!Object.hasOwn(container, key)) {
+      throw new Error(`missing object key at ${encodePointer(path)}`);
     }
-
-    const child = root[index];
-    if (!isContainer(child)) {
-      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-    }
-    next[index] = removeAtPath(child, path.slice(1), fullPath);
-    return next;
+    delete container[key];
   }
-
-  if (!isPatchObject(root)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-
-  const next = shallowMutableClone(root) as PatchObject;
-  const key = path[0]!;
-  if (path.length === 1) {
-    if (!Object.hasOwn(root, key)) {
-      throw new Error(`missing object key at ${encodePointer(fullPath)}`);
-    }
-    delete next[key];
-    return next;
-  }
-
-  if (!Object.hasOwn(root, key)) {
-    throw new Error(`missing path ${encodePointer(fullPath)}`);
-  }
-
-  const child = root[key];
-  if (!isContainer(child)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-  next[key] = removeAtPath(child, path.slice(1), fullPath);
-  return next;
+  return newRoot;
 };
 
 const moveValue = (
@@ -262,57 +253,16 @@ const spliceAtPath = (
   index: number,
   remove: number,
   add: FabricValue[],
-  fullPath: string[] = path,
 ): FabricValue => {
-  if (path.length === 0) {
-    if (!Array.isArray(root)) {
-      throw new Error(
-        `splice target is not an array at ${encodePointer(fullPath)}`,
-      );
-    }
-    if (index < 0 || remove < 0 || index > root.length) {
-      throw new Error(`invalid splice at ${encodePointer(fullPath)}`);
-    }
-    const next = shallowMutableClone(root) as FabricValue[];
-    next.splice(index, remove, ...add.map((value) => cloneValue(value)));
-    return next;
+  const { root: newRoot, container } = thawSpine(root, path, path);
+  if (!Array.isArray(container)) {
+    throw new Error(`splice target is not an array at ${encodePointer(path)}`);
   }
-
-  if (Array.isArray(root)) {
-    const next = shallowMutableClone(root) as FabricValue[];
-    const pathIndex = requireExistingArrayIndex(root, path[0]!, fullPath);
-    const child = root[pathIndex];
-    if (!isContainer(child)) {
-      throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-    }
-    next[pathIndex] = spliceAtPath(
-      child,
-      path.slice(1),
-      index,
-      remove,
-      add,
-      fullPath,
-    );
-    return next;
+  if (index < 0 || remove < 0 || index > container.length) {
+    throw new Error(`invalid splice at ${encodePointer(path)}`);
   }
-
-  if (!isPatchObject(root)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-
-  const key = path[0]!;
-  if (!Object.hasOwn(root, key)) {
-    throw new Error(`missing path ${encodePointer(fullPath)}`);
-  }
-
-  const child = root[key];
-  if (!isContainer(child)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
-  }
-
-  const next = shallowMutableClone(root) as PatchObject;
-  next[key] = spliceAtPath(child, path.slice(1), index, remove, add, fullPath);
-  return next;
+  container.splice(index, remove, ...add.map((value) => cloneValue(value)));
+  return newRoot;
 };
 
 const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
@@ -327,10 +277,6 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
     }
   }
   return current;
-};
-
-const createContainer = (nextSegment: string): PatchContainer => {
-  return isArraySegment(nextSegment) || nextSegment === "-" ? [] : {};
 };
 
 const parseArrayIndex = (segment: string): number => {

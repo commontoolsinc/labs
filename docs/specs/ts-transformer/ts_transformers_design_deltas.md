@@ -30,7 +30,7 @@ behavior and open follow-up work.
   - local reactive rewrap aliases in compute callbacks can re-enter collection
     rewrite eligibility
   - pattern callback canonicalization and `key(...)` lowering
-  - local opaque-root rewriting inside derive callbacks
+  - local opaque-root rewriting inside lift-applied callbacks
   - capability analysis with path/capability shrinking at schema boundaries
   - additive wrapper support for `ReadonlyCell` / `WriteonlyCell` / `OpaqueCell`
   - structural reactive-origin detection for `.get()` validation and opaque-root
@@ -50,7 +50,7 @@ behavior and open follow-up work.
   - schema shrink validation for declared `unknown`-typed properties
   - array item shrinking to `unknown` when only non-item properties (for
     example `.length`) are observed
-  - projected-result / object-literal schema recovery for derive/lift result
+  - projected-result / object-literal schema recovery for lift result
     inference
   - compute-context local reactive alias diagnostics
 - Partially landed:
@@ -67,7 +67,7 @@ behavior and open follow-up work.
 **Proposed terms:**
 
 - `compute context` for callbacks where values are being computed in a wrapped
-  compute form (`computed`, `derive`, `action`, `lift`, `handler`, etc.)
+  compute form (`computed`, `action`, `lift`, `handler`, etc.)
 - `pattern context` for top-level pattern/render-style author code where
   parameters are opaque by default and direct computation should trigger
   guidance/rewrite
@@ -122,7 +122,7 @@ behavior and open follow-up work.
   non-auto-unwrapped cell-like set (`Cell`, `Writable`, `Stream`, etc.).
 - In **compute context**, local aliases created inside the same callback may
   become reactive again when they re-wrap a reactive collection via
-  `computed(...)`, `derive(...)`, `lift(...)`, `action(...)`, `handler(...)`,
+  `computed(...)`, `lift(...)`, `action(...)`, `handler(...)`,
   `wish(...)`, or an already-lowered reactive collection call.
 - Never rewrite plain JS array operators.
 - The callback parameter of `.map` is treated as a **pattern callback
@@ -186,7 +186,7 @@ contract support).
   read/written, with conservative fallback to broader shape on unknown-dynamic
   operations.
 - Preserve broad pattern boundary shapes (including schema defaults) so links to
-  downstream `compute`/`handler`/`derive` code do not lose fields that are not
+  downstream `compute`/`handler` code do not lose fields that are not
   directly read in the outer pattern callback.
 - In pattern-style contexts, treat "lowerable to opaque/key semantics" as the
   primary legality criterion. Uses that cannot be lowered should produce
@@ -218,7 +218,7 @@ contract support).
 
 1. Rewrite decisions for collection and conditional operators can be explained
    from `{context, receiver capability summary}`, not `OpaqueRef` heuristics.
-2. Boundary schemas/types for compute-oriented boundaries (`derive`, `lift`,
+2. Boundary schemas/types for compute-oriented boundaries (`lift`,
    `handler`, compute-like callbacks) can be shrunk to used paths when no
    wildcard operations are present.
 3. Wildcard/dynamic operations (`...obj`, `Object.keys`, `for..in`, `for..of`,
@@ -369,7 +369,7 @@ Lowering is acceptable only when semantic equivalence is exact.
 ## P-005 Make Reactive Boundaries Explicit Where Opaque Values Dominate
 
 In pattern context, emitted forms should make reactive/opaque boundaries
-explicit (`when`, `unless`, `ifElse`, `derive`, schema boundaries), to reduce
+explicit (`when`, `unless`, `ifElse`, schema boundaries), to reduce
 implicit behavior and runtime ambiguity.
 
 ## P-006 Minimize Rewrite Surface In Compute Context
@@ -463,7 +463,7 @@ interface ReactiveContextInfo {
     | "render"
     | "array-map"
     | "computed"
-    | "derive"
+    | "lift-applied"
     | "action"
     | "lift"
     | "handler"
@@ -481,7 +481,7 @@ passes as authoritative context boundaries. Example target behavior:
 <div>{[0, 1].forEach(() => list.map(...))}</div>
 ```
 
-If JSX rewriting first introduces a compute wrapper (`computed`/`derive`) around
+If JSX rewriting first introduces a compute wrapper (`computed`) around
 this expression, the nested `list.map(...)` is in compute context for subsequent
 collection rewrite policy.
 
@@ -504,7 +504,7 @@ Emitters/strategies call policy functions instead of embedding local logic.
 **Current complexity:** `emitBinaryExpression` mixes:
 
 1. logical lowering (`&&`/`||`)
-2. derive/computed wrapping fallback
+2. computed wrapping fallback
 3. expensive-RHS heuristics
 
 **Recommendation:** structure as:
@@ -714,7 +714,7 @@ logic.
 **Status:** Landed (intraprocedural)
 
 1. Tag analysis origins from:
-   - pattern/lift/derive/handler/action callback parameters
+   - pattern/lift/handler/action callback parameters
    - results of `lift(...)` and `pattern(...)` invoked within pattern code
    - `.map` callback parameters only when that call site is selected for
      `mapWithPattern` rewrite

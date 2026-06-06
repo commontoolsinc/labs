@@ -2,7 +2,7 @@
  * Call Kind Detection
  *
  * This module identifies compiler-significant call families. Most are
- * Common Fabric-specific calls (derive, ifElse, pattern, etc.), but array-method
+ * Common Fabric-specific calls (lift, ifElse, pattern, etc.), but array-method
  * families are also classified because they establish callback/container
  * boundaries relevant to analysis and lowering.
  *
@@ -14,7 +14,7 @@
  *    Common Fabric declarations or imports.
  *
  * 2. **Alias following**: Follow stable const aliases and call signatures to
- *    preserve detection for `const alias = derive` and `declare const alias:
+ *    preserve detection for `const alias = lift` and `declare const alias:
  *    typeof ifElse` style code.
  *
  * 3. **Synthetic helper support**: Recognize internal `__cfHelpers.*` calls
@@ -41,7 +41,10 @@ import {
   COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES,
   COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME,
 } from "../core/commonfabric-runtime-registry.ts";
-import { isOpaqueRefType } from "../transformers/opaque-ref/opaque-ref.ts";
+import {
+  getCellKind,
+  isOpaqueRefType,
+} from "../transformers/opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 import {
   getTypeAtLocationWithFallback,
@@ -81,8 +84,40 @@ const CELL_SCOPED_CONSTRUCTOR_NAMES = new Set([
 ]);
 const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
-export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
+/**
+ * Prefix for the module-scope const a hoisted `lift(...)` call is bound to
+ * (CT-1644, Phase 2 of derive→lift→selfcontained). The whole lift call —
+ * schemas + callback — is hoisted to `const __cfLift_N = __cfHelpers.lift(...)`
+ * and the original site becomes `__cfLift_N(captures)`.
+ */
+export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
+
+/**
+ * Prefix for the module-scope const a hoisted `handler(...)` call is bound to
+ * (CT-1655, extending CT-1644's whole-call hoisting to handler). The handler is
+ * emitted in the lift-applied shape `__cfHelpers.handler(eventSchema,
+ * stateSchema, cb)(captures)`; the inner `handler(...)` call is hoisted to
+ * `const __cfHandler_N = __cfHelpers.handler(...)` and the original site becomes
+ * `__cfHandler_N(captures)`. Mechanically identical to lift hoisting, but the
+ * applied call keeps classifying as `{ kind: "builder", builderName: "handler" }`
+ * (NOT `lift-applied`) so existing handler-specific dispatchers are unaffected.
+ */
+export const SYNTHETIC_HANDLER_HOIST_PREFIX = "__cfHandler";
+
+/**
+ * Prefix for the module-scope const a hoisted `pattern(...)` call is bound to
+ * (CT-1655). Pattern's hoist differs from lift/handler: the bare
+ * `__cfHelpers.pattern(cb, inputSchema, outputSchema)` call sits in the FIRST
+ * argument of an enclosing `receiver.mapWithPattern(pattern(...), { params })`
+ * call (per-instance captures flow through the params object, the second
+ * argument). The bare pattern call is hoisted to
+ * `const __cfPattern_N = __cfHelpers.pattern(...)` and the `*WithPattern` call's
+ * first argument is rewritten to `__cfPattern_N`. The top-level
+ * `export default pattern(...)` is a direct call (not a `*WithPattern`
+ * argument) and is NOT hoisted.
+ */
+export const SYNTHETIC_PATTERN_HOIST_PREFIX = "__cfPattern";
 
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 
@@ -308,6 +343,86 @@ export function getPatternToolCallbackArgument(
     : undefined;
 }
 
+/**
+ * If `call` is a lowered reactive array-method call in the `*WithPattern`
+ * family — `mapWithPattern` / `filterWithPattern` / `flatMapWithPattern`, and
+ * any future lowered array method registered with `lowered: true` — whose FIRST
+ * argument is a bare `pattern(...)` builder call, return that inner pattern call
+ * (the hoistable unit). Otherwise return undefined. Recognition keys on the
+ * array-method family's `lowered` flag, not a hardcoded method name, so new
+ * `*WithPattern` lowerings are picked up automatically. The canonical shape is
+ * `receiver.mapWithPattern(pattern(...), { params })`.
+ *
+ * This is how the hoisting stage finds the pattern call to relocate (CT-1655):
+ * unlike lift/handler, the pattern call is not *applied* — it sits in the first
+ * argument position of the enclosing `*WithPattern` call, with per-instance
+ * captures threaded through that call's SECOND argument (the params object).
+ * So the bare `pattern(...)` is capture-free and safe to evaluate once at
+ * module scope. The top-level `export default pattern(...)` is a direct call,
+ * not a `*WithPattern` argument, so it is naturally excluded.
+ */
+export function getWithPatternHoistablePatternCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.CallExpression | undefined {
+  const callee = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(callee)) {
+    return undefined;
+  }
+  const accessKind = getArrayMethodAccessKindByName(callee.name.text);
+  if (!accessKind?.lowered) {
+    return undefined;
+  }
+  const firstArg = call.arguments[0];
+  if (!firstArg) {
+    return undefined;
+  }
+  const patternCall = stripWrappers(firstArg);
+  if (
+    !ts.isCallExpression(patternCall) ||
+    !isPatternBuilderCall(patternCall, checker)
+  ) {
+    return undefined;
+  }
+  return patternCall;
+}
+
+/**
+ * If `call` is a `patternTool(pattern(...), extraParams?)` call whose FIRST
+ * argument is a bare `pattern(...)` builder call, return that inner pattern call
+ * (the hoistable unit). Otherwise return undefined.
+ *
+ * Sibling of {@link getWithPatternHoistablePatternCall}: same hoist mechanic
+ * (relocate the bare pattern call sitting in argument 0, leaving the enclosing
+ * call's callee and remaining arguments intact), different enclosing call shape.
+ * Per-instance values flow through patternTool's SECOND argument (`extraParams`)
+ * and module-scoped reactive reads are absorbed by the pattern itself, so the
+ * bare `pattern(...)` is capture-free and safe to evaluate once at module scope.
+ * As of CT-1655 patternTool's first argument must be a pattern (enforced by
+ * PatternContextValidation), so this recognizer covers every reactive
+ * patternTool.
+ */
+export function getPatternToolHoistablePatternCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.CallExpression | undefined {
+  if (detectCallKind(call, checker)?.kind !== "pattern-tool") {
+    return undefined;
+  }
+  const firstArg = call.arguments[0];
+  if (!firstArg) {
+    return undefined;
+  }
+  const patternCall = stripWrappers(firstArg);
+  if (
+    !ts.isCallExpression(patternCall) ||
+    !isPatternBuilderCall(patternCall, checker)
+  ) {
+    return undefined;
+  }
+  return patternCall;
+}
+
 export function getCapabilitySummaryCallbackArgument(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -317,13 +432,12 @@ export function getCapabilitySummaryCallbackArgument(
 
   let callbackArg: ts.Expression | undefined;
   if (callKind.kind === "lift-applied") {
-    // For lift-applied shape (lift(cb)(input)), the callback lives on the
-    // inner lift call. For legacy derive shape, on the outer call itself.
+    // Lift-applied shape `lift(cb)(input)`: the callback lives on the inner
+    // lift call (the outer call's callee is always that inner CallExpression).
     const innerCallee = stripWrappers(call.expression);
-    const argSource = ts.isCallExpression(innerCallee)
-      ? innerCallee.arguments
-      : call.arguments;
-    callbackArg = argSource[argSource.length - 1];
+    if (ts.isCallExpression(innerCallee)) {
+      callbackArg = innerCallee.arguments[innerCallee.arguments.length - 1];
+    }
   } else if (
     callKind.kind === "builder" &&
     (
@@ -361,6 +475,52 @@ export function getLiftAppliedInnerCall(
   return ts.isCallExpression(stripped) ? stripped : undefined;
 }
 
+/**
+ * True iff `call` is a handler in its applied shape
+ * `__cfHelpers.handler(eventSchema, stateSchema, cb)(captures)` — an outer
+ * application whose callee is itself the inner `handler(...)` call.
+ *
+ * Structurally this is the same single-application shape as lift-applied, but
+ * we deliberately keep it OUT of the `lift-applied` CallKind (CT-1655): a
+ * handler-applied call continues to classify as `{ kind: "builder",
+ * builderName: "handler" }` so handler-specific dispatchers (stream causes in
+ * ReactiveVariableFor, capture-schema injection, write-authorization, etc.) are
+ * unaffected. This predicate exists solely so the hoisting stage can recognise
+ * the unit to relocate without minting a new kind or widening the lift-applied
+ * gate.
+ *
+ * Guards against multi-application chains (`handler(cb)(x)(y)`) the same way
+ * lift-applied recognition does — only the single-application form is the
+ * canonical lowered handler shape.
+ */
+export function isHandlerAppliedCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = stripWrappers(call.expression);
+  if (!ts.isCallExpression(target) || isMultiApplicationChain(call)) {
+    return false;
+  }
+  const builderKind = resolveBuilderExpressionKind(target, checker, new Set(), {
+    followFactoryResults: true,
+  });
+  return builderKind?.builderName === "handler";
+}
+
+/**
+ * For a handler-applied call (`__cfHelpers.handler(...)(captures)`), return the
+ * inner `handler(...)` CallExpression — the unit the hoisting stage relocates
+ * to a module-scope const. Returns undefined if `call` is not the applied
+ * shape. Mirrors {@link getLiftAppliedInnerCall}; routes through `stripWrappers`
+ * for the same forward-compatibility reasons.
+ */
+export function getHandlerAppliedInnerCall(
+  call: ts.CallExpression,
+): ts.CallExpression | undefined {
+  const stripped = stripWrappers(call.expression);
+  return ts.isCallExpression(stripped) ? stripped : undefined;
+}
+
 export function getLiftAppliedInputAndCallback(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -373,38 +533,18 @@ export function getLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // Two shapes are recognized as kind:"lift-applied":
-  //   (a) Legacy derive shape: __cfHelpers.derive(input, cb) or
-  //       __cfHelpers.derive(argSchema, resSchema, input, cb). Recognized
-  //       defensively for any unlowered legacy emission that reaches here.
-  //   (b) Canonical lift-applied shape: __cfHelpers.lift(cb)(input) or
-  //       __cfHelpers.lift(argSchema, resSchema, cb)(input).
-  // The lift-applied shape's outer call has the callee as a CallExpression.
+  // The lift-applied shape `__cfHelpers.lift(...)(input)` always has the outer
+  // call's callee as a CallExpression (the inner `lift(...)` factory). That is
+  // the only way detectCallKind produces kind:"lift-applied" — see its
+  // recognition in resolveExpressionKind (requires ts.isCallExpression(target)).
+  // The callback is the last arg of the inner lift call; the input is the first
+  // arg of the outer applied call.
   const innerCallee = stripWrappers(call.expression);
-  if (ts.isCallExpression(innerCallee)) {
-    // Lift-applied: callback is the last arg of the inner lift call; input
-    // is the first arg of the outer applied call.
-    const innerCall = innerCallee;
-    const callbackIndex = innerCall.arguments.length - 1;
-    const callbackArg = innerCall.arguments[callbackIndex];
-    const callback = callbackArg
-      ? resolveCallbackFunctionExpression(callbackArg, checker)
-      : undefined;
-    if (!callback) {
-      return undefined;
-    }
-
-    const input = call.arguments[0];
-    if (!input) {
-      return undefined;
-    }
-
-    return { input, callback };
+  if (!ts.isCallExpression(innerCallee)) {
+    return undefined;
   }
-
-  // Legacy derive shape.
-  const callbackIndex = call.arguments.length - 1;
-  const callbackArg = call.arguments[callbackIndex];
+  const callbackIndex = innerCallee.arguments.length - 1;
+  const callbackArg = innerCallee.arguments[callbackIndex];
   const callback = callbackArg
     ? resolveCallbackFunctionExpression(callbackArg, checker)
     : undefined;
@@ -412,8 +552,7 @@ export function getLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  const inputIndex = callbackIndex === 1 ? 0 : callbackIndex === 3 ? 2 : -1;
-  const input = inputIndex >= 0 ? call.arguments[inputIndex] : undefined;
+  const input = call.arguments[0];
   if (!input) {
     return undefined;
   }
@@ -441,6 +580,20 @@ export function isReactiveOriginExpression(
     return !!callKind && isReactiveOriginKind(callKind);
   }
   return false;
+}
+
+// A tagged template `str`...`` is semantically a call to its tag, but it is a
+// TaggedTemplateExpression in the AST — not a CallExpression — so detectCallKind
+// (keyed on CallExpression) does not classify it. This resolves the tag the same
+// way detectCallKind resolves a callee and reports whether it is a reactive-origin
+// commonfabric runtime call (e.g. str/llm). Scoped helper: a fuller unification of
+// tagged templates into detectCallKind is tracked as a follow-up.
+export function isReactiveOriginTaggedTemplate(
+  expression: ts.TaggedTemplateExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const tagKind = resolveExpressionKind(expression.tag, checker, new Set());
+  return !!tagKind && isReactiveOriginKind(tagKind);
 }
 
 export function classifyWildcardTraversalCall(
@@ -527,8 +680,7 @@ function resolveCallbackFunctionExpression(
     return undefined;
   }
 
-  const initializer = getVariableInitializer(target, checker) ??
-    getSyntheticModuleCallbackInitializer(target);
+  const initializer = getVariableInitializer(target, checker);
   return initializer
     ? resolveCallbackFunctionExpression(initializer, checker, seen)
     : undefined;
@@ -550,47 +702,6 @@ function unwrapHardenedCallbackExpression(
   }
 
   return expression.arguments[0];
-}
-
-function getSyntheticModuleCallbackInitializer(
-  identifier: ts.Identifier,
-): ts.Expression | undefined {
-  if (!identifier.text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX)) {
-    return undefined;
-  }
-
-  const sourceFile = findContainingSourceFile(identifier);
-  if (!sourceFile) {
-    return undefined;
-  }
-
-  for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) {
-      continue;
-    }
-
-    for (const declaration of statement.declarationList.declarations) {
-      if (
-        ts.isIdentifier(declaration.name) &&
-        declaration.name.text === identifier.text
-      ) {
-        return declaration.initializer;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
-  let current: ts.Node | undefined = node;
-  while (current) {
-    if (ts.isSourceFile(current)) {
-      return current;
-    }
-    current = current.parent ?? ts.getOriginalNode(current).parent;
-  }
-  return undefined;
 }
 
 export function isWildcardTraversalCall(
@@ -804,7 +915,12 @@ function isReactiveOriginKind(callKind: CallKind): boolean {
     case "cell-for":
       return true;
     case "lift-applied":
-      return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("derive");
+      // The lift-applied shape `lift(fn)(input)` (which `computed` also lowers to,
+      // and which `derive` used to produce) is inherently a reactive origin.
+      // Previously this checked `.has("derive")` — effectively always true, since
+      // derive was a registered reactive-origin call; that coupling broke when
+      // derive was removed from the registry. The shape is reactive regardless.
+      return true;
     case "ifElse":
       return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("ifElse");
     case "when":
@@ -1129,9 +1245,9 @@ function resolveExpressionKind(
   if (builderKind) {
     // Lift-applied recognition: when the callee is itself a call to lift
     // (e.g. __cfHelpers.lift(cb)({})), the *outer* call applies the lift
-    // factory to inputs and is semantically the lowered form of the
-    // user-source derive(input, cb). Return kind:"lift-applied" so
-    // downstream dispatchers handle it.
+    // factory to inputs and is the canonical lowered form of a reactive
+    // lifted-function computation (e.g. from computed()). Return
+    // kind:"lift-applied" so downstream dispatchers handle it.
     //
     // The plain unapplied builder case (e.g. __cfHelpers.lift(cb) on its
     // own, or a pattern() call) has `target` not as a CallExpression.
@@ -1200,6 +1316,22 @@ function resolveExpressionKind(
       // array-method family, only treat it as such for reactive receivers.
       if (isReactiveArrayMethodReceiverExpression(target.expression, checker)) {
         const result = { kind: "array-method" } as const;
+        cache.set(expression, result);
+        return result;
+      }
+    }
+    // `db.query<Row>(...)` on a SqliteDb receiver — reuse the `sqliteQuery`
+    // runtime-call kind so the existing schema-injection branch lowers `<Row>`
+    // to `rowSchema`. The receiver-type check (brand `"sqlite"`) is what
+    // distinguishes this from any other `.query` method.
+    if (name === "query") {
+      const receiverType = checker.getTypeAtLocation(target.expression);
+      if (getCellKind(receiverType, checker) === "sqlite") {
+        const result = {
+          kind: "runtime-call",
+          exportName: "sqliteQuery",
+          reactiveOrigin: true,
+        } as const;
         cache.set(expression, result);
         return result;
       }
@@ -1508,6 +1640,39 @@ function resolveBuilderExpressionKind(
       const result = { kind: "builder", builderName: fallbackName } as const;
       cache?.set(expression, result);
       return result;
+    }
+  }
+
+  // Hoisted-builder fallback (CT-1644 lift; CT-1655 handler): a `lift(...)` or
+  // `handler(...)` call hoisted to a module-scope const leaves a synthetic
+  // `__cfLift_N(captures)` / `__cfHandler_N(captures)` site whose callee
+  // identifier the checker can't resolve to its const initializer (synthetic
+  // nodes have no symbol). The hoisting stage records the hoisted inner call as
+  // the identifier's original node; resolve the builder kind through it so the
+  // application still classifies as the right builder (lift-applied for lift,
+  // `builderName: "handler"` for handler) for downstream stages — notably
+  // ReactiveVariableFor's `.for(...)` / stream-cause attachment, which runs
+  // after hoisting and sees only the synthetic site. Gated on
+  // `followFactoryResults` (matches the applied-call recognition path) and on
+  // the hoist prefixes (so only our hoisted sites take this path), and only
+  // consulted after symbol/name resolution has failed.
+  if (
+    options.followFactoryResults &&
+    ts.isIdentifier(target) &&
+    (target.text.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX) ||
+      target.text.startsWith(SYNTHETIC_HANDLER_HOIST_PREFIX))
+  ) {
+    const original = ts.getOriginalNode(target);
+    if (original !== target && ts.isCallExpression(original)) {
+      const kind = resolveBuilderExpressionKind(
+        original.expression,
+        checker,
+        seen,
+        options,
+      );
+      if (kind) {
+        return kind;
+      }
     }
   }
 

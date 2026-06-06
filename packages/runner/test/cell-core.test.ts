@@ -8,11 +8,6 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { FabricValue } from "@commonfabric/memory/interface";
-import {
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
 import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
@@ -38,8 +33,8 @@ import { trustPattern } from "./support/trusted-builder.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-const richSigner = await Identity.fromPassphrase("test rich raw");
-const richSpace = richSigner.did();
+const rawSigner = await Identity.fromPassphrase("test raw");
+const rawSpace = rawSigner.did();
 
 describe("Cell", () => {
   let runtime: Runtime;
@@ -85,64 +80,32 @@ describe("Cell", () => {
     expect(c.get()).toBe(20);
   });
 
-  it("should convert Error instances to @Error wrapper on set (legacy)", async () => {
+  it("should wrap Error instances in FabricError on set", async () => {
     const sm = StorageManager.emulate({ as: signer });
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: false },
     });
     const localTx = rt.edit();
     const c = rt.getCell<unknown>(
       space,
-      "should convert Error instances to @Error wrapper on set (legacy)",
+      "should wrap Error instances in FabricError on set",
       undefined,
       localTx,
     );
     const error = new TypeError("something went wrong");
     c.set(error);
 
-    // Legacy path: error should be converted to the `@Error` wrapper.
-    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
-    expect(result).toHaveProperty("@Error");
-    expect(result!["@Error"].name).toBe("TypeError");
-    expect(result!["@Error"].message).toBe("something went wrong");
-    expect(typeof result!["@Error"].stack).toBe("string");
-    await localTx.commit();
-    await rt.dispose();
-    await sm.close();
-  });
-
-  it("should wrap Error instances in FabricError on set (modern)", async () => {
-    const sm = StorageManager.emulate({ as: signer });
-    const rt = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-      experimental: { modernDataModel: true },
-    });
-    const localTx = rt.edit();
-    const c = rt.getCell<unknown>(
-      space,
-      "should wrap Error instances in FabricError on set (modern)",
-      undefined,
-      localTx,
-    );
-    const error = new TypeError("something went wrong");
-    c.set(error);
-
-    // Modern path: error is stored as a `FabricError`-shaped value rather
-    // than the legacy `@Error` wrapper. `c.get()` returns a proxy view of
-    // the stored wrapper — its observable fields (`type`, `name`,
-    // `message`, `stack`, etc.) are exposed directly on the projection,
-    // and its `typeTag` is `"Error@1"` (`FabricError`'s tag).
+    // Error is stored as a `FabricError`-shaped value. `c.get()` returns a
+    // proxy view of the stored wrapper — its observable fields (`type`,
+    // `name`, `message`, `stack`, etc.) are exposed directly on the
+    // projection, and its `wireTypeTag` is `"Error@1"` (`FabricError`'s tag).
     const result = c.get() as {
       message: string;
       stack: string;
-      typeTag: string;
-      "@Error"?: unknown;
+      wireTypeTag: string;
     };
-    expect(result["@Error"]).toBeUndefined();
-    expect(result.typeTag).toBe("Error@1");
+    expect(result.wireTypeTag).toBe("Error@1");
     expect(result.message).toBe("something went wrong");
     expect(typeof result.stack).toBe("string");
     await localTx.commit();
@@ -150,17 +113,16 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("should preserve Error cause property on set (legacy)", async () => {
+  it("should preserve Error cause property on set", async () => {
     const sm = StorageManager.emulate({ as: signer });
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: false },
     });
     const localTx = rt.edit();
     const c = rt.getCell<unknown>(
       space,
-      "should preserve Error cause property on set (legacy)",
+      "should preserve Error cause property on set",
       undefined,
       localTx,
     );
@@ -168,50 +130,15 @@ describe("Cell", () => {
     const error = new Error("wrapper error", { cause });
     c.set(error);
 
-    // Legacy path: error cause is recursively converted to `@Error` wrapper.
-    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
-    expect(result).toHaveProperty("@Error");
-    expect(result!["@Error"].message).toBe("wrapper error");
-    const causeWrapper = result!["@Error"].cause as {
-      "@Error": Record<string, unknown>;
-    };
-    expect(causeWrapper).toHaveProperty("@Error");
-    expect(causeWrapper["@Error"].message).toBe("root cause");
-    await localTx.commit();
-    await rt.dispose();
-    await sm.close();
-  });
-
-  it("should preserve Error cause property on set (modern)", async () => {
-    const sm = StorageManager.emulate({ as: signer });
-    const rt = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-      experimental: { modernDataModel: true },
-    });
-    const localTx = rt.edit();
-    const c = rt.getCell<unknown>(
-      space,
-      "should preserve Error cause property on set (modern)",
-      undefined,
-      localTx,
-    );
-    const cause = new Error("root cause");
-    const error = new Error("wrapper error", { cause });
-    c.set(error);
-
-    // Modern path: outer error is a `FabricError`-shaped value; its cause
-    // is also `FabricError`-shaped (recursively wrapped at conversion
-    // time), not a legacy `@Error` wrapper. The proxy view exposes the
-    // wrapper's observable fields directly.
+    // Outer error is a `FabricError`-shaped value; its cause is also
+    // `FabricError`-shaped (recursively wrapped at conversion time). The
+    // proxy view exposes the wrapper's observable fields directly.
     const result = c.get() as {
       message: string;
       cause: { message: string; stack: string };
-      typeTag: string;
-      "@Error"?: unknown;
+      wireTypeTag: string;
     };
-    expect(result["@Error"]).toBeUndefined();
-    expect(result.typeTag).toBe("Error@1");
+    expect(result.wireTypeTag).toBe("Error@1");
     expect(result.message).toBe("wrapper error");
     expect(result.cause.message).toBe("root cause");
     expect(typeof result.cause.stack).toBe("string");
@@ -220,18 +147,17 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("Error set through a nested write-redirect lands on the target (modern)", async () => {
+  it("Error set through a nested write-redirect lands on the target", async () => {
     const sm = StorageManager.emulate({ as: signer });
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: true },
     });
     const localTx = rt.edit();
 
     const target = rt.getCell<unknown>(
       space,
-      "nested redirect target (modern Error)",
+      "nested redirect target",
       undefined,
       localTx,
     );
@@ -244,7 +170,7 @@ describe("Cell", () => {
     // per-key recursion in the `isRecord(newValue)` branch.
     const parent = rt.getCell<{ slot: unknown }>(
       space,
-      "nested redirect parent (modern Error)",
+      "nested redirect parent",
       undefined,
       localTx,
     );
@@ -261,9 +187,9 @@ describe("Cell", () => {
 
     const targetResult = target.get() as {
       message: string;
-      typeTag: string;
+      wireTypeTag: string;
     };
-    expect(targetResult.typeTag).toBe("Error@1");
+    expect(targetResult.wireTypeTag).toBe("Error@1");
     expect(targetResult.message).toBe("through nested redirect");
 
     await localTx.commit();
@@ -311,17 +237,16 @@ describe("Cell", () => {
     expect(result?.arr.length).toBe(3);
   });
 
-  it("should preserve shared sparse arrays and preserve sharing (legacy)", async () => {
+  it("should preserve shared sparse arrays with structural equality", async () => {
     const sm = StorageManager.emulate({ as: signer });
     const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
-      experimental: { modernDataModel: false },
     });
     const localTx = rt.edit();
     const c = rt.getCell<unknown>(
       space,
-      "sparse sharing legacy",
+      "sparse sharing",
       undefined,
       localTx,
     );
@@ -338,209 +263,89 @@ describe("Cell", () => {
     expect(2 in (result?.[0] ?? [])).toBe(false);
     expect(result?.[0][3]).toBe(2);
     expect(result?.[0].length).toBe(4);
-    // With modernDataModel OFF, both should reference the same array
-    expect(result?.[0]).toBe(result?.[1]);
-    await localTx.commit();
-    await rt.dispose();
-    await sm.close();
-  });
-
-  it("should preserve shared sparse arrays with structural equality (modern)", async () => {
-    const sm = StorageManager.emulate({ as: signer });
-    const rt = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-      experimental: { modernDataModel: true },
-    });
-    const localTx = rt.edit();
-    const c = rt.getCell<unknown>(
-      space,
-      "sparse sharing modern",
-      undefined,
-      localTx,
-    );
-    const sparse: unknown[] = [];
-    sparse[0] = 1;
-    sparse[3] = 2; // holes at indices 1 and 2
-    // Same sparse array referenced twice
-    c.set([sparse, sparse]);
-
-    const result = c.get() as unknown[][] | undefined;
-    // Both should preserve holes
-    expect(result?.[0][0]).toBe(1);
-    expect(1 in (result?.[0] ?? [])).toBe(false);
-    expect(2 in (result?.[0] ?? [])).toBe(false);
-    expect(result?.[0][3]).toBe(2);
-    expect(result?.[0].length).toBe(4);
-    // With modernDataModel ON, both should be structurally equal
+    // Both should be structurally equal
     expect(result?.[0]).toEqual(result?.[1]);
     await localTx.commit();
     await rt.dispose();
     await sm.close();
   });
 
-  // `recursivelyAddIDIfNeeded()` has a legacy "preserve reference identity
-  // when there's nothing to do" optimization. Under the modern data model
-  // (`modernDataModel: true`), the function instead guarantees a
-  // deep-frozen `FabricValue` result for unfrozen inputs: shallow fabric
-  // conversion freezes the visited sub-trees and the function freezes
-  // the freshly-built top-level container. However, when the input is
-  // *already* deep-frozen (a valid `FabricValue`), the shallow
-  // conversion returns it as-is, so identity *is* preserved end-to-end.
-  // The pairs below pin the legacy invariant explicitly and assert the
-  // modern shape (both sides: unfrozen vs. already-frozen) separately.
-  // (Direct unit tests of `recursivelyAddIDIfNeeded` don't go through a
-  // `Runtime`, so flag control happens via `setDataModelConfig()`
-  // rather than runtime construction.)
+  it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (unfrozen input)", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    const interests = ["coding", "reading"];
+    const value = {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      interests,
+      stable: { nested: true },
+    };
 
-  it("preserves identity when recursivelyAddIDIfNeeded has nothing to do (legacy)", () => {
-    const savedFlag = getDataModelConfig();
-    setDataModelConfig(false);
-    try {
-      const frame: Frame = {
-        generatedIdCounter: 0,
-        opaqueRefs: new Set(),
-      };
-      const interests = ["coding", "reading"];
-      const value = {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        interests,
-        stable: { nested: true },
-      };
+    const result = recursivelyAddIDIfNeeded(value, frame);
 
-      const result = recursivelyAddIDIfNeeded(value, frame);
-
-      expect(result).toBe(value);
-      expect(result.interests).toBe(interests);
-      expect(result.stable).toBe(value.stable);
-    } finally {
-      setDataModelConfig(savedFlag);
-    }
+    // The "preserve identity when nothing to do" optimization doesn't
+    // apply for unfrozen inputs; the function returns a structurally
+    // equivalent, deep-frozen tree (top-level included).
+    expect(result).not.toBe(value);
+    expect(result).toEqual(value);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.interests)).toBe(true);
+    expect(Object.isFrozen(result.stable)).toBe(true);
   });
 
-  it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (modern, unfrozen input)", () => {
-    const savedFlag = getDataModelConfig();
-    setDataModelConfig(true);
-    try {
-      const frame: Frame = {
-        generatedIdCounter: 0,
-        opaqueRefs: new Set(),
-      };
-      const interests = ["coding", "reading"];
-      const value = {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        interests,
-        stable: { nested: true },
-      };
+  it("preserves identity when input is already deep-frozen", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    // Deep-freeze before passing in. An already-frozen
+    // plain Object/Array is a valid `FabricValue` and shallow fabric
+    // conversion returns it as-is, so reference identity survives all
+    // the way out.
+    const interests = Object.freeze(["coding", "reading"]);
+    const stable = Object.freeze({ nested: true });
+    const value = Object.freeze({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      interests,
+      stable,
+    });
 
-      const result = recursivelyAddIDIfNeeded(value, frame);
+    const result = recursivelyAddIDIfNeeded(value, frame);
 
-      // Modern: the legacy "preserve identity when nothing to do"
-      // optimization doesn't apply for unfrozen inputs. Instead the
-      // function returns a structurally equivalent, deep-frozen tree
-      // (top-level included).
-      expect(result).not.toBe(value);
-      expect(result).toEqual(value);
-      expect(Object.isFrozen(result)).toBe(true);
-      expect(Object.isFrozen(result.interests)).toBe(true);
-      expect(Object.isFrozen(result.stable)).toBe(true);
-    } finally {
-      setDataModelConfig(savedFlag);
-    }
+    expect(result).toBe(value);
+    expect(result.interests).toBe(interests);
+    expect(result.stable).toBe(stable);
   });
 
-  it("preserves identity when input is already deep-frozen (modern)", () => {
-    const savedFlag = getDataModelConfig();
-    setDataModelConfig(true);
-    try {
-      const frame: Frame = {
-        generatedIdCounter: 0,
-        opaqueRefs: new Set(),
-      };
-      // Deep-freeze before passing in. Under modern, an already-frozen
-      // plain Object/Array is a valid `FabricValue` and shallow fabric
-      // conversion returns it as-is, so reference identity survives all
-      // the way out.
-      const interests = Object.freeze(["coding", "reading"]);
-      const stable = Object.freeze({ nested: true });
-      const value = Object.freeze({
-        firstName: "Ada",
-        lastName: "Lovelace",
-        interests,
-        stable,
-      });
+  it("adds generated IDs to objects in arrays regardless of clone depth", () => {
+    const frame: Frame = {
+      generatedIdCounter: 0,
+      opaqueRefs: new Set(),
+    };
+    const stable = { nested: true };
+    const value = {
+      stable,
+      list: [{ name: "Ada" }, "plain"],
+    };
 
-      const result = recursivelyAddIDIfNeeded(value, frame);
+    const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
 
-      expect(result).toBe(value);
-      expect(result.interests).toBe(interests);
-      expect(result.stable).toBe(stable);
-    } finally {
-      setDataModelConfig(savedFlag);
-    }
-  });
-
-  it("only clones branches that need generated IDs (legacy)", () => {
-    const savedFlag = getDataModelConfig();
-    setDataModelConfig(false);
-    try {
-      const frame: Frame = {
-        generatedIdCounter: 0,
-        opaqueRefs: new Set(),
-      };
-      const stable = { nested: true };
-      const value = {
-        stable,
-        list: [{ name: "Ada" }, "plain"],
-      };
-
-      const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
-
-      expect(result).not.toBe(value);
-      expect(result.stable).toBe(stable);
-      expect(result.list).not.toBe(value.list);
-      expect(result.list[0]).not.toBe(value.list[0]);
-      expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
-      expect(result.list[1]).toBe(value.list[1]);
-    } finally {
-      setDataModelConfig(savedFlag);
-    }
-  });
-
-  it("adds generated IDs to objects in arrays regardless of clone depth (modern)", () => {
-    const savedFlag = getDataModelConfig();
-    setDataModelConfig(true);
-    try {
-      const frame: Frame = {
-        generatedIdCounter: 0,
-        opaqueRefs: new Set(),
-      };
-      const stable = { nested: true };
-      const value = {
-        stable,
-        list: [{ name: "Ada" }, "plain"],
-      };
-
-      const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
-
-      // Modern: shallow fabric conversion clones at each level, so no
-      // sub-branch is reference-preserved. The core invariants that
-      // remain: ID assignment for objects-in-arrays still fires, and
-      // primitive list elements still pass through unchanged. The
-      // returned tree is deep-frozen as a whole (top-level + sub-trees).
-      expect(result).not.toBe(value);
-      expect(result.stable).not.toBe(stable);
-      expect(result.stable).toEqual(stable);
-      expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
-      expect(result.list[1]).toBe("plain");
-      expect(Object.isFrozen(result)).toBe(true);
-      expect(Object.isFrozen(result.list)).toBe(true);
-      expect(Object.isFrozen(result.list[0])).toBe(true);
-    } finally {
-      setDataModelConfig(savedFlag);
-    }
+    // Shallow fabric conversion clones at each level, so no
+    // sub-branch is reference-preserved. The core invariants that
+    // remain: ID assignment for objects-in-arrays still fires, and
+    // primitive list elements still pass through unchanged. The
+    // returned tree is deep-frozen as a whole (top-level + sub-trees).
+    expect(result).not.toBe(value);
+    expect(result.stable).not.toBe(stable);
+    expect(result.stable).toEqual(stable);
+    expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
+    expect(result.list[1]).toBe("plain");
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.list)).toBe(true);
+    expect(Object.isFrozen(result.list[0])).toBe(true);
   });
 
   it("should preserve holes and add IDs to objects in sparse arrays", () => {
@@ -585,30 +390,6 @@ describe("Cell", () => {
     // toJSON() should have been called
     expect(result?.arr).toBe("custom-array-value");
   });
-
-  it("should throw when setting BigInt with modernDataModel OFF", async () => {
-    const sm = StorageManager.emulate({ as: signer });
-    const rt = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm,
-      experimental: { modernDataModel: false },
-    });
-    const localTx = rt.edit();
-    const c = rt.getCell<unknown>(
-      space,
-      "should throw when setting BigInt legacy",
-      undefined,
-      localTx,
-    );
-    expect(() => c.set({ value: BigInt(123) })).toThrow("Cannot store bigint");
-    await localTx.commit();
-    await rt.dispose();
-    await sm.close();
-  });
-
-  // Note: A complementary test for BigInt with modernDataModel ON is deferred.
-  // The cell layer accepts BigInt, but the storage layer's JSON.stringify
-  // cannot serialize it yet, causing an uncaught async error.
 
   it("should create a proxy for the cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
@@ -935,122 +716,105 @@ describe("Cell", () => {
       argumentLink?.scope,
     );
   });
-
-  // Cycle-resolution tests live in a separate `describe` below so they can be
-  // pinned to both `modernDataModel` flag states explicitly.
 });
 
-// Cycle-resolution behavior should hold under both `modernDataModel` flag
-// states, so these tests are run twice, once per state. Modeled on
-// `packages/data-model/test/clone-if-necessary.test.ts`. The flag is set in
-// `beforeEach` BEFORE constructing the `Runtime`, so the runtime captures
-// the correct value (the `Runtime` constructor snapshots
-// `getDataModelConfig()` at construction time).
 describe("Cell circular references", () => {
-  for (const modernMode of [false, true]) {
-    const label = modernMode ? "modern" : "legacy";
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
 
-    describe(`(${label})`, () => {
-      let runtime: Runtime;
-      let storageManager: ReturnType<typeof StorageManager.emulate>;
-      let tx: IExtendedStorageTransaction;
-
-      beforeEach(() => {
-        setDataModelConfig(modernMode);
-        storageManager = StorageManager.emulate({ as: signer });
-        runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-        });
-        tx = runtime.edit();
-      });
-
-      afterEach(async () => {
-        await tx.commit();
-        await runtime?.dispose();
-        await storageManager?.close();
-        resetDataModelConfig();
-      });
-
-      it("should translate circular references into links", () => {
-        const schema = {
-          $ref: "#/$defs/Root",
-          $defs: {
-            Root: {
-              type: "object",
-              properties: {
-                x: { type: "number" },
-                y: { type: "number" },
-                z: { $ref: "#/$defs/Root" },
-              },
-              required: ["x", "y", "z"],
-            },
-          },
-        } as const satisfies JSONSchema;
-        const c = runtime.getCell(
-          space,
-          "should translate circular references into links",
-          schema,
-          tx,
-        );
-        const data: any = { x: 1, y: 2 };
-        data.z = data;
-        c.set(data);
-
-        const proxy = c.getAsQueryResult();
-        expect(proxy.z).toBe(proxy);
-
-        const value = c.get();
-        expect(value.z.z.z).toBe(value.z.z);
-
-        const raw = c.getRaw();
-        expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
-      });
-
-      it("should translate circular references into links across cells", () => {
-        const schema = {
-          $ref: "#/$defs/Root",
-          $defs: {
-            Root: {
-              type: "object",
-              properties: {
-                list: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: { parent: { $ref: "#/$defs/Root" } },
-                    asCell: ["cell"],
-                    required: ["parent"],
-                  },
-                },
-              },
-              required: ["list"],
-            },
-          },
-        } as const satisfies JSONSchema;
-        const c = runtime.getCell(
-          space,
-          "should translate circular references into links",
-          schema,
-          tx,
-        );
-        const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
-        const outer: any = { list: [inner] };
-        inner.parent = outer;
-        c.set(outer);
-
-        const proxy = c.getAsQueryResult();
-        expect(proxy.list[0].parent).toBe(proxy);
-
-        const { id } = c.getAsNormalizedFullLink();
-        const innerCell = c.get().list[0];
-        const raw = innerCell.getRaw();
-        expect(raw).toMatchObject({
-          parent: { "/": { [LINK_V1_TAG]: { id } } },
-        });
-      });
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
     });
-  }
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should translate circular references into links", () => {
+    const schema = {
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          type: "object",
+          properties: {
+            x: { type: "number" },
+            y: { type: "number" },
+            z: { $ref: "#/$defs/Root" },
+          },
+          required: ["x", "y", "z"],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const c = runtime.getCell(
+      space,
+      "should translate circular references into links",
+      schema,
+      tx,
+    );
+    const data: any = { x: 1, y: 2 };
+    data.z = data;
+    c.set(data);
+
+    const proxy = c.getAsQueryResult();
+    expect(proxy.z).toBe(proxy);
+
+    const value = c.get();
+    expect(value.z.z.z).toBe(value.z.z);
+
+    const raw = c.getRaw();
+    expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
+  });
+
+  it("should translate circular references into links across cells", () => {
+    const schema = {
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          type: "object",
+          properties: {
+            list: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { parent: { $ref: "#/$defs/Root" } },
+                asCell: ["cell"],
+                required: ["parent"],
+              },
+            },
+          },
+          required: ["list"],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const c = runtime.getCell(
+      space,
+      "should translate circular references into links",
+      schema,
+      tx,
+    );
+    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+    const outer: any = { list: [inner] };
+    inner.parent = outer;
+    c.set(outer);
+
+    const proxy = c.getAsQueryResult();
+    expect(proxy.list[0].parent).toBe(proxy);
+
+    const { id } = c.getAsNormalizedFullLink();
+    const innerCell = c.get().list[0];
+    const raw = innerCell.getRaw();
+    expect(raw).toMatchObject({
+      parent: { "/": { [LINK_V1_TAG]: { id } } },
+    });
+  });
 });
 
 describe("Cell utility functions", () => {
@@ -1185,6 +949,21 @@ describe("Cell utility functions", () => {
       expect(cell.getRawUntyped({ frozen: false })).toEqual(cell.getRaw());
     });
 
+    it("getRawUntyped({ frozen: false }) _does_ clone", () => {
+      const cell = runtime.getCell<{ items: number[] }>(
+        space,
+        "getRawUntyped frozen false clone off",
+        undefined,
+        tx,
+      );
+      const orig = { items: [1, 2] };
+      cell.set(orig);
+      const result = cell.getRawUntyped({ frozen: false });
+      expect(result).toEqual(orig);
+      expect(result).not.toBe(orig);
+      expect(Object.isFrozen(result)).toBe(false);
+    });
+
     it("setRawUntyped accepts an array", () => {
       const cell = runtime.getCell<number[]>(
         space,
@@ -1240,38 +1019,19 @@ describe("Cell utility functions", () => {
         "Transaction required",
       );
     });
-
-    it("getRawUntyped({ frozen: false }) _does_ clone (flag OFF)", () => {
-      // Even with `modernDataModel === false`, `cloneIfNecessary()` _will_
-      // make a clone of a frozen value to get a mutable result.
-      const cell = runtime.getCell<{ items: number[] }>(
-        space,
-        "getRawUntyped frozen false clone off",
-        undefined,
-        tx,
-      );
-      cell.set({ items: [1, 2] });
-      const result = cell.getRawUntyped({ frozen: false });
-      expect(result).toEqual({ items: [1, 2] });
-      expect(Object.isFrozen(result)).toBe(false);
-    });
   });
 });
 
-// Separate top-level describe with modernDataModel enabled for frozen-ness.
-describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
+describe("Cell raw methods: frozen-or-not", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: richSigner });
+    storageManager = StorageManager.emulate({ as: rawSigner });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: {
-        modernDataModel: true,
-      },
     });
     tx = runtime.edit();
   });
@@ -1284,7 +1044,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRaw returns a frozen object", () => {
     const cell = runtime.getCell<{ a: number; b: number[] }>(
-      richSpace,
+      rawSpace,
       "getRaw frozen",
       undefined,
       tx,
@@ -1298,7 +1058,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped returns a frozen object", () => {
     const cell = runtime.getCell<{ x: number[] }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen",
       undefined,
       tx,
@@ -1312,7 +1072,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: false }) returns a mutable deep copy", () => {
     const cell = runtime.getCell<{ items: number[] }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false mutable",
       undefined,
       tx,
@@ -1336,7 +1096,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRaw and getRawUntyped agree, both frozen", () => {
     const cell = runtime.getCell<{ v: string }>(
-      richSpace,
+      rawSpace,
       "raw agreement frozen",
       undefined,
       tx,
@@ -1349,10 +1109,10 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
     expect(Object.isFrozen(untyped)).toBe(true);
   });
 
-  it("setRawUntyped stores arrays correctly (rich path)", () => {
+  it("setRawUntyped stores arrays correctly", () => {
     const cell = runtime.getCell<number[]>(
-      richSpace,
-      "setRawUntyped array rich",
+      rawSpace,
+      "setRawUntyped array",
       undefined,
       tx,
     );
@@ -1362,10 +1122,10 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
     expect(Object.isFrozen(raw)).toBe(true);
   });
 
-  it("setRawUntyped stores nested objects correctly (rich path)", () => {
+  it("setRawUntyped stores nested objects correctly", () => {
     const cell = runtime.getCell<{ a: { b: number[] } }>(
-      richSpace,
-      "setRawUntyped nested rich",
+      rawSpace,
+      "setRawUntyped nested",
       undefined,
       tx,
     );
@@ -1377,10 +1137,10 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
     expect(Object.isFrozen(raw.a.b)).toBe(true);
   });
 
-  it("setRawUntyped stores null (rich path)", () => {
+  it("setRawUntyped stores null", () => {
     const cell = runtime.getCell<number | null>(
-      richSpace,
-      "setRawUntyped null rich",
+      rawSpace,
+      "setRawUntyped null",
       undefined,
       tx,
     );
@@ -1391,7 +1151,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: false }) returns mutable array copy", () => {
     const cell = runtime.getCell<number[]>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false array",
       undefined,
       tx,
@@ -1405,7 +1165,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: false }) returns mutable deeply nested copy", () => {
     const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false deep nested",
       undefined,
       tx,
@@ -1425,7 +1185,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: false }) with empty array", () => {
     const cell = runtime.getCell<unknown[]>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false empty array",
       undefined,
       tx,
@@ -1438,7 +1198,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: false }) successive calls return independent copies", () => {
     const cell = runtime.getCell<{ val: number }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false independence",
       undefined,
       tx,
@@ -1452,7 +1212,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: true }) returns frozen (same as default)", () => {
     const cell = runtime.getCell<{ x: number }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen true",
       undefined,
       tx,
@@ -1465,7 +1225,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: false }) with deeply nested structure", () => {
     const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false deep",
       undefined,
       tx,
@@ -1482,7 +1242,7 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 
   it("getRawUntyped({ frozen: false }) successive calls are independent", () => {
     const cell = runtime.getCell<{ val: number }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false independence",
       undefined,
       tx,
@@ -1509,13 +1269,11 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 // originally added (PRs #1472, #1562) to handle string-form values
 // returned from a previous shape of the storage layer. PR #2971 in
 // March 2026 wired `valueFromJson` into the storage-boundary read path
-// (`memory/space.ts`), unconditionally decoding the `is` column to an
-// object before reaching either defensive parse: under flag-OFF
-// `valueFromJsonLegacy` is literally `JSON.parse(json)`, and under flag-ON
-// `valueFromJsonModern` strips the `fvj1:` prefix and decodes. From that
-// point on, neither guard could fire through the standard public API, and
-// the defensive parses became orphaned — which is what motivated their
-// deletion.
+// (`memory/space.ts`): `valueFromJson` unconditionally decodes the `is`
+// column to an object (stripping the `fvj1:` prefix) before reaching
+// either defensive parse. From that point on, neither guard could fire
+// through the standard public API, and the defensive parses became
+// orphaned — which is what motivated their deletion.
 //
 // The tests below pin the round-trip behavior that, post-deletion, is the
 // observable contract. They serve as a passive regression net for any future
@@ -1628,226 +1386,129 @@ describe(`Cell result-meta round-trip`, () => {
   );
 });
 
-// Cell-storage behavior for the four "weird" numeric values: `-0`, `NaN`,
-// `+Infinity`, `-Infinity`. The two data-model paths diverge sharply here:
-//
-// * Legacy (`modernDataModel = false`): `-0` is normalized to `0` on set, and
-//   any non-finite number throws `"Cannot store non-finite number"` at the
-//   fabric-value boundary inside `cell.set()`.
-// * Modern  (`modernDataModel = true`): all four values flow through end-to-end
-//   (PRs #3492/#3493/#3495). `-0` keeps its sign; `NaN` and `±Infinity` are
-//   stored faithfully and read back as themselves.
-//
-// These tests pin both behaviors so a future flag-default change can't quietly
-// regress either path.
-for (const modernDataModel of [false, true]) {
-  describe(
-    `Cell special-number storage with \`modernDataModel = ${modernDataModel}\``,
-    () => {
-      let runtime: Runtime;
-      let storageManager: ReturnType<typeof StorageManager.emulate>;
-      let tx: IExtendedStorageTransaction;
+describe(
+  `Cell special-number storage`,
+  () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
 
-      beforeEach(() => {
-        storageManager = StorageManager.emulate({ as: signer });
-        runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-          experimental: { modernDataModel },
-        });
-        tx = runtime.edit();
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
       });
+      tx = runtime.edit();
+    });
 
-      afterEach(async () => {
-        await tx.commit();
-        await runtime?.dispose();
-        await storageManager?.close();
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("preserves the sign of -0 on set", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "preserve -0",
+        undefined,
+        tx,
+      );
+      c.set({ value: -0 });
+      const result = c.get() as { value: number } | undefined;
+      expect(Object.is(result?.value, -0)).toBe(true);
+      expect(Object.is(result?.value, 0)).toBe(false);
+    });
+
+    it("stores NaN", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "store NaN",
+        undefined,
+        tx,
+      );
+      c.set({ value: NaN });
+      const result = c.get() as { value: number } | undefined;
+      expect(Number.isNaN(result?.value)).toBe(true);
+    });
+
+    it("stores +Infinity and -Infinity", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "store infinities",
+        undefined,
+        tx,
+      );
+      c.set({ pos: Infinity, neg: -Infinity });
+      const result = c.get() as
+        | { pos: number; neg: number }
+        | undefined;
+      expect(result?.pos).toBe(Infinity);
+      expect(result?.neg).toBe(-Infinity);
+    });
+  },
+);
+
+describe(
+  "Cell symbol storage",
+  () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
       });
+      tx = runtime.edit();
+    });
 
-      if (modernDataModel) {
-        it("preserves the sign of -0 on set", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "modern: preserve -0",
-            undefined,
-            tx,
-          );
-          c.set({ value: -0 });
-          const result = c.get() as { value: number } | undefined;
-          expect(Object.is(result?.value, -0)).toBe(true);
-          expect(Object.is(result?.value, 0)).toBe(false);
-        });
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
 
-        it("stores NaN", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "modern: store NaN",
-            undefined,
-            tx,
-          );
-          c.set({ value: NaN });
-          const result = c.get() as { value: number } | undefined;
-          expect(Number.isNaN(result?.value)).toBe(true);
-        });
+    it("round-trips an interned symbol with stable identity", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "interned symbol round-trip",
+        undefined,
+        tx,
+      );
+      c.set({ tag: Symbol.for("status") });
+      const result = c.get() as { tag: symbol } | undefined;
+      // Same registry key in the same realm yields the same symbol
+      // instance, so the round-tripped value is `Object.is` to the
+      // constructed sentinel.
+      expect(Object.is(result?.tag, Symbol.for("status"))).toBe(true);
+    });
 
-        it("stores +Infinity and -Infinity", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "modern: store infinities",
-            undefined,
-            tx,
-          );
-          c.set({ pos: Infinity, neg: -Infinity });
-          const result = c.get() as
-            | { pos: number; neg: number }
-            | undefined;
-          expect(result?.pos).toBe(Infinity);
-          expect(result?.neg).toBe(-Infinity);
-        });
-      } else {
-        it("converts -0 to 0 on set", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "legacy: -0 to 0",
-            undefined,
-            tx,
-          );
-          c.set({ value: -0 });
-          const result = c.get() as { value: number } | undefined;
-          expect(result?.value).toBe(0);
-          expect(Object.is(result?.value, 0)).toBe(true);
-          expect(Object.is(result?.value, -0)).toBe(false);
-        });
+    it("round-trips an interned symbol with an empty key", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "interned empty-key symbol",
+        undefined,
+        tx,
+      );
+      c.set({ tag: Symbol.for("") });
+      const result = c.get() as { tag: symbol } | undefined;
+      expect(Object.is(result?.tag, Symbol.for(""))).toBe(true);
+    });
 
-        it("throws when setting NaN", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "legacy: throw on NaN",
-            undefined,
-            tx,
-          );
-          expect(() => c.set({ value: NaN })).toThrow(
-            "Cannot store non-finite number",
-          );
-        });
-
-        it("throws when setting +Infinity or -Infinity", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "legacy: throw on infinities",
-            undefined,
-            tx,
-          );
-          expect(() => c.set({ value: Infinity })).toThrow(
-            "Cannot store non-finite number",
-          );
-          expect(() => c.set({ value: -Infinity })).toThrow(
-            "Cannot store non-finite number",
-          );
-        });
-      }
-    },
-  );
-}
-
-// Cell-storage behavior for symbols. The two data-model paths diverge:
-//
-// * Legacy (`modernDataModel = false`): any symbol -- registry-interned or
-//   unique -- throws `"Cannot store symbol"` at the fabric-value boundary
-//   inside `cell.set()`.
-// * Modern  (`modernDataModel = true`): registry-interned symbols
-//   (`Symbol.for(key)`) round-trip end-to-end, with `Object.is` identity
-//   preserved against any same-key `Symbol.for` in the same realm. Unique
-//   symbols (`Symbol(desc)`) throw the more specific `"Cannot store unique
-//   (uninterned) symbol"` (PRs #3503/#3510).
-for (const modernDataModel of [false, true]) {
-  describe(
-    `Cell symbol storage with \`modernDataModel = ${modernDataModel}\``,
-    () => {
-      let runtime: Runtime;
-      let storageManager: ReturnType<typeof StorageManager.emulate>;
-      let tx: IExtendedStorageTransaction;
-
-      beforeEach(() => {
-        storageManager = StorageManager.emulate({ as: signer });
-        runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-          experimental: { modernDataModel },
-        });
-        tx = runtime.edit();
-      });
-
-      afterEach(async () => {
-        await tx.commit();
-        await runtime?.dispose();
-        await storageManager?.close();
-      });
-
-      if (modernDataModel) {
-        it("round-trips an interned symbol with stable identity", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "modern: interned symbol round-trip",
-            undefined,
-            tx,
-          );
-          c.set({ tag: Symbol.for("status") });
-          const result = c.get() as { tag: symbol } | undefined;
-          // Same registry key in the same realm yields the same symbol
-          // instance, so the round-tripped value is `Object.is` to the
-          // constructed sentinel.
-          expect(Object.is(result?.tag, Symbol.for("status"))).toBe(true);
-        });
-
-        it("round-trips an interned symbol with an empty key", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "modern: interned empty-key symbol",
-            undefined,
-            tx,
-          );
-          c.set({ tag: Symbol.for("") });
-          const result = c.get() as { tag: symbol } | undefined;
-          expect(Object.is(result?.tag, Symbol.for(""))).toBe(true);
-        });
-
-        it("throws on a unique (uninterned) symbol", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "modern: throw on unique symbol",
-            undefined,
-            tx,
-          );
-          expect(() => c.set({ value: Symbol("nope") })).toThrow(
-            "Cannot store unique (uninterned) symbol",
-          );
-        });
-      } else {
-        it("throws on an interned symbol", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "legacy: throw on interned symbol",
-            undefined,
-            tx,
-          );
-          expect(() => c.set({ tag: Symbol.for("status") })).toThrow(
-            "Cannot store symbol",
-          );
-        });
-
-        it("throws on a unique (uninterned) symbol", () => {
-          const c = runtime.getCell<unknown>(
-            space,
-            "legacy: throw on unique symbol",
-            undefined,
-            tx,
-          );
-          expect(() => c.set({ value: Symbol("nope") })).toThrow(
-            "Cannot store symbol",
-          );
-        });
-      }
-    },
-  );
-}
+    it("throws on a unique (uninterned) symbol", () => {
+      const c = runtime.getCell<unknown>(
+        space,
+        "throw on unique symbol",
+        undefined,
+        tx,
+      );
+      expect(() => c.set({ value: Symbol("nope") })).toThrow(
+        "Cannot store unique (uninterned) symbol",
+      );
+    });
+  },
+);

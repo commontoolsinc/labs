@@ -425,7 +425,7 @@ computation rules below.
 
 ## Computation Rules
 
-For ordinary compute nodes, including `derive`, `computed`, and `lift`, the
+For ordinary compute nodes, including `computed` and `lift`, the
 logical output schema has the narrowest scope of the input schemas.
 
 If a computation whose output location is broader reads data from a narrower

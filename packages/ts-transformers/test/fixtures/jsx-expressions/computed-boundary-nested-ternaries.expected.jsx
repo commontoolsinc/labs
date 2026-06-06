@@ -11,6 +11,19 @@ import { computed, ifElse, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    bar: boolean;
+}, "B" | "C">({
+    type: "object",
+    properties: {
+        bar: {
+            type: "boolean"
+        }
+    },
+    required: ["bar"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    "enum": ["B", "C"]
+} as const satisfies __cfHelpers.JSONSchema, ({ bar }) => bar ? "B" : "C");
 // FIXTURE: computed-boundary-nested-ternaries
 // Verifies: outer branch lowering does not structurally lower nested ternaries inside computed callbacks
 //   show ? computed(() => bar ? "B" : "C") : "D" → outer branch lowers, inner ternary stays authored
@@ -26,19 +39,7 @@ export const OuterTernary = pattern((__cf_pattern_input) => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C", "D"]
-    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
-        bar: boolean;
-    }, "B" | "C">({
-        type: "object",
-        properties: {
-            bar: {
-                type: "boolean"
-            }
-        },
-        required: ["bar"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": ["B", "C"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ bar }) => bar ? "B" : "C")({ bar: bar }), "D")}</div>);
+    } as const satisfies __cfHelpers.JSONSchema, show, __cfLift_1({ bar: bar }), "D")}</div>);
 }, {
     type: "object",
     properties: {
@@ -71,6 +72,23 @@ export const OuterTernary = pattern((__cf_pattern_input) => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_2 = __cfHelpers.lift<{
+    foo: boolean;
+    bar: boolean;
+}, "A" | "B" | "C">({
+    type: "object",
+    properties: {
+        foo: {
+            type: "boolean"
+        },
+        bar: {
+            type: "boolean"
+        }
+    },
+    required: ["foo", "bar"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    "enum": ["A", "B", "C"]
+} as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo ? "A" : bar ? "B" : "C");
 export const AuthoredIfElse = pattern((__cf_pattern_input) => {
     const show = __cf_pattern_input.key("show");
     const foo = __cf_pattern_input.key("foo");
@@ -83,23 +101,7 @@ export const AuthoredIfElse = pattern((__cf_pattern_input) => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["A", "B", "C", "D"]
-    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
-        foo: boolean;
-        bar: boolean;
-    }, "A" | "B" | "C">({
-        type: "object",
-        properties: {
-            foo: {
-                type: "boolean"
-            },
-            bar: {
-                type: "boolean"
-            }
-        },
-        required: ["foo", "bar"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": ["A", "B", "C"]
-    } as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo ? "A" : bar ? "B" : "C")({
+    } as const satisfies __cfHelpers.JSONSchema, show, __cfLift_2({
         foo: foo,
         bar: bar
     }), "D");

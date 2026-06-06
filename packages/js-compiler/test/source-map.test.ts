@@ -1,13 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  composeBundleSourceMap,
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
   SourceMapParser,
   TypeScriptCompiler,
 } from "../mod.ts";
 import { StaticCacheFS } from "@commonfabric/static";
-import { SourceMapConsumer } from "source-map-js";
+import { SourceMapConsumer, SourceMapGenerator } from "source-map-js";
 
 const staticCache = new StaticCacheFS();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
@@ -282,5 +283,99 @@ export default errorOnLine6;
     // External files should be preserved unchanged
     expect(parsed).toContain("other-file.js:100:50");
     expect(parsed).toContain("https://example.com/lib.js:200:30");
+  });
+});
+
+describe("composeBundleSourceMap", () => {
+  const buildMap = (
+    file: string,
+    mappings: Array<{ gen: number; src: string; orig: number }>,
+  ) => {
+    const g = new SourceMapGenerator({ file });
+    for (const m of mappings) {
+      g.addMapping({
+        generated: { line: m.gen, column: 0 },
+        original: { line: m.orig, column: 0 },
+        source: m.src,
+      });
+    }
+    return JSON.parse(g.toString());
+  };
+
+  it("offsets each module's generated lines by its start in the joined bundle", () => {
+    const mapA = buildMap("a.js", [
+      { gen: 1, src: "a.ts", orig: 10 },
+      { gen: 2, src: "a.ts", orig: 11 },
+    ]);
+    const mapB = buildMap("b.js", [{ gen: 1, src: "b.ts", orig: 20 }]);
+    // Bodies joined with "\n": A occupies bundle lines 1..3 (3 lines), so B's
+    // gen line 1 lands at bundle line 4.
+    const composed = composeBundleSourceMap(
+      [{ body: "x\ny\nz", map: mapA }, { body: "p\nq", map: mapB }],
+      "bundle.js",
+    )!;
+    const consumer = new SourceMapConsumer(composed);
+    expect(consumer.originalPositionFor({ line: 1, column: 0 }).source).toBe(
+      "a.ts",
+    );
+    expect(consumer.originalPositionFor({ line: 1, column: 0 }).line).toBe(10);
+    const b = consumer.originalPositionFor({ line: 4, column: 0 });
+    expect(b.source).toBe("b.ts");
+    expect(b.line).toBe(20);
+  });
+
+  it("applies startLineOffset to the first module (eval wrapper line)", () => {
+    const mapA = buildMap("a.js", [{ gen: 1, src: "a.ts", orig: 10 }]);
+    // startLineOffset 1 mirrors the `(function (...) {` wrapper: the body's
+    // gen line 1 maps to bundle line 2.
+    const composed = composeBundleSourceMap(
+      [{ body: "x", map: mapA }],
+      "m.js",
+      1,
+    )!;
+    const consumer = new SourceMapConsumer(composed);
+    expect(consumer.originalPositionFor({ line: 2, column: 0 }).source).toBe(
+      "a.ts",
+    );
+    expect(consumer.originalPositionFor({ line: 2, column: 0 }).line).toBe(10);
+  });
+
+  it("returns undefined when no module has a map", () => {
+    expect(composeBundleSourceMap([{ body: "x" }], "m.js")).toBe(undefined);
+  });
+
+  it("overrides the recorded source path when `source` is given", () => {
+    // Compiler maps record only the basename; the override rewrites it to the
+    // full module path so resolved coordinates match the verified-source set.
+    const mapA = buildMap("a.js", [{ gen: 1, src: "main.tsx", orig: 10 }]);
+    const composed = composeBundleSourceMap(
+      [{ body: "x", map: mapA, source: "/id/dir/main.tsx" }],
+      "m.js",
+    )!;
+    const consumer = new SourceMapConsumer(composed);
+    const pos = consumer.originalPositionFor({ line: 1, column: 0 });
+    expect(pos.source).toBe("/id/dir/main.tsx");
+    expect(pos.line).toBe(10);
+  });
+
+  it("preserves sourcesContent under the overridden source name", () => {
+    const g = new SourceMapGenerator({ file: "a.js" });
+    g.addMapping({
+      generated: { line: 1, column: 0 },
+      original: { line: 10, column: 0 },
+      source: "main.tsx",
+    });
+    g.setSourceContent("main.tsx", "const authored = 1;");
+    const mapA = JSON.parse(g.toString());
+    const composed = composeBundleSourceMap(
+      [{ body: "x", map: mapA, source: "/id/dir/main.tsx" }],
+      "m.js",
+    )!;
+    // Content must be reachable under the OVERRIDDEN name (what the mappings
+    // now point at), so DevTools can display the authored source.
+    expect(
+      composed.sourcesContent?.[composed.sources.indexOf("/id/dir/main.tsx")],
+    )
+      .toBe("const authored = 1;");
   });
 });

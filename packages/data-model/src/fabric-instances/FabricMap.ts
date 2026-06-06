@@ -1,13 +1,11 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
-import { FrozenMap } from "../frozen-builtins.ts";
+} from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
@@ -17,10 +15,13 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Map;
   }
 
   [DECONSTRUCT](): FabricValue {

@@ -6,15 +6,21 @@ import {
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
-  DECONSTRUCT,
   FabricInstance,
   type FabricValue,
-  getDataModelConfig,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  DECONSTRUCT,
+  FabricDeconstructable,
+} from "@commonfabric/data-model/wire-common";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { SqliteParamsWire } from "@commonfabric/memory/v2";
+import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
+import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
+import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -35,6 +41,7 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
+  type Module,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -375,6 +382,8 @@ const cellMethods = new Set<
   | "filterWithPattern"
   | "flatMap"
   | "flatMapWithPattern"
+  | "exec"
+  | "query"
 >([
   "get",
   "sample",
@@ -419,7 +428,101 @@ const cellMethods = new Set<
   "getAsOpaqueRefProxy",
   "setInitialValue",
   "setSelfRef",
+  "exec",
+  "query",
 ]);
+
+/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
+ *  used to map positional `_cf_link` params. Returns undefined when there is no
+ *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
+ *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
+ *  insert's VALUES tuple is NOT mistaken for a column list. */
+function parseSqliteInsertColumns(sql: string): string[] | undefined {
+  const m = sql.match(
+    /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
+  );
+  if (!m) return undefined;
+  return m[1].split(",").map((c) => c.trim().replace(/^["'`\[]|["'`\]]$/g, ""));
+}
+
+/**
+ * Encode SQLite bind params for the wire: a cell bound to a `_cf_link` column is
+ * encoded to an absolute sigil-link string; a cell bound to any other column
+ * throws; an `undefined` value throws (the pending-value guard — `null` is
+ * allowed for SQL NULL). Shared by `db.exec` (CellImpl) and the `sqliteQuery`
+ * builtin so the encode rules and the undefined guard cannot drift.
+ *
+ * Positional params are validated against the statement's explicit `INSERT`
+ * column list (cycled across multi-row `VALUES` tuples). When the target column
+ * of a positional `?` can't be determined (columnless INSERT, UPDATE, opaque
+ * SQL), a Cell binding cannot be verified to land in a `_cf_link` column, so it
+ * is REJECTED with an actionable error rather than blindly sigil-encoded (which
+ * would corrupt a non-link column). Use an explicit column list or named params
+ * (`:col`) to bind a Cell in those statements.
+ */
+/**
+ * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
+ * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
+ * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
+ * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
+ * counts as a bound cell. (Lives here because it needs `isCell` /
+ * `instanceof CellImpl`; cf-link.ts already imports from cell.ts.)
+ */
+export function asBoundCell(value: unknown): Cell<unknown> | undefined {
+  if (isCell(value)) return value as Cell<unknown>;
+  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+  return undefined;
+}
+
+export function encodeSqliteParams(
+  sql: string,
+  params?: ReadonlyArray<unknown> | Record<string, unknown>,
+): SqliteParamsWire | undefined {
+  if (params === undefined) return undefined;
+  const assertDefined = (value: unknown): void => {
+    if (value === undefined) {
+      throw new TypeError(
+        "sqlite: param is undefined (it may be a value that isn't ready yet); " +
+          "pass a resolved value, or null for SQL NULL",
+      );
+    }
+  };
+  const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
+    assertDefined(value);
+    const cell = asBoundCell(value);
+    if (cell) {
+      if (!isLinkCol) {
+        throw new TypeError("cells may only be bound to _cf_link columns");
+      }
+      return encodeCellToSigilString(cell);
+    }
+    return value;
+  };
+  if (Array.isArray(params)) {
+    const cols = parseSqliteInsertColumns(sql);
+    return params.map((v, i) => {
+      if (cols) {
+        // Cycle the column list across multi-row `VALUES (?),(?)` tuples.
+        return encodeOne(v, isCfLinkColumn(cols[i % cols.length] ?? ""));
+      }
+      assertDefined(v);
+      if (asBoundCell(v)) {
+        throw new TypeError(
+          "sqlite: a Cell parameter must bind to a _cf_link column, but the " +
+            "target column can't be determined from this statement. Use an " +
+            "explicit column list (INSERT INTO t (col) VALUES (?)) or named " +
+            "params (:col) so the binding can be verified.",
+        );
+      }
+      return v;
+    }) as SqliteParamsWire;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(params)) {
+    out[k] = encodeOne(v, isCfLinkColumn(k));
+  }
+  return out as SqliteParamsWire;
+}
 
 export function createCell<T>(
   runtime: Runtime,
@@ -582,6 +685,25 @@ export class CellImpl<T extends FabricValue>
     this._causeContainer.cause = cause;
 
     return this as unknown as Cell<T>;
+  }
+
+  /**
+   * Pins this (not-yet-linked) cell to a space before its id exists, and routes
+   * any pattern nodes attached to it into that target space. Used by the pattern
+   * builder to implement `PatternFactory.inSpace(...)`. Throws if the cell has
+   * already been linked.
+   */
+  setUnlinkedSpace(space: MemorySpace): void {
+    if (this._causeContainer.id || this._link.id) {
+      throw new Error(
+        "Cannot set space: cell already has a link.",
+      );
+    }
+    this._causeContainer.space = space;
+    this._link = { ...this._link, space };
+    for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
+      (node.module as Module).targetSpace = space;
+    }
   }
 
   /**
@@ -817,6 +939,69 @@ export class CellImpl<T extends FabricValue>
         resolve(result);
       });
     });
+  }
+
+  /**
+   * SqliteDb write (`db.exec`): records a SQLite write op onto THIS cell's
+   * transaction so it commits ATOMICALLY with surrounding cell writes (one
+   * commit = cell ops + a `sqlite` op). On SQL failure the whole commit aborts.
+   * Only valid on a `"sqlite"`-kind cell and inside a transaction (e.g. a
+   * handler). Throws on an `undefined` param (it may be a value that isn't ready
+   * yet — pass a resolved value, or `null` for SQL NULL). See
+   * docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+   */
+  exec(
+    sql: string,
+    params?: ReadonlyArray<unknown> | Record<string, unknown>,
+  ): void {
+    if (!this.tx) {
+      throw new Error(
+        ".exec() must be called within a transaction (e.g. inside a handler)",
+      );
+    }
+    if (!this.tx.recordSqliteWrite) {
+      throw new Error("storage transaction does not support sqlite writes");
+    }
+    // `"sqlite"` is a type-level kind (the public `SqliteDb` type restricts who
+    // can call `.exec`); at runtime we validate the actual handle value rather
+    // than `_kind`, since handler-input materialization doesn't always stamp the
+    // kind onto the delivered cell. Read the handle with `getRaw()` (NOT `get()`):
+    // the delivered cell's schema is the `SqliteDatabase` shape (no declared
+    // properties), so `get()` would shape the handle down to `{}` and drop the
+    // `id`/`tables` fields. Use `lastNode: "value"` so the FINAL link is still
+    // resolved (a handler-delivered handle may sit behind a link at its target) —
+    // getRaw's default `"top"` would stop at the link object and miss `id`.
+    const handle = this.getRaw({ lastNode: "value" }) as
+      | { id?: unknown; tables?: unknown; scope?: unknown }
+      | undefined;
+    if (!handle || typeof handle.id !== "string") {
+      throw new TypeError(
+        ".exec() is only available on a SqliteDb cell (invalid database handle)",
+      );
+    }
+    this.tx.recordSqliteWrite(this.space, {
+      op: "sqlite",
+      db: {
+        id: handle.id,
+        tables: handle.tables as Record<string, unknown> | undefined,
+        // Carry the db's declared scope so the write lands in the same per-user
+        // / per-session on-disk file the read path resolves (stamped by
+        // sqliteDatabase onto the handle value).
+        scope: isCellScope(handle.scope) ? handle.scope : undefined,
+      },
+      sql,
+      params: encodeSqliteParams(sql, params),
+    });
+    // Bump a write counter on the DB handle cell in THIS SAME commit. Two
+    // effects, both intended:
+    //  - `reactOn: db` queries re-run after a write (the handle value changed).
+    //  - it serializes concurrent writers: each does a read-modify-write of
+    //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
+    //    revision (optimistic-concurrency mutex) and one retries.
+    const rev = ((handle as { rev?: unknown }).rev as number | undefined) ?? 0;
+    this.withTx(this.tx).set(
+      { ...(handle as Record<string, unknown>), rev: rev + 1 } as unknown as T,
+    );
   }
 
   set(
@@ -1157,15 +1342,18 @@ export class CellImpl<T extends FabricValue>
       // Create a child link with extended path
       // When we have a childSchema, we need to preserve the schema that contains $defs
       // for resolving $ref references. If schema wasn't set, fall back to the parent schema.
+      //
+      // key() only extends the path and walks the schema. It must NOT change the
+      // link's scope: scope lives in the schema (top-level and asCell entries)
+      // and is resolved later as a follow cap during reads and as the target
+      // scope during writes. Stamping schema scope onto this link here would
+      // re-address the value to the wrong scoped instance of the container doc
+      // (see CT-1623).
       currentLink = {
         ...currentLink,
         path: [...currentLink.path, key.toString()] as string[],
         schema: childSchema,
       };
-
-      if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
-        currentLink = { ...currentLink, scope: childSchema.scope };
-      }
     }
 
     // Determine the kind based on schema flags
@@ -1178,10 +1366,6 @@ export class CellImpl<T extends FabricValue>
         const asCellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
         if (asCellKind !== undefined) {
           kind = asCellKind;
-        }
-        const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
-        if (isCellScope(asCellScope)) {
-          currentLink = { ...currentLink, scope: asCellScope };
         }
       }
     }
@@ -1409,14 +1593,11 @@ export class CellImpl<T extends FabricValue>
    * Proxy wrapping). By default returns a deep-frozen `FabricValue`
    * snapshot; pass `{ frozen: false }` for a mutable deep copy.
    *
-   * **Frozenness contract:** Defaults to `{ frozen: true }` regardless
-   * of the data-model flag, returning a deep-frozen `FabricValue`
-   * snapshot via `cloneIfNecessary()`. Under `modernDataModel: true`
-   * the underlying storage already holds a deep-frozen tree, so the
-   * clone is typically a no-op. Under `modernDataModel: false` (legacy)
-   * the snapshot is freshly frozen at read time. The `{ frozen: false }`
-   * variant returns a fresh mutable deep copy and never aliases storage
-   * state.
+   * **Frozenness contract:** Defaults to `{ frozen: true }`, returning a
+   * deep-frozen `FabricValue` snapshot via `cloneIfNecessary()`. The underlying
+   * storage already holds a deep-frozen tree, so the clone is typically a
+   * no-op. The `{ frozen: false }` variant returns a fresh mutable deep copy
+   * and never aliases storage state.
    */
   getRaw(options?: RawCellReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
@@ -1612,6 +1793,10 @@ export class CellImpl<T extends FabricValue>
     boundTarget?: (...args: unknown[]) => unknown,
   ): OpaqueRef<T> {
     const self = this as unknown as Cell<T>;
+    // `query`/`exec` are SqliteDb-only methods whose names are also common data
+    // fields (e.g. wish's `query`). Only forward them as methods on a
+    // `"sqlite"`-kind cell; otherwise treat `.query`/`.exec` as data navigation.
+    const cellKind = this._kind;
     const proxy = new Proxy(boundTarget ?? this, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
@@ -1642,8 +1827,13 @@ export class CellImpl<T extends FabricValue>
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;
 
-          // Check if this is a method on the cell
-          if (cellMethods.has(prop as keyof ICell<T>)) {
+          // Check if this is a method on the cell. `query`/`exec` are gated to
+          // SqliteDb cells so they don't shadow same-named data fields.
+          const isSqliteOnlyMethod = prop === "query" || prop === "exec";
+          if (
+            cellMethods.has(prop as keyof ICell<T>) &&
+            (!isSqliteOnlyMethod || cellKind === "sqlite")
+          ) {
             return nestedCell.getAsOpaqueRefProxy(
               (self as unknown as Record<
                 string,
@@ -1666,6 +1856,36 @@ export class CellImpl<T extends FabricValue>
    * Map over an array cell, creating a new derived array.
    * Similar to Array.prototype.map but works with OpaqueRefs.
    */
+  /**
+   * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
+   * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
+   * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
+   * injected by the transformer (method-call lowering), not set here. Like
+   * `.map`, this is a build-time node constructor with no `_kind` guard: at
+   * pattern-build time `this` is an opaque builder ref (the `"sqlite"` kind only
+   * materializes at runtime via the asCell schema), and the public `SqliteDb`
+   * type already restricts who can call it. A wrong handle fails at runtime in
+   * `readDbRef`.
+   */
+  query<Row = Record<string, unknown>>(
+    sql: string,
+    options?: {
+      params?: ReadonlyArray<unknown> | Record<string, unknown>;
+      reactOn?: unknown;
+    },
+  ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
+    return sqliteQueryNodeFactory({
+      db: this,
+      sql,
+      params: options?.params,
+      reactOn: options?.reactOn,
+      // Forward the transformer-injected `<Row>` schema (lowered into the
+      // options object) to the node so the builtin can decode `_cf_link`
+      // columns. Read loosely — it is not part of the public options type.
+      rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
+    }) as OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }>;
+  }
+
   map<S>(
     fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
@@ -1924,6 +2144,23 @@ export class CellImpl<T extends FabricValue>
       "Copy trap: Something is trying to traverse a cell.",
     );
   }
+}
+
+export function setCellUnlinkedSpace(
+  cell: unknown,
+  space: MemorySpace,
+): void {
+  asCellImpl(cell)?.setUnlinkedSpace(space);
+}
+
+function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
+  if (cell === null || cell === undefined) return undefined;
+  const maybeToCell = (cell as { [toCell]?: () => Cell<unknown> })[toCell];
+  const unproxied = typeof maybeToCell === "function"
+    ? maybeToCell.call(cell)
+    : cell;
+  if (!isCell(unproxied)) return undefined;
+  return unproxied as unknown as CellImpl<FabricValue>;
 }
 
 function subscribeToReferencedDocs<T>(
@@ -2204,17 +2441,13 @@ function validateStaticData(value: unknown): void {
  * This ensures that mutable arrays only consist of links to documents, at least
  * when written to only via .set, .update and .push above.
  *
- * **Frozenness contract (modern data model only):** This function sits at
- * the write boundary into runner/memory storage. Under
- * `modernDataModel: true`, the returned tree is always a valid
- * deep-frozen `FabricValue`: the shallow fabric conversion freezes the
- * sub-trees it visits, and the function freezes the freshly-built
- * top-level container before returning. If the input is already a
- * deep-frozen valid `FabricValue`, the shallow conversion returns it
- * as-is and reference identity is preserved end-to-end. Under
- * `modernDataModel: false` (legacy), no freezing happens here at all
- * and the legacy "preserve identity when there's nothing to do"
- * optimization applies regardless of input frozenness.
+ * **Frozenness contract:** This function sits at the write boundary into
+ * runner/memory storage. The returned tree is always a valid deep-frozen
+ * `FabricValue`: the shallow fabric conversion freezes the sub-trees it visits,
+ * and the function freezes the freshly-built top-level container before
+ * returning. If the input is already a deep-frozen valid `FabricValue`, the
+ * shallow conversion returns it as-is and reference identity is preserved
+ * end-to-end.
  *
  * TODO(seefeld): When an array has default entries and is rewritten as [...old,
  * new], this will still break, because the previous entries will point back to
@@ -2231,10 +2464,6 @@ export function recursivelyAddIDIfNeeded<T>(
   // Can't add IDs without frame.
   if (!frame) return value;
 
-  // Snapshot the modern-data-model flag once; used below at the freshly-
-  // built-container freeze points.
-  const modern = getDataModelConfig();
-
   // Already seen, return previously annotated result. Check this before
   // shallowFabricFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
@@ -2244,22 +2473,24 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
-  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
-  // `FabricRegExp`) are immutable wrappers with class-defined identity.
-  // Their own-enumerable properties are implementation details, not
-  // user-visible structure; iterating them via the generic walker would
-  // descend into wrapper internals meaninglessly. Instead, walk the
-  // observable internal
-  // structure via `[DECONSTRUCT]()` (the same mechanism the serialization
-  // system uses) for side effects only — tracking shared references in
-  // `seen` and populating `frame.generatedIdCounter` for any
-  // objects-in-arrays nested inside — then return the original instance
-  // unchanged. Subclasses that haven't implemented `[DECONSTRUCT]` yet
-  // will throw from this path; that's the right signal the moment they
-  // start seeing traffic.
+  // `FabricInstance`s are opaque with respect to plain-object-like property
+  // access; they have class-defined identity. Iterating their own-enumerable
+  // properties via the generic walker would descend into wrapper internals
+  // meaninglessly. Instead, walk the observable internal structure via
+  // `[DECONSTRUCT]()` (the same mechanism the serialization system uses) for
+  // side effects only — tracking shared references in `seen` and populating
+  // `frame.generatedIdCounter` for any objects-in-arrays nested inside — then
+  // return the original instance unchanged. Subclasses that haven't implemented
+  // `[DECONSTRUCT]` yet will throw from this path; that's the right signal the
+  // moment they start seeing traffic.
   if (value instanceof FabricInstance) {
     seen.set(value, value);
-    const state = value[DECONSTRUCT]();
+
+    // All `FabricInstance`s must implement `FabricDeconstructable`, even though
+    // the type system can't let us say that (because of how the `data-model`
+    // separates client vs. internal-implementation concerns).
+    const deconstructable = value as unknown as FabricDeconstructable;
+    const state = deconstructable[DECONSTRUCT]();
     if (isRecord(state) || Array.isArray(state)) {
       recursivelyAddIDIfNeeded(state, frame, seen);
     }
@@ -2267,10 +2498,11 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   // Convert value to fabric form. This handles:
-  // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
-  // - Instances (e.g., Error → @Error wrapper)
+  // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
+  //   symbols)
+  // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
   // - Objects/arrays with toJSON() methods
-  // - Sparse arrays (densified with null in holes)
+  // - Sparse arrays (holes preserved)
   const converted = shallowFabricFromNativeValue(value);
 
   // `FabricInstance` returned by the conversion step (e.g. `FabricError`
@@ -2279,7 +2511,10 @@ export function recursivelyAddIDIfNeeded<T>(
   // `[DECONSTRUCT]()` for side effects, return the instance unchanged.
   if (converted instanceof FabricInstance) {
     seen.set(value, converted);
-    const state = converted[DECONSTRUCT]();
+
+    // See above in re this cast.
+    const deconstructable = converted as unknown as FabricDeconstructable;
+    const state = deconstructable[DECONSTRUCT]();
     if (isRecord(state) || Array.isArray(state)) {
       recursivelyAddIDIfNeeded(state, frame, seen);
     }
@@ -2287,7 +2522,8 @@ export function recursivelyAddIDIfNeeded<T>(
   }
 
   // Primitives need no further processing. Cache the conversion when it
-  // changed the value (e.g. `-0 → 0`) so callers see consistent results.
+  // produced a different value (e.g. an object whose `toJSON()` returns a
+  // primitive) so callers see consistent results.
   if (!isRecord(converted)) {
     if (converted !== value) seen.set(value, converted);
     return converted as T;
@@ -2295,12 +2531,9 @@ export function recursivelyAddIDIfNeeded<T>(
 
   // From here `converted` is an array or record. The result container is
   // pre-registered in `seen` against the original `value` BEFORE descending
-  // into entries, so circular back-references to `value` resolve correctly
-  // even under modern, where shallow conversion allocates a fresh frozen
-  // clone whose own properties still point at the original (unfrozen)
-  // input. Without this, a cycle would re-enter
-  // `shallowFabricFromNativeValue(value)` on every pass and recurse
-  // forever.
+  // into entries, so circular back-references to `value` resolve correctly.
+  // Without this, a cycle would re-enter `shallowFabricFromNativeValue(value)`
+  // on every pass and recurse forever.
   const convertedDiffers = converted !== value;
 
   if (Array.isArray(converted)) {
@@ -2322,9 +2555,9 @@ export function recursivelyAddIDIfNeeded<T>(
       ) {
         changed = true;
         const withId = { [ID]: frame.generatedIdCounter++, ...v };
-        // Under modern, the ID-wrapped object is a freshly-built
-        // container that must also be deep-frozen.
-        if (modern) Object.freeze(withId);
+        // The ID-wrapped object is a freshly-built container that must also be
+        // deep-frozen.
+        Object.freeze(withId);
         result[i] = withId;
       } else {
         if (!Object.is(v, el)) {
@@ -2339,12 +2572,11 @@ export function recursivelyAddIDIfNeeded<T>(
       return value;
     }
 
-    // Under the modern data model, the value enters a write-boundary that
-    // expects deep-frozen `FabricValue` trees. Children are already frozen
-    // by `shallowFabricFromNativeValue()` above; freeze the freshly-built
-    // top-level container so the returned tree is deep-frozen as a whole.
-    if (modern) Object.freeze(result);
-    return result as T;
+    // The value enters a write-boundary that expects deep-frozen `FabricValue`
+    // trees. Children are already frozen by `shallowFabricFromNativeValue()`
+    // above; freeze the freshly-built top-level container so the returned tree
+    // is deep-frozen as a whole.
+    return Object.freeze(result) as T;
   } else {
     const sourceRecord = converted as Record<string, unknown>;
     const result: Record<string, unknown> = {};
@@ -2379,9 +2611,7 @@ export function recursivelyAddIDIfNeeded<T>(
       return value;
     }
 
-    // See array-branch comment above re: modern freeze.
-    if (modern) Object.freeze(result);
-    return result as T;
+    return Object.freeze(result) as T;
   }
 }
 
@@ -2439,8 +2669,8 @@ export function convertCellsToLinks(
 
   seen.set(value, path); // ...which needs to be tracked for circularity.
 
-  // Convert the (top level of) the value to something JSON-encodable if not
-  // already JSON-encodable, or throw if it's neither already valid nor
+  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
+  // if it isn't already, or throw if it's neither already valid nor
   // convertible.
   value = shallowFabricFromNativeValue(value);
 
@@ -2543,7 +2773,7 @@ function schemaWithDefaultAndScope<T>(
   return scopedSchema;
 }
 
-function schemaCellScope(
+export function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
   return isRecord(schema) && isCellScope(schema.scope)

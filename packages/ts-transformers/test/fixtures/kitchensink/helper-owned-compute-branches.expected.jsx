@@ -33,6 +33,325 @@ interface Project {
     members: string[];
     badges: Badge[];
 }
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        showArchived: boolean;
+        projects: {
+            archived: boolean;
+        }[];
+    };
+}, Project[]>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                showArchived: {
+                    type: "boolean"
+                },
+                projects: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            archived: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["archived"]
+                    }
+                }
+            },
+            required: ["showArchived", "projects"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Project"
+    },
+    $defs: {
+        Project: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                },
+                archived: {
+                    type: "boolean"
+                },
+                members: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                badges: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Badge"
+                    }
+                }
+            },
+            required: ["id", "name", "archived", "members", "badges"]
+        },
+        Badge: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["text", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.showArchived
+    ? state.projects
+    : state.projects.filter((project) => !project.archived));
+const __cfLift_2 = __cfHelpers.lift<{
+    memberIndex: number;
+}, boolean>({
+    type: "object",
+    properties: {
+        memberIndex: {
+            type: "number"
+        }
+    },
+    required: ["memberIndex"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ memberIndex }) => memberIndex === 0);
+const __cfLift_3 = __cfHelpers.lift<{
+    project: {
+        name: string;
+    };
+    member: string;
+}, string>({
+    type: "object",
+    properties: {
+        project: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        member: {
+            type: "string"
+        }
+    },
+    required: ["project", "member"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ project, member }) => `${project.name}-${member}`);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const member = __cf_pattern_input.key("element");
+    const memberIndex = __cf_pattern_input.key("index");
+    const project = __cf_pattern_input.params.project;
+    return (<small>
+              {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ memberIndex: memberIndex }), __cfLift_3({
+        project: {
+            name: project.name
+        },
+        member: member
+    }), member)}
+            </small>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                project: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["project"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_4 = __cfHelpers.lift<{
+    visibleProjects: {
+        name: string;
+        badges: {
+            active: boolean;
+            text: string;
+        }[];
+        members: string[];
+    }[];
+    state: {
+        prefix: string;
+    };
+    fallbackMembers: __cfHelpers.ReadonlyCell<string[]>;
+}, (import("commonfabric").VNode | import("commonfabric").UIRenderable)[]>({
+    type: "object",
+    properties: {
+        visibleProjects: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    badges: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                active: {
+                                    type: "boolean"
+                                },
+                                text: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["active", "text"]
+                        }
+                    },
+                    members: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        }
+                    }
+                },
+                required: ["name", "badges", "members"]
+            }
+        },
+        state: {
+            type: "object",
+            properties: {
+                prefix: {
+                    type: "string"
+                }
+            },
+            required: ["prefix"]
+        },
+        fallbackMembers: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: ["readonly"]
+        }
+    },
+    required: ["visibleProjects", "state", "fallbackMembers"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        anyOf: [{
+                $ref: "https://commonfabric.org/schemas/vnode.json"
+            }, {
+                $ref: "#/$defs/UIRenderable"
+            }]
+    },
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, ({ visibleProjects, state, fallbackMembers }) => 
+// [TRANSFORM] .map() stays plain: visibleProjects is a captured computed input, plain inside this compute
+visibleProjects.map((project, projectIndex) => {
+    // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
+    const plainPreview = ["alpha", "beta"].map((label, labelIndex) => `${project.name}-${labelIndex}-${label}`);
+    // [TRANSFORM] ifElse: schema args injected on authored ifElse
+    return ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, project.badges.length > 0, <div>
+          <h3>{project.name}</h3>
+          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside computed */}
+          {project.badges.map((badge, badgeIndex) => (<span>
+              {badge.active
+                ? `${state.prefix}${badge.text}-${projectIndex}`
+                : badgeIndex === 0
+                    ? `${project.name}:${badge.text}`
+                    : ""}
+            </span>))}
+          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside computed */}
+          {fallbackMembers.mapWithPattern(__cfPattern_1, {
+            project: {
+                name: project.name
+            }
+        })}
+          {/* [TRANSFORM] .map() stays plain: plainPreview is a local literal array */}
+          {plainPreview.map((label) => <i>{label}</i>)}
+        </div>, <div>
+          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside computed */}
+          {project.members.map((member, memberIndex) => (<span>
+              {memberIndex === projectIndex
+                ? `${state.prefix}${member}`
+                : member}
+            </span>))}
+        </div>);
+}));
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
     // [TRANSFORM] new Writable: schema arg injected
@@ -42,327 +361,13 @@ export default pattern((state) => {
             type: "string"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("fallbackMembers", true);
-    // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
-    const visibleProjects = __cfHelpers.lift<{
-        state: {
-            showArchived: boolean;
-            projects: {
-                archived: boolean;
-            }[];
-        };
-    }, Project[]>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    showArchived: {
-                        type: "boolean"
-                    },
-                    projects: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                archived: {
-                                    type: "boolean"
-                                }
-                            },
-                            required: ["archived"]
-                        }
-                    }
-                },
-                required: ["showArchived", "projects"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Project"
-        },
-        $defs: {
-            Project: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    archived: {
-                        type: "boolean"
-                    },
-                    members: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    },
-                    badges: {
-                        type: "array",
-                        items: {
-                            $ref: "#/$defs/Badge"
-                        }
-                    }
-                },
-                required: ["id", "name", "archived", "members", "badges"]
-            },
-            Badge: {
-                type: "object",
-                properties: {
-                    text: {
-                        type: "string"
-                    },
-                    active: {
-                        type: "boolean"
-                    }
-                },
-                required: ["text", "active"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.showArchived
-        ? state.projects
-        : state.projects.filter((project) => !project.archived))({ state: {
+    // [TRANSFORM] computed() -> lift(): captures state.showArchived, state.projects
+    const visibleProjects = __cfLift_1({ state: {
             showArchived: state.key("showArchived"),
             projects: state.key("projects")
         } }).for("visibleProjects", true);
-    // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
-    const rows = __cfHelpers.lift<{
-        visibleProjects: {
-            name: string;
-            badges: {
-                active: boolean;
-                text: string;
-            }[];
-            members: string[];
-        }[];
-        state: {
-            prefix: string;
-        };
-        fallbackMembers: __cfHelpers.ReadonlyCell<string[]>;
-    }, (import("commonfabric").VNode | import("commonfabric").UIRenderable)[]>({
-        type: "object",
-        properties: {
-            visibleProjects: {
-                type: "array",
-                items: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        badges: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    active: {
-                                        type: "boolean"
-                                    },
-                                    text: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["active", "text"]
-                            }
-                        },
-                        members: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["name", "badges", "members"]
-                }
-            },
-            state: {
-                type: "object",
-                properties: {
-                    prefix: {
-                        type: "string"
-                    }
-                },
-                required: ["prefix"]
-            },
-            fallbackMembers: {
-                type: "array",
-                items: {
-                    type: "string"
-                },
-                asCell: ["readonly"]
-            }
-        },
-        required: ["visibleProjects", "state", "fallbackMembers"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }]
-        },
-        $defs: {
-            UIRenderable: {
-                type: "object",
-                properties: {
-                    $UI: {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }
-                },
-                required: ["$UI"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, ({ visibleProjects, state, fallbackMembers }) => 
-    // [TRANSFORM] .map() stays plain: visibleProjects is a captured derive input, plain inside this compute
-    visibleProjects.map((project, projectIndex) => {
-        // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
-        const plainPreview = ["alpha", "beta"].map((label, labelIndex) => `${project.name}-${labelIndex}-${label}`);
-        // [TRANSFORM] ifElse: schema args injected on authored ifElse
-        return ifElse({
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, project.badges.length > 0, <div>
-          <h3>{project.name}</h3>
-          {/* [TRANSFORM] .map() stays plain: project.badges is compute-owned data inside derive */}
-          {project.badges.map((badge, badgeIndex) => (<span>
-              {badge.active
-                    ? `${state.prefix}${badge.text}-${projectIndex}`
-                    : badgeIndex === 0
-                        ? `${project.name}:${badge.text}`
-                        : ""}
-            </span>))}
-          {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
-          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const member = __cf_pattern_input.key("element");
-                const memberIndex = __cf_pattern_input.key("index");
-                const project = __cf_pattern_input.params.project;
-                return (<small>
-              {__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    memberIndex: number;
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        memberIndex: {
-                            type: "number"
-                        }
-                    },
-                    required: ["memberIndex"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ memberIndex }) => memberIndex === 0)({ memberIndex: memberIndex }), __cfHelpers.lift<{
-                    project: {
-                        name: string;
-                    };
-                    member: string;
-                }, string>({
-                    type: "object",
-                    properties: {
-                        project: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        },
-                        member: {
-                            type: "string"
-                        }
-                    },
-                    required: ["project", "member"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, ({ project, member }) => `${project.name}-${member}`)({
-                    project: {
-                        name: project.name
-                    },
-                    member: member
-                }), member)}
-            </small>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            project: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        required: ["project"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
-                project: {
-                    name: project.name
-                }
-            })}
-          {/* [TRANSFORM] .map() stays plain: plainPreview is a local literal array */}
-          {plainPreview.map((label) => <i>{label}</i>)}
-        </div>, <div>
-          {/* [TRANSFORM] .map() stays plain: project.members is compute-owned data inside derive */}
-          {project.members.map((member, memberIndex) => (<span>
-              {memberIndex === projectIndex
-                    ? `${state.prefix}${member}`
-                    : member}
-            </span>))}
-        </div>);
-    }))({
+    // [TRANSFORM] computed() -> lift(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
+    const rows = __cfLift_4({
         visibleProjects: visibleProjects,
         state: {
             prefix: state.key("prefix")

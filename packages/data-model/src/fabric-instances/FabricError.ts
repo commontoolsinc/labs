@@ -1,17 +1,15 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../interface.ts";
-import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
-import { TAGS } from "../fabric-type-tags.ts";
-import { FrozenSet } from "../frozen-builtins.ts";
-import { EmptyReconstructionContext } from "../EmptyReconstructionContext.ts";
+} from "@/wire-common/interface.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { FrozenSet } from "@/frozen-builtins.ts";
+import { EmptyReconstructionContext } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
-import { errorClassFromType, UNSAFE_KEYS } from "../native-instance-utils.ts";
+import { errorClassFromType, UNSAFE_KEYS } from "@/native-conversion.ts";
 
 /**
  * Reserved key set for `FabricError`'s extras bag: these names belong to the
@@ -80,9 +78,6 @@ export type FabricErrorState = {
  * spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Error;
-
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
   type: string;
   /** The `.name` property (always a concrete string). */
@@ -106,11 +101,11 @@ export class FabricError extends FabricNativeWrapper<Error> {
   #nativeFrozen: Error | undefined;
 
   /**
-   * Constructs from a `FabricErrorState` record. All state values must
-   * already be in `FabricValue` form -- the conversion layer
-   * (`fabric-value-modern.ts`) is responsible for ensuring this when
-   * constructing from a native `Error`. Use `FabricError.fromNativeError()`
-   * for shallow conversion from a native `Error`.
+   * Constructs from a `FabricErrorState` record. All state values must already
+   * be in `FabricValue` form -- the conversion layer is responsible for
+   * ensuring this when constructing from a native `Error`. Use
+   * `FabricError.fromNativeError()` for shallow conversion from a native
+   * `Error`.
    */
   constructor(state: FabricErrorState) {
     super();
@@ -133,6 +128,11 @@ export class FabricError extends FabricNativeWrapper<Error> {
         this.#extras.set(key, value);
       }
     }
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Error;
   }
 
   /**

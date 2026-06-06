@@ -1,11 +1,10 @@
 /**
  * Tests for the frozen proxy target fix in `query-result-proxy.ts`.
  *
- * When `modernDataModel` is enabled, stored objects are deep-frozen at
- * commit time. After commit, reads in a new transaction return direct
- * references to these frozen objects. The proxy creation function must still
- * wrap them (using an unfrozen stub as the proxy target) so that link
- * resolution and all proxy traps work correctly.
+ * Stored objects are deep-frozen at commit time. After commit, reads in a new
+ * transaction return direct references to these frozen objects. The proxy
+ * creation function must still wrap them (using an unfrozen stub as the proxy
+ * target) so that link resolution and all proxy traps work correctly.
  *
  * These tests now go through a real commit/reopen cycle. The v2 transaction
  * core isolates caller-owned values on write, so pre-freezing inputs is no
@@ -62,9 +61,6 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: {
-        modernDataModel: true,
-      },
     });
     tx = runtime.edit();
   });
@@ -86,7 +82,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     targetCell.set({ answer: 42 });
 
     // Set up a cell whose value contains a sigil link to the target.
-    // Write it deep-frozen to simulate post-commit state with modernDataModel.
+    // Write it deep-frozen to simulate post-commit state.
     const sourceLink = writeCell(
       runtime,
       tx,
@@ -132,9 +128,6 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: {
-        modernDataModel: true,
-      },
     });
     tx = runtime.edit();
   });
@@ -446,7 +439,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
   });
 });
 
-describe("frozen proxy target: v2 committed reads with modernDataModel ON", () => {
+describe("frozen proxy target: v2 committed reads", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -458,9 +451,6 @@ describe("frozen proxy target: v2 committed reads with modernDataModel ON", () =
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: {
-        modernDataModel: true,
-      },
     });
     tx = runtime.edit();
   });
@@ -471,7 +461,7 @@ describe("frozen proxy target: v2 committed reads with modernDataModel ON", () =
     await storageManager?.close();
   });
 
-  it("resolves sigil links and freezes raw tx reads in rich mode", async () => {
+  it("resolves sigil links and freezes raw tx reads", async () => {
     const targetCell = runtime.getCell<{ answer: number }>(
       space,
       "v2-rich-link-target",
@@ -521,7 +511,7 @@ describe("frozen proxy target: v2 committed reads with modernDataModel ON", () =
   });
 });
 
-describe("frozen proxy target: committed reads with modernDataModel OFF (legacy)", () => {
+describe("frozen proxy target: committed reads", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -533,9 +523,6 @@ describe("frozen proxy target: committed reads with modernDataModel OFF (legacy)
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: {
-        modernDataModel: false,
-      },
     });
     tx = runtime.edit();
   });
@@ -546,55 +533,7 @@ describe("frozen proxy target: committed reads with modernDataModel OFF (legacy)
     await storageManager?.close();
   });
 
-  it("returns frozen committed objects when modernDataModel is OFF (legacy)", async () => {
-    const link = writeCell(runtime, tx, "legacy-frozen-raw", {
-      a: 1,
-      b: 2,
-    });
-
-    tx = await commitAndReopen(runtime, tx);
-    const rawValue = tx.readValueOrThrow(link);
-    expect(Object.isFrozen(rawValue)).toBe(true);
-
-    const result = createQueryResultProxy<{ a: number; b: number }>(
-      runtime,
-      tx,
-      link,
-      0,
-      false,
-    );
-
-    expect(Number(result.a)).toBe(1);
-    expect(Number(result.b)).toBe(2);
-  });
-});
-
-describe("frozen proxy target: committed reads under modernDataModel", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
-
-  beforeEach(() => {
-    storageManager = StorageManager.emulate({
-      as: signer,
-    });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      experimental: {
-        modernDataModel: true,
-      },
-    });
-    tx = runtime.edit();
-  });
-
-  afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
-  });
-
-  it("returns frozen committed objects under modernDataModel", async () => {
+  it("returns frozen committed objects", async () => {
     const link = writeCell(runtime, tx, "modern-frozen-raw", {
       a: 1,
       b: 2,
@@ -614,101 +553,5 @@ describe("frozen proxy target: committed reads under modernDataModel", () => {
 
     expect(Number(result.a)).toBe(1);
     expect(Number(result.b)).toBe(2);
-  });
-});
-
-describe("frozen proxy target: wrap fires under modernDataModel=OFF", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
-
-  beforeEach(() => {
-    storageManager = StorageManager.emulate({
-      as: signer,
-    });
-    // Construct the runtime under `modernDataModel: true` so the storage
-    // layer produces a deep-frozen committed value, then flip the flag to
-    // `false` post-write to simulate the post-PR-C state where a frozen
-    // value reaches `createQueryResultProxy` while `modernDataModel` is
-    // falsy. Prior to PR-B, this case hit a now-removed short-circuit at
-    // `query-result-proxy.ts:162-168` that returned the raw frozen value
-    // instead of wrapping it -- defeating link resolution and breaking
-    // user-code mutation through the proxy.
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-      experimental: {
-        modernDataModel: true,
-      },
-    });
-    tx = runtime.edit();
-  });
-
-  afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
-  });
-
-  it("wraps a frozen object input even when modernDataModel is OFF", async () => {
-    const link = writeCell(runtime, tx, "pr-b-wrap-frozen-object", {
-      a: 1,
-      b: 2,
-    });
-
-    tx = await commitAndReopen(runtime, tx);
-
-    // Precondition: the committed read returns a deep-frozen object.
-    const rawValue = tx.readValueOrThrow(link);
-    expect(Object.isFrozen(rawValue)).toBe(true);
-
-    // Simulate the post-PR-C state: frozen value reaches the proxy with
-    // `modernDataModel` falsy.
-    runtime.experimental.modernDataModel = false;
-
-    const proxy = createQueryResultProxy<{ a: number; b: number }>(
-      runtime,
-      tx,
-      link,
-      0,
-      false,
-    );
-
-    // Post-PR-B, the proxy must wrap the frozen value (not return it raw),
-    // so property access goes through the get trap.
-    expect(proxy).not.toBe(rawValue);
-    expect(Number(proxy.a)).toBe(1);
-    expect(Number(proxy.b)).toBe(2);
-  });
-
-  it("wraps a frozen array input even when modernDataModel is OFF", async () => {
-    const link = writeCell(runtime, tx, "pr-b-wrap-frozen-array", [
-      10,
-      20,
-      30,
-    ]);
-
-    tx = await commitAndReopen(runtime, tx);
-
-    const rawValue = tx.readValueOrThrow(link);
-    expect(Object.isFrozen(rawValue)).toBe(true);
-    expect(Array.isArray(rawValue)).toBe(true);
-
-    runtime.experimental.modernDataModel = false;
-
-    const proxy = createQueryResultProxy<number[]>(
-      runtime,
-      tx,
-      link,
-      0,
-      false,
-    );
-
-    // The proxy must wrap so array-method dispatch at `:266-321` can fire
-    // for write-mutation methods. Spot-check via a read-only iterator that
-    // routes through the proxy's get-trap rather than the raw target.
-    expect(proxy).not.toBe(rawValue);
-    expect(Array.isArray(proxy)).toBe(true);
-    expect([...proxy].map(Number)).toEqual([10, 20, 30]);
   });
 });

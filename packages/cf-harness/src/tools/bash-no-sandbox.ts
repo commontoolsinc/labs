@@ -7,6 +7,7 @@ import {
   BROWSER_HOST_COMMAND_DENIED_PREFIX,
   validateBrowserHostCommand,
 } from "./browser-host-command-policy.ts";
+import { createClearedHostProcessEnv } from "./host-process-env.ts";
 import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
 const DEFAULT_HOST_TIMEOUT_MS = 30_000;
@@ -17,7 +18,7 @@ export const bashNoSandboxToolDescriptor: HarnessToolDescriptor = {
   toolId: "bash-no-sandbox",
   title: "Bash (No Sandbox)",
   description:
-    "PROVISIONAL BROWSER HOST COMMAND TOOL. Runs policy-restricted commands outside the sandbox on the host workspace. Intended only for the browser subagent profile, especially invoking agent-browser; do not use for normal repository work.",
+    "PROVISIONAL BROWSER HOST COMMAND TOOL. Runs policy-restricted commands outside the sandbox on the host workspace. Intended only for the browser subagent profile, especially invoking agent-browser against the provided Browser Access CDP lease; do not use for normal repository work.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -54,7 +55,10 @@ export const bashNoSandboxTool: HarnessToolDefinition<
     const commandCwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
       : context.currentDir;
-    const policyResult = validateBrowserHostCommand(input.command);
+    const policyResult = validateBrowserHostCommand(input.command, {
+      browserAccessCdpUrl: context.browserAccess?.cdpUrl,
+      browserAccessExpiresAt: context.browserAccess?.expiresAt,
+    });
     if (!policyResult.allowed) {
       context.setCurrentDir(commandCwd);
       return {
@@ -98,6 +102,8 @@ export const bashNoSandboxTool: HarnessToolDefinition<
       command: plan.argv[0]!,
       args: [...plan.argv.slice(1)],
       cwd: hostCwd,
+      clearEnv: true,
+      env: createClearedHostProcessEnv(),
       timeoutMs: resolveHostTimeoutMs(input.timeoutMs),
     });
     context.setCurrentDir(commandCwd);

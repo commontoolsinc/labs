@@ -44,7 +44,7 @@ Authors should be able to:
 
 The runtime should receive:
 
-1. explicit schemas for significant boundaries (`pattern`, `derive`, `lift`,
+1. explicit schemas for significant boundaries (`pattern`, `lift`,
    `handler`, `cell`, `wish`, `generateObject`, conditional helpers)
 2. explicit closure capture params instead of hidden lexical captures
 3. explicit control-flow helper calls where required by reactive semantics

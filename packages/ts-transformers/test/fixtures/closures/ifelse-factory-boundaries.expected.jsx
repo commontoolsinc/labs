@@ -11,23 +11,6 @@ import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const entry = __cf_pattern_input.key("element");
-    return ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "null"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{
-                type: "null"
-            }, {}]
-    } as const satisfies __cfHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null);
-});
 const moduleHasSettings = lift({
     type: "object",
     properties: {
@@ -74,6 +57,157 @@ interface Message {
     id: string;
     type: "chat" | "system";
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    return ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "null"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Entry"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Entry: {
+            type: "object",
+            properties: {
+                piece: {
+                    type: "object",
+                    properties: {
+                        settingsUI: {
+                            type: "string"
+                        }
+                    }
+                }
+            },
+            required: ["piece"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "null"
+        }, {
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_1 = __cfHelpers.lift<{
+    msg: {
+        type: string;
+    };
+}, boolean>({
+    type: "object",
+    properties: {
+        msg: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string"
+                }
+            },
+            required: ["type"]
+        }
+    },
+    required: ["msg"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, ({ msg }) => msg.type === "system");
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const msg = __cf_pattern_input.key("element");
+    const selectedId = __cf_pattern_input.key("params", "selectedId");
+    return ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ msg: {
+            type: msg.key("type")
+        } }), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
+                open
+              </button>).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Message"
+        },
+        params: {
+            type: "object",
+            properties: {
+                selectedId: {
+                    type: "string",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["selectedId"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Message: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                type: {
+                    "enum": ["chat", "system"]
+                }
+            },
+            required: ["id", "type"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: ifelse-factory-boundaries
 // Verifies: authored ifElse keeps captured property access inside factory boundaries
 //   moduleHasSettings({ piece: entry.piece }) → piece capture stays structural inside lift() call
@@ -86,143 +220,11 @@ export default pattern((__cf_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema).for("selectedId", true);
     return {
         [UI]: (<div>
-          {entries.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Entry"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Entry: {
-                        type: "object",
-                        properties: {
-                            piece: {
-                                type: "object",
-                                properties: {
-                                    settingsUI: {
-                                        type: "string"
-                                    }
-                                }
-                            }
-                        },
-                        required: ["piece"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        type: "null"
-                    }, {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
-          {messages.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const msg = __cf_pattern_input.key("element");
-                const selectedId = __cf_pattern_input.key("params", "selectedId");
-                return ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    msg: {
-                        type: string;
-                    };
-                }, boolean>({
-                    type: "object",
-                    properties: {
-                        msg: {
-                            type: "object",
-                            properties: {
-                                type: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["type"]
-                        }
-                    },
-                    required: ["msg"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, ({ msg }) => msg.type === "system")({ msg: {
-                        type: msg.key("type")
-                    } }), <span>{msg.key("id")}</span>, <button type="button" onClick={selectMessage({ selectedId, msgId: msg.key("id") })}>
-                open
-              </button>).for("__patternResult", true);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Message"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            selectedId: {
-                                type: "string",
-                                asCell: ["readonly"]
-                            }
-                        },
-                        required: ["selectedId"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Message: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "string"
-                            },
-                            type: {
-                                "enum": ["chat", "system"]
-                            }
-                        },
-                        required: ["id", "type"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+          {entries.mapWithPattern(__cfPattern_1, {})}
+          {messages.mapWithPattern(__cfPattern_2, {
                 selectedId: selectedId
             })}
-        </div>)
+        </div>),
     };
 }, {
     type: "object",

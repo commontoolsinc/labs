@@ -15,7 +15,11 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-const CFC_GROUP_CHAT_TIMEOUT = 30_000;
+// 60s (was 30s): the imported-message authorship row completes in ~17s locally
+// but exceeds 30s on slower CI runners, causing intermittent timeouts in
+// `waitForInvalidAuthorshipState`. Bumping the headroom stabilizes CI; the test
+// logic is unchanged.
+const CFC_GROUP_CHAT_TIMEOUT = 60_000;
 const IMPORTED_MESSAGE_MARKERS = [
   "Jumping in late here.",
   "I think we already covered this above.",

@@ -11,36 +11,36 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ state }) => double(state.count + 1));
 const double = __cfHardenFn((x: number) => x * 2);
+const __cfLift_1 = __cfHelpers.lift<{
+    state: {
+        count: number;
+    };
+}, number>({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                count: {
+                    type: "number"
+                }
+            },
+            required: ["count"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ state }) => double(state.count + 1));
 // FIXTURE: pattern-local-helper-call-roots
 // Verifies: top-level ordinary local helper calls with reactive inputs are
 //   lifted as whole calls, while plain inputs stay plain.
 //   double(2)                 -> unchanged plain JS call
-//   double(state.count + 1)   -> derive(..., ({ state }) => double(state.count + 1))
+//   double(state.count + 1)   -> lift(({ state }) => double(state.count + 1))({ state })
 export default pattern((state) => ({
     staticDoubled: double(2),
-    doubled: __cfHelpers.lift<{
-        state: {
-            count: number;
-        };
-    }, number>({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    count: {
-                        type: "number"
-                    }
-                },
-                required: ["count"]
-            }
-        },
-        required: ["state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ state: {
+    doubled: __cfLift_1({ state: {
             count: state.key("count")
         } }).for(["__patternResult", "doubled"], true)
 }), {

@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import {
   fabricFromNativeValue,
   FabricInstance,
@@ -9,7 +9,14 @@ import {
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
+import {
+  type CellScope,
+  ID,
+  ID_FIELD,
+  type JSONSchema,
+} from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
 import {
   CellImpl,
@@ -249,6 +256,20 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
 };
 
 /**
+ * The scope at which a slot's content is stored (the write target scope). It
+ * shares its precedence with the read follow-cap (see
+ * `ContextualFlowControl.getSchemaScopeCap`) so writes and reads agree on which
+ * scoped instance a slot addresses. `any`/no constraint yields `undefined` —
+ * i.e. no narrowing. Distinct from the link's own base scope.
+ */
+function declaredCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  const cap = ContextualFlowControl.getSchemaScopeCap(schema);
+  return isCellScope(cap) ? cap : undefined;
+}
+
+/**
  * Traverses newValue and updates `current` and any relevant linked documents.
  *
  * Returns true if any changes were made.
@@ -353,6 +374,51 @@ export function normalizeAndDiff(
         `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`,
     );
     newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
+  }
+
+  // Scope narrowing: if this slot's schema declares a scope narrower than the
+  // link's base scope, the content belongs in the narrower-scope instance and
+  // the broader-scope slot holds a link to it, so readers at the broader scope
+  // follow it to the narrower instance. A reference value (link/cell) is exempt:
+  // it already carries its own target scope. Both writes recurse back through
+  // normalizeAndDiff so they get the usual diffing, no-op detection, and CFC
+  // label/policy handling. Applying this at the top of normalizeAndDiff makes it
+  // compose to arbitrary depth (every nested descent re-enters here): narrowing
+  // fires at whatever slot declares it. Element-level scope (an array's `items`
+  // schema) therefore yields one redirect per element, while array-level scope
+  // (the array slot's own schema) redirects the whole array.
+  const declaredScope = declaredCellScope(link.schema);
+  if (
+    declaredScope !== undefined &&
+    scopeRank(declaredScope) > scopeRank(link.scope) &&
+    !isCellLink(newValue) &&
+    !isCell(newValue)
+  ) {
+    const scopedLink: NormalizedFullLink = { ...link, scope: declaredScope };
+    return [
+      // Content goes into the narrower-scope instance (its missing container
+      // structure is created by the storage write, which builds parents for the
+      // path). Diffed against the narrower instance's own current value.
+      ...normalizeAndDiff(
+        runtime,
+        tx,
+        scopedLink,
+        newValue,
+        context,
+        options,
+        seen,
+      ),
+      // The broader-scope slot points to that instance.
+      ...normalizeAndDiff(
+        runtime,
+        tx,
+        link,
+        createSigilLinkFromParsedLink(scopedLink, { base: link }) as unknown,
+        context,
+        options,
+        seen,
+      ),
+    ];
   }
 
   // ID_FIELD redirects to an existing field and we do something like DOM
@@ -684,8 +750,8 @@ export function normalizeAndDiff(
     ];
   }
 
-  // Convert the (top level of) the value to something JSON-encodable if not
-  // already JSON-encodable, or throw if it's neither already valid nor
+  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
+  // if it isn't already, or throw if it's neither already valid nor
   // convertible.
   const fabricValue = shallowFabricFromNativeValue(newValue);
   if (fabricValue !== newValue) {
@@ -778,8 +844,7 @@ export function normalizeAndDiff(
     return changes;
   }
 
-  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
-  // `FabricRegExp`) are atomic from this layer's perspective: their
+  // `FabricInstance` values are atomic from this layer's perspective: their
   // own-enumerable properties are implementation details, not
   // user-visible structure, and iterating them via the generic
   // `isRecord` branch below would walk wrapper-internal fields, which
@@ -833,9 +898,15 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_OBJECT] Processing object at path=${pathStr}`,
     );
-    // If the current value is not a (regular) object, set it to an empty object
-    // Note that the alias case is handled above
-    if (!isRecord(currentValue) || isPrimitiveCellLink(currentValue)) {
+    // If the current value is not a (regular) object, set it to an empty object.
+    // Note that the alias case is handled above.
+    // We use `isObject` (not `isRecord`) here deliberately: `isRecord` is true
+    // for arrays (`typeof [] === "object"`), whereas `isObject` excludes them.
+    // Resetting on an array→object transition is required; otherwise per-key
+    // writes land in a slot whose stored parent is still an array and storage
+    // rejects them with a TypeMismatchError. This mirrors the array branch
+    // above, which resets a mismatched container via `value: []`.
+    if (!isObject(currentValue) || isPrimitiveCellLink(currentValue)) {
       diffLogger.debug(
         "diff",
         () =>

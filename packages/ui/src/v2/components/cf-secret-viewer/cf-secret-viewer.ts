@@ -88,7 +88,7 @@ export class CFSecretViewer extends BaseElement {
   declare trailingChars: number;
 
   private _revealed = false;
-  private _autoHideTimeout?: number;
+  private _autoHideTimeout?: ReturnType<typeof setTimeout>;
 
   constructor() {
     super();

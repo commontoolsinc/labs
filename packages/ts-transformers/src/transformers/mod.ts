@@ -1,4 +1,4 @@
-export { BuilderCallbackHoistingTransformer } from "./builder-callback-hoisting.ts";
+export { BuilderCallHoistingTransformer } from "./builder-call-hoisting.ts";
 export { CastValidationTransformer } from "./cast-validation.ts";
 export { PatternCallbackLoweringTransformer } from "./pattern-callback-lowering.ts";
 export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.ts";

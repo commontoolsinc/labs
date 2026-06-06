@@ -20,11 +20,16 @@ export {
   type TypeScriptCompilerOptions,
 } from "./typescript/mod.ts";
 export {
+  collectImportSpecifiers,
+  resolveImportSpecifier,
+} from "./typescript/resolver.ts";
+export {
   FileSystemProgramResolver,
   HttpProgramResolver,
   InMemoryProgram,
 } from "./program.ts";
 export {
+  composeBundleSourceMap,
   isSourceMap,
   type MappedPosition,
   parseSourceMap,

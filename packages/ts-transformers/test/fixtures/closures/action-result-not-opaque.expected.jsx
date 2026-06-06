@@ -19,6 +19,30 @@ const __cfAmdHooks = undefined;
 interface State {
     label: string;
 }
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+    count.set(count.get() + 1);
+});
+const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
+    count.set(count.get() - 1);
+});
 // FIXTURE: action-result-not-opaque
 // Verifies: action() results used as JSX event handlers are not marked asOpaque in the output
 //   action(() => count.set(...)) → handler(false, { count: { asCell } }, (_, { count }) => ...)({ count })
@@ -28,32 +52,10 @@ export default pattern((__cf_pattern_input) => {
     const count = new Writable(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("count", true);
-    const increment = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            count: {
-                type: "number",
-                asCell: ["cell"]
-            }
-        },
-        required: ["count"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
-        count.set(count.get() + 1);
-    })({
+    const increment = __cfHandler_1({
         count: count
     }).for({ stream: "increment" }, true);
-    const decrement = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            count: {
-                type: "number",
-                asCell: ["cell"]
-            }
-        },
-        required: ["count"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
-        count.set(count.get() - 1);
-    })({
+    const decrement = __cfHandler_2({
         count: count
     }).for({ stream: "decrement" }, true);
     return {

@@ -34,7 +34,12 @@ import {
   REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
-import type { CellScope, JSONObject, JSONSchema } from "./builder/types.ts";
+import type {
+  CellScope,
+  JSONObject,
+  JSONSchema,
+  SchemaScope,
+} from "./builder/types.ts";
 import {
   addressKey,
   createDataCellURI,
@@ -42,7 +47,7 @@ import {
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
+import { canFollowScopedLink } from "./scope.ts";
 import type {
   Activity,
   CommitError,
@@ -318,18 +323,28 @@ const pathStartsWith = (
   prefix.length <= path.length &&
   prefix.every((part, index) => path[index] === part);
 
+/**
+ * Determines whether `schemaTracker` already covers `selector` for the given
+ * `key` — either by an exact (hash-equal) match, or by an existing permissive
+ * (`true`-schema) selector whose path is a prefix of this selector's path.
+ *
+ * Most efficient when handed an already-interned selector: the
+ * `internPathSelector()` call below is then a near-no-op that returns the same
+ * reference. An un-interned selector is still handled correctly — it is simply
+ * canonicalized (and deep-frozen) on the way in.
+ *
+ * A schema-less (`undefined`) selector is normalized to `false` ("reject") —
+ * the opposite of the `undefined ≈ true` ("accept") convention used elsewhere
+ * in this file.
+ */
 export const schemaTrackerCoversSelector = (
   schemaTracker: MapSet<string, SchemaPathSelector>,
   key: string,
   selector: SchemaPathSelector,
 ): boolean => {
-  const internedSelector = selector.schema !== undefined &&
-      Object.isFrozen(selector) && Object.isFrozen(selector.path)
-    ? selector
-    : internPathSelector({
-      path: [...selector.path],
-      schema: selector.schema ?? false,
-    });
+  const internedSelector = internPathSelector(
+    selector.schema === undefined ? { ...selector, schema: false } : selector,
+  );
   if (schemaTracker.hasValue(key, internedSelector)) {
     return true;
   }
@@ -1041,6 +1056,24 @@ export abstract class BaseObjectTraverser {
     );
   }
 
+  /**
+   * Returns the interned form of a coverage `selector`, memoized so repeated
+   * structurally-equal checks reuse one frozen instance.
+   *
+   * Safe to call on a frozen or mutable `selector` — it never requires a
+   * mutable one. Interning may deep-freeze the selector and its `path` in place
+   * (a mutable selector's `schema` may also be canonicalized); a frozen input is
+   * left untouched, with a fresh interned selector returned when needed. See
+   * `internPathSelector()`. A schema-less (`undefined`) selector is treated as
+   * `false` ("reject").
+   *
+   * The memo matters: `combineOptionalSchema()` mints a new un-interned schema
+   * on every call, so without it each repeated coverage check would
+   * re-deep-freeze, re-clone, and re-hash that schema — measurably (~2x) slower
+   * on link-heavy refreshes. The cache key joins the path with a single schema
+   * hash rather than hashing the whole selector: hashing the path array (vs a
+   * string join) is pure added cost on the hot cache-hit path.
+   */
   private internCoverageSelector(
     selector: SchemaPathSelector,
   ): SchemaPathSelector {
@@ -1053,11 +1086,11 @@ export abstract class BaseObjectTraverser {
     if (cached !== undefined) {
       return cached;
     }
-
-    const interned = internPathSelector({
-      path: [...selector.path],
-      schema,
-    });
+    // Copy only to substitute the `false` schema for a missing one; otherwise
+    // pass the selector through (`internPathSelector()` handles frozen input).
+    const interned = internPathSelector(
+      selector.schema === undefined ? { ...selector, schema } : selector,
+    );
     this.coverageSelectorCache.set(cacheKey, interned);
     return interned;
   }
@@ -1229,9 +1262,17 @@ function notFound(
 }
 
 const schemaScopeForSelector = (selector?: SchemaPathSelector) =>
-  isRecord(selector?.schema) && isSchemaScope(selector.schema.scope)
-    ? selector.schema.scope
-    : undefined;
+  schemaFollowScopeCap(selector?.schema);
+
+/**
+ * The scope cap a schema imposes on the link it permits a read to follow (see
+ * ContextualFlowControl.getSchemaScopeCap for the precedence, e.g.
+ * `asCell: [{ kind: "cell", scope: "session" }]` caps at session). This caps
+ * *which* link scopes may be followed; it must never be copied onto the
+ * followed link itself.
+ */
+const schemaFollowScopeCap = (schema: unknown): SchemaScope | undefined =>
+  ContextualFlowControl.getSchemaScopeCap(schema as JSONSchema | undefined);
 
 /**
  * Get a string to use as a key for the specified address
@@ -1303,8 +1344,17 @@ function followPointer(
   };
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
-    logger.info("traverse", () => [
-      "blocked narrower-scope link follow",
+    // A broader-scoped read context cannot follow a link into a narrower scope
+    // (e.g. a space-scoped .map()/lift row reaching a perSession/perUser cell).
+    // The rule is intentional, but the follow resolves to undefined silently —
+    // a frequent cause of "my PerUser/PerSession value is undefined inside a
+    // map" authoring bugs (CT-1642). Warn (not info) so it actually surfaces:
+    // the traverse logger runs at "warn", which previously swallowed this.
+    logger.warn("traverse", () => [
+      `blocked narrower-scope link follow: a "${schemaScope}"-scoped read ` +
+      `cannot follow a "${link.scope}"-scoped link, so it resolves to ` +
+      `undefined. If this is inside a .map()/lift, resolve the ` +
+      `narrower-scoped value at the top level and pass the value down.`,
       {
         schemaScope,
         linkScope: link.scope,
@@ -2753,10 +2803,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
         schema: itemSchema,
       };
       this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-      // Sparse array holes are densified to `null` at the storage boundary in
-      // legacy JSON mode. When the item schema expects cells/streams, or the
-      // schema rejects both `null` and `undefined`, treat that committed `null`
-      // as a missing slot so array consumers still see hole semantics.
+      // TODO(danfuzz): Sparse array holes should be preserved by the data
+      // model, but they currently come back as `null` from the storage
+      // boundary — that's a bug. As a stopgap, when the item schema expects
+      // cells/streams, or the schema rejects both `null` and `undefined`, treat
+      // that committed `null` as a missing slot so array consumers still see
+      // hole semantics. Fix the hole densification at its source and remove
+      // this.
       if (
         item === null &&
         this.shouldTreatNullArrayEntryAsHole(curSelector.schema)

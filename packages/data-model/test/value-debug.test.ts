@@ -1,25 +1,18 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
-} from "../src/value-debug.ts";
-import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
-import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
-
-// ============================================================================
-// Tests
-// ============================================================================
+} from "@/value-debug.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricMap } from "@/fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 describe("value-debug", () => {
-  // --------------------------------------------------------------------------
-  // toCompactDebugString
-  // --------------------------------------------------------------------------
-
   describe("toCompactDebugString", () => {
     it("compactly stringifies a plain object", () => {
       expect(toCompactDebugString({ a: 1, b: "two" }))
@@ -330,10 +323,6 @@ describe("value-debug", () => {
     });
   });
 
-  // --------------------------------------------------------------------------
-  // toIndentedDebugString
-  // --------------------------------------------------------------------------
-
   describe("toIndentedDebugString", () => {
     it("indents object output with 2 spaces", () => {
       expect(toIndentedDebugString({ a: 1, b: "two" }))
@@ -406,10 +395,6 @@ describe("value-debug", () => {
     });
   });
 
-  // --------------------------------------------------------------------------
-  // toDebugKindString
-  // --------------------------------------------------------------------------
-
   describe("toDebugKindString", () => {
     it("renders `null` and `undefined` literally", () => {
       expect(toDebugKindString(null)).toBe("null");
@@ -439,8 +424,6 @@ describe("value-debug", () => {
     it("renders FabricInstance subclasses with their constructor name", () => {
       expect(toDebugKindString(FabricError.fromNativeError(new Error("x"))))
         .toBe("FabricInstance (FabricError)");
-      expect(toDebugKindString(new FabricRegExp(/abc/g, "es2025")))
-        .toBe("FabricInstance (FabricRegExp)");
       expect(toDebugKindString(new FabricMap(new Map())))
         .toBe("FabricInstance (FabricMap)");
     });
@@ -450,6 +433,8 @@ describe("value-debug", () => {
         .toBe("FabricPrimitive (FabricEpochNsec)");
       expect(toDebugKindString(new FabricBytes(new Uint8Array([1, 2, 3]))))
         .toBe("FabricPrimitive (FabricBytes)");
+      expect(toDebugKindString(new FabricRegExp(/abc/g)))
+        .toBe("FabricPrimitive (FabricRegExp)");
     });
 
     it("renders non-fabric class instances with their constructor name", () => {

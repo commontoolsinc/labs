@@ -27,6 +27,11 @@ import {
   type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
   type SessionSync,
+  type SqliteDbRef,
+  type SqliteOperation,
+  type SqliteParamsWire,
+  type SqliteQueryResult,
+  type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
 import { parentPath, parsePointer } from "../../../memory/v2/path.ts";
@@ -856,6 +861,21 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.listSchedulerActionSnapshots(query);
   }
 
+  sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    return this.replica.sqliteQuery(db, sql, params);
+  }
+
+  registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    return this.replica.registerSqliteDiskSource(id, path);
+  }
+
   get(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.replica.getDocument(uri, scope);
   }
@@ -949,6 +969,13 @@ class SpaceReplica implements ISpaceReplica {
     Set<(document: EntityDocument | undefined) => void>
   >();
   #watchView: MemoryV2Client.WatchView | null = null;
+  // The specific view instance that `consumeUpdates` is iterating. This can
+  // diverge from `#watchView` (the client may hand back a fresh view instance
+  // on a later refresh while the original consumer keeps running), so teardown
+  // must close *this* view to settle the consumer's pending `next()`. Closing
+  // only `#watchView` can leave the consumer's view open, hanging dispose() on
+  // `Promise.allSettled([...#updatePromises])`.
+  #subscribedWatchView: MemoryV2Client.WatchView | null = null;
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
@@ -1024,6 +1051,23 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
   }
 
+  async sqliteQuery(
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ): Promise<SqliteQueryResult> {
+    const { session } = await this.sessionHandle();
+    return await session.sqliteQuery(db, sql, params);
+  }
+
+  async registerSqliteDiskSource(
+    id: string,
+    path: string,
+  ): Promise<SqliteRegisterDiskSourceResult> {
+    const { session } = await this.sessionHandle();
+    return await session.registerSqliteDiskSource(id, path);
+  }
+
   async listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -1043,6 +1087,11 @@ class SpaceReplica implements ISpaceReplica {
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
+    // Also close the view the update consumer is bound to, in case it diverged
+    // from #watchView; otherwise its pending next() never settles and the
+    // `Promise.allSettled([...#updatePromises])` below hangs forever.
+    this.#subscribedWatchView?.close();
+    this.#subscribedWatchView = null;
     const sessionHandle = this.#sessionHandle;
     this.#sessionHandle = undefined;
     if (sessionHandle) {
@@ -1070,6 +1119,8 @@ class SpaceReplica implements ISpaceReplica {
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
+    this.#subscribedWatchView?.close();
+    this.#subscribedWatchView = null;
     const sessionHandle = this.#sessionHandle;
     this.#sessionHandle = undefined;
     if (sessionHandle) {
@@ -1216,13 +1267,24 @@ class SpaceReplica implements ISpaceReplica {
           ),
     );
 
-    if (operations.length === 0 && schedulerObservation === undefined) {
+    const sqliteOps = transaction.sqliteOps ?? [];
+
+    if (
+      operations.length === 0 && schedulerObservation === undefined &&
+      sqliteOps.length === 0
+    ) {
       return { ok: {} };
     }
 
     return await withCommitTiming(
       ["commitNative", "commitOperations"],
-      () => this.commitOperations(operations, source, schedulerObservation),
+      () =>
+        this.commitOperations(
+          operations,
+          source,
+          schedulerObservation,
+          sqliteOps,
+        ),
     );
   }
 
@@ -1268,8 +1330,14 @@ class SpaceReplica implements ISpaceReplica {
       this.#watchView = view;
       this.applySessionSync(sync, type);
       if (this.#updatePromises.size === 0) {
+        this.#subscribedWatchView = view;
         const updates = this.consumeUpdates(view.subscribeSync())
-          .finally(() => this.#updatePromises.delete(updates));
+          .finally(() => {
+            this.#updatePromises.delete(updates);
+            if (this.#subscribedWatchView === view) {
+              this.#subscribedWatchView = null;
+            }
+          });
         this.#updatePromises.add(updates);
       }
       return { ok: {} };
@@ -1451,8 +1519,9 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
     schedulerObservation?: unknown,
+    sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    if (operations.length === 0) {
+    if (operations.length === 0 && sqliteOps.length === 0) {
       if (schedulerObservation === undefined) {
         return { ok: {} };
       }
@@ -1468,26 +1537,31 @@ class SpaceReplica implements ISpaceReplica {
       (): ClientCommit => ({
         localSeq,
         reads: this.buildReads(source, localSeq),
-        operations: operations.map((operation) => {
-          switch (operation.op) {
-            case "delete":
-              return operation;
-            case "patch":
-              return {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-              };
-            case "set":
-              return {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: operation.value,
-              };
-          }
-        }),
+        // Cell ops first, folded SQLite ops last (applied in array order by the
+        // engine; sqlite ops are not entity revisions and carry no id/scope).
+        operations: [
+          ...operations.map((operation) => {
+            switch (operation.op) {
+              case "delete":
+                return operation;
+              case "patch":
+                return {
+                  op: "patch" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  patches: operation.patches,
+                };
+              case "set":
+                return {
+                  op: "set" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  value: operation.value,
+                };
+            }
+          }),
+          ...sqliteOps,
+        ],
         ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
       }),
     );

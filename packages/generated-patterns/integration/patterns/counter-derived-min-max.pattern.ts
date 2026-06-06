@@ -1,7 +1,6 @@
 import {
   type Cell,
   Default,
-  derive,
   handler,
   lift,
   pattern,
@@ -103,8 +102,8 @@ export const counterWithDerivedMinMax = pattern<DerivedMinMaxArgs>(
       values: historyValues,
       current: currentValue,
     });
-    const minValue = derive(limits, (snapshot) => snapshot.min);
-    const maxValue = derive(limits, (snapshot) => snapshot.max);
+    const minValue = limits.min;
+    const maxValue = limits.max;
     const label = str`Min: ${minValue}, Max: ${maxValue}`;
 
     return {

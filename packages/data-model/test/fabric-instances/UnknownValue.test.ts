@@ -1,14 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
-} from "../../src/interface.ts";
-import { UnknownValue } from "../../src/fabric-instances/UnknownValue.ts";
-import { ExplicitTagValue } from "../../src/fabric-instances/ExplicitTagValue.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
+
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("UnknownValue", () => {
@@ -20,9 +17,9 @@ describe("UnknownValue", () => {
   });
 
   describe("constructor()", () => {
-    it("preserves `typeTag` and `state`", () => {
+    it("preserves `wireTypeTag` and `state`", () => {
       const us = new UnknownValue("FancyType@3", { data: [1, 2, 3] });
-      expect(us.typeTag).toBe("FancyType@3");
+      expect(us.wireTypeTag).toBe("FancyType@3");
       expect(us.state).toEqual({ data: [1, 2, 3] });
     });
   });

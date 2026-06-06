@@ -133,10 +133,9 @@ four special values that JSON cannot represent natively (`-0`, `NaN`,
   at the language level.
 
 > **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity`
-> reach this layer in a given run depends on the `modernDataModel` flag at
-> the fabric-value conversion gate; see `1-fabric-values.md` Section 4.9.
-> The byte-level encoding above is the hasher's contract regardless of how
-> the values arrived.
+> reach this layer depends on the fabric-value conversion gate; see
+> `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
+> hasher's contract regardless of how the values arrived.
 
 ### 4.4 `string`
 
@@ -193,7 +192,8 @@ must use the threshold when deciding which form to emit.
 The hashed form applies everywhere this spec encodes a string via the
 `TAG_STRING` layout: standalone strings (this section), `symbol` keys
 (Section 4.6), object keys (Section 4.13), `FabricInstance` type tags
-(Section 4.14), and `FabricHash` algorithm tags (Section 4.11).
+(Section 4.14), `FabricHash` algorithm tags (Section 4.11), and
+`FabricRegExp` source/flags/flavor strings (Section 4.16).
 
 ### 4.5 `bigint`
 
@@ -242,10 +242,9 @@ hashes, while inheriting the short/long string-encoding delegation
 unchanged.
 
 > **Conversion-gate cross-reference.** Whether a symbol value reaches this
-> layer in a given run depends on the `modernDataModel` flag at the
-> fabric-value conversion gate; see `1-fabric-values.md` Section 4.9. The
-> byte-level encoding above is the hasher's contract regardless of how the
-> value arrived.
+> layer depends on the fabric-value conversion gate; see
+> `1-fabric-values.md` Section 4.9. The byte-level encoding above is the
+> hasher's contract regardless of how the value arrived.
 
 ### 4.7 `undefined`
 
@@ -317,8 +316,8 @@ so the two temporal types are always distinguishable.
 ### 4.11 `FabricHash`
 
 ```
-Bytes: TAG_CONTENT_ID  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
-       0x29            <string, §4.4>   <1+ bytes>       <varies>
+Bytes: TAG_HASH  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
+       0x29       <string, §4.4>   <1+ bytes>       <varies>
 ```
 
 `FabricHash` represents a content identifier — a hash with an algorithm
@@ -386,7 +385,7 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
 ```
 
 - **Type tag**: The `FabricInstance`'s type tag string (e.g., `"Error@1"`,
-  `"Map@1"`, `"Set@1"`, `"RegExp@1"`) encoded as a complete tagged string
+  `"Map@1"`, `"Set@1"`) encoded as a complete tagged string
   value per Section 4.4. Concretely, this emits either the direct form
   (`TAG_STRING` + LEB128 length + UTF-8 bytes) for type tags of 64 UTF-8 bytes
   or fewer, or the hashed form (`TAG_STRING_HASH` + 32-byte SHA-256 of the
@@ -396,10 +395,11 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
   recursively as a complete tagged value.
 
 > **Note on types with dedicated tags.** `FabricBytes`,
-> `FabricEpochNsec`, `FabricEpochDays`, and `FabricHash` are **not**
-> hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is encoded
-> directly (see Sections 4.8, 4.9, 4.10, and 4.11 respectively). These are
-> all `FabricPrimitive` subclasses — they do not implement `[DECONSTRUCT]`.
+> `FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, and `FabricRegExp` are
+> **not** hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is
+> encoded directly (see Sections 4.8, 4.9, 4.10, 4.11, and 4.16
+> respectively). These are all `FabricPrimitive` subclasses — they do not
+> implement `[DECONSTRUCT]`.
 
 ### 4.15 Holes (sparse array elements)
 
@@ -424,6 +424,30 @@ Holes appear only within array encodings (Section 4.12). Consecutive holes are
 > **Distinction.** `TAG_HOLE` (`0x01`), `TAG_UNDEFINED` (`0x21`), and `TAG_NULL`
 > (`0x20`) are all distinct. The arrays `[1, , 3]`, `[1, undefined, 3]`, and
 > `[1, null, 3]` produce three different hashes.
+
+### 4.16 `FabricRegExp`
+
+```
+Bytes: TAG_REGEXP  SOURCE_STRING   FLAGS_STRING    FLAVOR_STRING
+       0x2B        <string, §4.4>  <string, §4.4>  <string, §4.4>
+```
+
+`FabricRegExp` represents a regular-expression value. It is a
+`FabricPrimitive` subclass and has a dedicated type tag; it does not implement
+`[DECONSTRUCT]` and is **not** hashed via `TAG_INSTANCE`.
+
+- **Source**: The pattern source string (`regex.source`), encoded as a
+  complete tagged string value per Section 4.4 (direct form for sources of 64
+  UTF-8 bytes or fewer, hashed form for longer).
+- **Flags**: The flag string (e.g. `"gi"`), encoded as a complete tagged
+  string value per Section 4.4.
+- **Flavor**: The regex dialect identifier (e.g. `"es2025"`), encoded as a
+  complete tagged string value per Section 4.4.
+
+The three strings are fed in order — source, then flags, then flavor — with no
+enclosing container and no `TAG_END` terminator, since the field count is
+fixed. Distinct regex dialects with identical source and flags therefore
+produce distinct hashes (the `flavor` field disambiguates them).
 
 ---
 
@@ -576,7 +600,7 @@ payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 29  24 04 66 69 64 31  04  DE AD BE EF
 ```
 
-- `TAG_CONTENT_ID` (`0x29`)
+- `TAG_HASH` (`0x29`)
 - Algorithm tag (string, §4.4 direct form): `TAG_STRING` (`0x24`), length 4
   (`0x04`), UTF-8 bytes `66 69 64 31`
 - Hash byte length 4 (`0x04`)
@@ -584,38 +608,26 @@ payload is 4 bytes: `0xDE`, `0xAD`, `0xBE`, `0xEF`.
 
 ### 7.12 `FabricRegExp(/abc/gi)`
 
-`FabricRegExp` is a `FabricInstance` and is hashed via `TAG_INSTANCE`.
+`FabricRegExp` is a `FabricPrimitive` with the dedicated tag `TAG_REGEXP`
+(`0x2B`); it is hashed by feeding its three component strings — source, flags,
+flavor — in that order (Section 4.16). A `FabricRegExp` built from `/abc/gi`
+has source `"abc"`, flags `"gi"`, and the default flavor `"es2025"`. All three
+strings are under the 64-byte threshold, so each uses the direct string form.
 
-Type tag `"RegExp@1"` is 8 bytes in UTF-8: `0x52`, `0x65`, `0x67`, `0x45`,
-`0x78`, `0x70`, `0x40`, `0x31` — under the 64-byte threshold, so the direct
-string form applies.
+- RegExp tag: `2B`
+- Source `"abc"` (3 bytes UTF-8): `24 03 61 62 63`
+- Flags `"gi"` (2 bytes UTF-8): `24 02 67 69`
+- Flavor `"es2025"` (6 bytes UTF-8): `24 06 65 73 32 30 32 35`
 
-Deconstructed state is `{ source: "abc", flags: "gi" }`, an object with keys
-sorted by UTF-8 bytes: `"flags"` (0x66...) < `"source"` (0x73...). All keys
-and string values shown here are also under the threshold, so they use the
-direct string form.
-
-- Instance tag: `12`
-- Type tag (string, §4.4 direct form): `TAG_STRING` `24`, length 8 `08`,
-  UTF-8 `52 65 67 45 78 70 40 31`
-- State (object):
-  - Object tag: `11`
-  - Key `"flags"` (5 bytes UTF-8): `24 05 66 6C 61 67 73`
-  - Value `"gi"` (2 bytes UTF-8): `24 02 67 69`
-  - Key `"source"` (6 bytes UTF-8): `24 06 73 6F 75 72 63 65`
-  - Value `"abc"` (3 bytes UTF-8): `24 03 61 62 63`
-  - End: `00`
+There is no enclosing object and no `TAG_END` terminator — the three fields are
+fed positionally.
 
 Full byte stream:
 ```
-12
-24 08 52 65 67 45 78 70 40 31
-11
-24 05 66 6C 61 67 73
-24 02 67 69
-24 06 73 6F 75 72 63 65
+2B
 24 03 61 62 63
-00
+24 02 67 69
+24 06 65 73 32 30 32 35
 ```
 
 ### 7.13 `[1, , 3]` (sparse array)
@@ -702,8 +714,9 @@ hashed form.
 
 This rule applies to every string the hasher feeds, including standalone
 strings (Section 4.4), `symbol` keys (Section 4.6), object keys (Section
-4.13), `FabricInstance` type tags (Section 4.14), and `FabricHash`
-algorithm tags (Section 4.11). The threshold is evaluated per-string
+4.13), `FabricInstance` type tags (Section 4.14), `FabricHash`
+algorithm tags (Section 4.11), and `FabricRegExp` source/flags/flavor
+strings (Section 4.16). The threshold is evaluated per-string
 independently: an object may mix short keys (direct form) and long keys
 (hashed form) in the same key-value sequence.
 

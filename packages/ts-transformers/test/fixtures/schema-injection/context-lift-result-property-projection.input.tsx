@@ -1,4 +1,4 @@
-import { Cell, derive, lift, pattern, Writable } from "commonfabric";
+import { Cell, computed, lift, pattern, Writable } from "commonfabric";
 
 const liftSummary = lift<
   { primary: Writable<number>; secondary: Writable<number> }
@@ -13,13 +13,15 @@ const liftSummary = lift<
 });
 
 // FIXTURE: context-lift-result-property-projection
-// Verifies: derive() preserves projected property schemas when the input comes
-// from a typed lift() result rather than falling back to unknown
-//   derive(summary, (snapshot) => snapshot.difference) → derive({ difference: number }, number, ...)
+// Verifies: a reactive builder preserves projected property schemas when the captured
+// input comes from a typed lift() result rather than falling back to unknown
+//   computed(() => summary.difference) → captures { difference: number } and outputs number
+//   (KEEP computed: baring to `summary.difference` lowers to a plain .key() access with NO
+//    captured-input schema, defeating this fixture's projection-shrink coverage — verified)
 export default pattern<{ primary: Cell<number>; secondary: Cell<number> }>(
   ({ primary, secondary }) => {
     const summary = liftSummary({ primary, secondary });
-    const difference = derive(summary, (snapshot) => snapshot.difference);
+    const difference = computed(() => summary.difference);
 
     return {
       summary,

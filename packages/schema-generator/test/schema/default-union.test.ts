@@ -131,6 +131,54 @@ describe("Schema: Default in unions", () => {
     expect(result.default).toBe(null);
   });
 
+  it("collapses an EXPANDED Default<[]> array union, preserving comparable items (CT-1639)", async () => {
+    // The transformer hands schema-gen a node where Default<[]> has already been
+    // EXPANDED by the checker into its raw branded form — there is no `Default<>`
+    // alias node left. We model that directly: `[] & DefaultMarker<[]>` plus the
+    // bare `[]` empty-array member, unioned with the real comparable array. The
+    // degenerate empty members must collapse so the comparable array survives
+    // (single array schema, asCell:["comparable"] kept, default: []).
+    const code = `
+      declare const DEFAULT_MARKER: unique symbol;
+      type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
+      interface Item { label: string }
+      type T = Array<ComparableCell<Item>> | ([] & DefaultMarker<[]>) | [];
+    `;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+    );
+
+    // Comparable items must be preserved on the (sole) array schema.
+    const arraySchema = result.anyOf
+      ? (result.anyOf as any[]).find((s) =>
+        s?.type === "array" && s?.items?.asCell
+      )
+      : result;
+    expect((arraySchema?.items as any)?.asCell).toEqual(["comparable"]);
+    // And the empty-only degenerate branch must not survive as a sibling that
+    // dilutes consumers: no `{ type: "array", items: false }` branch.
+    if (result.anyOf) {
+      const hasEmptyOnly = (result.anyOf as any[]).some((s) =>
+        s?.type === "array" && s?.items === false
+      );
+      expect(hasEmptyOnly).toBe(false);
+    }
+  });
+
+  it("does NOT fabricate a default for an ordinary array | empty-tuple union (no Default brand) (CT-1639)", async () => {
+    // A plain `string[] | []` has a bare empty-tuple member but NO Default brand.
+    // The expanded-Default collapse must not fire here — it would invent a
+    // `default: []` the author never asked for. (Regression for a cubic review
+    // finding on the CT-1639 pt-1 PR.)
+    const code = `type T = string[] | [];`;
+    const { type, checker, typeNode } = await getTypeFromCode(code, "T");
+    const result = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker, typeNode),
+    );
+    expect((result as any).default).toBeUndefined();
+  });
+
   it("applies array defaults from T[] | Default<[...]>", async () => {
     const code = `
       interface Default<T, V extends T = T> {}

@@ -123,7 +123,7 @@ Pattern Source (.tsx)
     ↓
 [1] ts-transformers (enhanced)
     - Hoist lift/handler to module scope (when external references exist)
-    - Rewrite inline derive → lift call
+    - Lower `computed(...)` to the lift-applied form `lift(...)(input)`
     - Emit optional verification hints for top-level items
     ↓
 [2] js-compiler (existing)
@@ -194,9 +194,8 @@ The `ts-transformers` package requires the following enhancements:
 
 | Transformation | Current Behavior | New Behavior |
 |----------------|------------------|--------------|
-| `computed(() => ...)` | → `derive({}, () => ...)` | → hoist `lift(...)` when the post-transform callback still depends on imports or module scope |
+| `computed(() => ...)` | → `lift(() => ...)({})` (lift-applied) | → hoist `lift(...)` when the post-transform callback still depends on imports or module scope |
 | `action(() => ...)` | → `handler((_, {}) => ...)({})` | → hoist `handler(...)` when the post-transform callback still depends on imports or module scope |
-| inline `derive(input, fn)` | kept inline | → hoist `lift(...)` when the post-transform callback still depends on imports or module scope |
 | `lift(...)` | allowed inline | **ERROR** if not at module scope |
 | `handler(...)` | allowed inline | **ERROR** if not at module scope |
 | module-scope calls | minimal validation | strict allowlist enforcement |
@@ -506,7 +505,8 @@ raw authored callback.
 
 By the time this hoisting pass runs:
 
-- `computed(...)` has already been rewritten to `derive(...)`
+- `computed(...)` has already been rewritten to the lift-applied form
+  `lift(...)(input)`
 - `action(...)` has already been rewritten to `handler(...)(params)`
 - closure lowering has already converted local closed-over values into explicit
   callback parameters / params objects where possible
@@ -531,13 +531,13 @@ This is the default behavior, not merely an optimization.
 
 ```typescript
 // This stays inline (self-contained after normalization)
-const doubled = derive(props.value, x => x * 2);
+const doubled = lift(({ value }) => value * 2)({ value: props.value });
 
 // This MUST be hoisted (still references module scope after normalization)
-const doubled = derive(props.value, x => x * multiplier);
+const doubled = lift(({ value }) => value * multiplier)({ value: props.value });
 ```
 
-#### 4.3.1 Computed / Derive Hoisting Rule
+#### 4.3.1 Computed Hoisting Rule
 
 **Before (current):**
 ```typescript
@@ -550,25 +550,25 @@ export const MyPattern = pattern<Input, Output>((props) => {
 **After transformation (current):**
 ```typescript
 export const MyPattern = pattern<Input, Output>((props) => {
-  const doubled = derive({}, () => props.value * 2);
+  const doubled = lift(({ value }) => value * 2)({ value: props.value });
   return { doubled };
 });
 ```
 
-If the post-transform derive callback is self-contained, it stays inline.
+If the post-transform lift-applied callback is self-contained, it stays inline.
 
-If the post-transform derive callback still references imports or module scope,
-the transformer must hoist the builder factory, not the fully applied call.
-This applies equally to nested builder callbacks introduced by helpers such as
+If the post-transform callback still references imports or module scope, the
+transformer must hoist the builder factory, not the fully applied call. This
+applies equally to nested builder callbacks introduced by helpers such as
 `map(...)`, `mapWithPattern(...)`, or inline sub-`pattern(...)` creation. If
 the post-transform callback still sees module-scoped bindings, it must be
 lifted to module scope so verified evaluation can mint and register a stable
 `implementationRef` for the real executable body.
 
-Concretely:
+Concretely, the lift-applied shape splits into a factory and an application:
 
-- starting point: `derive(inputSchema, outputSchema, params, fn)`
-- hoist target: `lift(inputSchema, outputSchema, fn)`
+- starting point: `lift(inputSchema, outputSchema, fn)(params)`
+- hoist target: `lift(inputSchema, outputSchema, fn)` (the factory)
 - original-site replacement: `hoistedLift(params)`
 
 **After transformation (new, when hoisting is required):**
@@ -583,12 +583,6 @@ export const MyPattern = pattern<Input, Output>((props) => {
   return { doubled };
 });
 ```
-
-The same rule applies to explicit `derive(...)` calls:
-
-- if the post-transform callback is self-contained, keep `derive(...)` inline
-- if it still depends on imports or module scope, hoist `lift(...)` and leave
-  the application with `(params)` at the original location
 
 #### 4.3.2 Action / Handler Hoisting Rule
 
@@ -643,7 +637,7 @@ explicitly and are not the target of the module-hoisting rule above.
 **Before:**
 ```typescript
 export const MyPattern = pattern<Input, Output>((props) => {
-  const total = derive(props.items, items => items.reduce((a, b) => a + b, 0));
+  const total = computed(() => props.items.reduce((a, b) => a + b, 0));
   return { total };
 });
 ```
@@ -865,7 +859,7 @@ not currently exposed to authored SES modules through `runtimeDeps`.
 These runtime modules may export:
 
 - module-scope trusted builder entrypoints: `pattern`, `lift`, `handler`,
-  `action`, `derive`, `computed`
+  `action`, `computed`
 - callback-scope helper entrypoints such as `patternTool(...)`, which remain
   valid inside verified pattern callbacks but are not part of the module-scope
   trusted-builder allowlist
@@ -1756,7 +1750,7 @@ module even if the hints are wrong or missing.
 - `packages/ts-transformers/src/hoisting/*`
 - compiler pipeline entrypoints that preserve the hints into emitted JS
 
-#### 1.2 Hoist computed/action/derive when useful (Priority: High)
+#### 1.2 Hoist computed/action when useful (Priority: High)
 
 Continue to hoist only when the post-transform builder callback still depends on
 imports or module scope. Earlier closure-lowering passes already internalize
@@ -1765,8 +1759,9 @@ references after normalization.
 
 The hoist target must be the builder factory:
 
-- `derive(inputSchema, outputSchema, params, fn)` hoists as
-  `lift(inputSchema, outputSchema, fn)` and leaves the `(params)` call in place
+- `lift(inputSchema, outputSchema, fn)(params)` (the lift-applied form, e.g.
+  from `computed(...)`) hoists as `lift(inputSchema, outputSchema, fn)` and
+  leaves the `(params)` call in place
 - `handler(eventSchema, stateSchema, fn)(params)` hoists as
   `handler(eventSchema, stateSchema, fn)` and leaves the `(params)` call in
   place

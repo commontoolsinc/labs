@@ -13,7 +13,9 @@ import type {
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
   HarnessSkillScriptExecution,
+  HarnessSkillScriptExecutionTarget,
 } from "../contracts/skill.ts";
+import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -25,12 +27,15 @@ export interface HarnessToolContext {
   skillRegistry?: HarnessSkillRegistry;
   skillActivations?: HarnessSkillActivations;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
+  skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
+  browserAccess?: HarnessBrowserAccessLease;
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
   workspaceHostPath?: string;
   resolvePath(path: string): string;
   resolveHostPath(path: string): string;
+  resolveHostRootPath(path: string): string;
   hostPathToWorkspacePath(path: string): string | undefined;
   isHostPathWithinWorkspace(
     path: string,

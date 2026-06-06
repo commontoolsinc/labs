@@ -1655,6 +1655,9 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
         profile: string;
         allowedToolIds: string[];
         hostToolIds: string[];
+        skillNames?: string[];
+        allowedSkillScripts?: Array<{ skill: string; path: string }>;
+        skillScriptExecutionTarget?: string;
       };
     };
   };
@@ -1992,6 +1995,9 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
         profile: string;
         allowedToolIds: string[];
         hostToolIds: string[];
+        skillNames?: string[];
+        allowedSkillScripts?: Array<{ skill: string; path: string }>;
+        skillScriptExecutionTarget?: string;
       };
     };
   };
@@ -2002,7 +2008,13 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash-no-sandbox", "read_file", "view_image"],
+    [
+      "bash-no-sandbox",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "run_skill_script",
+    ],
   );
   assertEquals(
     requestBodies[1].messages[0].content.includes(
@@ -2021,9 +2033,295 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
     "bash-no-sandbox",
     "read_file",
     "view_image",
+    "read_skill_resource",
+    "run_skill_script",
   ]);
   assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
+  assertEquals(output.subagent.manifest.skillNames, ["agent-browser"]);
+  assertEquals(output.subagent.manifest.allowedSkillScripts, [
+    { skill: "agent-browser", path: "scripts/form-automation.sh" },
+    { skill: "agent-browser", path: "scripts/capture-workflow.sh" },
+  ]);
+  assertEquals(output.subagent.manifest.skillScriptExecutionTarget, "host");
   assertEquals(result.finalAssistantText, "Browser-profile parent completed.");
+});
+
+Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill scripts", async () => {
+  const workspace = await Deno.makeTempDir({
+    prefix: "cf-harness-browser-subagent-skills-",
+  });
+  try {
+    const skillsRoot = join(workspace, "skills");
+    const skillDir = join(skillsRoot, "agent-browser");
+    const scriptSource = [
+      "#!/bin/bash",
+      "set -euo pipefail",
+      'echo "captured=$2"',
+      'echo "target=$CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET"',
+      "",
+    ].join("\n");
+    await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+    await Deno.writeTextFile(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        "name: agent-browser",
+        "description: Browser automation",
+        "---",
+        "",
+        "Use capture workflow for page checks.",
+      ].join("\n"),
+    );
+    await Deno.writeTextFile(
+      join(skillDir, "scripts", "capture-workflow.sh"),
+      scriptSource,
+      { mode: 0o755 },
+    );
+    await Deno.writeTextFile(
+      join(skillDir, "scripts", "form-automation.sh"),
+      "#!/bin/bash\necho form\n",
+      { mode: 0o755 },
+    );
+    await Deno.writeTextFile(
+      join(skillDir, "scripts", "authenticated-session.sh"),
+      "#!/bin/bash\necho auth\n",
+      { mode: 0o755 },
+    );
+    const registry = await discoverHarnessSkills({
+      skillsRoot,
+      sandboxSkillsRoot: "/workspace/skills",
+    });
+    const hostRunner = new FakeProcessRunner([{
+      stdout: "captured=http://localhost:8000/piece\ntarget=host\n",
+      stderr: "debug-page-secret=stderr-observation\n",
+      exitCode: 0,
+    }]);
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      processRunner: hostRunner,
+      workspaceHostPath: workspace,
+      skillsRoot,
+      runId: "run-browser-subagent-skills",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
+    });
+    await engine.persistSkillRegistry(registry);
+
+    const requestBodies: Array<{
+      messages: Array<{
+        role: string;
+        tool_call_id?: string;
+        content: string;
+      }>;
+      tools: Array<{ function: { name: string } }>;
+    }> = [];
+    const returnSchema = {
+      type: "object",
+      properties: {
+        ok: { type: "boolean" },
+        captured: { type: "string" },
+      },
+      required: ["ok", "captured"],
+      additionalProperties: false,
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["browser"],
+      engine,
+      browserAccess: {
+        type: "cf-harness.chat.browser-access-lease",
+        leaseId: "lease-1",
+        cdpUrl: "http://127.0.0.1:9222",
+      },
+      fetchFn: (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as {
+          messages: Array<{
+            role: string;
+            tool_call_id?: string;
+            content: string;
+          }>;
+          tools: Array<{ function: { name: string } }>;
+        };
+        requestBodies.push(body);
+        const payload = requestBodies.length === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-browser-profile-skills",
+                  type: "function",
+                  function: {
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal: "Capture the deployed pattern page.",
+                      profile: "browser",
+                      returnSchema,
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : requestBodies.length === 2
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-run-capture-script",
+                  type: "function",
+                  function: {
+                    name: "run_skill_script",
+                    arguments: JSON.stringify({
+                      skill: "agent-browser",
+                      path: "scripts/capture-workflow.sh",
+                      args: [
+                        "--cdp",
+                        "http://127.0.0.1:9222",
+                        "http://localhost:8000/piece",
+                      ],
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : requestBodies.length === 3
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: JSON.stringify({
+                  ok: true,
+                  captured:
+                    "captured=http://localhost:8000/piece\ntarget=host\n",
+                }),
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Parent saw browser child summary.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(payload), { status: 200 }),
+        );
+      },
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Delegate browser work.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    assertEquals(
+      requestBodies[1].tools.map((tool) => tool.function.name),
+      [
+        "bash-no-sandbox",
+        "read_file",
+        "view_image",
+        "read_skill_resource",
+        "run_skill_script",
+      ],
+    );
+    assertStringIncludes(
+      requestBodies[1].messages[1].content,
+      '<skill_context name="agent-browser"',
+    );
+    assertStringIncludes(
+      requestBodies[1].messages[1].content,
+      "scripts/capture-workflow.sh",
+    );
+    const toolMessage = requestBodies[2].messages.at(-1);
+    if (toolMessage?.role !== "tool") {
+      throw new Error("expected run_skill_script tool response");
+    }
+    const scriptOutput = JSON.parse(toolMessage.content) as {
+      status: string;
+      executionTarget: string;
+      stdout: string;
+      stderr: string;
+    };
+    assertEquals(scriptOutput.status, "executed");
+    assertEquals(scriptOutput.executionTarget, "host");
+    assertEquals(
+      scriptOutput.stdout,
+      "captured=http://localhost:8000/piece\ntarget=host\n",
+    );
+    assertEquals(
+      scriptOutput.stderr,
+      "debug-page-secret=stderr-observation\n",
+    );
+    assertEquals(hostRunner.requests.length, 1);
+    assertEquals(hostRunner.requests[0], {
+      command: "bash",
+      args: [
+        "-s",
+        "--",
+        "--cdp",
+        "http://127.0.0.1:9222",
+        "http://localhost:8000/piece",
+      ],
+      cwd: workspace,
+      clearEnv: true,
+      env: {
+        PATH: hostRunner.requests[0]!.env!.PATH,
+        CF_HARNESS_RUN_ID: "run-browser-subagent-skills.subagent.1",
+        SKILL_NAME: "agent-browser",
+        SKILL_DIR: skillDir,
+        SKILL_SCRIPT: join(skillDir, "scripts", "capture-workflow.sh"),
+        CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET: "host",
+      },
+      stdinText: scriptSource,
+      timeoutMs: 60000,
+    });
+    const delegateToolMessage = result.transcript.at(-2);
+    if (delegateToolMessage?.role !== "tool") {
+      throw new Error("expected delegate_task tool response");
+    }
+    assertEquals(
+      delegateToolMessage.content.includes(
+        "captured=http://localhost:8000/piece",
+      ),
+      false,
+    );
+    assertEquals(
+      delegateToolMessage.content.includes("debug-page-secret"),
+      false,
+    );
+    const delegateOutput = JSON.parse(delegateToolMessage.content) as {
+      subagent: {
+        structuredReturn?: {
+          value?: {
+            ok?: boolean;
+            captured?: unknown;
+          };
+        };
+      };
+    };
+    assertEquals(delegateOutput.subagent.structuredReturn?.value?.ok, true);
+    assertEquals(delegateOutput.subagent.structuredReturn?.value?.captured, {
+      "@link": "opaque:run-browser-subagent-skills.subagent.1#/captured",
+    });
+    assertEquals(
+      result.finalAssistantText,
+      "Parent saw browser child summary.",
+    );
+  } finally {
+    await Deno.remove(workspace, { recursive: true });
+  }
 });
 
 Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for browser subagents", async () => {
@@ -2040,6 +2338,8 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
       leaseId: "lease-browser-1",
       cdpUrl: "http://127.0.0.1:9222",
       owner: "loom",
+      profileMode: "transient",
+      accountAccess: "none",
     },
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
@@ -2108,11 +2408,23 @@ Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for br
   const childSystemPrompt = requestBodies[1].messages[0].content;
   assertStringIncludes(
     childSystemPrompt,
-    "Loom Browser Access lease: lease-browser-1",
+    "Browser Access lease: lease-browser-1",
   );
   assertStringIncludes(
     childSystemPrompt,
-    "Loom Browser Access CDP endpoint: http://127.0.0.1:9222",
+    "Browser Access CDP endpoint: http://127.0.0.1:9222",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Browser Access profile mode: transient",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Browser Access account access: none",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "temporary no-login profile",
   );
   assertStringIncludes(
     childSystemPrompt,
@@ -2271,6 +2583,11 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
       apiKey: "test-key",
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["browser"],
+      browserAccess: {
+        type: "cf-harness.chat.browser-access-lease",
+        leaseId: "lease-structured",
+        cdpUrl: "http://host.docker.internal:9362",
+      },
       engine: new CfHarnessEngine({
         artifactStore,
         processRunner: hostRunner,
@@ -2375,7 +2692,13 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     );
     assertEquals(
       requestBodies[1].tools.map((tool) => tool.function.name),
-      ["bash-no-sandbox", "read_file", "view_image"],
+      [
+        "bash-no-sandbox",
+        "read_file",
+        "view_image",
+        "read_skill_resource",
+        "run_skill_script",
+      ],
     );
     assertEquals(
       requestBodies[1].messages[0].content.includes(
@@ -2397,6 +2720,8 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
         "body",
       ],
       cwd: workspaceHostPath,
+      clearEnv: true,
+      env: { PATH: hostRunner.requests[0]!.env!.PATH },
       timeoutMs: 30000,
     }]);
 
@@ -2572,8 +2897,8 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
     },
     {
       name: "too many turns",
-      arguments: { goal: "Inspect", maxModelTurns: 17 },
-      message: "delegate_task maxModelTurns must be an integer from 1 to 16",
+      arguments: { goal: "Inspect", maxModelTurns: 65 },
+      message: "delegate_task maxModelTurns must be an integer from 1 to 64",
     },
     {
       name: "unknown profile",

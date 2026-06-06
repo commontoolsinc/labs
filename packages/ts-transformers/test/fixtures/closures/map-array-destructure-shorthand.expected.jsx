@@ -18,6 +18,93 @@ type ItemTuple = [
 interface State {
     items: ItemTuple[];
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element", "0");
+    return (<div data-item={item}>{item}</div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/ItemTuple"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        ItemTuple: {
+            type: "array",
+            items: {
+                type: ["number", "string"]
+            }
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element", "0");
+    const count = __cf_pattern_input.key("element", "1");
+    const index = __cf_pattern_input.key("index");
+    return (<div key={index}>
+            {item}: {count}
+          </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/ItemTuple"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        ItemTuple: {
+            type: "array",
+            items: {
+                type: ["number", "string"]
+            }
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-array-destructure-shorthand
 // Verifies: array-destructured map params are not incorrectly captured as shorthand properties
 //   .map(([item]) => ...) → .mapWithPattern(pattern(...), {}) with key("element", "0")
@@ -29,95 +116,10 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {/* Array destructured parameter - without fix, 'item' would be
                 incorrectly captured in params due to shorthand usage in JSX */}
-        {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element", "0");
-                return (<div data-item={item}>{item}</div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/ItemTuple"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    ItemTuple: {
-                        type: "array",
-                        items: {
-                            type: ["number", "string"]
-                        }
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {items.mapWithPattern(__cfPattern_1, {})}
 
         {/* Multiple array destructured params */}
-        {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element", "0");
-                const count = __cf_pattern_input.key("element", "1");
-                const index = __cf_pattern_input.key("index");
-                return (<div key={index}>
-            {item}: {count}
-          </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/ItemTuple"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    ItemTuple: {
-                        type: "array",
-                        items: {
-                            type: ["number", "string"]
-                        }
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {items.mapWithPattern(__cfPattern_2, {})}
       </div>),
     };
 }, {

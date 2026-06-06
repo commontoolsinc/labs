@@ -1,11 +1,12 @@
-import type { FabricValue, ReconstructionContext } from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
+import type { FabricValue } from "@/interface.ts";
+import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
 } from "./interface.ts";
-import { makeProblematic } from "./makeProblematic.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
  * Handler for the four "special" numeric values that JSON cannot represent
@@ -21,7 +22,15 @@ import { makeProblematic } from "./makeProblematic.ts";
  * back to `Number.NaN`.
  */
 export const SpecialNumberHandler: TypeHandler = {
-  tag: TAGS.SpecialNumber,
+  /** @inheritDoc */
+  get classSource() {
+    return Number;
+  },
+
+  /** @inheritDoc */
+  get wireTypeTag() {
+    return WIRE_TYPE_TAGS.SpecialNumber;
+  },
 
   canSerialize(value: FabricValue): boolean {
     if (typeof value !== "number") return false;
@@ -48,7 +57,7 @@ export const SpecialNumberHandler: TypeHandler = {
       // The remaining canSerialize case is `Object.is(num, -0)`.
       state = "-0";
     }
-    return codec.wrapTag(TAGS.SpecialNumber, state);
+    return codec.wrapTag(WIRE_TYPE_TAGS.SpecialNumber, state);
   },
 
   deserialize(
@@ -57,8 +66,8 @@ export const SpecialNumberHandler: TypeHandler = {
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
     if (typeof state !== "string") {
-      return makeProblematic(
-        TAGS.SpecialNumber,
+      return new ProblematicValue(
+        WIRE_TYPE_TAGS.SpecialNumber,
         state,
         `SpecialNumber: expected string state, got ${typeof state}`,
       );
@@ -73,8 +82,8 @@ export const SpecialNumberHandler: TypeHandler = {
       case "NaN":
         return NaN;
       default:
-        return makeProblematic(
-          TAGS.SpecialNumber,
+        return new ProblematicValue(
+          WIRE_TYPE_TAGS.SpecialNumber,
           state,
           `SpecialNumber: unknown literal ${JSON.stringify(state)}`,
         );

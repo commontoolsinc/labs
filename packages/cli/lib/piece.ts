@@ -45,6 +45,7 @@ import {
   renderPieceCallHelp,
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
+import { deriveDiskHandleId } from "./sqlite-source.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -889,6 +890,64 @@ export async function linkPieces(
         options,
       ),
   );
+}
+
+/**
+ * Phase 7: link a pattern field to an injected on-disk SQLite source
+ * (`cf piece link sqlite:<absPath> <piece>/<field>`, read-only v1). Derives a
+ * stable handle id from (space, absPath), creates the handle cell at that id with
+ * value `{ id, tables: {}, rev: 0 }`, registers the on-disk source with the server
+ * (so reads attach the file read-only for that id), then links the handle into
+ * the target field. Idempotent: re-linking the same path resolves to the same
+ * handle id (same cell, same registration). v1 is read-only — `db.exec` against an
+ * injected source is rejected by the server (Q13/Q14).
+ */
+export async function linkSqliteDiskSource(
+  config: SpaceConfig,
+  absPath: string,
+  targetPieceId: string,
+  targetPath: (string | number)[],
+  options?: { start?: boolean; targetScope?: CellScope },
+): Promise<void> {
+  const manager = await loadManager(config);
+  const space = manager.getSpace();
+  const id = deriveDiskHandleId(space, absPath);
+
+  // 1. Seed the handle cell AT the deterministic id. Its entity id == its
+  //    value.id == the server registry key, so a pattern read of the linked
+  //    handle resolves to the id the server holds a disk descriptor for. tables
+  //    is empty — v1 does not migrate external files (the on-disk db owns its
+  //    schema); the server skips ensureTables for a registered source.
+  const handle = manager.runtime.getCellFromEntityId(
+    space,
+    { "/": id },
+    [],
+    undefined,
+  );
+  const writeRes = await manager.runtime.editWithRetry((tx) => {
+    handle.withTx(tx).set({ id, tables: {}, rev: 0 });
+  });
+  if (writeRes.error) throw writeRes.error;
+
+  // 2. Register the on-disk source with the server (read-only attach for `id`).
+  const provider = manager.runtime.storageManager.open(space);
+  if (!provider.registerSqliteDiskSource) {
+    throw new Error(
+      "storage provider does not support injected sqlite disk sources",
+    );
+  }
+  await provider.registerSqliteDiskSource(id, absPath);
+
+  // 3. Link the handle (addressed by entity id) into the target field.
+  const resolvedTarget = await resolveLinkEndpointAddress(
+    manager,
+    targetPieceId,
+  );
+  await manager.link(id, [], resolvedTarget, targetPath, {
+    start: options?.start,
+    targetScope: options?.targetScope,
+  });
+  await manager.synced();
 }
 
 export class LinkValidationError extends Error {

@@ -30,7 +30,22 @@ deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
 
 # For a fresh random key (e.g., against production):
 deno run -A packages/cli/mod.ts id new > cf.key
+
+# To match a browser identity registered with a recovery phrase:
+deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > cf.key
 ```
+
+Both `id derive` and `id from-mnemonic` accept the secret three ways: as a file
+(`-- <file>`), on stdin (`-`, or no argument), or as an inline positional
+argument. Prefer a file or stdin for real secrets — an inline argument is
+visible in shell history and to other processes via `ps`. A single trailing
+newline is stripped from file/stdin input, so `echo`/editor input matches the
+equivalent inline value.
+
+Note: `id derive` (passphrase) and `id from-mnemonic` (BIP-39 phrase) use
+different derivations and produce different DIDs from the same text. Use
+`from-mnemonic` to match browser mnemonic login; see
+`docs/development/SHARED_IDENTITY.md`.
 
 **IMPORTANT:** Do NOT use `deno task cf id new > file` — the `deno task` wrapper
 prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
@@ -54,11 +69,13 @@ the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
 
 ```bash
 # Pass experiment env vars to CLI commands:
-EXPERIMENTAL_MODERN_DATA_MODEL=true \
+EXPERIMENTAL_EXAMPLE_NAME_1=true \
+EXPERIMENTAL_EXAMPLE_NAME_2=true \
 deno task cf piece new pattern.tsx ...
 ```
 
-See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
+Replace `EXAMPLE_NAME_*` with an actual defined experiment name. See
+`docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 
 **Local servers**: See `docs/development/LOCAL_DEV_SERVERS.md`
 

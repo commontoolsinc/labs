@@ -33,6 +33,7 @@ import type {
   WriterError,
 } from "./interface.ts";
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
+import type { SqliteOperation } from "@commonfabric/memory/v2";
 import {
   getDirectTransactionReactivityLog,
   getTransactionReadActivities,
@@ -99,6 +100,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     writePolicyInputs: [],
+    writePolicyInputIdentities: new Map(),
     outbox: [],
     diagnostics: [],
   };
@@ -196,7 +198,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // identity-stable, which lets `hashStringOf()` cache its hash on the
     // existing WeakMap. The within-sort tiebreaker in
     // `compareWritePolicyInput` then re-hashes each element via the cache.
-    this.cfcState.writePolicyInputs.push(deepFreeze(input));
+    const frozen = deepFreeze(input);
+    this.cfcState.writePolicyInputs.push(frozen);
+    // Capture the identity active right now so writeAuthorizedBy is verified
+    // against the trust context that authored this write, even if a later run
+    // in the same transaction changes the identity.
+    this.cfcState.writePolicyInputIdentities.set(
+      frozen,
+      this.cfcState.implementationIdentity,
+    );
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }
@@ -293,6 +303,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return digest;
   }
 
+  enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
+    this.tx.enableMultiSpaceWrites?.(order);
+  }
+
   setReadOnly(reason = "runtime.readTx()"): void {
     this.readOnlySource = reason;
     this.tx.setReadOnly?.(reason);
@@ -329,6 +343,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   getSchedulerObservation(): unknown {
     return this.tx.getSchedulerObservation?.();
+  }
+
+  recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    // A folded SQLite write is a write — honor the wrapper's read-only mode the
+    // same way cell writes do, instead of silently recording it.
+    this.assertWritable("recordSqliteWrite");
+    if (!this.tx.recordSqliteWrite) {
+      throw new Error(
+        "storage transaction does not support recordSqliteWrite()",
+      );
+    }
+    this.tx.recordSqliteWrite(space, op);
   }
 
   getReadActivities(): Iterable<IReadActivity> {
@@ -445,11 +471,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        // When modernDataModel is ON, stored objects are deep-frozen by
-        // fabricFromNativeValueModern(). Shallow-clone before mutation to avoid
-        // TypeError on frozen objects. `shallowMutableClone` always copies,
-        // because the value may be the transaction's working copy, which must
-        // not be mutated in place.
+        // Stored objects are deep-frozen by `fabricFromNativeValueModern()`.
+        // Clone before mutation to avoid `TypeError` on frozen objects: this
+        // always copies (the value may be the transaction's working copy, which
+        // must not be mutated in place), and it deep-freezes the bound children
+        // as inexpensive defense-in-depth against accidental deeper mutation of
+        // the shared input.
         valueObj = shallowMutableClone(
           currentValue as FabricValue,
         ) as FabricObject;
@@ -774,6 +801,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.enqueuePostCommitEffect(effect);
   }
 
+  enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
+    this.wrapped.enableMultiSpaceWrites?.(order);
+  }
+
   setReadOnly(reason?: string): void {
     this.wrapped.setReadOnly?.(reason);
   }
@@ -801,6 +832,15 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   getSchedulerObservation(): unknown {
     return this.wrapped.getSchedulerObservation?.();
+  }
+
+  recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
+    if (!this.wrapped.recordSqliteWrite) {
+      throw new Error(
+        "storage transaction does not support recordSqliteWrite()",
+      );
+    }
+    this.wrapped.recordSqliteWrite(space, op);
   }
 
   getReadActivities(): Iterable<IReadActivity> {

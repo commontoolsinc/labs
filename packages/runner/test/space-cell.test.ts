@@ -112,7 +112,7 @@ describe("Runtime.getSpaceCell", () => {
   });
 
   describe("schema handling", () => {
-    it("should use spaceCellSchema by default", () => {
+    it("should expose defaultPattern in spaceCellSchema by default", () => {
       // Verify the default schema structure
       const schema = spaceCellSchema as {
         type: string;
