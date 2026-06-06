@@ -25,10 +25,15 @@ export class UndefinedCodec extends BaseFabricCodec {
 
   /** @inheritDoc */
   decode(
-    _wireTypeTag: string,
-    _state: FabricValue,
+    wireTypeTag: string,
+    state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {
+    if (state !== null) {
+      throw new Error(
+        `${wireTypeTag}: expected \`null\` state, got ${typeof state}`,
+      );
+    }
     return undefined;
   }
 }

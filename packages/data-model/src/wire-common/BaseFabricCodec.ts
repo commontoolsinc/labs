@@ -1,10 +1,3 @@
-/**
- * Empty `ReconstructionContext`: a singleton whose `getCell()` always throws.
- * Useful as a default for decode paths that aren't expected to encounter
- * `Cell` references (e.g. storage-boundary reads of values known to be
- * structurally flat).
- */
-
 import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import type { FabricCodec, ReconstructionContext } from "./interface.ts";

@@ -159,8 +159,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 
       /** @inheritDoc */
       encode(value: FabricHash): FabricValue {
-        // The `<tag>:<base64urlHash>` string form round-trips via `fromString()`.
-        return value.taggedHashString;
+        return { tag: value.tag, hash: value.hashString };
       }
 
       /** @inheritDoc */
@@ -169,15 +168,25 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
-        if (typeof state !== "string") {
+        if (
+          state === null || typeof state !== "object" || Array.isArray(state)
+        ) {
           return new ProblematicValue(
             wireTypeTag,
             state,
-            `Hash: expected string state, got ${typeof state}`,
+            `Hash: expected object state, got ${typeof state}`,
+          );
+        }
+        const { tag, hash } = state as Record<string, unknown>;
+        if (typeof tag !== "string" || typeof hash !== "string") {
+          return new ProblematicValue(
+            wireTypeTag,
+            state,
+            "Hash: expected string `tag` and `hash`",
           );
         }
         try {
-          return FabricHash.fromString(state);
+          return new FabricHash(fromBase64url(hash), tag);
         } catch (e) {
           return new ProblematicValue(
             wireTypeTag,

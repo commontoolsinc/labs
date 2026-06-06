@@ -4,7 +4,8 @@ import { expect } from "@std/expect";
 import type { FabricValue } from "@/interface.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { CODEC } from "@/wire-common/interface.ts";
-import { EmptyReconstructionContext } from "@/wire-common/EmptyReconstructionContext.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
@@ -153,25 +154,25 @@ describe("FabricHash", () => {
 
     describe("[CODEC]", () => {
       const codec = FabricHash[CODEC];
-      const context = new EmptyReconstructionContext(
-        true,
-        "no-op (FabricHash codec test).",
-      );
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      it("has the `Hash@1` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe("Hash@1");
+      it("has the `Hash` wire type tag", () => {
+        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Hash);
       });
 
-      it("encodes to the tagged hash string", () => {
+      it("encodes to a `{ tag, hash }` object", () => {
         const cid = new FabricHash(SAMPLE_HASH, "fid1");
-        expect(codec.encode(cid as FabricValue)).toBe(cid.taggedHashString);
+        expect(codec.encode(cid as FabricValue)).toEqual({
+          tag: "fid1",
+          hash: cid.hashString,
+        });
       });
 
-      it("decodes the tagged hash string back to a `FabricHash`", () => {
+      it("decodes a `{ tag, hash }` object back to a `FabricHash`", () => {
         const cid = new FabricHash(SAMPLE_HASH, "fid1");
         const decoded = codec.decode(
           codec.wireTypeTag,
-          cid.taggedHashString,
+          { tag: "fid1", hash: cid.hashString },
           context,
         );
         expect(decoded).toBeInstanceOf(FabricHash);
@@ -192,7 +193,7 @@ describe("FabricHash", () => {
         expect((decoded as FabricHash).bytes).toEqual(cid.bytes);
       });
 
-      it("decodes non-string state to a `ProblematicValue`", () => {
+      it("decodes non-object state to a `ProblematicValue`", () => {
         const decoded = codec.decode(
           codec.wireTypeTag,
           123 as unknown as FabricValue,
@@ -201,10 +202,10 @@ describe("FabricHash", () => {
         expect(decoded).toBeInstanceOf(ProblematicValue);
       });
 
-      it("decodes a malformed hash string (no `:`) to a `ProblematicValue`", () => {
+      it("decodes missing/non-string fields to a `ProblematicValue`", () => {
         const decoded = codec.decode(
           codec.wireTypeTag,
-          "no-colon-here",
+          { tag: "fid1" } as unknown as FabricValue,
           context,
         );
         expect(decoded).toBeInstanceOf(ProblematicValue);

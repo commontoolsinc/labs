@@ -159,6 +159,12 @@ export class FabricRegExp extends BaseFabricPrimitive {
             `RegExp: expected object state, got ${typeof state}`,
           );
         }
+        // Beyond requiring an object, this class does not enforce regex
+        // syntax as part of its wire participation: only the `es2025` flavor
+        // is validated (eagerly, by the constructor building a native
+        // `RegExp`); other flavors are stored faithfully and may carry
+        // arbitrary `source`/`flags`. So a malformed non-`es2025` wire object
+        // is accepted as-is rather than becoming a `ProblematicValue`.
         const s = state as Record<string, unknown>;
         const flavor = (s.flavor as string) ?? DEFAULT_FLAVOR;
         const source = (s.source as string) ?? "";
