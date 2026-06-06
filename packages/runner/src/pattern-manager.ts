@@ -1038,9 +1038,13 @@ export class PatternManager {
   getPatternEntryRef(
     pattern: Pattern | Module,
   ): { identity: string; symbol: string } | undefined {
-    return this.patternToEntryRef.get(
-      this.findOriginalPattern(pattern as Pattern),
-    );
+    // `patternToEntryRef` is keyed by the EXACT exported value (the entry, set
+    // by patternFromMain/patternFromEvaluation, and every imported sub-pattern,
+    // set by registerEvaluatedModules). Check the exact object FIRST, then the
+    // normalized original: a copied/wrapped pattern whose `unsafe_originalPattern`
+    // root differs from the keyed object would otherwise never resolve its ref.
+    return this.patternToEntryRef.get(pattern as Pattern) ??
+      this.patternToEntryRef.get(this.findOriginalPattern(pattern as Pattern));
   }
 
   /**
