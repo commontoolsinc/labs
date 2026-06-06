@@ -297,17 +297,20 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result as JsonWireValue;
     }
 
-    // Anything reaching here is none of: a registered-codec value, an
-    // `ExplicitTagValue`, a `FabricInstance`, a primitive, or an array -- so
-    // the only legitimate remaining shape is a *plain* object. A non-object
-    // (e.g. an uninterned/unique `symbol`, which no codec accepts) or a
-    // non-plain object (a class instance with no codec) is unencodable and
-    // must fail loudly rather than be mis-encoded as / silently flattened to a
-    // plain object.
+    // Codec values, `ExplicitTagValue`, `FabricInstance`, primitives, and
+    // arrays were all handled above. The only legitimate remaining shape is a
+    // *plain* object. Anything else -- a non-object (e.g. an uninterned/unique
+    // `symbol`) or a non-plain object (a class instance with no codec) -- is
+    // unencodable and must fail loudly rather than be silently mis-encoded as
+    // a plain object.
     if (!isPlainObject(value)) {
-      throw new Error(
-        `Cannot encode value of type \`${typeof value}\` (no applicable codec).`,
-      );
+      const kind = (typeof value === "object" && value !== null)
+        ? `a \`${
+          (value as { constructor?: { name?: string } }).constructor?.name ??
+            "(anonymous)"
+        }\` instance`
+        : `a value of type \`${typeof value}\``;
+      throw new Error(`Cannot encode ${kind}: no applicable codec.`);
     }
 
     // Plain objects

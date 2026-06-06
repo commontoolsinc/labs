@@ -595,7 +595,7 @@ describe("JsonEncodingContext", () => {
       // must then fail loudly rather than silently flatten the symbol to `{}`.
       const { context } = makeTestContext();
       expect(() => context.encode(Symbol("nope") as FabricValue)).toThrow(
-        "Cannot encode value of type `symbol`",
+        "no applicable codec",
       );
     });
 
@@ -794,7 +794,7 @@ describe("JsonEncodingContext", () => {
       // must fail loudly, not be mis-encoded as a plain object.
       const { context } = makeTestContext();
       expect(() => context.encode(new Map() as unknown as FabricValue))
-        .toThrow("Cannot encode value");
+        .toThrow("no applicable codec");
     });
   });
 
