@@ -1,3 +1,4 @@
+import { isPlainObject } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { type FabricValue } from "@/interface.ts";
@@ -298,11 +299,15 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     // Anything reaching here is none of: a registered-codec value, an
     // `ExplicitTagValue`, a `FabricInstance`, a primitive, or an array -- so
-    // the only legitimate remaining shape is a plain object. A non-object
-    // (e.g. an uninterned/unique `symbol`, which no codec accepts) is
-    // unencodable and must fail loudly rather than silently flatten to `{}`.
-    if (typeof value !== "object") {
-      throw new Error(`Cannot encode value of type \`${typeof value}\`.`);
+    // the only legitimate remaining shape is a *plain* object. A non-object
+    // (e.g. an uninterned/unique `symbol`, which no codec accepts) or a
+    // non-plain object (a class instance with no codec) is unencodable and
+    // must fail loudly rather than be mis-encoded as / silently flattened to a
+    // plain object.
+    if (!isPlainObject(value)) {
+      throw new Error(
+        `Cannot encode value of type \`${typeof value}\` (no applicable codec).`,
+      );
     }
 
     // Plain objects

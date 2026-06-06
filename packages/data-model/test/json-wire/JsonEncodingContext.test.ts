@@ -788,6 +788,14 @@ describe("JsonEncodingContext", () => {
       expect(() => context.encode(new UnregisteredInstance() as FabricValue))
         .toThrow("No codec registered");
     });
+
+    it("throws on a non-plain object with no codec (e.g. a raw `Map`)", () => {
+      // A non-plain object that is neither a FabricInstance nor codec-handled
+      // must fail loudly, not be mis-encoded as a plain object.
+      const { context } = makeTestContext();
+      expect(() => context.encode(new Map() as unknown as FabricValue))
+        .toThrow("Cannot encode value");
+    });
   });
 
   describe("`Date` -> `FabricEpochNsec` conversion", () => {
