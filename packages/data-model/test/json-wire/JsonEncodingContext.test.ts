@@ -2,13 +2,21 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { JsonEncodingContext } from "@/json-wire/JsonEncodingContext.ts";
-import type { FabricValue } from "@/interface.ts";
+import {
+  DEEP_FREEZE,
+  FabricInstance,
+  type FabricValue,
+  IS_DEEP_FROZEN,
+} from "@/interface.ts";
 import type { JsonWireValue } from "@/json-wire/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { DECONSTRUCT } from "@/wire-common/interface.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
@@ -25,6 +33,40 @@ class TestReconstructionContext extends BaseReconstructionContext {
 
   override getCell(): never {
     throw new Error("getCell not implemented in test runtime");
+  }
+}
+
+/**
+ * A `FabricInstance` with no registered codec, for exercising the encode-side
+ * mandate guard (every wire form must be explicitly represented).
+ */
+class UnregisteredInstance extends BaseFabricInstance {
+  [DECONSTRUCT](): FabricValue {
+    return {};
+  }
+
+  get wireTypeTag(): string {
+    return "Unregistered@1";
+  }
+
+  protected shallowUnfrozenClone(): FabricInstance {
+    return new UnregisteredInstance();
+  }
+
+  // The encode-side mandate guard fires before any of these are reached, so
+  // they are throwing stubs.
+  deepClone(_frozen: boolean): FabricInstance {
+    throw new Error("not implemented");
+  }
+
+  [DEEP_FREEZE](_subFreeze: (value: FabricValue) => FabricValue): FabricValue {
+    throw new Error("not implemented");
+  }
+
+  [IS_DEEP_FROZEN](
+    _subIsDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
+    throw new Error("not implemented");
   }
 }
 
@@ -690,6 +732,65 @@ describe("JsonEncodingContext", () => {
       const d = result.date as unknown as FabricEpochDays;
       expect(d).toBeInstanceOf(FabricEpochDays);
       expect(d.value).toBe(19723n);
+    });
+  });
+
+  describe("FabricRegExp", () => {
+    it("serializes to `/RegExp@1` with `{ source, flags, flavor }`", () => {
+      const re = new FabricRegExp(/ab+c/gi);
+      const result = toWireFormat(re as FabricValue) as Record<
+        string,
+        unknown
+      >;
+      expect(Object.keys(result)).toEqual(["/RegExp@1"]);
+      expect(result["/RegExp@1"]).toEqual({
+        flags: "gi",
+        flavor: "es2025",
+        source: "ab+c",
+      });
+    });
+
+    it("round-trips a regex (source, flags, flavor)", () => {
+      const re = new FabricRegExp(/ab+c/gi);
+      const result = roundTrip(re as FabricValue) as unknown as FabricRegExp;
+      expect(result).toBeInstanceOf(FabricRegExp);
+      expect(result.source).toBe("ab+c");
+      expect(result.flags).toBe("gi");
+      expect(result.flavor).toBe("es2025");
+    });
+
+    it("round-trips a flagless regex", () => {
+      const re = new FabricRegExp("es2025", "^x*$", "");
+      const result = roundTrip(re as FabricValue) as unknown as FabricRegExp;
+      expect(result).toBeInstanceOf(FabricRegExp);
+      expect(result.source).toBe("^x*$");
+      expect(result.flags).toBe("");
+    });
+
+    it("round-trips in a nested structure", () => {
+      const obj = {
+        pattern: new FabricRegExp(/\d+/g),
+        label: "digits",
+      } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, FabricValue>;
+      expect(result.label).toBe("digits");
+      const re = result.pattern as unknown as FabricRegExp;
+      expect(re).toBeInstanceOf(FabricRegExp);
+      expect(re.source).toBe("\\d+");
+      expect(re.flags).toBe("g");
+    });
+
+    it("decodes non-object state to `ProblematicValue`", () => {
+      const result = fromWireFormat({ "/RegExp@1": "nope" } as JsonWireValue);
+      expect(result).toBeInstanceOf(ProblematicValue);
+    });
+  });
+
+  describe("un-registered instance types", () => {
+    it("throws when encoding a `FabricInstance` with no registered codec", () => {
+      const { context } = makeTestContext();
+      expect(() => context.encode(new UnregisteredInstance() as FabricValue))
+        .toThrow("No codec registered");
     });
   });
 
@@ -1553,16 +1654,16 @@ describe("JsonEncodingContext", () => {
     });
   });
 
-  describe("`TypeHandler.deserialize()` deep-frozen contract", () => {
-    // The contract is scoped to the type-handler dispatch arm only: anything
-    // returned via a registered `TypeHandler` is guaranteed deep-frozen at
-    // the `deserialize()` boundary, so callers do not each have to freeze.
-    // The class-registry fallback arm is a separate sibling branch and is
-    // intentionally NOT covered by this contract.
+  describe("`FabricCodec.decode()` deep-frozen contract", () => {
+    // The contract is scoped to the codec dispatch arm: anything returned via
+    // a registered `FabricCodec` is guaranteed deep-frozen at the `decode()`
+    // boundary, so callers do not each have to freeze. The unknown-tag
+    // fallback (`UnknownValue`) is a separate arm and is intentionally NOT
+    // covered by this contract.
 
-    it("handler-produced value is deep-frozen at the boundary", () => {
-      // `/EpochNsec@1` dispatches through a registered TypeHandler (arm-1);
-      // the reconstructed FabricEpochNsec must be deep-frozen on return.
+    it("codec-produced value is deep-frozen at the boundary", () => {
+      // `/EpochNsec@1` dispatches through a registered codec; the
+      // reconstructed FabricEpochNsec must be deep-frozen on return.
       const result = fromWireFormat(
         { "/EpochNsec@1": "AA" } as JsonWireValue,
       );
@@ -1570,9 +1671,9 @@ describe("JsonEncodingContext", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("lenient-mode `ProblematicValue` from a handler is deep-frozen", () => {
-      // `/BigInt@1` with non-string state fails handler validation; the
-      // lenient catch produces a ProblematicValue -- still an arm-1 return,
+    it("lenient-mode `ProblematicValue` from a codec is deep-frozen", () => {
+      // `/BigInt@1` with non-string state fails codec validation; the
+      // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
       const ctx = new JsonEncodingContext({ lenient: true });
@@ -1585,7 +1686,7 @@ describe("JsonEncodingContext", () => {
       expect(isDeepFrozen(result)).toBe(true);
     });
 
-    it("handler round-trip yields a deep-frozen result", () => {
+    it("codec round-trip yields a deep-frozen result", () => {
       const result = roundTrip(
         new FabricEpochNsec(1704067200000000000n) as FabricValue,
       );
