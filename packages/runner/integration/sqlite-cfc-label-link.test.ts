@@ -133,7 +133,7 @@ Deno.test({
   fn: async () => {
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
-    let timeoutHandle: number;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(
         () => reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`)),
