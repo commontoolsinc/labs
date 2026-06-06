@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { FabricValue } from "@/interface.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { CODEC } from "@/wire-common/interface.ts";
+import { EmptyReconstructionContext } from "@/wire-common/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
 const SAMPLE_HASH = new Uint8Array(32);
@@ -144,6 +148,66 @@ describe("FabricHash", () => {
         expect(() => FabricHash.fromString("nocolonhere")).toThrow(
           "Invalid content hash string",
         );
+      });
+    });
+
+    describe("[CODEC]", () => {
+      const codec = FabricHash[CODEC];
+      const context = new EmptyReconstructionContext(
+        true,
+        "no-op (FabricHash codec test).",
+      );
+
+      it("has the `Hash@1` wire type tag", () => {
+        expect(codec.wireTypeTag).toBe("Hash@1");
+      });
+
+      it("encodes to the tagged hash string", () => {
+        const cid = new FabricHash(SAMPLE_HASH, "fid1");
+        expect(codec.encode(cid as FabricValue)).toBe(cid.taggedHashString);
+      });
+
+      it("decodes the tagged hash string back to a `FabricHash`", () => {
+        const cid = new FabricHash(SAMPLE_HASH, "fid1");
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          cid.taggedHashString,
+          context,
+        );
+        expect(decoded).toBeInstanceOf(FabricHash);
+        expect((decoded as FabricHash).taggedHashString).toBe(
+          cid.taggedHashString,
+        );
+      });
+
+      it("round-trips via encode -> decode (non-`fid1` tag)", () => {
+        const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(cid as FabricValue),
+          context,
+        );
+        expect(decoded).toBeInstanceOf(FabricHash);
+        expect((decoded as FabricHash).tag).toBe("sha3");
+        expect((decoded as FabricHash).bytes).toEqual(cid.bytes);
+      });
+
+      it("decodes non-string state to a `ProblematicValue`", () => {
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          123 as unknown as FabricValue,
+          context,
+        );
+        expect(decoded).toBeInstanceOf(ProblematicValue);
+      });
+
+      it("decodes a malformed hash string (no `:`) to a `ProblematicValue`", () => {
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          "no-colon-here",
+          context,
+        );
+        expect(decoded).toBeInstanceOf(ProblematicValue);
       });
     });
   });
