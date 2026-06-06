@@ -7,11 +7,11 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 
-import { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
-import { BigIntHandler } from "./BigIntHandler.ts";
-import { SpecialNumberHandler } from "./SpecialNumberHandler.ts";
-import { SymbolHandler } from "./SymbolHandler.ts";
-import { UndefinedHandler } from "./UndefinedHandler.ts";
+import { CodecRegistry } from "./CodecRegistry.ts";
+import { BigIntCodec } from "./BigIntCodec.ts";
+import { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
+import { SymbolCodec } from "./SymbolCodec.ts";
+import { UndefinedCodec } from "./UndefinedCodec.ts";
 
 /**
  * Creates a registry with the built-in codecs. Each fabric class that has a
@@ -28,8 +28,8 @@ import { UndefinedHandler } from "./UndefinedHandler.ts";
  * `UnknownValue` / `ProblematicValue` are live-graph stand-ins that carry a
  * per-instance tag and are handled directly by the encoding context.
  */
-export function createDefaultRegistry(): TypeHandlerRegistry {
-  const registry = new TypeHandlerRegistry();
+export function createDefaultRegistry(): CodecRegistry {
+  const registry = new CodecRegistry();
 
   // Fabric classes with a fixed wire tag: codec lives on the class.
   registry.register(FabricBytes[CODEC]);
@@ -41,10 +41,10 @@ export function createDefaultRegistry(): TypeHandlerRegistry {
   registry.register(FabricSet[CODEC]);
 
   // JS primitives that need tagged encoding (no owned class to host a codec).
-  registry.register(new BigIntHandler());
-  registry.register(new SpecialNumberHandler());
-  registry.register(new SymbolHandler());
-  registry.register(new UndefinedHandler());
+  registry.register(new BigIntCodec());
+  registry.register(new SpecialNumberCodec());
+  registry.register(new SymbolCodec());
+  registry.register(new UndefinedCodec());
 
   return registry;
 }

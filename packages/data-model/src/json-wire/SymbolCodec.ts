@@ -21,7 +21,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class SymbolHandler extends BaseFabricCodec {
+export class SymbolCodec extends BaseFabricCodec {
   constructor() {
     super(WIRE_TYPE_TAGS.Symbol, Symbol as unknown as Constructor);
   }

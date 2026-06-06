@@ -182,6 +182,6 @@ export interface SerializationContext<SerializedForm = unknown> {
   /** Decodes a serialized form back into a fabric value. */
   decode(
     data: SerializedForm,
-    runtime: ReconstructionContext,
+    context: ReconstructionContext,
   ): FabricValue;
 }

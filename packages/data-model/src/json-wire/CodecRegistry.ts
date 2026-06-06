@@ -30,28 +30,28 @@ function constructorOf(
 }
 
 /**
- * Registry of type handlers. Provides tag-based lookup for deserialization
- * and linear-scan matching for serialization.
+ * Registry of `FabricCodec`s. Provides tag-based lookup for decoding and
+ * class-fast-path / linear-scan matching for encoding.
  */
-export class TypeHandlerRegistry {
-  /** Ordered list of handlers for serialization matching. */
+export class CodecRegistry {
+  /** Ordered list of codecs, scanned for encode matching. */
   readonly #codecs: FabricCodec[] = [];
 
-  /** Tag -> handler map for O(1) deserialization dispatch. */
+  /** Tag -> codec map for O(1) decode dispatch. */
   readonly #tagMap = new Map<string, FabricCodec>();
 
-  /** Class -> handler map for O(1) serialization dispatch. */
+  /** Class -> codec map for the O(1) encode fast path. */
   readonly #classMap = new Map<Constructor, FabricCodec>();
 
   /**
-   * Registers a handler. Handlers with non-empty tags are indexed for O(1)
-   * deserialization lookup. Handlers with empty tags (like
-   * `FabricInstanceHandler`) participate in serialization matching only.
+   * Registers a codec, indexing it by its `wireTypeTag` (for decode) and, when
+   * it declares a `uniqueHandledClass`, by that class (for the encode fast
+   * path). It also joins the ordered list used by the encode linear scan.
    */
   register(codec: FabricCodec): void {
-    const classSource = codec.uniqueHandledClass;
-    if (classSource !== undefined) {
-      this.#classMap.set(classSource, codec);
+    const uniqueClass = codec.uniqueHandledClass;
+    if (uniqueClass !== undefined) {
+      this.#classMap.set(uniqueClass, codec);
     }
 
     this.#tagMap.set(codec.wireTypeTag, codec);
@@ -59,9 +59,9 @@ export class TypeHandlerRegistry {
   }
 
   /**
-   * Finds a codec that can serialize the given value. Returns `undefined`
-   * if no handler matches (the caller should fall through to structural
-   * handling for primitives, arrays, and plain objects).
+   * Finds a codec that can encode the given value. Returns `undefined` if none
+   * matches (the caller should fall through to structural handling for
+   * primitives, arrays, and plain objects).
    */
   codecFromValue(value: FabricValue): FabricCodec | undefined {
     const constructorFn = constructorOf(value);

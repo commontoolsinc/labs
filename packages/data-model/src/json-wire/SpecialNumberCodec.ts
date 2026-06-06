@@ -17,7 +17,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * Any NaN bit pattern serializes as the literal `"NaN"` and round-trips
  * back to `Number.NaN`.
  */
-export class SpecialNumberHandler extends BaseFabricCodec {
+export class SpecialNumberCodec extends BaseFabricCodec {
   constructor() {
     super(WIRE_TYPE_TAGS.SpecialNumber, Number);
   }

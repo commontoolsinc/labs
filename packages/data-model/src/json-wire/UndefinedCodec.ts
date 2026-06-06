@@ -8,7 +8,7 @@ import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
  * `undefined` has no corresponding class, so there is no `uniqueHandledClass`;
  * matching is by `canEncode()`. See Section 1.4.1 of the formal spec.
  */
-export class UndefinedHandler extends BaseFabricCodec {
+export class UndefinedCodec extends BaseFabricCodec {
   constructor() {
     super(WIRE_TYPE_TAGS.Undefined, undefined);
   }

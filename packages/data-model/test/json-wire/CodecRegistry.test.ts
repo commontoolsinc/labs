@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import type { Constructor } from "@commonfabric/utils/types";
 
 import { toCompactDebugString } from "@/value-debug.ts";
-import { TypeHandlerRegistry } from "@/json-wire/TypeHandlerRegistry.ts";
+import { CodecRegistry } from "@/json-wire/CodecRegistry.ts";
 import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
@@ -59,14 +59,14 @@ function buildRegistry(
   const first = new TestCodec("first@1", undefined);
   const handler = new TestCodec("handler@1", classSource, example);
   const last = new TestCodec("last@1", undefined);
-  const registry = new TypeHandlerRegistry();
+  const registry = new CodecRegistry();
   registry.register(first);
   registry.register(handler);
   registry.register(last);
   return { first, handler, last, registry };
 }
 
-describe("TypeHandlerRegistry", () => {
+describe("CodecRegistry", () => {
   describe("codecFromValue()", () => {
     for (
       const { fastPath, classSource, example, counter } of [
@@ -154,20 +154,20 @@ describe("TypeHandlerRegistry", () => {
 
   describe("codecFromTag()", () => {
     it("returns the codec registered under a tag", () => {
-      const registry = new TypeHandlerRegistry();
+      const registry = new CodecRegistry();
       const codec = new TestCodec("Foo@1", undefined);
       registry.register(codec);
       expect(registry.codecFromTag("Foo@1")).toBe(codec);
     });
 
     it("returns undefined for an unregistered tag", () => {
-      const registry = new TypeHandlerRegistry();
+      const registry = new CodecRegistry();
       registry.register(new TestCodec("Foo@1", undefined));
       expect(registry.codecFromTag("Bar@2")).toBeUndefined();
     });
 
     it("resolves the last registration when a tag is reused", () => {
-      const registry = new TypeHandlerRegistry();
+      const registry = new CodecRegistry();
       const first = new TestCodec("Dup@1", undefined);
       const second = new TestCodec("Dup@1", undefined);
       registry.register(first);

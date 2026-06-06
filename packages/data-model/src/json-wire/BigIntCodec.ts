@@ -27,7 +27,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class BigIntHandler extends BaseFabricCodec {
+export class BigIntCodec extends BaseFabricCodec {
   constructor() {
     super(WIRE_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
   }
