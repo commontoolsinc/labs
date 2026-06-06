@@ -97,6 +97,10 @@ describe("parseWriteParamColumns — RETURNING after all-? VALUES still maps", (
     expect(parseWriteParamColumns("INSERT INTO t (a) VALUES (?) RETURNING id"))
       .toEqual(["a"]);
   });
+  it("tolerates a trailing semicolon", () => {
+    expect(parseWriteParamColumns("INSERT INTO t (a, b) VALUES (?, ?);"))
+      .toEqual(["a", "b"]);
+  });
 });
 
 describe("parseWriteTable", () => {

@@ -87,15 +87,20 @@ export function checkSqliteWriteCeiling(
     return undefined;
   }
 
-  // Named/object params: the bind key is the placeholder name. Strip a leading
-  // sigil (`:name` / `@name` / `$name`) and resolve it as a column. A labeled
-  // value whose key doesn't resolve to a declared column fails closed (we won't
-  // trust an unmappable key not to be storing above a ceiling).
-  for (const [rawKey, value] of Object.entries(params)) {
-    const conf = confidentialityOf(value);
-    if (conf.length === 0) continue;
-    const v = checkLabeled(conf, rawKey.replace(/^[:@$]/, ""));
-    if (v) return v;
+  // Named/object params: a placeholder name is NOT reliably the target column
+  // (it's an arbitrary bind name, and without parsing we can't tell a stored
+  // SET/INSERT value from a WHERE filter). So a LABELED value bound via named
+  // params fails closed — checking the key as a column would either miss the
+  // real ceiling (bypass) or reject a filter that isn't stored (false reject).
+  // Use positional `?` with an explicit column list for a CFC-checked write.
+  // Unlabeled named writes are unaffected.
+  for (const value of Object.values(params)) {
+    if (confidentialityOf(value).length > 0) {
+      return "sqlite: a labeled value is bound via named/object params, whose " +
+        "target column cannot be determined — use positional ? params with an " +
+        "explicit column list (INSERT INTO t (col) VALUES (?)) or a simple " +
+        "UPDATE (SET col = ?)";
+    }
   }
   return undefined;
 }

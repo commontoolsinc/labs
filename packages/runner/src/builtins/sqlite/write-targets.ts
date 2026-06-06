@@ -157,7 +157,9 @@ export function parseWriteParamColumns(
     const afterValues = blanked.slice((m.index ?? 0) + m[0].length);
     const retIdx = afterValues.search(/\breturning\b/i);
     const region = retIdx === -1 ? afterValues : afterValues.slice(0, retIdx);
-    if (!/^[\s?(),]*$/.test(region)) return undefined;
+    // Bare `?` tuples only — plus an optional trailing statement terminator
+    // (`;`). Any interleaved literal/expression → fail closed.
+    if (!/^[\s?(),]*;?\s*$/.test(region)) return undefined;
     // Positional params cycle across multi-row `VALUES (?),(?)` tuples.
     return Array.from({ length: count }, (_, i) => cols[i % cols.length]);
   }

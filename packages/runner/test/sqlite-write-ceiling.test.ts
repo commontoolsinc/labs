@@ -85,13 +85,30 @@ describe("checkSqliteWriteCeiling", () => {
       .toMatch(/cannot be determined/);
   });
 
-  it("named params: the key is the column", () => {
+  it("named/object params with a labeled value fail closed (use positional)", () => {
+    // A bind name isn't reliably the target column and we can't tell a stored
+    // value from a WHERE filter without parsing, so a labeled named-param write
+    // is refused — even when the key happens to match the column.
     expect(check("INSERT INTO emails (body) VALUES (:body)", { body: SECRET }))
-      .toMatch(/maxConfidentiality/);
+      .toMatch(/determined/);
     expect(
       check("INSERT INTO emails (body) VALUES (:body)", { body: SUPPORTED }),
     )
+      .toMatch(/determined/);
+  });
+
+  it("named/object params with only UNLABELED values are a no-op", () => {
+    expect(check("INSERT INTO emails (body) VALUES (:body)", { body: "plain" }))
       .toBeUndefined();
+  });
+
+  it("named labeled value used as a WHERE filter also fails closed (safe)", () => {
+    // cubic P2: we can't tell this filter value isn't stored, so we refuse
+    // rather than risk either a bypass or a wrong ceiling check.
+    expect(check("UPDATE emails SET subject = :s WHERE body = :f", {
+      s: "ok",
+      f: SECRET,
+    })).toMatch(/determined/);
   });
 
   it("no tables / no ifc -> no-op", () => {
@@ -129,11 +146,11 @@ describe("checkSqliteWriteCeiling — fail closed (was fail-open)", () => {
       .toMatch(/determined/);
   });
 
-  it("named param with a sigil-prefixed key still enforces the ceiling", () => {
+  it("named param with a sigil-prefixed key fails closed", () => {
     expect(
       check("INSERT INTO emails (body) VALUES (:body)", { ":body": SECRET }),
     )
-      .toMatch(/maxConfidentiality/);
+      .toMatch(/determined/);
   });
 
   it("column-name case mismatch still enforces the ceiling", () => {

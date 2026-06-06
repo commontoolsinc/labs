@@ -12,13 +12,24 @@
   target column's `maxConfidentiality`; the target column comes from
   `parseWriteParamColumns`/`parseWriteTable` (bounded, fail-closed on `UPDATE`
   with a complex `WHERE`, subqueries, upserts, …). No-op until `ifc` is declared.
+  **Fail-closed when the target column can't be POSITIVELY resolved** — a
+  resolution miss (unknown table, column not in the declared schema, schema-
+  qualified target, interleaved-literal `VALUES`, `UPDATE OR <action>`, identifier
+  case mismatch) rejects a labeled value rather than treating "no ceiling found"
+  as "no ceiling". Column match is case-insensitive. **Named/object params with
+  a labeled value fail closed** (a bind name isn't reliably the column, and SET
+  vs WHERE can't be told apart without parsing) — use positional `?`.
 - **Read propagation:** done, but **needs sound column provenance** (an
   unsoundness `by-name` shared by per-column too — `SELECT body AS x`). The
   server captures each result column's TRUE origin via SQLite column-metadata
   FFI (`column-origin.ts`, gated on the db declaring `ifc`); the builtin maps
-  origin → the column's `ifc` (`labelResultSchema`) and writes the rows under
-  that schema so a consumer inherits the label. An unattributable column
-  (expression/literal/compound → `null` origin) **fails closed** (refuses).
+  origin → the column's `ifc` (`labelResultSchema`) and writes the rows under a
+  PER-FIELD label schema so a consumer inherits the label. A column with no
+  single source (expression/literal/aggregate → `null` origin) does NOT refuse;
+  it inherits the conservative combined label of the db's labeled columns via the
+  runtime's `mergeLabel` (union of confidentiality AND integrity — see the
+  integrity-semantics caveat in CT-1668). The query IS refused only when two
+  columns project to the SAME output name (ambiguous per-row label).
   - **Mechanism note:** the labeled write is CFC-relevant, so the tx must be
     `prepareTxForCommit`-prepared before commit (`enforce-explicit` mode) or the
     write is rejected and rolls back. The builtin's `editWithRetry` does this.
@@ -93,7 +104,13 @@ is not required and not the source of truth. **Both hooks read column `ifc` from
 
 ### Read hook — propagate (sqlite-builtins.ts, result-cell construction)
 
-Mirror the existing `asCellColumnsFromRowSchema` helper:
+> **SUPERSEDED by the as-built above.** This was the pre-implementation sketch:
+> by-NAME resolution and a coarse result-cell-level union. The recon proved
+> by-name is unsound (`SELECT body AS x` hides the origin), so the shipped design
+> uses TRUE column-origin provenance and PER-FIELD labels on each result row —
+> see "Status / as-built" and `cfc-read-provenance.md`. Kept for history.
+
+The original sketch (do not implement):
 
 1. From the result rows' column set (the selected columns = the row keys / the
    `rowSchema` properties), resolve each column's `ifc.confidentiality` from
@@ -139,17 +156,22 @@ CFC write-policy inputs (for audit/attempted-target capture) is deferred.
 
 - **D1 — column-label source = `db.tables`** (authoritative), not the injected
   `<Row>`. *Recommended; low controversy.*
-- **D2 — coarse result-cell label** (union of all selected labeled columns) vs.
-  per-field labels on the result structure. *Recommend coarse for Phase 2*
-  (safe over-taint; per-field is a refinement).
+- **D2 — [resolved: per-field]** result label granularity. Shipped PER-FIELD
+  (each result row's `<col>` carries its origin column's `ifc`), not the coarse
+  result-cell union originally recommended — sound column-origin provenance made
+  per-field cheap and avoids over-tainting unlabeled columns.
 - **D3 — [resolved] label rides the data flow, not just cells.** The write check
   uses each bound value's flow/observed confidentiality (cells AND values derived
   from confidential reads); no cell restriction and no special literal handling (a
   literal carries no label).
-- **D4 — multi-table / computed columns.** A `SELECT` with a join or an
-  expression column whose name isn't in any `db.tables` table → no label found.
-  *Recommend: unknown columns contribute no label in Phase 2* (documented gap;
-  expression/joined confidential data is a Phase 3 concern).
+- **D4 — [resolved] multi-table / computed columns.** Resolved by column-origin
+  provenance, NOT by name (so the original "unknown column → no label / fail
+  open" recommendation does not ship). A joined column resolves to its TRUE
+  `(table, column)` origin and inherits that column's `ifc`. A computed/expression
+  column (`null` origin) does NOT fail open: it inherits the conservative combined
+  label of the db's labeled columns (via `mergeLabel`). Duplicate output names
+  refuse the query. (Per-row projection from origin-identified source columns
+  remains a Phase 3 concern.)
 
 ## Phasing within Phase 2 (shippable steps)
 
