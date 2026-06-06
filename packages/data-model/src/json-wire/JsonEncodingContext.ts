@@ -81,8 +81,8 @@ function unquote(v: JsonWireValue): JsonWireValue {
  * from the formal spec (Section 5).
  *
  * Public interface: `SerializationContext<string>`
- * - `encode(value)` -- full pipeline: serialize + stringify
- * - `decode(data, context)` -- full pipeline: parse + deserialize
+ * - `encode(value)` -- full pipeline: tree-encode + stringify
+ * - `decode(data, context)` -- full pipeline: parse + tree-decode
  *
  * All internal machinery (tag wrapping, tree walking, byte conversion) is
  * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
@@ -110,7 +110,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
-    return ENCODING_PREFIX_TAG + JSON.stringify(this.serialize(value));
+    return ENCODING_PREFIX_TAG + JSON.stringify(this.#encode(value));
   }
 
   /**
@@ -127,7 +127,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
     const parsed = JsonEncodingContext.#parseWireText(json);
-    return this.deserialize(parsed, context);
+    return this.#decode(parsed, context);
   }
 
   //
@@ -151,7 +151,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * Serializes a fabric value to UTF-8 JSON bytes.
    */
   encodeToBytes(value: FabricValue): Uint8Array {
-    return this.toBytes(this.serialize(value));
+    return this.toBytes(this.#encode(value));
   }
 
   /**
@@ -162,7 +162,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     context: ReconstructionContext,
   ): FabricValue {
     const tree = this.fromBytes(bytes);
-    return this.deserialize(tree, context);
+    return this.#decode(tree, context);
   }
 
   //
@@ -220,14 +220,14 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   //
-  // Tree-walking serialization (private)
+  // Tree-walking encode (private)
   //
 
   /**
-   * Serializes a fabric value into wire format. Recursively processes nested
-   * values. See Section 4.5 of the formal spec.
+   * Encodes a fabric value into the wire-format tree. Recursively processes
+   * nested values. See Section 4.5 of the formal spec.
    */
-  private serialize(
+  #encode(
     value: FabricValue,
     _seen?: Set<object>,
     registry: CodecRegistry = defaultRegistry,
@@ -248,7 +248,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       const tag = codec.wireTypeTag;
       const unprocessedState = codec.encode(value);
-      const finalState = this.serialize(unprocessedState, seen, registry);
+      const finalState = this.#encode(unprocessedState, seen, registry);
       const result: JsonWireValue = { [`/${tag}`]: finalState };
 
       if (addedToSeen) {
@@ -271,7 +271,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
       seen.add(value);
       const result = this.wrapTag(
         value.wireTypeTag,
-        this.serialize(value.state, seen, registry),
+        this.#encode(value.state, seen, registry),
       );
       seen.delete(value);
       return result;
@@ -314,7 +314,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           result.push(this.wrapTag(WIRE_META_TAGS.hole, count));
         } else {
           result.push(
-            this.serialize(value[i] as FabricValue, seen, registry),
+            this.#encode(value[i] as FabricValue, seen, registry),
           );
           i++;
         }
@@ -338,7 +338,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const result: Record<string, JsonWireValue> = {};
     const valueRec = value as Record<string, FabricValue>;
     for (const key of utf8SortedKeysOf(valueRec)) {
-      result[key] = this.serialize(valueRec[key], seen, registry);
+      result[key] = this.#encode(valueRec[key], seen, registry);
     }
     seen.delete(value as object);
 
@@ -363,19 +363,19 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   //
-  // Tree-walking deserialization (private)
+  // Tree-walking decode (private)
   //
 
   /**
-   * Deserializes a wire-format value back into runtime types.
-   * See Section 4.5 of the formal spec.
+   * Decodes a wire-format tree back into fabric values. See Section 4.5 of
+   * the formal spec.
    *
-   * Frozen-ness contract: values returned via the type-handler dispatch arm
-   * are guaranteed deep-frozen at this boundary, so callers do not each have
-   * to freeze. The class-registry fallback arm is a separate sibling branch
-   * and is intentionally NOT covered by this contract.
+   * Frozen-ness contract: values returned via the codec dispatch arm are
+   * guaranteed deep-frozen at this boundary, so callers do not each have to
+   * freeze. The unknown-tag fallback (`UnknownValue`) is a separate arm and is
+   * intentionally NOT covered by this contract.
    */
-  private deserialize(
+  #decode(
     data: JsonWireValue,
     context: ReconstructionContext,
     registry: CodecRegistry = defaultRegistry,
@@ -394,13 +394,13 @@ export class JsonEncodingContext implements SerializationContext<string> {
         const inner = rawState as Record<string, JsonWireValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
-          result[key] = this.deserialize(val, context, registry);
+          result[key] = this.#decode(val, context, registry);
         }
         return Object.freeze(result);
       }
 
       // Except for `/quote` and `/object`, the `state` needs to be fully decoded.
-      const state = this.deserialize(rawState, context, registry);
+      const state = this.#decode(rawState, context, registry);
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
@@ -474,7 +474,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           targetIndex += entryDecoded.state as number;
         } else {
-          result[targetIndex] = this.deserialize(entry, context, registry);
+          result[targetIndex] = this.#decode(entry, context, registry);
           targetIndex++;
         }
       }
@@ -493,7 +493,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           `object contains reserved /-prefixed key: "${key}"`,
         ) as unknown as FabricValue;
       }
-      result[key] = this.deserialize(val, context, registry);
+      result[key] = this.#decode(val, context, registry);
     }
     return Object.freeze(result);
   }

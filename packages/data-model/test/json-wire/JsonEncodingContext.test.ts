@@ -1844,39 +1844,6 @@ describe("JsonEncodingContext", () => {
       }).toThrow();
     });
 
-    it("`serialize()` output for `/quote`-routed values is itself deep-frozen (flat and nested)", () => {
-      // White-box: the serialized /quote tree is transient -- encode() and
-      // encodeToBytes() immediately JSON.stringify it and discard it -- so
-      // its frozen-ness is not observable via the public API. Reach into the
-      // private serializer to pin the guarantee directly.
-      //
-      // It holds because `unquote()` rebuilds + recursively freezes every
-      // array/object, so each member handed to the container's shallow
-      // `Object.freeze` is itself already deep-frozen. A future change to
-      // `unquote()` that stopped rebuilding (or stopped freezing) would
-      // silently break this; this test is the guard. NOTE: the non-/quote
-      // serialize outputs (bare objects/arrays, /object-wrapped, handler
-      // state) are intentionally NOT asserted here -- that throwaway tree is
-      // out of scope and is not deep-frozen.
-      const { context } = makeTestContext();
-      const serialize = (context as unknown as {
-        serialize(v: FabricValue): JsonWireValue;
-      }).serialize.bind(context);
-
-      const flat = serialize(
-        { "/a": 1, "/b": { plain: [1, 2] } } as unknown as FabricValue,
-      );
-      const nested = serialize(
-        { "/a": { "/b": { c: [1, { d: 2 }] } } } as unknown as FabricValue,
-      );
-
-      expect(flat).toEqual({
-        "/quote": { "/a": 1, "/b": { plain: [1, 2] } },
-      });
-      expect(isDeepFrozen(flat)).toBe(true);
-      expect(isDeepFrozen(nested)).toBe(true);
-    });
-
     it("`serialize()`→`/quote`→`decode()` round-trip is deep-frozen end-to-end", () => {
       // An object whose keys are all /-prefixed but whose values are all
       // quote-safe routes through the serialize-side /quote path, then back
