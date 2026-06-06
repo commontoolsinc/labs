@@ -8,7 +8,11 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import { FabricCodec, CODEC, ReconstructionContext } from "@/wire-common/interface.ts";
+import {
+  CODEC,
+  FabricCodec,
+  ReconstructionContext,
+} from "@/wire-common/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.

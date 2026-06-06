@@ -1,25 +1,18 @@
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-import { type FabricInstance, type FabricValue } from "@/interface.ts";
+import { type FabricValue } from "@/interface.ts";
 import {
-  type FabricClass,
-  RECONSTRUCT,
   type ReconstructionContext,
   type SerializationContext,
 } from "@/wire-common/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
+import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
-import type { JsonWireValue, TagHandler } from "./interface.ts";
+import type { JsonWireValue } from "./interface.ts";
 import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
-import {
-  BaseFabricInstance,
-  FabricError,
-  FabricMap,
-  FabricSet,
-} from "@/fabric-instances/index.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { WIRE_META_TAGS } from "@/wire-common/wire-meta-tags.ts";
 
 /**
@@ -92,22 +85,13 @@ function unquote(v: JsonWireValue): JsonWireValue {
  * - `decode(data, runtime)` -- full pipeline: parse + deserialize
  *
  * All internal machinery (tag wrapping, tree walking, byte conversion) is
- * private. Type handlers receive a narrow `TypeHandlerCodec` view of `this`
- * during tree walking.
+ * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
+ * the `TypeHandlerRegistry`.
  */
 export class JsonEncodingContext implements SerializationContext<string> {
-  /** Tag -> class registry for known types. */
-  private readonly registry = new Map<
-    string,
-    FabricClass<FabricInstance>
-  >();
-
   /** Whether failed reconstructions produce `ProblematicValue` instead of
    *  throwing. */
   readonly lenient: boolean;
-
-  /** Narrow view for tag handlers (avoids exposing private methods). */
-  private readonly tagHandler: TagHandler;
 
   /**
    * Constructs an instance, optionally configured for lenient mode (which
@@ -115,20 +99,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
    */
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
-
-    // Create a tag-handler view that delegates to our private methods.
-    this.tagHandler = {
-      wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) =>
-        BaseFabricInstance.wireTypeTagOf(value),
-    };
-
-    // Register native wrapper classes for deserialization. Each wrapper's
-    // static `[RECONSTRUCT]` method is used by the class registry fallback
-    // path in `deserialize()`.
-    this.registry.set(WIRE_TYPE_TAGS.Error, FabricError);
-    this.registry.set(WIRE_TYPE_TAGS.Map, FabricMap);
-    this.registry.set(WIRE_TYPE_TAGS.Set, FabricSet);
   }
 
   //
@@ -198,13 +168,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
   // Tag wrapping/unwrapping (private)
   //
-
-  /** Returns the class that can reconstruct instances for a given tag. */
-  private getClassFor(
-    tag: string,
-  ): FabricClass<FabricInstance> | undefined {
-    return this.registry.get(tag);
-  }
 
   /**
    * Wraps a tag and state into the `/<tag>` wire format. Prepends `/` to the
@@ -293,6 +256,34 @@ export class JsonEncodingContext implements SerializationContext<string> {
       }
 
       return result;
+    }
+
+    // `ExplicitTagValue` (`UnknownValue` / `ProblematicValue`): live-graph
+    // stand-ins for values that arrived with an unknown tag or failed to
+    // decode. They round-trip to their *preserved* tag plus raw state, so the
+    // wire form shows that original tag -- never an `ExplicitTagValue` tag.
+    // Uses `.state` directly (NOT `[DECONSTRUCT]()`, whose shape differs).
+    if (value instanceof ExplicitTagValue) {
+      const seen = _seen ?? new Set<object>();
+      if (seen.has(value)) {
+        throw new Error("Circular reference detected during serialization");
+      }
+      seen.add(value);
+      const result = this.wrapTag(
+        value.wireTypeTag,
+        this.serialize(value.state, seen, registry),
+      );
+      seen.delete(value);
+      return result;
+    }
+
+    // Every other `FabricInstance` must be representable by a registered codec.
+    // An un-codec'd instance is a programming error, not something to silently
+    // encode as a plain object.
+    if (value instanceof BaseFabricInstance) {
+      throw new Error(
+        `No codec registered for fabric instance: ${value.constructor.name}`,
+      );
     }
 
     // Primitives
@@ -451,28 +442,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
         return deepFreeze(codec.decode(tag, state, runtime));
       }
 
-      // Class registry fallback
-      const cls = this.getClassFor(tag);
-
-      if (cls) {
-        if (this.lenient) {
-          try {
-            return cls[RECONSTRUCT](
-              state,
-              runtime,
-            );
-          } catch (e: unknown) {
-            return new ProblematicValue(
-              tag,
-              state,
-              e instanceof Error ? e.message : String(e),
-            );
-          }
-        }
-        return cls[RECONSTRUCT](state, runtime);
-      }
-
-      // Unknown type: preserve for round-tripping.
+      // No registered codec for this tag: preserve the unknown form for
+      // round-tripping.
       return new UnknownValue(tag, state);
     }
 

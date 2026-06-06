@@ -2,8 +2,24 @@ import type {
   FabricEpochNsec as ApiFabricEpochNsec,
   FabricEpochNsecConstructor as ApiFabricEpochNsecConstructor,
 } from "@commonfabric/api";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
+import {
+  bigintFromMinimalTwosComplement,
+  bigintToMinimalTwosComplement,
+} from "@commonfabric/utils/bigint";
 
+import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+import {
+  CODEC,
+  type FabricCodec,
+  type ReconstructionContext,
+} from "@/wire-common/interface.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 
 /**
@@ -30,6 +46,52 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
   get value(): bigint {
     return this.#value;
+  }
+
+  //
+  // Static members
+  //
+
+  static #codec = new (class EpochNsecCodec extends BaseFabricCodec {
+    constructor() {
+      super(WIRE_TYPE_TAGS.EpochNsec, FabricEpochNsec);
+    }
+
+    /** @inheritDoc */
+    encode(value: FabricEpochNsec): FabricValue {
+      return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
+    }
+
+    /** @inheritDoc */
+    decode(
+      wireTypeTag: string,
+      state: FabricValue,
+      _context: ReconstructionContext,
+    ): FabricValue {
+      if (typeof state !== "string") {
+        return new ProblematicValue(
+          wireTypeTag,
+          state,
+          `EpochNsec: expected string state, got ${typeof state}`,
+        );
+      }
+      try {
+        return new FabricEpochNsec(
+          bigintFromMinimalTwosComplement(fromBase64url(state)),
+        );
+      } catch {
+        return new ProblematicValue(
+          wireTypeTag,
+          state,
+          `EpochNsec: invalid base64: ${state}`,
+        );
+      }
+    }
+  })();
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
 
