@@ -88,10 +88,15 @@ a **per-field label schema** (`labelResultSchema`), so a consumer reading
 - Two columns projecting to the same output name **refuse** the query (the
   per-row label would be ambiguous).
 
-The labeled write is CFC-relevant, so its transaction is prepared
-(`prepareTxForCommit`, via the builtin's `editWithRetry`) before commit or it
-rolls back. The per-field label lands on each split-out row entity; downstream
-reads inherit it through dereference-trace accumulation (not a single-cell
+This applies the label as the runner **writes the query result back into the
+result cell** — a post-commit effect of `db.query`, on its OWN transaction
+(`editWithRetry`), distinct from the SQL write. (`db.exec` mutations, by
+contrast, fold a `sqlite` op into the *caller's* `tx` and just run the
+synchronous write-ceiling guard; they never use `editWithRetry`.) That labeled
+result-cell write is CFC-relevant, so its transaction must be prepared
+(`prepareTxForCommit`, which `editWithRetry` runs) before commit or it rolls
+back. The per-field label lands on each split-out row entity; downstream reads
+inherit it through dereference-trace accumulation (not a single-cell
 `cfcLabelViewForCell`).
 
 ### Write — ceiling check
