@@ -1996,6 +1996,39 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     },
   );
 
+  // CT-1634: the bare `lift(fn)(input)` form — `fn` a function *reference*, not
+  // an inline arrow — is the shape SchemaInjection would skip (no introspectable
+  // callback, no type args). This locks the invariant that makes that skip safe:
+  // the form is rejected at the source, so it never reaches schema injection.
+  // Authors are steered to `computed(() => fn(...))`, which lowers to a fully
+  // schema-injected lift. (Distinct from the arrow-callback case above, whose
+  // inner lift arg IS introspectable.)
+  await t.step(
+    "errors on bare-fn lift(fn)(input) immediately invoked (CT-1634)",
+    async () => {
+      const source = `      import { pattern, lift, h } from "commonfabric";
+
+      function double(n: number): number { return n * 2; }
+
+      export default pattern<{ value: number }>((cell) => {
+        const doubled = lift(double)(cell.value);
+        return <div>{doubled}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:builder-placement");
+      assertEquals(
+        errors[0]!.message.includes("computed"),
+        true,
+        "Error should suggest using computed()",
+      );
+    },
+  );
+
   await t.step("errors on handler() inside pattern body", async () => {
     const source = `      import { pattern, handler, h } from "commonfabric";
 

@@ -3261,6 +3261,27 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             typeRegistry,
           );
         }
+
+        // Fall-through: a lift-applied call with neither explicit `<In, Out>`
+        // type args (path above) nor a resolvable inline callback
+        // (`liftAppliedArgs`) is left un-injected. The only such shape is the
+        // bare `lift(fn)(input)` form where `fn` is a function *reference*
+        // (e.g. `lift(String)(x)`), not an arrow/function-expression
+        // `resolveFunctionLikeExpression` can introspect — there is nothing to
+        // derive a schema from at this site. Omitting the schema here is
+        // safe-by-construction, NOT a coverage gap (CT-1634):
+        //   - The lowering never produces this shape: reactive computations
+        //     emit `lift<In,Out>(argSchema, resSchema, ({…}) => …)(input)` with
+        //     an introspectable arrow + type args (the path above).
+        //   - `derive(value, fn)`, which historically lowered to bare
+        //     `lift(fn)(input)`, was removed (CT-1621/CT-1643).
+        //   - Authoring it directly is rejected: `validateBuilderPlacement`
+        //     (pattern-context-validation.ts) errors on an immediately-invoked
+        //     in-pattern lift, steering authors to `computed(() => …)`.
+        // The surviving direct form is module-scope unapplied `lift(fn)`
+        // (post-CT-1644 hoist); whether such lifts — and library-global fns
+        // like `String` used as the lift fn — should carry a schema / be
+        // hardened is the `selfcontained` design surface tracked in CT-1654.
       }
 
       if (callKind?.kind === "builder" && callKind.builderName === "lift") {
