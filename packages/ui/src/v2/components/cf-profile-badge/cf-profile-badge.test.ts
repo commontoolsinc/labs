@@ -166,6 +166,51 @@ describe("CFProfileBadge", () => {
       expect(el._state).toBe("presented");
       expect(el._seal).toBeUndefined();
     });
+
+    it("discards a label read superseded mid-flight (no stale seal write)", async () => {
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+
+      // A label read whose timing we control.
+      const gate = deferred<unknown>();
+      const verify = el._refreshVerification({
+        getCfcLabel: () => gate.promise,
+      });
+
+      // Simulate a re-bind / disconnect superseding this read: both `_resolve`
+      // and `disconnectedCallback` bump `_resolveGeneration`.
+      el._resolveGeneration++;
+
+      // The read now resolves with a valid attestation — but it is stale.
+      gate.resolve(representsPrincipalLabel(OWNER_DID));
+      await verify;
+
+      // The superseded read must NOT have flipped the badge to verified.
+      expect(el._state).toBe("presented");
+      expect(el._seal).toBeUndefined();
+    });
+
+    it("logs and stays presented when the label read fails", async () => {
+      const el = new CFProfileBadge() as any;
+      markConnected(el, true);
+
+      const originalError = console.error;
+      let logged = 0;
+      console.error = () => {
+        logged++;
+      };
+      try {
+        await el._refreshVerification({
+          getCfcLabel: () => Promise.reject(new Error("ipc boom")),
+        });
+      } finally {
+        console.error = originalError;
+      }
+
+      expect(logged).toBe(1);
+      expect(el._state).toBe("presented");
+      expect(el._seal).toBeUndefined();
+    });
   });
 
   describe("profileDisplayFromValue", () => {
