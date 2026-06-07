@@ -640,6 +640,13 @@ export class RuntimeProcessor {
     await this.runtime.idle();
   }
 
+  // Persistence durability, distinct from handleIdle's reactive quiescence:
+  // awaits in-flight compile-cache write-backs so a subsequent load reads the
+  // freshly-written entry instead of recompiling.
+  async handleFlushCompileCacheWrites(): Promise<void> {
+    await this.runtime.patternManager.flushCompileCacheWrites();
+  }
+
   async handlePieceCreate(
     request: PageCreateRequest,
   ): Promise<PageResponse> {
@@ -1037,6 +1044,8 @@ export class RuntimeProcessor {
         return await this.handleEnsureHomePatternRunning(request);
       case RequestType.Idle:
         return await this.handleIdle();
+      case RequestType.FlushCompileCacheWrites:
+        return await this.handleFlushCompileCacheWrites();
       case RequestType.PageCreate:
         return await this.handlePieceCreate(
           request,
