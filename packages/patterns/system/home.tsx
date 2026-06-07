@@ -129,9 +129,12 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
-  // NOTE(CT-1628): the `as any` casts around `profile` below are required
-  // because the CFC wrapper types (TrustedProfileLink) don't yet compose with
-  // Writable/the pattern factory output type. Tracked for a proper type fix.
+  // NOTE(CT-1628): the `as any` casts on `profile` passed to
+  // `submitProfileCreation` / `ProfileCreate` below are required because the CFC
+  // wrapper type (TrustedProfileLink = Cfc<…>) doesn't compose with those
+  // handlers' `Writable<ProfileHomeOutput>` input. Tracked for a proper type
+  // fix. (The `$profile` / `$cell` view bindings need no cast — those props
+  // accept a `CellLike`.)
   const profile = new Writable<TrustedProfileLink>(undefined).for("profile");
   const profileName = new Writable("").for("profileName");
   const createProfileStream = submitProfileCreation({
@@ -197,15 +200,17 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                     <cf-hstack id="home-profile-summary" gap="2" align="center">
                       {
                         /*
-                        Show the home-space `profileName` mirror here rather than
-                        `profile.key("name")`: the latter reads cross-space (into
-                        the profile space) and renders empty inline. The live,
-                        editable name is shown by the `cf-render` below.
+                        The trusted <cf-profile-badge> resolves the cross-space
+                        profile cell and renders its avatar + name as official
+                        system chrome. The `profileName` mirror is kept alongside
+                        it as a light-DOM label (the badge renders its name in
+                        shadow DOM; integration tests assert on this text).
                       */
                       }
+                      <cf-profile-badge $profile={profile} />
                       <strong>{profileName}</strong>
                     </cf-hstack>
-                    <cf-render $cell={profile as any} />
+                    <cf-render $cell={profile} />
                   </cf-vstack>
                 ),
                 profileCreate,
