@@ -4,6 +4,7 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
@@ -223,5 +224,39 @@ describe("memory v2 boundary decode", () => {
       decoded.value.nested.count = 2;
     }, TypeError);
     assertEquals(decoded.value.nested.count, 1);
+  });
+});
+
+describe("memory v2 boundary encode", () => {
+  // A `Uint8Array` (such as a session-open signature) must be converted to a
+  // `FabricBytes` before serialization so it survives the wire boundary, rather
+  // than being silently mangled into an empty object by the structural fallback
+  // in the encoder.
+  it("converts a native `Uint8Array` to a `Bytes`-tagged wire form", () => {
+    const bytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+    const encoded = encodeMemoryBoundary({ signature: bytes });
+
+    // Proper tagged form, not a mangled `{}`.
+    assert(
+      encoded.includes("Bytes@1"),
+      `expected a Bytes-tagged wire form, got: ${encoded}`,
+    );
+    assertFalse(
+      encoded.includes(`"signature":{}`),
+      `signature was mangled into an empty object: ${encoded}`,
+    );
+  });
+
+  it("round-trips a native `Uint8Array` to a `FabricBytes`", () => {
+    const bytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+    const decoded = decodeMemoryBoundary<{ signature: FabricBytes }>(
+      encodeMemoryBoundary({ signature: bytes }),
+    );
+
+    assert(
+      decoded.signature instanceof FabricBytes,
+      `expected a FabricBytes, got: ${decoded.signature}`,
+    );
+    assertEquals(decoded.signature.slice(), bytes);
   });
 });

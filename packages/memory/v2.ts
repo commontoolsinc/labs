@@ -3,6 +3,7 @@ import {
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-wire";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
@@ -561,8 +562,15 @@ export const wireMemoryProtocolFlags = (
   persistentSchedulerState: flags.persistentSchedulerState,
 });
 
+/**
+ * Encodes a value for transmission across the memory wire boundary. Native
+ * values are first converted to `FabricValue`s (e.g. a `Uint8Array` -- such as
+ * a session-open signature -- becomes `FabricBytes`) so they serialize
+ * faithfully, rather than being silently mangled by the structural
+ * object/array fallthrough in the encoder.
+ */
 export const encodeMemoryBoundary = (value: unknown): string =>
-  jsonFromValue(value as FabricValue);
+  jsonFromValue(fabricFromNativeValue(value));
 
 export const decodeMemoryBoundary = <Value = FabricValue>(
   source: string,
