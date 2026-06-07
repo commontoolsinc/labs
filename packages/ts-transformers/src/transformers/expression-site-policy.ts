@@ -6,7 +6,7 @@ import {
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
-  isReactiveOriginTaggedTemplate,
+  isReactiveOriginExpression,
   type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -547,7 +547,7 @@ function isReactiveRuntimeCallTaggedTemplateSpan(
   if (!template || !ts.isTemplateExpression(template)) return false;
   const tagged = template.parent;
   if (!tagged || !ts.isTaggedTemplateExpression(tagged)) return false;
-  return isReactiveOriginTaggedTemplate(tagged, context.checker);
+  return isReactiveOriginExpression(tagged, context.checker);
 }
 
 export function getExpressionContainerKind(

@@ -5,11 +5,13 @@ import {
   classifyArrayCallbackContainerCall,
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
+  detectCalleeKind,
   detectCallKind,
   detectNewExpressionKind,
   getCapabilitySummaryCallbackArgument,
   getLiftAppliedInputAndCallback,
   getPatternBuilderCallbackArgument,
+  isReactiveOriginExpression,
 } from "../../src/ast/mod.ts";
 
 function createProgram(source: string): {
@@ -387,4 +389,44 @@ Deno.test("getLiftAppliedInputAndCallback recognizes lift-applied input position
   assertEquals(secondArgs?.input.getText(), "1");
   assertEquals(secondArgs?.callback.parameters[0]?.name.getText(), "value");
   assertEquals(thirdArgs, undefined);
+});
+
+Deno.test("detectCalleeKind classifies a tagged template identically to its call form (CT-1629)", () => {
+  // `str` is a reactive-origin runtime call. Invoking it as `str(...)`
+  // (CallExpression, callee `.expression`) or `str`...`` (TaggedTemplateExpression,
+  // callee `.tag`) is the same semantic call — the kind is a fact about the
+  // callee, not the invocation surface.
+  const { sourceFile, checker } = createProgram(`
+    import { str } from "commonfabric";
+
+    const called = str("a", "b");
+    const tagged = str\`a \${"b"}\`;
+  `);
+
+  const called = findInitializer(sourceFile, "called");
+  const tagged = findInitializer(sourceFile, "tagged");
+
+  if (!ts.isCallExpression(called)) {
+    throw new Error("Expected `called` to be a call expression");
+  }
+  if (!ts.isTaggedTemplateExpression(tagged)) {
+    throw new Error("Expected `tagged` to be a tagged template expression");
+  }
+
+  const calledKind = detectCalleeKind(called, checker);
+  const taggedKind = detectCalleeKind(tagged, checker);
+
+  // Both resolve to the same runtime-call kind via the shared callee resolution.
+  assertEquals(calledKind?.kind, "runtime-call");
+  assertEquals(taggedKind?.kind, "runtime-call");
+  assertEquals(calledKind, taggedKind);
+
+  // detectCallKind (CallExpression-narrowed alias) agrees with detectCalleeKind
+  // on the call form — they share the same engine.
+  assertEquals(detectCallKind(called, checker), calledKind);
+
+  // The reactive-origin trichotomy (call / new / tagged) now lives in one place:
+  // isReactiveOriginExpression recognizes the tagged form without a bespoke helper.
+  assertEquals(isReactiveOriginExpression(tagged, checker), true);
+  assertEquals(isReactiveOriginExpression(called, checker), true);
 });
