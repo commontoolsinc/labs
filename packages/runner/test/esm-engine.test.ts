@@ -239,12 +239,12 @@ describe("Engine.compileToRecordGraph", () => {
       // Spec (module-loading.md, threat model "the persistent compilation
       // cache"): on a warm hit the CFC integrity label — not the SES verifier —
       // is the security boundary, so re-verifying integrity-gated bodies is
-      // redundant per-load work. A FULL hit flagged `trustedBodies` must NOT
-      // re-run `verifyCompiledModuleBody`. Feed the same tampered-but-full set as
-      // the test above (disallowed top-level code in the entry body): untrusted
-      // it is rejected; trusted it assembles the graph without re-verification.
-      // `compileToRecordGraph` only verifies + builds (no eval), so the
-      // disallowed body never executes — success proves the verifier was skipped.
+      // redundant per-load work. A FULL hit delivered through the integrity-gated
+      // `precompiledModulesFor` channel and flagged `trustedBodies` must NOT
+      // re-run `verifyCompiledModuleBody`. The body has disallowed top-level code:
+      // untrusted it is rejected; trusted it assembles the graph without
+      // re-verification. `compileToRecordGraph` only verifies + builds (no eval),
+      // so the disallowed body never executes — success proves verify was skipped.
       const first = await engine.compileToRecordGraph(MULTI);
       const tampered = new Map(
         first.modules.map((m) => [m.identity, { js: m.js }]),
@@ -252,17 +252,33 @@ describe("Engine.compileToRecordGraph", () => {
       tampered.set(first.entryIdentity, {
         js: `"use strict";\nfetch("https://evil.example");\n`,
       });
-      // Untrusted direct injection is still verified (rejected).
-      await expect(
-        engine.compileToRecordGraph(MULTI, { precompiledModules: tampered }),
-      ).rejects.toThrow();
-      // Trusted full hit: the SES body verifier is skipped, so the graph
-      // assembles successfully despite the disallowed body.
+      // Trusted full hit via the integrity-gated lazy channel: the SES body
+      // verifier is skipped, so the graph assembles despite the disallowed body.
       const trusted = await engine.compileToRecordGraph(MULTI, {
-        precompiledModules: tampered,
         trustedBodies: true,
+        precompiledModulesFor: async () => tampered,
       });
       expect(trusted.graph.compiledBodies.size).toBeGreaterThan(0);
+    });
+
+    it("never trusts direct precompiledModules injection, even with trustedBodies", async () => {
+      // Provenance guard: `trustedBodies` skips verification ONLY for bodies that
+      // arrived via the integrity-gated `precompiledModulesFor` channel. A direct,
+      // caller-supplied `precompiledModules` map is untrusted injection and MUST
+      // still be SES-verified — the opt-in flag alone cannot unlock the skip.
+      const first = await engine.compileToRecordGraph(MULTI);
+      const tampered = new Map(
+        first.modules.map((m) => [m.identity, { js: m.js }]),
+      );
+      tampered.set(first.entryIdentity, {
+        js: `"use strict";\nfetch("https://evil.example");\n`,
+      });
+      await expect(
+        engine.compileToRecordGraph(MULTI, {
+          precompiledModules: tampered,
+          trustedBodies: true,
+        }),
+      ).rejects.toThrow();
     });
 
     it("ignores a partial precompiled set and recompiles the whole program", async () => {

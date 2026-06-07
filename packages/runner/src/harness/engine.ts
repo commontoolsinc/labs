@@ -406,13 +406,20 @@ export class Engine extends EventTarget implements Harness {
       }
 
       // Security-verify every authored module body before it can execute —
-      // EXCEPT a trusted full hit. On an integrity-gated warm full hit
-      // (`trustedBodies` + every body present in the cache) the CFC integrity
-      // label is the security boundary, so re-running the SES body verifier is
-      // redundant per-load work (threat model: `docs/specs/module-loading.md`,
-      // "the persistent compilation cache"). Freshly compiled bodies (miss /
-      // partial) and untrusted direct injections are always verified.
-      const trustBodies = fullHit && options.trustedBodies === true;
+      // EXCEPT a trusted, integrity-gated full hit. The CFC integrity label is
+      // the security boundary for cache hits, so re-running the SES body verifier
+      // on integrity-gated bytes is redundant per-load work (threat model:
+      // `docs/specs/module-loading.md`, "the persistent compilation cache").
+      // Trust is gated on PROVENANCE, not just the opt-in flag: the bodies must
+      // have arrived via the lazy `precompiledModulesFor` channel (the cache
+      // callback, which reads the compiled set with `requiredIntegrity`,
+      // fail-closed) — NOT a direct, caller-supplied `precompiledModules` map,
+      // which is untrusted injection. Freshly compiled bodies (miss / partial)
+      // are likewise always verified.
+      const trustBodies = fullHit &&
+        options.trustedBodies === true &&
+        options.precompiledModules === undefined &&
+        options.precompiledModulesFor !== undefined;
       if (!trustBodies) {
         for (const [specifier, body] of graph.compiledBodies) {
           verifyCompiledModuleBody(body, specifier);
