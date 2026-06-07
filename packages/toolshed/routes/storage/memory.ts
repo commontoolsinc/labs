@@ -19,11 +19,10 @@ const toByteArray = (value: unknown): Uint8Array | null => {
     return value;
   }
   // A `FabricBytes` is the intended long-term wire form for the signature.
-  // Accepting it here (ahead of any client producing it) is the "expand" half
-  // of a staged rollout, so that the producer can later flip to `FabricBytes`
-  // without breaking already-deployed servers.
+  // Accepting it here ahead of any client producing it lets the producer flip
+  // to `FabricBytes` later without breaking already-deployed servers.
   // TODO(danfuzz): Once producers emit `FabricBytes`, the array/numeric-object
-  // branches below become legacy and can be retired. (Staged rollout Z4.)
+  // branches below become legacy and can be retired.
   if (value instanceof FabricBytes) {
     return value.slice();
   }

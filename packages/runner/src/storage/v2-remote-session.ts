@@ -159,10 +159,9 @@ export class RemoteSessionFactory implements SessionFactory {
         // codec encoder). The server-side `toByteArray` accepts this form.
         //
         // TODO(danfuzz): The signature should travel as a `FabricBytes`, not a
-        // number array. Once consumers that accept `FabricBytes` have fully
+        // number array. Once servers that accept `FabricBytes` have fully
         // propagated, flip this to `new FabricBytes(signature.ok)` and then
-        // retire the array/numeric-object handling in `toByteArray`. (Staged
-        // rollout Z4.)
+        // retire the array/numeric-object handling in `toByteArray`.
         signature: Array.from(signature.ok),
       },
     };
