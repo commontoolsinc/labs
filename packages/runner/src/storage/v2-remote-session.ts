@@ -150,7 +150,20 @@ export class RemoteSessionFactory implements SessionFactory {
     return {
       invocation,
       authorization: {
-        signature: signature.ok,
+        // The signature is sent as a plain number array. It used to be passed
+        // as a raw `Uint8Array`, which only survived the memory wire boundary
+        // by accident: the encoder's lenient structural fallback flattened it
+        // into a numeric-keyed object that the server's `toByteArray` happened
+        // to accept. Emitting an explicit array makes the wire form intentional
+        // (and keeps it a plain `FabricValue`, so it survives the stricter
+        // codec encoder). The server-side `toByteArray` accepts this form.
+        //
+        // TODO(danfuzz): The signature should travel as a `FabricBytes`, not a
+        // number array. Once consumers that accept `FabricBytes` have fully
+        // propagated, flip this to `new FabricBytes(signature.ok)` and then
+        // retire the array/numeric-object handling in `toByteArray`. (Staged
+        // rollout Z4.)
+        signature: Array.from(signature.ok),
       },
     };
   }

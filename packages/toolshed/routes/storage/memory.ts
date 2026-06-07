@@ -1,6 +1,7 @@
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
@@ -16,6 +17,15 @@ const authorizationError = (message: string): Error =>
 const toByteArray = (value: unknown): Uint8Array | null => {
   if (value instanceof Uint8Array) {
     return value;
+  }
+  // A `FabricBytes` is the intended long-term wire form for the signature.
+  // Accepting it here (ahead of any client producing it) is the "expand" half
+  // of a staged rollout, so that the producer can later flip to `FabricBytes`
+  // without breaking already-deployed servers.
+  // TODO(danfuzz): Once producers emit `FabricBytes`, the array/numeric-object
+  // branches below become legacy and can be retired. (Staged rollout Z4.)
+  if (value instanceof FabricBytes) {
+    return value.slice();
   }
   if (Array.isArray(value) && value.every((item) => Number.isInteger(item))) {
     return Uint8Array.from(value);
