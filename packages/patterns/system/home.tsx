@@ -129,9 +129,12 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
-  // NOTE(CT-1628): the `as any` casts around `profile` below are required
-  // because the CFC wrapper types (TrustedProfileLink) don't yet compose with
-  // Writable/the pattern factory output type. Tracked for a proper type fix.
+  // NOTE(CT-1628): the `as any` casts on `profile` passed to
+  // `submitProfileCreation` / `ProfileCreate` below are required because the CFC
+  // wrapper type (TrustedProfileLink = Cfc<…>) doesn't compose with those
+  // handlers' `Writable<ProfileHomeOutput>` input. Tracked for a proper type
+  // fix. (The `$profile` / `$cell` view bindings need no cast — those props
+  // accept a `CellLike`.)
   const profile = new Writable<TrustedProfileLink>(undefined).for("profile");
   const profileName = new Writable("").for("profileName");
   const createProfileStream = submitProfileCreation({
@@ -204,10 +207,10 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
                         shadow DOM; integration tests assert on this text).
                       */
                       }
-                      <cf-profile-badge $profile={profile as any} />
+                      <cf-profile-badge $profile={profile} />
                       <strong>{profileName}</strong>
                     </cf-hstack>
-                    <cf-render $cell={profile as any} />
+                    <cf-render $cell={profile} />
                   </cf-vstack>
                 ),
                 profileCreate,
