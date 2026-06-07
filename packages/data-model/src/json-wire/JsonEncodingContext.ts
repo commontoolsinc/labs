@@ -2,6 +2,7 @@ import { isPlainObject } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { type FabricValue } from "@/interface.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,
@@ -169,9 +170,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   private unwrapTag(
     data: JsonWireValue,
   ): { tag: string; state: JsonWireValue } | null {
-    if (
-      data === null || typeof data !== "object" || Array.isArray(data)
-    ) {
+    if (!isPlainObject(data)) {
       return null;
     }
 
@@ -180,8 +179,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     // `isEncodedInstance()` guaranteed a single-property object, so this
-    // destructures that one entry.
-    const [[key, value]] = Object.entries(data);
+    // destructures that one entry. (`isPlainObject()` is not a type guard, so
+    // narrow explicitly for the type-checker.)
+    const [[key, value]] = Object.entries(
+      data as Record<string, JsonWireValue>,
+    );
     return { tag: key.slice(1), state: value };
   }
 
@@ -309,7 +311,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           (value as { constructor?: { name?: string } }).constructor?.name ??
             "(anonymous)"
         }\` instance`
-        : `a value of type \`${typeof value}\``;
+        : toCompactDebugString(value, 50);
       throw new Error(`Cannot encode ${kind}: no applicable codec.`);
     }
 

@@ -8,6 +8,7 @@ import {
 } from "@/wire-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";
@@ -150,9 +151,7 @@ export class FabricRegExp extends BaseFabricPrimitive {
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
-        if (
-          state === null || typeof state !== "object" || Array.isArray(state)
-        ) {
+        if (!isPlainObject(state)) {
           return new ProblematicValue(
             wireTypeTag,
             state,

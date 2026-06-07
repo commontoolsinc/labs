@@ -6,6 +6,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
@@ -168,9 +169,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
-        if (
-          state === null || typeof state !== "object" || Array.isArray(state)
-        ) {
+        if (!isPlainObject(state)) {
           return new ProblematicValue(
             wireTypeTag,
             state,
