@@ -49,19 +49,33 @@ const scopeForWrapperName = (
 ): SchemaScope | undefined =>
   name === undefined ? undefined : SCOPE_WRAPPER_SCOPES[name];
 
-// Cell-capability brands all wrap the SAME structural inner `T`; they differ
-// only in read/write capability. The transformer narrows one to another (e.g.
-// `Cell<T>` → `ReadonlyCell<T>`) to reflect usage, so a node-vs-type brand
-// mismatch among these is a capability narrowing, not a structural change.
-const CELL_CAPABILITY_KINDS: ReadonlySet<WrapperKind> = new Set([
-  "Cell",
-  "ReadonlyCell",
-  "WriteonlyCell",
-  "ComparableCell",
-  "OpaqueCell",
-]);
+// The capability subset of `CellWrapperKind`: brands that all wrap the SAME
+// structural inner `T` and differ only in read/write capability. The transformer
+// narrows one to another (e.g. `Cell<T>` → `ReadonlyCell<T>`) to reflect usage,
+// so a node-vs-type brand mismatch among these is a capability narrowing, not a
+// structural change. `Stream`/`SqliteDb`/`OpaqueRef` are excluded: they carry a
+// distinct structural contract, not a read/write variant of a plain cell.
+//
+// Derived as an exhaustive map over `CellWrapperKind` so that adding a new kind
+// to that union is a compile error here until it's deliberately classified.
+//
+// NB: distinct from `type-utils.ts`'s `CELL_LIKE_WRAPPER_NAMES`, which keys off
+// raw type-node NAMES (where `Writable` is a separate spelling and `OpaqueCell`
+// is split out). This set keys off RESOLVED `CellWrapperKind` values, where
+// `Writable` has already normalized to `Cell` and `OpaqueCell` belongs with the
+// rest.
+const CELL_CAPABILITY_KIND_MAP: Readonly<Record<CellWrapperKind, boolean>> = {
+  Cell: true,
+  ReadonlyCell: true,
+  WriteonlyCell: true,
+  ComparableCell: true,
+  OpaqueCell: true,
+  Stream: false,
+  SqliteDb: false,
+  OpaqueRef: false,
+};
 const isCellCapabilityKind = (kind: WrapperKind): boolean =>
-  CELL_CAPABILITY_KINDS.has(kind);
+  CELL_CAPABILITY_KIND_MAP[kind];
 
 const resolveScopeWrapperNode = (
   typeNode: ts.TypeNode | undefined,
