@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     value: __cfHelpers.ReadonlyCell<number>;
     multiplier: __cfHelpers.ReadonlyCell<number>;
-}, number>({
+}, number>(({ value, multiplier }) => value.get() * multiplier.get(), {
     type: "object",
     properties: {
         value: {
@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "multiplier"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => value.get() * multiplier.get());
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-basic-capture
 // Verifies: computed(() => expr) with two cell captures is closure-extracted into a lift-applied computation
 //   computed(() => value.get() * multiplier.get()) → lift(({ value, multiplier }) => value.get() * multiplier.get())({ value, multiplier })

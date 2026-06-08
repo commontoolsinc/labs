@@ -20,7 +20,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         tagCounts: Record<string, number>;
     };
     tag: string;
-}, number | undefined>({
+}, number | undefined>(({ state, tag }) => state.tagCounts[tag], {
     type: "object",
     properties: {
         state: {
@@ -43,7 +43,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state", "tag"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state, tag }) => state.tagCounts[tag]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");

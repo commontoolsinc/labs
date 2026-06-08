@@ -16,7 +16,7 @@ declare function fetchAny(): any;
 const __cfLift_1 = __cfHelpers.lift<{
     result: any;
     prompt: string;
-}, any>({
+}, any>(({ result, prompt }) => result?.title || prompt || "Untitled", {
     type: "object",
     properties: {
         result: true,
@@ -25,7 +25,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["result", "prompt"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ result, prompt }) => result?.title || prompt || "Untitled");
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-any-result-override
 // Verifies: explicit Output type parameter overrides inferred `any` return type for schema generation
 //   pattern<Input, string>() → output schema { type: "string" } instead of inferred any

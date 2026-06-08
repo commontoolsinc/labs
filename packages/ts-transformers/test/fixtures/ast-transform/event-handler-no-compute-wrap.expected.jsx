@@ -34,7 +34,7 @@ const handleClick = handler({
 });
 const __cfLift_1 = __cfHelpers.lift<{
     count: Default<number, 0>;
-}, number>({
+}, number>(({ count }) => count + 1, {
     type: "object",
     properties: {
         count: {
@@ -45,7 +45,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: event-handler-no-compute-wrap
 // Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
 // wrapper (formerly derive, now lift-applied post-CT-1615), while

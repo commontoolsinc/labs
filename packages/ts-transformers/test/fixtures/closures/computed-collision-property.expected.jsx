@@ -13,7 +13,10 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     multiplier: __cfHelpers.ReadonlyCell<number>;
-}, { multiplier: number; value: number; }>({
+}, { multiplier: number; value: number; }>(({ multiplier }) => ({
+    multiplier: multiplier.get(),
+    value: multiplier.get() * 3,
+}), {
     type: "object",
     properties: {
         multiplier: {
@@ -33,10 +36,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["multiplier", "value"]
-} as const satisfies __cfHelpers.JSONSchema, ({ multiplier }) => ({
-    multiplier: multiplier.get(),
-    value: multiplier.get() * 3,
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-collision-property
 // Verifies: a captured cell named the same as a returned object property does not rename the property
 //   computed(() => ({ multiplier: multiplier.get(), value: ... })) → lift(...)({ multiplier })

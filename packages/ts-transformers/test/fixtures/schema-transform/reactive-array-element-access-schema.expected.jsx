@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
     index: __cfHelpers.Cell<number>;
-}, string | undefined>({
+}, string | undefined>(({ items, index }) => items.get()[index.get()], {
     type: "object",
     properties: {
         items: {
@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items", "index"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()]);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: reactive-array-element-access-schema
 // Verifies: reactive array element access preserves `string | undefined` in the
 // emitted result schema.

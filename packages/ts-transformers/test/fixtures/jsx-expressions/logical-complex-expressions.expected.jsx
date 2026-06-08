@@ -14,7 +14,7 @@ const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
     isEnabled: __cfHelpers.Cell<boolean>;
-}, Readonly<boolean>>({
+}, Readonly<boolean>>(({ items, isEnabled }) => items.get().length > 0 && isEnabled.get(), {
     type: "object",
     properties: {
         items: {
@@ -32,11 +32,11 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items", "isEnabled"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ items, isEnabled }) => items.get().length > 0 && isEnabled.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     count: __cfHelpers.Cell<number>;
     items: __cfHelpers.Cell<string[]>;
-}, boolean>({
+}, boolean>(({ count, items }) => (count.get() > 10 || items.get().length > 5), {
     type: "object",
     properties: {
         count: {
@@ -54,7 +54,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["count", "items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ count, items }) => (count.get() > 10 || items.get().length > 5));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: logical-complex-expressions
 // Verifies: nested && and mixed || && with JSX are transformed to when() with lift-applied predicates
 //   a && b && <JSX>     → when(lift(...)({ a, b }), <JSX>)

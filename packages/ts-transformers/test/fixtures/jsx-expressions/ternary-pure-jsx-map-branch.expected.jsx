@@ -16,7 +16,7 @@ interface TagEvent {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     recentEvents: TagEvent[];
-}, boolean>({
+}, boolean>(({ recentEvents }) => recentEvents.length === 0, {
     type: "object",
     properties: {
         recentEvents: {
@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["recentEvents"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ recentEvents }) => recentEvents.length === 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const event = __cf_pattern_input.key("element");
     const idx = __cf_pattern_input.key("index");

@@ -28,7 +28,7 @@ type EntriesValue = Entry[] | Default<[
 const firstName = __cfHardenFn((entries: Cell<EntriesValue>): string => (entries.get() ?? [])[0]?.profile.get().name ?? "");
 const __cfLift_1 = __cfHelpers.lift<{
     entries: __cfHelpers.ReadonlyCell<EntriesValue>;
-}, string>({
+}, string>(({ entries }) => firstName(entries), {
     type: "object",
     properties: {
         entries: {
@@ -64,7 +64,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ entries }) => firstName(entries));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: readonly-capture-named-alias-nested-cell
 // Verifies (BEHAVIOR LOCK): a by-reference, read-only-used capture of a bare
 //   `Cell<EntriesValue>` (EntriesValue = Entry[] | Default<[]>, Entry has a

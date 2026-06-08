@@ -110,12 +110,12 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       ({ values }) => {
         // Compute item count from values
         const itemCount = lift(
+          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
           {
             type: "array",
             items: { type: "number" },
           } as const satisfies JSONSchema,
           { type: "number" } as const satisfies JSONSchema,
-          (arr: number[]) => (Array.isArray(arr) ? arr.length : 0),
         )(values);
 
         return { values, itemCount };
@@ -144,6 +144,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Lift that dynamically instantiates itemCountPattern for each group
     const instantiateGroups = lift(
+      ({ groups }: any) => {
+        const raw = groups.get();
+        const list = Array.isArray(raw) ? raw : [];
+        const children = [];
+        for (let index = 0; index < list.length; index++) {
+          const groupCell = groups.key(index)!;
+          const valuesCell = groupCell.key("values");
+          const child = itemCountPattern({
+            values: valuesCell,
+          });
+          children.push(child);
+        }
+        return children;
+      },
       {
         type: "object",
         properties: {
@@ -171,24 +185,19 @@ describe("Pattern Runner - Dynamic Patterns", () => {
           },
         },
       } as const satisfies JSONSchema,
-      ({ groups }) => {
-        const raw = groups.get();
-        const list = Array.isArray(raw) ? raw : [];
-        const children = [];
-        for (let index = 0; index < list.length; index++) {
-          const groupCell = groups.key(index)!;
-          const valuesCell = groupCell.key("values");
-          const child = itemCountPattern({
-            values: valuesCell,
-          });
-          children.push(child);
-        }
-        return children;
-      },
     );
 
     // Lift that sums itemCount from all groups
     const computeTotalItems = lift(
+      (entries: Array<{ itemCount?: number }>) => {
+        if (!Array.isArray(entries)) {
+          return 0;
+        }
+        return entries.reduce((sum, entry) => {
+          const count = entry?.itemCount;
+          return typeof count === "number" ? sum + count : sum;
+        }, 0);
+      },
       {
         type: "array",
         items: {
@@ -199,15 +208,6 @@ describe("Pattern Runner - Dynamic Patterns", () => {
         },
       } as const satisfies JSONSchema,
       { type: "number" } as const satisfies JSONSchema,
-      (entries: Array<{ itemCount?: number }>) => {
-        if (!Array.isArray(entries)) {
-          return 0;
-        }
-        return entries.reduce((sum, entry) => {
-          const count = entry?.itemCount;
-          return typeof count === "number" ? sum + count : sum;
-        }, 0);
-      },
     );
 
     // Outer pattern that uses instantiateGroups and computeTotalItems
@@ -1288,7 +1288,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     // this shape — see IDerivable note in api/index.ts.
     const isEvenPattern = pattern<{ element: number }>(
       ({ element }) => {
-        return lift(numberSchema, booleanSchema, (x: number) => x % 2 === 0)(
+        return lift((x: number) => x % 2 === 0, numberSchema, booleanSchema)(
           element,
         );
       },
@@ -1324,9 +1324,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const duplicatePattern = pattern<{ element: number }>(
       ({ element }) => {
         return lift(
+          (x: number) => [x, x * 10],
           numberSchema,
           numberArraySchema,
-          (x: number) => [x, x * 10],
         )(
           element,
         );

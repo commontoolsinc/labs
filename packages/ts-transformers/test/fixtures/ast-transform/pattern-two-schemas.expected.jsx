@@ -21,7 +21,7 @@ interface Result {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     count: number;
-}, number>({
+}, number>(({ count }) => count * 2, {
     type: "object",
     properties: {
         count: {
@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count * 2);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-two-schemas
 // Verifies: pattern with both input and output schemas already present preserves them
 //   pattern<Input, Result>(fn, inputSchema, outputSchema) → pattern(fn, inputSchema, outputSchema) (schemas kept)

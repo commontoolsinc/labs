@@ -42,7 +42,10 @@ const __cfLift_1 = __cfHelpers.lift<{
         description: string;
     };
     startEditing: __cfHelpers.Stream<void>;
-}, __cfHelpers.JSXElement>({
+}, __cfHelpers.JSXElement>(({ card, startEditing }) => (<div>
+                <span>{card.description}</span>
+                <cf-button onClick={startEditing}>Edit</cf-button>
+              </div>), {
     type: "object",
     properties: {
         card: {
@@ -79,10 +82,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ card, startEditing }) => (<div>
-                <span>{card.description}</span>
-                <cf-button onClick={startEditing}>Edit</cf-button>
-              </div>));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: action-in-ternary-with-explicit-computed
 // Verifies: action() referenced inside an explicit computed() in JSX is captured in the lift-applied wrapper
 //   action(() => ...) → handler(...)({ isEditing })

@@ -36,7 +36,7 @@ interface PatternInput {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.ReadonlyCell<unknown[]>;
-}, boolean>({
+}, boolean>(({ items }) => items.get().length > 0, {
     type: "object",
     properties: {
         items: {
@@ -50,14 +50,14 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     item: {
         tags: {
             length: number;
         };
     };
-}, boolean>({
+}, boolean>(({ item }) => item.tags.length > 0, {
     type: "object",
     properties: {
         item: {
@@ -79,7 +79,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["item"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.tags.length > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const showInactive = __cf_pattern_input.key("params", "showInactive");

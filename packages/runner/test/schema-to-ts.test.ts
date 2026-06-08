@@ -2,12 +2,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
-import { handler, lift } from "../src/builder/module.ts";
+import { handler } from "../src/builder/module.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import {
   type AnyCellWrapping,
-  type JSONSchema,
   type OpaqueRef,
   Schema,
 } from "../src/builder/types.ts";
@@ -645,63 +644,15 @@ describe("Schema-to-TS Type Conversion", () => {
     expectType<ExpectedDynamicObject, DynamicObjectSchema>();
   });
 
-  it("should correctly infer types when using lift with JSON schema", () => {
-    // Define input and output schemas
-    const inputSchema = {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        count: { type: "number" },
-        tags: {
-          type: "array",
-          items: { type: "string" },
-        },
-      },
-      required: ["name"],
-    } as const satisfies JSONSchema;
-
-    const outputSchema = {
-      type: "object",
-      properties: {
-        processed: { type: "boolean" },
-        nameLength: { type: "number" },
-        firstTag: { type: "string" },
-      },
-      //required: ["processed", "nameLength"],
-    } as const satisfies JSONSchema;
-
-    // Create a module using lift with JSON schemas
-    // This tests type inference - TypeScript should infer the correct input and output types
-    const processModule = lift(
-      inputSchema,
-      outputSchema,
-      (input) => {
-        // This will only compile if input is correctly typed according to inputSchema
-        const nameLength = input.name.length;
-        const firstTag = input.tags?.[0] || "";
-        const _count = input.count || 0;
-
-        // This will only compile if the return type matches outputSchema
-        return {
-          processed: true,
-          nameLength,
-          firstTag,
-        };
-      },
-    );
-
-    // Test with actual data
-    processModule({
-      name: "Test",
-      count: 5,
-      tags: ["important", "test"],
-    });
-
-    // Check that optional property works
-    processModule({
-      name: "NoTags",
-    });
-  });
+  // (Removed: "should correctly infer types when using lift with JSON schema".)
+  // That test asserted lift's schema-first overload materialized the callback
+  // input type FROM the argument schema via Schema<T> — i.e. `lift(inputSchema,
+  // outputSchema, (input) => …)` typed `input` from `inputSchema`. CT-1625
+  // removed that schema->type materialization variant of lift (it was used
+  // nowhere outside this test) and reordered lift to function-first
+  // (`lift(fn, argSchema?, resSchema?)`) to match pattern()/handler(). The
+  // Schema<> type utility itself is unchanged and still covered by the tests
+  // above; only lift's use of it as an overload was retired.
 
   it("should correctly infer types when using handler with JSON schema", () => {
     // Define event and state schemas

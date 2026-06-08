@@ -18,7 +18,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             name: string;
         };
     };
-}, string>({
+}, string>(({ state }) => identity(state.user.name), {
     type: "object",
     properties: {
         state: {
@@ -40,12 +40,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => identity(state.user.name));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         maybeUser?: { name: string; } | undefined;
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => identity(state.maybeUser?.name), {
     type: "object",
     properties: {
         state: {
@@ -66,13 +66,13 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => identity(state.maybeUser?.name));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         a: number;
         b: number;
     };
-}, number>({
+}, number>(({ state }) => Math.max(state.a, state.b), {
     type: "object",
     properties: {
         state: {
@@ -91,12 +91,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(state.a, state.b));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         float: string;
     };
-}, number>({
+}, number>(({ state }) => parseInt(state.float), {
     type: "object",
     properties: {
         state: {
@@ -112,12 +112,12 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => parseInt(state.float));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         label?: string | null | undefined;
     };
-}, string>({
+}, string>(({ state }) => state.label ?? "Pending", {
     type: "object",
     properties: {
         state: {
@@ -132,7 +132,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.label ?? "Pending");
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
 //   lifted as whole calls instead of lowering only inner argument expressions.

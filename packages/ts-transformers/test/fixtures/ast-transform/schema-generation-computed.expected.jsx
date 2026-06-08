@@ -18,9 +18,9 @@ type DeriveResult = {
     doubled: number;
 };
 declare const source: DeriveInput;
-const __cfLift_1 = __cfHelpers.lift(false, (): DeriveResult => ({
+const __cfLift_1 = __cfHelpers.lift((): DeriveResult => ({
     doubled: source.count * 2,
-}));
+}), false);
 // FIXTURE: schema-generation-computed
 // Verifies: computed() closure-extracts a captured value into a lift() with input
 // (capture) and output schemas generated from type info

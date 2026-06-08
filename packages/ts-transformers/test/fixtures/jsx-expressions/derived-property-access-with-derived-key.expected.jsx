@@ -21,7 +21,10 @@ interface Assignment {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     items: Item[];
-}, { aisle: string; item: Item; }[]>({
+}, { aisle: string; item: Item; }[]>(({ items }) => items.map((item, idx) => ({
+    aisle: `Aisle ${(idx % 3) + 1}`,
+    item: item,
+})), {
     type: "object",
     properties: {
         items: {
@@ -76,13 +79,19 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((item, idx) => ({
-    aisle: `Aisle ${(idx % 3) + 1}`,
-    item: item,
-})));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     itemsWithAisles: { aisle: string; item: Item; }[];
-}, Record<string, Assignment[]>>({
+}, Record<string, Assignment[]>>(({ itemsWithAisles }) => {
+    const groups: Record<string, Assignment[]> = {};
+    for (const assignment of itemsWithAisles) {
+        if (!groups[assignment.aisle]) {
+            groups[assignment.aisle] = [];
+        }
+        groups[assignment.aisle]!.push(assignment);
+    }
+    return groups;
+}, {
     type: "object",
     properties: {
         itemsWithAisles: {
@@ -153,19 +162,10 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["name", "done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ itemsWithAisles }) => {
-    const groups: Record<string, Assignment[]> = {};
-    for (const assignment of itemsWithAisles) {
-        if (!groups[assignment.aisle]) {
-            groups[assignment.aisle] = [];
-        }
-        groups[assignment.aisle]!.push(assignment);
-    }
-    return groups;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     groupedByAisle: Record<string, Assignment[]>;
-}, string[]>({
+}, string[]>(({ groupedByAisle }) => Object.keys(groupedByAisle).sort(), {
     type: "object",
     properties: {
         groupedByAisle: {
@@ -212,11 +212,11 @@ const __cfLift_3 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     groupedByAisle: Record<string, Assignment[]>;
     aisleName: string;
-}, Assignment[] | undefined>({
+}, Assignment[] | undefined>(({ groupedByAisle, aisleName }) => groupedByAisle[aisleName], {
     type: "object",
     properties: {
         groupedByAisle: {
@@ -297,7 +297,7 @@ const __cfLift_4 = __cfHelpers.lift<{
             required: ["name", "done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName]);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const assignment = __cf_pattern_input.key("element");
     return (<div>

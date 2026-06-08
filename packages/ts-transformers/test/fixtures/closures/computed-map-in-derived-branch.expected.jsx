@@ -21,7 +21,9 @@ interface PatternInput {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     people: __cfHelpers.ReadonlyCell<Person[]>;
-}, { name: string; rank: number; isFirst: boolean; }[]>({
+}, { name: string; rank: number; isFirst: boolean; }[]>(({ people }) => [...people.get()]
+    .sort((a, b) => a.rank - b.rank)
+    .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })), {
     type: "object",
     properties: {
         people: {
@@ -64,12 +66,10 @@ const __cfLift_1 = __cfHelpers.lift<{
         },
         required: ["name", "rank", "isFirst"]
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ people }) => [...people.get()]
-    .sort((a, b) => a.rank - b.rank)
-    .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     people: __cfHelpers.ReadonlyCell<unknown[]>;
-}, number>({
+}, number>(({ people }) => people.get().length, {
     type: "object",
     properties: {
         people: {
@@ -83,7 +83,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["people"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-in-derived-branch
 // Verifies: moving a reactive computation out of a JSX slot forces the whole
 //   branch into derive(), so nested maps run in compute context and stay plain

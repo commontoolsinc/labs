@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     list: __cfHelpers.Cell<string[] | undefined>;
-}, boolean>({
+}, boolean>(({ list }) => !list.get()?.[0], {
     type: "object",
     properties: {
         list: {
@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["list"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ list }) => !list.get()?.[0]);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: optional-element-access
 // Verifies: optional element access (?.[0]) in a negated && guard is transformed to when(lift(...)(...))
 //   !list.get()?.[0] && <span> → when(lift(({list}) => !list.get()?.[0])({ list }), <span>)

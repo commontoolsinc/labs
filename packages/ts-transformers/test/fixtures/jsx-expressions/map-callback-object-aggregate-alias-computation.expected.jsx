@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     meta: {
         kind: string;
     };
-}, boolean>({
+}, boolean>(({ meta }) => meta.kind === "folder", {
     type: "object",
     properties: {
         meta: {
@@ -48,7 +48,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["meta"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ meta }) => meta.kind === "folder");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const file = __cf_pattern_input.key("element");
     const meta = { kind: file.key("type") };

@@ -19,7 +19,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.count > 0, {
     type: "object",
     properties: {
         state: {
@@ -35,7 +35,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: builder-conditional
 // Verifies: ternary in JSX is transformed to ifElse() with a lift-applied condition
 //   state.count > 0 ? <p>A</p> : <p>B</p> → __cfHelpers.ifElse(...schemas, lift(...)({...}), <p>A</p>, <p>B</p>)

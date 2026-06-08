@@ -21,7 +21,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, number>({
+}, number>(({ state }) => state.count + 1, {
     type: "object",
     properties: {
         state: {
@@ -37,12 +37,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count + 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, number>({
+}, number>(({ state }) => state.count - 1, {
     type: "object",
     properties: {
         state: {
@@ -58,12 +58,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count - 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, number>({
+}, number>(({ state }) => state.count * 2, {
     type: "object",
     properties: {
         state: {
@@ -79,12 +79,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count * 2);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, number>({
+}, number>(({ state }) => state.price / 2, {
     type: "object",
     properties: {
         state: {
@@ -100,12 +100,12 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price / 2);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, number>({
+}, number>(({ state }) => state.count % 3, {
     type: "object",
     properties: {
         state: {
@@ -121,13 +121,13 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count % 3);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         price: number;
         discount: number;
     };
-}, number>({
+}, number>(({ state }) => state.price - (state.price * state.discount), {
     type: "object",
     properties: {
         state: {
@@ -146,13 +146,13 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price - (state.price * state.discount));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         price: number;
         quantity: number;
     };
-}, number>({
+}, number>(({ state }) => state.price * state.quantity, {
     type: "object",
     properties: {
         state: {
@@ -171,13 +171,13 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price * state.quantity);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         price: number;
         quantity: number;
     };
-}, number>({
+}, number>(({ state }) => (state.price * state.quantity) * 1.08, {
     type: "object",
     properties: {
         state: {
@@ -196,7 +196,7 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.price * state.quantity) * 1.08);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         count: number;
@@ -204,7 +204,8 @@ const __cfLift_9 = __cfHelpers.lift<{
         price: number;
         discount: number;
     };
-}, number>({
+}, number>(({ state }) => (state.count + state.quantity) * state.price -
+    (state.price * state.discount), {
     type: "object",
     properties: {
         state: {
@@ -229,13 +230,12 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.count + state.quantity) * state.price -
-    (state.price * state.discount));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_10 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, number>({
+}, number>(({ state }) => state.count * state.count * state.count, {
     type: "object",
     properties: {
         state: {
@@ -251,12 +251,12 @@ const __cfLift_10 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count * state.count * state.count);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, number>({
+}, number>(({ state }) => state.price - 10, {
     type: "object",
     properties: {
         state: {
@@ -272,12 +272,12 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price - 10);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_12 = __cfHelpers.lift<{
     state: {
         price: number;
     };
-}, number>({
+}, number>(({ state }) => state.price + 10, {
     type: "object",
     properties: {
         state: {
@@ -293,7 +293,7 @@ const __cfLift_12 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price + 10);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-arithmetic-operations
 // Verifies: arithmetic expressions with reactive refs in JSX are wrapped in a lift-applied computation
 //   {state.count + 1}                      → lift(({state}) => state.count + 1)({ count })

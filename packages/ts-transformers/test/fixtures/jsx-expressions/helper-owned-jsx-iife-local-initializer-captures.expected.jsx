@@ -68,7 +68,7 @@ const __cfHandler_1 = __cfHelpers.handler({
 });
 const __cfLift_1 = __cfHelpers.lift<{
     path: __cfHelpers.Cell<string[]>;
-}, readonly string[]>({
+}, readonly string[]>(({ path }) => path.get(), {
     type: "object",
     properties: {
         path: {
@@ -85,11 +85,11 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     tree: __cfHelpers.Cell<Entry[]>;
     p: readonly string[];
-}, readonly Entry[]>({
+}, readonly Entry[]>(({ tree, p }) => findChildren(tree, p), {
     type: "object",
     properties: {
         tree: {
@@ -158,10 +158,10 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["id", "name", "type"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ tree, p }) => findChildren(tree, p));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     unsorted: readonly Entry[];
-}, Entry[]>({
+}, Entry[]>(({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name)), {
     type: "object",
     properties: {
         unsorted: {
@@ -223,7 +223,7 @@ const __cfLift_3 = __cfHelpers.lift<{
             required: ["id", "name", "type"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name)));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

@@ -17,7 +17,7 @@ interface State {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     input: __cfHelpers.Writable<State>;
-}, string>({
+}, string>(({ input }) => input.key("foo").get(), {
     type: "object",
     properties: {
         input: {
@@ -42,7 +42,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.key("foo").get());
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-preserve-opaque-input
 // Verifies: Writable<T> pattern input is preserved as an opaque ref, with JSX .get() wrapped in a lift-applied computation
 //   input.key("foo").get() in JSX → lift(({ input }) => input.key("foo").get())({ input })

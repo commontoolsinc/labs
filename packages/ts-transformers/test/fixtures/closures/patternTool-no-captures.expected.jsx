@@ -17,7 +17,9 @@ type Output = {
 const __cfLift_1 = __cfHelpers.lift<{
     query: string;
     content: string;
-}, string[]>({
+}, string[]>(({ content, query }) => {
+    return content.split("\n").filter((c: string) => c.includes(query));
+}, {
     type: "object",
     properties: {
         query: {
@@ -33,9 +35,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
-    return content.split("\n").filter((c: string) => c.includes(query));
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     query: string;
     content: string;

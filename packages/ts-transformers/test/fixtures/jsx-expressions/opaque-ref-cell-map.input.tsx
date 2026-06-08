@@ -18,14 +18,6 @@ const SimplePattern = pattern(() => ({
 
 // Create a cell to store an array of charms
 const createCellRef = lift(
-  {
-    type: "object",
-    properties: {
-      isInitialized: { type: "boolean", "default": false, asCell: ["cell"] },
-      storedCellRef: { type: "object", asCell: ["cell"] },
-    },
-  },
-  undefined,
   ({ isInitialized, storedCellRef }) => {
     if (!isInitialized.get()) {
       console.log("Creating cellRef - first time");
@@ -44,6 +36,13 @@ const createCellRef = lift(
       cellRef: storedCellRef,
     };
   },
+  {
+    type: "object",
+    properties: {
+      isInitialized: { type: "boolean", "default": false, asCell: ["cell"] },
+      storedCellRef: { type: "object", asCell: ["cell"] },
+    },
+  },
 );
 
 // Add a charm to the array and navigate to it
@@ -52,15 +51,6 @@ const createCellRef = lift(
 // we only try to add the charm once to the list
 // and we only call navigateTo once
 const addCharmAndNavigate = lift(
-  {
-    type: "object",
-    properties: {
-      charm: { type: "object" },
-      cellRef: { type: "array", asCell: ["cell"] },
-      isInitialized: { type: "boolean", asCell: ["cell"] },
-    },
-  },
-  undefined,
   ({ charm, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
@@ -72,6 +62,14 @@ const addCharmAndNavigate = lift(
       }
     }
     return undefined;
+  },
+  {
+    type: "object",
+    properties: {
+      charm: { type: "object" },
+      cellRef: { type: "array", asCell: ["cell"] },
+      isInitialized: { type: "boolean", asCell: ["cell"] },
+    },
   },
 );
 

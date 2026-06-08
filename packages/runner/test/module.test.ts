@@ -91,9 +91,10 @@ describe("module", () => {
       } as const satisfies JSONSchema;
 
       const greet = lift(
+        ({ name, age }: { name: string; age?: number }) =>
+          `Hello ${name}${age ? `, age ${age}` : ""}!`,
         schema,
         { type: "string" } as const satisfies JSONSchema,
-        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`,
       );
 
       expect(isModule(greet)).toBe(true);
@@ -118,9 +119,10 @@ describe("module", () => {
       } as const satisfies JSONSchema;
 
       const greet = lift(
+        ({ name, age }: { name: string; age?: number }) =>
+          `Hello ${name}${age ? `, age ${age}` : ""}!`,
         inputSchema,
         outputSchema,
-        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`,
       );
 
       expect(isModule(greet)).toBe(true);
