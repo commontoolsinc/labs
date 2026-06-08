@@ -18,14 +18,14 @@ const toByteArray = (value: unknown): Uint8Array | null => {
   if (value instanceof Uint8Array) {
     return value;
   }
-  // A `FabricBytes` is the intended long-term wire form for the signature.
-  // Accepting it here ahead of any client producing it lets the producer flip
-  // to `FabricBytes` later without breaking already-deployed servers.
-  // TODO(danfuzz): Once producers emit `FabricBytes`, the array/numeric-object
-  // branches below become legacy and can be retired.
+  // A `FabricBytes` is the long-term wire form for the signature, and the
+  // current client (`v2-remote-session.ts`) emits it.
   if (value instanceof FabricBytes) {
     return value.slice();
   }
+  // TODO(danfuzz): the array / numeric-keyed-object branches below are legacy
+  // forms emitted by older clients (pre-`FabricBytes`). Retire them once every
+  // client emitting them has propagated out.
   if (Array.isArray(value) && value.every((item) => Number.isInteger(item))) {
     return Uint8Array.from(value);
   }

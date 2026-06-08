@@ -1,4 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
@@ -150,19 +151,13 @@ export class RemoteSessionFactory implements SessionFactory {
     return {
       invocation,
       authorization: {
-        // The signature is sent as a plain number array. It used to be passed
-        // as a raw `Uint8Array`, which only survived the memory wire boundary
-        // by accident: the encoder's lenient structural fallback flattened it
-        // into a numeric-keyed object that the server's `toByteArray` happened
-        // to accept. Emitting an explicit array makes the wire form intentional
-        // (and keeps it a plain `FabricValue`, so it survives the stricter
-        // codec encoder). The server-side `toByteArray` accepts this form.
-        //
-        // TODO(danfuzz): The signature should travel as a `FabricBytes`, not a
-        // number array. Once servers that accept `FabricBytes` have fully
-        // propagated, flip this to `new FabricBytes(signature.ok)` and then
-        // retire the array/numeric-object handling in `toByteArray`.
-        signature: Array.from(signature.ok),
+        // The signature travels as a `FabricBytes` -- the proper fabric form
+        // for a byte sequence, which serializes to a compact `/Bytes@1` wire
+        // form and round-trips faithfully. The server's `toByteArray` accepts
+        // it. (It still also accepts the older number-array form for now, so
+        // that legacy handling can be retired only once every client emitting
+        // it has been replaced by this one -- see the TODO in `toByteArray`.)
+        signature: new FabricBytes(signature.ok),
       },
     };
   }
