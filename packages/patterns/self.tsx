@@ -96,6 +96,60 @@ export interface RemoveValueCardEvent {
 }
 
 // ============================================================================
+// PURE HELPERS (exported — these ARE the shipping mutation logic)
+// ============================================================================
+
+/**
+ * Upsert a neurotype entry by system.
+ * Replaces the entry with the same `system` in-place, or appends if absent.
+ */
+export function upsertNeurotype(
+  model: SelfModel,
+  entry: Neurotype,
+): SelfModel {
+  const idx = model.neurotypes.findIndex((n) => n.system === entry.system);
+  if (idx === -1) {
+    return { ...model, neurotypes: [...model.neurotypes, entry] };
+  }
+  return {
+    ...model,
+    neurotypes: model.neurotypes.map((n, i) => (i === idx ? entry : n)),
+  };
+}
+
+/** Return a new SelfModel with the ValueCard appended to `values`. */
+export function appendValue(model: SelfModel, card: ValueCard): SelfModel {
+  return { ...model, values: [...model.values, card] };
+}
+
+/** Return a new SelfModel with the QAResponse appended to `responses`. */
+export function appendResponse(
+  model: SelfModel,
+  response: QAResponse,
+): SelfModel {
+  return { ...model, responses: [...model.responses, response] };
+}
+
+/** Return a new SelfModel with the neurotype for `system` removed. No-op if absent. */
+export function withoutNeurotype(
+  model: SelfModel,
+  system: NeurotypeSystem,
+): SelfModel {
+  return {
+    ...model,
+    neurotypes: model.neurotypes.filter((n) => n.system !== system),
+  };
+}
+
+/** Return a new SelfModel with the ValueCard at zero-based `index` removed. */
+export function withoutValueAt(model: SelfModel, index: number): SelfModel {
+  return {
+    ...model,
+    values: model.values.filter((_, i) => i !== index),
+  };
+}
+
+// ============================================================================
 // HANDLERS
 // ============================================================================
 
@@ -108,7 +162,6 @@ export const recordNeurotype = handler<
   RecordNeurotypeEvent,
   { selfModel: Writable<SelfModel> }
 >(({ system, result, detail, source }, { selfModel }) => {
-  const current = selfModel.get();
   const entry: Neurotype = {
     system,
     result,
@@ -116,16 +169,7 @@ export const recordNeurotype = handler<
     source,
     recordedAt: safeDateNow(),
   };
-  const idx = current.neurotypes.findIndex((n) => n.system === system);
-  if (idx === -1) {
-    selfModel.set({
-      ...current,
-      neurotypes: [...current.neurotypes, entry],
-    });
-  } else {
-    const updated = current.neurotypes.map((n, i) => (i === idx ? entry : n));
-    selfModel.set({ ...current, neurotypes: updated });
-  }
+  selfModel.set(upsertNeurotype(selfModel.get(), entry));
 });
 
 /** Append a ValueCard. */
@@ -133,9 +177,8 @@ export const addValueCard = handler<
   AddValueCardEvent,
   { selfModel: Writable<SelfModel> }
 >(({ title, description, weight, sourcePromptId }, { selfModel }) => {
-  const current = selfModel.get();
   const card: ValueCard = { title, description, weight, sourcePromptId };
-  selfModel.set({ ...current, values: [...current.values, card] });
+  selfModel.set(appendValue(selfModel.get(), card));
 });
 
 /** Append a QAResponse. Timestamp is set automatically via safeDateNow(). */
@@ -143,7 +186,6 @@ export const recordResponse = handler<
   RecordResponseEvent,
   { selfModel: Writable<SelfModel> }
 >(({ promptId, prompt, answer, track }, { selfModel }) => {
-  const current = selfModel.get();
   const response: QAResponse = {
     promptId,
     prompt,
@@ -151,7 +193,7 @@ export const recordResponse = handler<
     track,
     answeredAt: safeDateNow(),
   };
-  selfModel.set({ ...current, responses: [...current.responses, response] });
+  selfModel.set(appendResponse(selfModel.get(), response));
 });
 
 /** Remove the neurotype entry whose system matches. No-op if not found. */
@@ -159,11 +201,7 @@ export const removeNeurotype = handler<
   RemoveNeurotypeEvent,
   { selfModel: Writable<SelfModel> }
 >(({ system }, { selfModel }) => {
-  const current = selfModel.get();
-  selfModel.set({
-    ...current,
-    neurotypes: current.neurotypes.filter((n) => n.system !== system),
-  });
+  selfModel.set(withoutNeurotype(selfModel.get(), system));
 });
 
 /**
@@ -175,11 +213,7 @@ export const removeValueCard = handler<
   RemoveValueCardEvent,
   { selfModel: Writable<SelfModel> }
 >(({ index }, { selfModel }) => {
-  const current = selfModel.get();
-  selfModel.set({
-    ...current,
-    values: current.values.filter((_, i) => i !== index),
-  });
+  selfModel.set(withoutValueAt(selfModel.get(), index));
 });
 
 // ============================================================================
@@ -215,6 +249,9 @@ export interface SelfOutput {
 const Self = pattern<SelfInput, SelfOutput>(
   ({ selfModel: injectedSelfModel }) => {
     // Use the injected cell when provided (e.g. from tests); otherwise own one.
+    // The explicit .for("selfModel") is required here: `new Writable(...)` sits
+    // on the RIGHT of ??, so the CTS transformer does NOT auto-inject a .for
+    // cause for it. Without this call the owned cell has no stable id.
     const selfModel = injectedSelfModel ??
       new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel");
 
