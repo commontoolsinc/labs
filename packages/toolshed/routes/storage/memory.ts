@@ -18,36 +18,12 @@ const toByteArray = (value: unknown): Uint8Array | null => {
   if (value instanceof Uint8Array) {
     return value;
   }
-  // A `FabricBytes` is the long-term wire form for the signature, and the
-  // current client (`v2-remote-session.ts`) emits it.
+  // The session signature travels as a `FabricBytes` (emitted by the client in
+  // `v2-remote-session.ts`), which decodes to one here.
   if (value instanceof FabricBytes) {
     return value.slice();
   }
-  // TODO(danfuzz): the array / numeric-keyed-object branches below are legacy
-  // forms emitted by older clients (pre-`FabricBytes`). Retire them once every
-  // client emitting them has propagated out.
-  if (Array.isArray(value) && value.every((item) => Number.isInteger(item))) {
-    return Uint8Array.from(value);
-  }
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const entries = Object.entries(value)
-    .map(([key, item]) => [Number(key), item] as const)
-    .filter(([index, item]) =>
-      Number.isInteger(index) && index >= 0 && Number.isInteger(item)
-    )
-    .toSorted(([left], [right]) => left - right);
-
-  if (
-    entries.length === 0 ||
-    entries.some(([index], position) => index !== position)
-  ) {
-    return null;
-  }
-
-  return Uint8Array.from(entries.map(([, item]) => item as number));
+  return null;
 };
 
 const sameSessionDescriptor = (

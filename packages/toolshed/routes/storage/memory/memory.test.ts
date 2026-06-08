@@ -327,57 +327,6 @@ serialTest("memory websocket negotiates a session", async () => {
   }
 });
 
-// Backward-compatibility for the staged signature wire-format migration: the
-// current client emits a `FabricBytes` signature (exercised by the other
-// session tests via `createSessionOpenAuth`), but the server must still accept
-// the legacy number-array form that not-yet-upgraded clients send, until that
-// form is retired. See `toByteArray` in `../memory.ts`.
-serialTest(
-  "memory websocket negotiates a session with a legacy number-array signature",
-  async () => {
-    const identity = await Identity.fromPassphrase("memory-route-open-legacy");
-    const server = Deno.serve({ port: 0 }, app.fetch);
-    const address = new URL(
-      `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
-    );
-    const space = identity.did();
-
-    try {
-      const socket = await openSocket(address);
-      socket.send(encodeMemoryBoundary(HELLO));
-      await readJsonMessage(socket);
-
-      const auth = await createSessionOpenAuth(identity, space);
-      socket.send(encodeMemoryBoundary({
-        type: "session.open",
-        requestId: "open-1",
-        space,
-        session: {},
-        ...auth,
-        authorization: {
-          ...auth.authorization,
-          // Legacy form: a plain number array rather than a `FabricBytes`.
-          signature: [...auth.authorization.signature.slice()],
-        },
-      }));
-
-      const opened = await readJsonMessage<{
-        type: "response";
-        requestId: string;
-        ok: { sessionId: string; serverSeq: number };
-      }>(socket);
-
-      assertEquals(opened.type, "response");
-      assertEquals(opened.requestId, "open-1");
-      assert(opened.ok.sessionId.length > 0);
-
-      socket.close();
-    } finally {
-      await server.shutdown();
-    }
-  },
-);
-
 serialTest("memory websocket rejects an unsigned session open", async () => {
   const identity = await Identity.fromPassphrase("memory-route-open-reject");
   const server = Deno.serve({ port: 0 }, app.fetch);
