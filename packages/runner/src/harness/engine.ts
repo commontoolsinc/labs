@@ -671,9 +671,12 @@ export class Engine extends EventTarget implements Harness {
       const loadId = `${ctx.loadIdPrefix}:esm:${this.nextLoadId++}`;
       this.executableRegistry.beginVerifiedLoad(loadId);
       // Register per-module content hashes for parity with the AMD evaluate
-      // path. This wires the scheduler's content-addressed implementation hash;
-      // it becomes effective once source-location resolution under the ESM
-      // loader is wired (see the sourceURL note in module-record-compiler.ts).
+      // path. This wires the scheduler's content-addressed implementation hash.
+      // It is effective flag-on: source-location resolution under the ESM loader
+      // is wired (the `indexOf`-into-`script` fallback plus the per-module source
+      // maps registered below), so `fn.src` resolves to the canonical
+      // `cf:module/<hash>/<path>` form these hashes key on. Covered by
+      // `action-fingerprint.test.ts` and `esm-source-location.test.ts`.
       ctx.registerHashes();
 
       const globals = createModuleCompartmentGlobals({
