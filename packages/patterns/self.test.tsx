@@ -196,9 +196,14 @@ export default pattern(() => {
   //    `injectedSelfModel ?? new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel")`
   // =========================================================================
 
-  const selfOwned = Self({});
+  // Instantiate with no injection purely to exercise the own-cell branch
+  // (`.for("selfModel")`); its result isn't read (a cell-result proxy can't be
+  // unwrapped in a computed body), so it is intentionally unused.
+  const _selfOwned = Self({});
 
-  // selfOwned is a cell-result proxy; accessing its properties inside a
+  // The own-cell value is verified indirectly: accessing a Self result's
+  // properties inside a computed() body is not auto-unwrapped. Extract the cell
+  // value via a named
   // computed() body is not auto-unwrapped. Extract the cell value via a named
   // Writable that we inject — then verify the own-cell branch's initial state
   // by checking that a freshly-owned Self starts at EMPTY_SELF_MODEL.
