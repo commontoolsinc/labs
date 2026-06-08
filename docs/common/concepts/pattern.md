@@ -6,7 +6,7 @@ A pattern is a TypeScript/JSX program that defines reactive data transformations
 flowchart TD
         A["Result Cell"]
         A --meta.argument--> B["Argument Cell"]
-        A --meta.internal--> C["Internal Cell"]
+        A --meta.internal manifest--> C@{ shape: procs, label: "Internal Cells}"
         A --meta.pattern--> D["Pattern Cell"]
         B --meta.result--> A
         C --meta.result--> A

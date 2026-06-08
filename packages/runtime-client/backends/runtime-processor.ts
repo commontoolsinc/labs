@@ -1214,20 +1214,15 @@ export class RuntimeProcessor {
 }
 
 /**
- * Sync a root cell and each meta cell reachable from it.
+ * Sync a root cell and each direct metadata-linked cell reachable from it.
  *
- * Callers that need a transactional root cell can create it first and pass it.
+ * `internal` is raw manifest metadata, not a direct metadata link. Callers that
+ * need a transactional root cell can create it first and pass it.
  */
 async function syncMetaLinkedDocs(
   cell: Cell<any>,
   cycleCheck: Set<string> = new Set<string>(),
 ) {
-  // TODO(@ubik2): possibly this could be removed -- I removed "internal",
-  // since it's no longer a link to a cell. If I still need this function
-  // after my changes to traverse's loadMetaLinkedDocs, it should either
-  // be renamed to indicate that it only syncs the pattern and argument, or
-  // it should be expanded to also handle the embedded internal links.
-  // See also Runner.syncMetaCells
   const pendingCells = [cell];
   cycleCheck.add(cell.sourceURI);
   while (pendingCells.length > 0) {

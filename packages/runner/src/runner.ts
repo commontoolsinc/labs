@@ -1747,23 +1747,14 @@ export class Runner {
   }
 
   /**
-   * Sync the result cell's `internal` and `argument` meta-linked docs.
+   * Sync docs reached through result-cell metadata links.
    *
-   * They are separate content-addressed docs reached only via the result
-   * cell's meta links, so they are not loaded by syncing the result cell or the
-   * pattern's node inputs/outputs. `applySetupState` reads the persisted
-   * `internal` synchronously; awaiting these here keeps a build-time default
-   * from transiently clobbering a persisted value on a cold read (CT-1666).
-   *
-   * The result cell must already be synced so its meta links are readable.
+   * `internal` is raw manifest metadata on the result cell, not a direct
+   * metadata link. The result cell must already be synced so link metadata is
+   * readable.
    */
   private async syncMetaCells(resultCell: Cell<any>): Promise<void> {
     const promises: Promise<unknown>[] = [];
-    // TODO(@ubik2): possibly this could be removed -- I removed "internal",
-    // since it's no longer a link to a cell. If I still need this function
-    // after my changes to traverse's loadMetaLinkedDocs, it should either
-    // be renamed to indicate that it only syncs the argument, or it should be
-    // expanded to also handle the embedded internal links.
     for (const field of ["argument"] as const) {
       const link = getMetaLink(resultCell, field);
       if (link === undefined) continue;
@@ -1800,14 +1791,9 @@ export class Runner {
 
     await resultCell.sync();
 
-    // Also load the `internal` and `argument` meta-linked docs. These live in
-    // separate content-addressed docs reached only via the result cell's meta
-    // links -- not through the schema/value graph synced above -- so they are
-    // not covered by `resultCell.sync()` or the node input/output sync below.
-    // `applySetupState` reads the persisted `internal` synchronously and merges
-    // the pattern's build-time defaults UNDER it (persisted wins). Without this
-    // awaited load that read races storage and can see `undefined`, letting a
-    // build-time default transiently clobber the persisted value (CT-1666).
+    // Also load docs reached through result-cell metadata links. `internal`
+    // itself is raw manifest metadata on the result cell, so it is covered by
+    // `resultCell.sync()` rather than by this helper.
     await this.syncMetaCells(resultCell);
 
     // We could support this by replicating what happens in runner, but since

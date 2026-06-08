@@ -106,8 +106,8 @@ links by prepending `/of:`.
 
 Mentionable arrays from `wish()` results contain `@link` references, not
 direct data. Each array entry is a sub-cell (e.g.,
-`/of:parentId/internal/mentionable/0`) that points to the real piece cell
-via indirection.
+`/of:derivedInternalId/mentionable/0`) that points to the real piece cell via
+indirection.
 
 ### The problem
 
@@ -141,8 +141,9 @@ Without `asSchema()`, `.get()` on array entries returns `CellHandle` objects
 
 ### Resolving stable entity IDs
 
-Sub-cell IDs like `/of:parentId/internal/mentionable/0` are array indices,
-not stable entity references. To get the real piece cell ID, use
+Sub-cell IDs like `/of:derivedInternalId/mentionable/0` are array positions
+within an intermediate result, not stable entity references. To get the real
+piece cell ID, use
 `resolveAsCell()`:
 
 ```tsx

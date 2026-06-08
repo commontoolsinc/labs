@@ -236,25 +236,33 @@ In addition to schema-directed references, traversal MUST load provenance and
 runtime metadata documents via top-level metadata links on an entity document.
 
 When the server loads any document during query evaluation, it MUST inspect the
-top-level document object for metadata links such as:
+top-level document object for metadata links and manifest links such as:
 
 ```json
 {
   "pattern": { "/": { "link@1": { "id": "of:pattern-abc", "path": [] } } },
   "argument": { "/": { "link@1": { "id": "of:argument-def", "path": [] } } },
-  "internal": { "/": { "link@1": { "id": "of:internal-ghi", "path": [] } } },
+  "internal": [
+    {
+      "partialCause": "counter",
+      "link": { "/": { "link@1": { "id": "of:internal-ghi", "path": [] } } }
+    }
+  ],
   "result": { "/": { "link@1": { "id": "of:result-jkl", "path": [] } } }
 }
 ```
 
-The `pattern`, `argument`, `internal`, and `result` fields use the same sigil
-link form as ordinary cell references. The `cfc` metadata field is the exception:
-it uses a compact metadata object, and traversal converts its `schemaHash` into a
-CID sigil link before loading the referenced document. If present, the server
-resolves each metadata link, loads that document, adds it to the query result and
-watch tracker, and then repeats the same metadata-link check on the loaded
-document. This continues until a document without metadata links is reached or a
-cycle is detected.
+The `pattern`, `argument`, and `result` fields use the same sigil link form as
+ordinary cell references. The `internal` field is raw metadata, not a direct
+metadata link. It stores a manifest array, and traversal resolves each
+manifest-entry `link` as an internal cell owned by the result cell. The `cfc`
+metadata field is also special: it uses a compact metadata object, and traversal
+converts its `schemaHash` into a CID sigil link before loading the referenced
+document. If present, the server resolves each metadata link and each internal
+manifest link, loads that document, adds it to the query result and watch
+tracker, and then repeats the same metadata/manifest check on the loaded
+document. This continues until a document without metadata links or manifest
+links is reached or a cycle is detected.
 
 This behavior is not optional provenance decoration. It is part of the query
 result shape, mirroring `loadMetaLinkedDocs()` in `traverse.ts`, and is required

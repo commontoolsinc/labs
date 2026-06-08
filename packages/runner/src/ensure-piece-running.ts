@@ -57,8 +57,9 @@ function followResultCellChain(
  * runtime.runSynced() on an already-running piece is idempotent - it simply
  * returns without doing anything. This keeps the code simple and stateless.
  *
- * This function follows result metadata from argument/internal cells back to
- * the root result cell, then starts the piece if it's not already running.
+ * This function follows result metadata from argument or derived internal cells
+ * back to the root result cell, then starts the piece if it's not already
+ * running.
  *
  * The traversal logic:
  * 1. Start with the cell at the cellLink location

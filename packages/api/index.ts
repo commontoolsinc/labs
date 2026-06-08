@@ -289,10 +289,10 @@ export type MetaLinkField =
 /**
  * The `pattern` field links a result cell to its pattern
  * The `argument` field links a result cell to its argument cell
- * The `internal` field contains a manifest with links its internal cells for state
+ * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,
- * and also lets the argument and internal cells link back to the result cell.
+ * and also lets the argument and derived internal cells link back to the result cell.
  * The cfc code accesses the `cfc` field directly, but I include it here too.
  */
 export type MetaField =
