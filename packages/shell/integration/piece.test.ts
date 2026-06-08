@@ -246,6 +246,14 @@ describe("shell piece tests", () => {
         return await page.evaluate(() => !!globalThis.commonfabric?.rt);
       });
       await waitForSpaceRootPattern(page);
+      // Ensure the space-root/sub-pattern compile-cache write-backs are durable
+      // before we snapshot the baseline and load the piece. Otherwise a write
+      // still in flight can be missed by the piece load's cache read, forcing an
+      // in-client recompile (the flake this test guards against). This awaits
+      // persistence specifically, NOT reactive idle.
+      await page.evaluate(async () => {
+        await globalThis.commonfabric?.rt?.flushCompileCacheWrites();
+      });
       const clientCompileCountBeforePieceLoad =
         await getClientEngineCompileCount(page);
 

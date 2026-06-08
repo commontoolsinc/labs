@@ -583,8 +583,17 @@ export class PatternManager {
       if (!compileResult) {
         loadedFromCache = false;
         compileResult = await this.runtime.harness.compile(program);
-        // Fire-and-forget cache write
-        cachedCompiler.set(programHash, compileResult).catch(() => {});
+        // Fire-and-forget cache write — does not block the load. Tracked in
+        // compileCacheWrites so flushCompileCacheWrites() can await it (graceful
+        // shutdown / deterministic tests), matching the ESM-path write-backs.
+        // Without this, a subsequent load of the same program can read the cache
+        // before this write lands and recompile (the piece.test.ts
+        // "0 in-client compilations" flake).
+        const cacheWrite = cachedCompiler.set(programHash, compileResult).catch(
+          () => {},
+        );
+        this.compileCacheWrites.add(cacheWrite);
+        cacheWrite.finally(() => this.compileCacheWrites.delete(cacheWrite));
       }
       return this.evaluateToPattern(compileResult, program, {
         skipBundleValidation: loadedFromCache,
