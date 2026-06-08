@@ -10,6 +10,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -919,11 +920,20 @@ describe("Cell Static Methods", () => {
       });
     });
 
-    it("should handle creating cell with Date object", () => {
+    it("should round-trip a FabricEpochNsec timestamp value", () => {
+      // A native `Date` is NOT a supported cell value: the write path doesn't
+      // normalize it to a `FabricValue`, so it's lost (flattened to `{}` or
+      // promoted to a bogus link) and the codec rejects it outright. The fabric
+      // representation of a timestamp is `FabricEpochNsec`, which round-trips
+      // faithfully.
       withinHandlerContext(runtime, space, tx, () => {
-        const date = new Date("2024-01-01");
-        const cell = Cell.of(date);
-        expect(cell.get()).toEqual(date);
+        const epoch = new FabricEpochNsec(
+          BigInt(Date.parse("2024-01-01T00:00:00Z")) * 1_000_000n,
+        );
+        const cell = Cell.of(epoch);
+        const got = cell.get() as FabricEpochNsec;
+        expect(got.value).toBe(epoch.value);
+        expect(got.wireTypeTag).toBe("EpochNsec@1");
       });
     });
 
