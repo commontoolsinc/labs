@@ -5,6 +5,7 @@ import {
   type CellScope,
   type ClientCommit,
   type ClientMessage,
+  columnDeclaresIfc,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
@@ -31,6 +32,7 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceRequest,
   type SqliteRegisterDiskSourceResult,
+  type SqliteResultColumn,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -51,6 +53,7 @@ import { assertReadOnly } from "./sqlite/guard.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import { ensureColumnOriginAvailable } from "./sqlite/column-origin.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -223,6 +226,23 @@ function missingTableName(error: unknown): string | undefined {
  *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
  *  `ü` as distinct tables, so folding them together here would mask a genuine
  *  "no such table" error as an empty result. */
+/** Whether any column of any declared table carries a non-empty `ifc` (so a
+ *  read of this db needs sound column provenance for CFC labeling). */
+function declaresColumnIfc(
+  tables: Record<string, unknown> | undefined,
+): boolean {
+  if (tables === undefined) return false;
+  for (const table of Object.values(tables)) {
+    const props = (table as { properties?: Record<string, unknown> })
+      ?.properties;
+    if (!props) continue;
+    for (const col of Object.values(props)) {
+      if (columnDeclaresIfc((col as { ifc?: unknown })?.ifc)) return true;
+    }
+  }
+  return false;
+}
+
 function isDeclaredTable(
   tables: Record<string, unknown> | undefined,
   name: string,
@@ -716,7 +736,8 @@ export class Server {
     sql: string,
     params: SqliteParamsWire | undefined,
     scopeKey: string,
-  ): Promise<unknown[]> {
+    wantColumns: boolean,
+  ): Promise<{ rows: unknown[]; columns?: SqliteResultColumn[] }> {
     // Apply the statement guard BEFORE the file-existence short-circuit, so a
     // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
     // multi-statement) is refused even against a never-written cell-db rather
@@ -731,11 +752,13 @@ export class Server {
     try {
       Deno.statSync(path);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return [];
+      if (error instanceof Deno.errors.NotFound) return { rows: [] };
       throw error;
     }
     try {
-      return this.#readPool.query(path, sql, params);
+      return wantColumns
+        ? this.#readPool.queryWithOrigins(path, sql, params)
+        : { rows: this.#readPool.query(path, sql, params) };
     } catch (error) {
       // The file exists (written at least once, so ensureTables created every
       // table declared at that write). A "no such table" therefore means either:
@@ -752,7 +775,7 @@ export class Server {
       // write yet succeed after (SQLite case-folds), flipping the contract.
       const missing = missingTableName(error);
       if (missing !== undefined && isDeclaredTable(db.tables, missing)) {
-        return [];
+        return { rows: [] };
       }
       throw error;
     }
@@ -986,9 +1009,30 @@ export class Server {
       // per-source difference is path resolution: an injected on-disk source's
       // registered path, else the cell-derived path (which the db's scope
       // qualifies, per the session's principal / id).
+      //
+      // Capture per-column origin ONLY when the db declares per-column `ifc`
+      // (CFC read-labeling needs sound provenance). Unlabeled dbs — the common
+      // case, and all injected on-disk sources — pay nothing.
+      const wantColumns = declaresColumnIfc(message.db.tables);
+      // Bind @db/sqlite's column-origin symbols before a labeled read; fail
+      // loudly if they can't be bound rather than mislabeling the result.
+      if (wantColumns && !(await ensureColumnOriginAvailable())) {
+        throw new Error(
+          "sqlite: CFC read labeling needs SQLite column-metadata FFI, but " +
+            "@db/sqlite's column-origin symbols could not be bound",
+        );
+      }
       const disk = this.#diskSources.get(message.space, message.db.id);
-      const rows = disk
-        ? this.#readPool.query(disk.path, message.sql, message.params)
+      const result = disk
+        ? (wantColumns
+          ? this.#readPool.queryWithOrigins(
+            disk.path,
+            message.sql,
+            message.params,
+          )
+          : {
+            rows: this.#readPool.query(disk.path, message.sql, message.params),
+          })
         : await this.#readCellDb(
           message.space,
           message.db,
@@ -998,8 +1042,13 @@ export class Server {
             principal: session.principal,
             sessionId: message.sessionId,
           }),
+          wantColumns,
         );
-      return { type: "response", requestId: message.requestId, ok: { rows } };
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: { rows: result.rows, columns: result.columns },
+      };
     } catch (error) {
       return respondTypedError<SqliteQueryResult>(
         message.requestId,
