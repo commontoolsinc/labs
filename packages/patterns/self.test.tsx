@@ -14,13 +14,16 @@
  *
  * Run: deno task cf test packages/patterns/self.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commonfabric";
+import { computed, handler, pattern, Writable } from "commonfabric";
 import Self, {
   appendResponse,
   appendValue,
   EMPTY_SELF_MODEL,
   type Neurotype,
+  type NeurotypeSystem,
   type QAResponse,
+  recordNeurotypeFromForm,
+  removeNeurotypeBySystem,
   type SelfModel,
   upsertNeurotype,
   type ValueCard,
@@ -69,6 +72,22 @@ const MEANING_RESPONSE: QAResponse = {
   track: "meaning",
   answeredAt: 2000,
 };
+
+// ---------------------------------------------------------------------------
+// Test-local void handler — data baked into state so the runner fires it as
+// Stream<void> with no payload.  Used only for the removeValueCard step.
+// ---------------------------------------------------------------------------
+
+const doRemoveValueCard = handler<
+  void,
+  { selfModel: Writable<SelfModel>; index: number }
+>((_event, { selfModel, index }) => {
+  const current = selfModel.get();
+  selfModel.set({
+    ...current,
+    values: current.values.filter((_, i) => i !== index),
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Test pattern
@@ -229,6 +248,94 @@ export default pattern(() => {
   );
 
   // =========================================================================
+  // Test 5b: removeValueCard removes by index — fresh cell with one value card
+  // =========================================================================
+
+  const selfModelValues = new Writable<SelfModel>(
+    appendValue(EMPTY_SELF_MODEL, CURIOSITY_CARD),
+  );
+
+  const action_remove_first_value = doRemoveValueCard({
+    selfModel: selfModelValues,
+    index: 0,
+  });
+
+  const assert_values_empty_after_remove = computed(
+    () => selfModelValues.get().values.length === 0,
+  );
+
+  // =========================================================================
+  // Form handler tests (CT-1672) — use a fresh selfModel to avoid state bleed
+  // =========================================================================
+
+  const selfModel2 = new Writable<SelfModel>(EMPTY_SELF_MODEL);
+  const systemField = new Writable<NeurotypeSystem>("enneagram");
+  const resultField = new Writable<string>("5w4");
+
+  // Test 6: recordNeurotypeFromForm records entry + clears resultField
+  const action_form_record_enneagram = recordNeurotypeFromForm({
+    selfModel: selfModel2,
+    systemField,
+    resultField,
+  });
+
+  const assert_form_recorded_enneagram = computed(() =>
+    selfModel2
+      .get()
+      .neurotypes.some(
+        (n) =>
+          n.system === "enneagram" &&
+          n.result === "5w4" &&
+          n.source === "self-reported",
+      )
+  );
+
+  const assert_result_field_cleared = computed(
+    () => resultField.get() === "",
+  );
+
+  // Test 7: upsert via form — record mbti "INTJ" then "ENFP", expect length 1 + "ENFP"
+  const systemField2 = new Writable<NeurotypeSystem>("mbti");
+  const resultField2a = new Writable<string>("INTJ");
+  const action_form_record_mbti_intj = recordNeurotypeFromForm({
+    selfModel: selfModel2,
+    systemField: systemField2,
+    resultField: resultField2a,
+  });
+
+  // After action_form_record_mbti_intj, resultField2a is cleared; set it to ENFP for upsert.
+  const resultField2b = new Writable<string>("ENFP");
+  const action_form_upsert_mbti_enfp = recordNeurotypeFromForm({
+    selfModel: selfModel2,
+    systemField: systemField2,
+    resultField: resultField2b,
+  });
+
+  const assert_form_upsert_length_one = computed(
+    () =>
+      selfModel2.get().neurotypes.filter((n) => n.system === "mbti").length ===
+        1,
+  );
+
+  const assert_form_upsert_result_enfp = computed(
+    () =>
+      selfModel2
+        .get()
+        .neurotypes.find((n) => n.system === "mbti")?.result === "ENFP",
+  );
+
+  // Test 8: removeNeurotypeBySystem — after two systems, remove enneagram, only mbti remains
+  const action_remove_enneagram_by_system = removeNeurotypeBySystem({
+    selfModel: selfModel2,
+    system: "enneagram",
+  });
+
+  const assert_only_mbti_after_remove = computed(() => {
+    const neurotypes = selfModel2.get().neurotypes;
+    return neurotypes.length === 1 && neurotypes[0]?.system === "mbti";
+  });
+
+  // =========================================================================
   // Test Sequence
   // =========================================================================
   return {
@@ -277,6 +384,25 @@ export default pattern(() => {
       { assertion: assert_owned_responses_empty },
       { assertion: assert_owned_values_empty },
       { assertion: assert_owned_neurotypes_empty },
+
+      // === Test 5b: removeValueCard removes by index ===
+      { action: action_remove_first_value },
+      { assertion: assert_values_empty_after_remove },
+
+      // === Test 6: recordNeurotypeFromForm records + clears resultField ===
+      { action: action_form_record_enneagram },
+      { assertion: assert_form_recorded_enneagram },
+      { assertion: assert_result_field_cleared },
+
+      // === Test 7: upsert via form — same system replaces, length stays 1 ===
+      { action: action_form_record_mbti_intj },
+      { action: action_form_upsert_mbti_enfp },
+      { assertion: assert_form_upsert_length_one },
+      { assertion: assert_form_upsert_result_enfp },
+
+      // === Test 8: removeNeurotypeBySystem removes correct entry ===
+      { action: action_remove_enneagram_by_system },
+      { assertion: assert_only_mbti_after_remove },
     ],
   };
 });
