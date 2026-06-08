@@ -7,6 +7,7 @@ export {
   type FabricNativeObject,
   type FabricObject,
   FabricPrimitive,
+  FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";

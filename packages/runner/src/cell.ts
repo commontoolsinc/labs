@@ -7,6 +7,7 @@ import {
 import {
   cloneIfNecessary,
   FabricInstance,
+  FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -2556,18 +2557,23 @@ export function recursivelyAddIDIfNeeded<T>(
   // - Sparse arrays (holes preserved)
   const converted = shallowFabricFromNativeValue(value);
 
-  // `FabricInstance` returned by the conversion step (e.g. `FabricError`
-  // wrapping a native `Error`). Same handling as the up-front
-  // `FabricInstance` branch above: record identity, walk via
-  // `[DECONSTRUCT]()` for side effects, return the instance unchanged.
-  if (converted instanceof FabricInstance) {
+  // A `FabricSpecialObject` returned by the conversion step (e.g. `FabricError`
+  // wrapping a native `Error`, or `FabricEpochNsec` wrapping a native `Date`).
+  // These are atomic fabric values and must be returned unchanged rather than
+  // walked as records (their state is private, so the record branch below would
+  // flatten them to `{}`). Only `FabricInstance`s carry nested `FabricValue`s
+  // that need `[ID]` assignment via `[DECONSTRUCT]()`; `FabricPrimitive`s are
+  // leaves.
+  if (converted instanceof FabricSpecialObject) {
     seen.set(value, converted);
 
-    // See above in re this cast.
-    const deconstructable = converted as unknown as FabricDeconstructable;
-    const state = deconstructable[DECONSTRUCT]();
-    if (isRecord(state) || Array.isArray(state)) {
-      recursivelyAddIDIfNeeded(state, frame, seen);
+    if (converted instanceof FabricInstance) {
+      // See above in re this cast.
+      const deconstructable = converted as unknown as FabricDeconstructable;
+      const state = deconstructable[DECONSTRUCT]();
+      if (isRecord(state) || Array.isArray(state)) {
+        recursivelyAddIDIfNeeded(state, frame, seen);
+      }
     }
     return converted as T;
   }
@@ -2600,9 +2606,13 @@ export function recursivelyAddIDIfNeeded<T>(
 
     sourceArray.forEach((el, i) => {
       const v = recursivelyAddIDIfNeeded(el, frame, seen);
-      // For objects on arrays only: Add ID if not already present.
+      // For objects on arrays only: Add ID if not already present. A
+      // `FabricSpecialObject` is an atomic fabric leaf, not a plain container —
+      // `{ [ID]: …, ...v }` would spread away its private state (flattening e.g.
+      // a `FabricEpochNsec` to `{[ID]: …}`), so it must be left intact.
       if (
-        isObject(v) && !isCellLink(v) && !(ID in v)
+        isObject(v) && !isCellLink(v) && !(ID in v) &&
+        !(v instanceof FabricSpecialObject)
       ) {
         changed = true;
         const withId = { [ID]: frame.generatedIdCounter++, ...v };
@@ -2874,7 +2884,19 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         kind,
       );
 
-      // Set the initial value only if value is defined
+      // Set the initial value only if value is defined.
+      // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
+      // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
+      // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
+      // (which runs `recursivelyAddIDIfNeeded`). The raw value flows both into
+      // `setInitialValue()` and into the schema `default` via
+      // `schemaWithDefaultAndScope()` above, and reaches storage/encode from
+      // there -- so a `Cell.of(new Date())` throws under the strict codec.
+      // (Normalizing only the `setInitialValue()` arg is insufficient; the
+      // schema-`default` copy still leaks the raw value, and embedding a
+      // `FabricSpecialObject` in a hashed schema `default` is its own hazard.)
+      // Fixing this cleanly is entangled with the initial-value / schema-default
+      // materialization path; left for that follow-up.
       if (value !== undefined) {
         cell.setInitialValue(value);
       }
