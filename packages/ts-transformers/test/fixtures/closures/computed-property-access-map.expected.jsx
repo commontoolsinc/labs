@@ -81,7 +81,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             name: string;
         }[];
     };
-}, import("commonfabric").JSXElement[]>({
+}, __cfHelpers.JSXElement[]>({
     type: "object",
     properties: {
         result: {

@@ -399,7 +399,7 @@ const __cfLift_4 = __cfHelpers.lift<{
         };
         title: string;
     };
-}, import("commonfabric").JSXElement>({
+}, __cfHelpers.JSXElement>({
     type: "object",
     properties: {
         section: {

@@ -165,8 +165,14 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   // does not re-show the create form (which would let it overwrite a valid
   // link). The `cf-render` below resolves and loads the cross-space profile for
   // display.
+  // `profile` is a Cell whose value is itself a Cell (TrustedProfileLink wraps
+  // Cell<ProfileHomeOutput>), so `profile.get()` returns the inner cell HANDLE,
+  // which is always non-undefined. Read one level deeper — `profile.get()?.get()`
+  // — to test whether the inner cell actually holds a value (i.e. a profile
+  // exists). Using `profile.get() !== undefined` here is always true and would
+  // permanently hide the create surface.
   const hasProfile = computed(() =>
-    profile.get() !== undefined ||
+    profile.get()?.get() !== undefined ||
     (profileName.get() ?? "").trim().length > 0
   );
 

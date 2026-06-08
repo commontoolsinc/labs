@@ -4,6 +4,7 @@ import {
   detectCallKind,
   type NormalizedDataFlow,
   setParentPointers,
+  typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
 import { TransformationContext } from "../../core/mod.ts";
@@ -133,11 +134,14 @@ export function createReactiveWrapperForExpression(
 
   try {
     resultType = checker.getTypeAtLocation(expression);
-    resultTypeNode = checker.typeToTypeNode(
+    // Build via the canonical chokepoint so commonfabric refs normalize to
+    // `__cfHelpers.X` and the node is registered for schema generation. (The
+    // call-node registration below still keys the lift-applied CallExpression
+    // to its result Type.)
+    resultTypeNode = typeToTypeNodeWithRegistry(
       resultType,
-      sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
+      { checker, factory, sourceFile },
+      context.options.state?.typeRegistry,
     );
   } catch {
     resultTypeNode = undefined;

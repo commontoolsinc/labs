@@ -8,6 +8,12 @@ import type { CellWrapperKind } from "./typescript/cell-brand.ts";
 /**
  * Names that should be treated as Cell-like wrapper types.
  * "Writable" is an alias for "Cell" that better expresses semantic meaning.
+ *
+ * NB: this keys off raw type-node NAMES (hence `Writable` is listed and
+ * `OpaqueCell` is split into `OPAQUE_WRAPPER_NAMES`). It is intentionally
+ * distinct from `common-fabric-formatter.ts`'s `CELL_CAPABILITY_KIND_MAP`,
+ * which keys off RESOLVED `CellWrapperKind` values (where `Writable` has already
+ * normalized to `Cell` and `OpaqueCell` belongs with the rest).
  */
 const CELL_LIKE_WRAPPER_NAMES = new Set([
   "Cell",

@@ -8,7 +8,9 @@ import {
   detectCallKind,
   getLiftAppliedInputAndCallback,
   getTypeFromTypeNodeWithFallback,
+  qualifyCommonFabricTypeRefs,
   setParentPointers,
+  typeToTypeNodeWithRegistry,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
@@ -456,8 +458,18 @@ export function transformLiftAppliedCall(
   let hasTypeParameter = false;
 
   if (callback.type) {
-    // Explicit return type annotation
-    resultTypeNode = callback.type;
+    // Explicit return type annotation. This may be a synthesized annotation
+    // attached upstream (pos < 0) that still carries raw
+    // `import("commonfabric").X` refs, so normalize it to `__cfHelpers.X`
+    // before it flows into the emitted lift type argument. The normalizer's
+    // ImportTypeNode branch is purely syntactic, so it works without a paired
+    // Type; pass the registered Type when available so it both qualifies nested
+    // bare refs and carries the registry association onto the rewritten node.
+    resultTypeNode = qualifyCommonFabricTypeRefs(
+      callback.type,
+      options.state?.typeRegistry?.get(callback.type),
+      { checker, factory, typeRegistry: options.state?.typeRegistry },
+    );
   } else if (signature) {
     // Infer from callback signature
     resultType = signature.getReturnType();
@@ -469,17 +481,20 @@ export function transformLiftAppliedCall(
     if (isTypeParam) {
       hasTypeParameter = true;
     } else {
-      resultTypeNode = checker.typeToTypeNode(
+      // Convert via the canonical chokepoint so commonfabric refs in the
+      // result type are normalized to the always-resolvable `__cfHelpers.X`
+      // form (otherwise the emitted `lift<In, Out>` second type arg prints
+      // `import("commonfabric").X`). It also registers the result Type in the
+      // typeRegistry for downstream schema generation.
+      resultTypeNode = typeToTypeNodeWithRegistry(
         resultType,
-        context.sourceFile,
-        ts.NodeBuilderFlags.NoTruncation |
-          ts.NodeBuilderFlags.UseStructuralFallback,
+        {
+          checker,
+          factory,
+          sourceFile: context.sourceFile,
+        },
+        options.state?.typeRegistry,
       );
-
-      // Register the result Type in typeRegistry
-      if (resultTypeNode && options.state?.typeRegistry) {
-        options.state?.typeRegistry.set(resultTypeNode, resultType);
-      }
     }
   }
 

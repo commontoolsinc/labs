@@ -6,6 +6,7 @@ import {
   buildTypeElementsFromCaptureTree,
   createRegisteredTypeLiteral,
   expressionToTypeNode,
+  typeToTypeNodeWithRegistry,
 } from "../../ast/type-building.ts";
 import {
   inferArrayElementType,
@@ -253,14 +254,13 @@ export class SchemaFactory {
     // Infer from parameter location
     const type = checker.getTypeAtLocation(eventParam);
 
-    // Try to convert Type to TypeNode
-    const typeNode = checker.typeToTypeNode(
+    // Convert via the canonical chokepoint: normalizes commonfabric refs to
+    // `__cfHelpers.X`, registers the node for schema generation, and falls back
+    // to `unknown` if conversion fails.
+    return typeToTypeNodeWithRegistry(
       type,
-      this.context.sourceFile,
-      ts.NodeBuilderFlags.NoTruncation |
-        ts.NodeBuilderFlags.UseStructuralFallback,
-    ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-
-    return registerTypeForNode(typeNode, type, typeRegistry);
+      { checker, factory, sourceFile: this.context.sourceFile },
+      typeRegistry,
+    );
   }
 }

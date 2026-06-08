@@ -63,29 +63,72 @@ export function qualifyCommonFabricTypeRefs(
       factory.createIdentifier(leafName),
     );
 
+  const isCommonFabricSymbol = (sym: ts.Symbol | undefined): boolean => {
+    if (!sym) return false;
+    const parent = (sym as unknown as { parent?: ts.Symbol }).parent;
+    return isCommonFabricModuleName(parent?.name) && !!sym.name;
+  };
+
   // From a Type, find the export name in commonfabric (if any).
   //
-  // Prefer `aliasSymbol` over `symbol`: when the user writes `Writable<X>`
-  // and `Writable` is an alias for `Cell`, the Type's `symbol` may be the
-  // underlying `Cell` constructor while `aliasSymbol` correctly points at
-  // `Writable`. Preserving the user's chosen name keeps the emitted
-  // annotation closer to authored intent.
+  // Prefer `aliasSymbol`: when the user writes `Writable<X>` and `Writable` is
+  // itself a commonfabric alias for `Cell`, the Type's `symbol` is the
+  // underlying `Cell` constructor while `aliasSymbol` points at `Writable` —
+  // we want to keep `Writable`.
+  //
+  // Crucially, if `aliasSymbol` is a USER alias (NOT a commonfabric export),
+  // the user has already named this type completely and resolvably (e.g.
+  // `type SharedMessagesCell = Writable<Foo>`). We must NOT fall through to
+  // `type.symbol` and rewrite to the bare underlying commonfabric name: the
+  // alias-reference node carries no type arguments (they're hidden inside the
+  // alias), so rewriting `SharedMessagesCell` -> `__cfHelpers.Cell` would drop
+  // the `<Foo>` entirely, degrading the type to `Cell<unknown>` and breaking
+  // runtime cell materialization. Leave user aliases alone.
   const commonFabricExportName = (
     type: ts.Type | undefined,
   ): string | undefined => {
     if (!type) return undefined;
-    const candidates: (ts.Symbol | undefined)[] = [
-      type.aliasSymbol,
-      type.symbol,
-    ];
-    for (const sym of candidates) {
-      if (!sym) continue;
-      const parent = (sym as unknown as { parent?: ts.Symbol }).parent;
-      if (isCommonFabricModuleName(parent?.name) && sym.name) {
-        return sym.name;
-      }
+    if (type.aliasSymbol) {
+      return isCommonFabricSymbol(type.aliasSymbol)
+        ? type.aliasSymbol.name
+        : undefined;
     }
-    return undefined;
+    return isCommonFabricSymbol(type.symbol) ? type.symbol.name : undefined;
+  };
+
+  // For a union/intersection member TypeNode, find the constituent Type to
+  // pair it with. Matches by commonfabric export name (order-independent):
+  // a bare member ref `X` is paired with the constituent whose CF export name
+  // is `X`. Returns undefined when there's no constituent info or no match —
+  // in which case the member is walked with no paired Type (safe: it can only
+  // be rewritten via the syntactic Import-form branch, never misattributed).
+  const pairedConstituentForMember = (
+    member: ts.TypeNode,
+    unionOrIntersectionType: ts.Type | undefined,
+  ): ts.Type | undefined => {
+    if (!unionOrIntersectionType) return undefined;
+    const constituents =
+      (unionOrIntersectionType as ts.UnionOrIntersectionType).types;
+    if (!constituents) return undefined;
+
+    // Only bare identifier refs can be name-matched (the case the printer
+    // emits for in-scope/aliasable commonfabric types inside unions).
+    if (!ts.isTypeReferenceNode(member) || !ts.isIdentifier(member.typeName)) {
+      return undefined;
+    }
+    const memberName = member.typeName.text;
+    // Require an UNAMBIGUOUS match. If two constituents share a commonfabric
+    // export name but differ in their type arguments (e.g. `Cell<A> | Cell<B>`,
+    // both printed as bare `Cell<...>`), name-matching alone can't tell which
+    // member pairs with which constituent. Picking the first would walk the
+    // member's nested type args against the wrong constituent's args and could
+    // mis-rewrite a nested generic. On ambiguity, return undefined: the member
+    // is left unpaired (un-normalized) rather than risk a wrong rewrite — the
+    // safe degradation this helper already documents.
+    const matches = constituents.filter(
+      (constituent) => commonFabricExportName(constituent) === memberName,
+    );
+    return matches.length === 1 ? matches[0] : undefined;
   };
 
   // For a TypeReference Type, get its Nth type argument. Different
@@ -250,26 +293,27 @@ export function qualifyCommonFabricTypeRefs(
         : factory.updateArrayTypeNode(node, rewritten);
     }
 
-    // Union / Intersection: walk each member without paired Type info (the
-    // paired Type IS the union/intersection, but mapping individual members
-    // to constituent Types is brittle; recurse and rely on Import-form
-    // detection for nested refs).
-    if (ts.isUnionTypeNode(node)) {
-      const rewritten = node.types.map((t) => walk(t, undefined));
+    // Union / Intersection: walk each member, pairing it with the constituent
+    // Type that matches by commonfabric export name. Index-pairing TypeNode
+    // members to constituent Types is brittle (TS doesn't guarantee matching
+    // order), so we match by NAME instead: for a bare member ref, find the
+    // constituent whose commonfabric export name equals the ref's identifier.
+    // This is order-independent and only ever supplies a paired Type that
+    // would make the member rewrite to that same name — a non-CF member finds
+    // no match and passes through unchanged. The Import-form (ImportTypeNode)
+    // members are still handled syntactically without needing a paired Type.
+    if (ts.isUnionTypeNode(node) || ts.isIntersectionTypeNode(node)) {
+      const rewritten = node.types.map((t) =>
+        walk(t, pairedConstituentForMember(t, pairedType))
+      );
       const changed = rewritten.some((t, i) => t !== node.types[i]);
-      return changed
+      if (!changed) return node;
+      return ts.isUnionTypeNode(node)
         ? factory.updateUnionTypeNode(node, factory.createNodeArray(rewritten))
-        : node;
-    }
-    if (ts.isIntersectionTypeNode(node)) {
-      const rewritten = node.types.map((t) => walk(t, undefined));
-      const changed = rewritten.some((t, i) => t !== node.types[i]);
-      return changed
-        ? factory.updateIntersectionTypeNode(
+        : factory.updateIntersectionTypeNode(
           node,
           factory.createNodeArray(rewritten),
-        )
-        : node;
+        );
     }
 
     // ParenthesizedType, TypeOperator: unwrap and walk inner.
@@ -289,7 +333,20 @@ export function qualifyCommonFabricTypeRefs(
     return node;
   };
 
-  return walk(typeNode, rootType);
+  const result = walk(typeNode, rootType);
+
+  // Carry the registry association forward. The walk returns a fresh node when
+  // it rewrites anything, which would otherwise orphan the original node's
+  // typeRegistry entry — downstream consumers (e.g. the SchemaGenerator) look
+  // the emitted node up by identity, and a missing entry silently degrades the
+  // generated schema (e.g. a precise JSXElement schema collapses to `true`).
+  // Registering here means callers that hand an already-built node to the
+  // normalizer can't forget to re-register it.
+  if (result !== typeNode && rootType && context.typeRegistry) {
+    context.typeRegistry.set(result, rootType);
+  }
+
+  return result;
 }
 
 /**

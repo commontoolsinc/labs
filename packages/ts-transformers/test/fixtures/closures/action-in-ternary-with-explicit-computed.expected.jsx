@@ -42,7 +42,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         description: string;
     };
     startEditing: __cfHelpers.Stream<void>;
-}, import("commonfabric").JSXElement>({
+}, __cfHelpers.JSXElement>({
     type: "object",
     properties: {
         card: {

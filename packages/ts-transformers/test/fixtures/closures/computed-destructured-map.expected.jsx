@@ -77,7 +77,7 @@ const __cfLift_1 = __cfHelpers.lift<{
 }));
 const __cfLift_2 = __cfHelpers.lift<{
     result: { tasks: Item[]; view: string; };
-}, import("commonfabric").JSXElement[]>({
+}, __cfHelpers.JSXElement[]>({
     type: "object",
     properties: {
         result: {

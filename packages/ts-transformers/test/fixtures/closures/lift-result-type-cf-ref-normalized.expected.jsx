@@ -41,20 +41,22 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => {
-    const format = (value: number) => `Count: ${value}`;
-    return <span>{format(count)}</span>;
-});
-// FIXTURE: computed-jsx-local-function
-// Verifies: computed() with a locally-defined function inside the callback is closure-extracted
-//   computed(() => { const format = ...; return <span>{format(count)}</span> }) → lift(({ count }) => { ... })({ count })
-//   The pattern param `count` is captured with asOpaque: true in the schema.
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => <span>{count}</span>);
+// FIXTURE: lift-result-type-cf-ref-normalized
+// Verifies: a synthesized lift's RESULT type argument that is a commonfabric
+// type (here JSXElement, the type of the returned JSX) is emitted as the
+// canonical __cfHelpers.JSXElement form, NOT the inline TS import-type form
+// the printer produces by default.
+//
+// Regression guard for the bug where lift result-type construction bypassed the
+// qualifyCommonFabricTypeRefs normalizer. The companion invariant test
+// (test/no-import-type-in-output.test.ts) guards every path globally; this
+// fixture pins the specific JSX-returning-computed shape with a legible,
+// minimal diff so a regression is obvious here too.
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
-        [UI]: (<div>
-        {__cfLift_1({ count: count })}
-      </div>),
+        [UI]: <div>{__cfLift_1({ count: count })}</div>,
     };
 }, {
     type: "object",

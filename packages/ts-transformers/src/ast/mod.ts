@@ -93,3 +93,7 @@ export {
   unwrapOpaqueLikeType,
   widenLiteralType,
 } from "./type-inference.ts";
+export {
+  qualifyCommonFabricTypeRefs,
+  typeToTypeNodeWithRegistry,
+} from "./type-building.ts";
