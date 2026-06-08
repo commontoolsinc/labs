@@ -70,6 +70,7 @@ import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 import {
   type IMemorySpaceValueAddress,
+  isSigilLink,
   isWriteRedirectLink,
   type ValuePath,
 } from "./link-types.ts";
@@ -1537,7 +1538,14 @@ function loadMetaLinkedDoc(
       return [];
     }
     for (const manifestEntry of targetObj["internal"]) {
-      if ("link" in manifestEntry && isPrimitiveCellLink(manifestEntry.link)) {
+      if (!isRecord(manifestEntry)) {
+        logger.warn(
+          "traverse",
+          () => ["Invalid internal manifest entry in", valueEntry.address],
+        );
+        continue;
+      }
+      if ("link" in manifestEntry && isSigilLink(manifestEntry.link)) {
         const item = loadMetaLinkedDocFromLink(
           tx,
           valueEntry,
