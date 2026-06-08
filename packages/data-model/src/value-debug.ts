@@ -4,7 +4,11 @@
 
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { FabricInstance, FabricPrimitive } from "./interface.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+} from "./interface.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
@@ -116,29 +120,55 @@ class DebugStringifier {
       }
 
       case "object": {
-        // TODO(danfuzz): This case will have to get smarter once we have
-        // `FabricSpecialObject`s flowing through the system (which generally cannot
-        // be stringified with full fidelity via `JSON.stringify()`'s default
-        // behavior).
-
-        if ((value !== null) && this.#circles.has(value)) {
+        if (value === null) {
+          // Let `JSON.stringify()` just render it directly as `"null"`.
+          return null;
+        } else if (this.#circles.has(value)) {
           if (this.#unusedCircles.has(value)) {
             this.#unusedCircles.delete(value);
             return value;
           }
           return marked("<circle>");
-        } else {
+        } else if (isPlainObject(value) || Array.isArray(value)) {
           return value;
+        }
+
+        // Non-plain object.
+
+        const className =
+          (value as { constructor?: { name?: string } }).constructor?.name ??
+            "<anonymous>";
+
+        if (value instanceof FabricSpecialObject) {
+          // The slash here is to suggest that what we're rendering is a known
+          // encodable type, and not just an instance of some random class.
+          // TODO(danfuzz): This should get fancier/smarter once the new "codec"
+          // work lands in `data-model`.
+          const fullTag = (value as { wireTypeTag?: string }).wireTypeTag ??
+            className;
+          const tag = fullTag.replace(/@.*$/, "");
+          return marked(`/${tag}(...)`);
+        } else {
+          // Non-plain non-fabric object. Punt on attempting to render the
+          // innards.
+          return marked(`new ${className}(...)`);
         }
       }
 
       case "symbol": {
         const key = Symbol.keyFor(value);
-        return marked(
-          (key === undefined)
-            ? `Symbol(${JSON.stringify(value.description ?? "")})`
-            : `Symbol.for(${JSON.stringify(key)})`,
-        );
+        if (key === undefined) {
+          // Uninterned ("unique") symbol.
+          const description = value.description;
+          return marked(
+            (description === undefined)
+              ? "Symbol()"
+              : `Symbol(${JSON.stringify(description)})`,
+          );
+        } else {
+          // Interned symbol.
+          return marked(`Symbol.for(${JSON.stringify(key)})`);
+        }
       }
 
       case "undefined": {
