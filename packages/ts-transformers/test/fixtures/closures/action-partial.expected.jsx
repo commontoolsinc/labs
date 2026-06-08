@@ -11,6 +11,12 @@ import { Cell, pattern, action } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface BaseState {
+    a: Cell<string>;
+    b: Cell<number>;
+}
+// Partial<BaseState> should make both 'a' and 'b' optional in the schema
+type PartState = Partial<BaseState>;
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -37,12 +43,6 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b));
-interface BaseState {
-    a: Cell<string>;
-    b: Cell<number>;
-}
-// Partial<BaseState> should make both 'a' and 'b' optional in the schema
-type PartState = Partial<BaseState>;
 // FIXTURE: action-partial
 // Verifies: Partial<BaseState> produces optional (anyOf undefined|type) capture schemas in handlers
 //   action(() => console.log(a)) → handler(false, { a: { anyOf: [undefined, string] } }, ...)({ a })
@@ -85,3 +85,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfHandler_2
+});

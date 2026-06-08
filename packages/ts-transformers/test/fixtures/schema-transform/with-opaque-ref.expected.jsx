@@ -11,6 +11,22 @@ import { Cell, pattern, toSchema, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    value: Cell<number>;
+}
+const model = __cfHelpers.__cf_data({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: ["cell"]
+        }
+    },
+    required: ["value"],
+    "default": {
+        value: 0
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_1 = __cfHelpers.lift<{
     cell: {
         value: __cfHelpers.Cell<number>;
@@ -33,22 +49,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value.get() * 2);
-interface State {
-    value: Cell<number>;
-}
-const model = __cfHelpers.__cf_data({
-    type: "object",
-    properties: {
-        value: {
-            type: "number",
-            asCell: ["cell"]
-        }
-    },
-    required: ["value"],
-    "default": {
-        value: 0
-    }
-} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: with-opaque-ref
 // Verifies: Cell<> fields generate asCell in schema and a reactive builder gets input/output schemas injected
 //   Cell<number> → { type: "number", asCell: true }
@@ -87,3 +87,6 @@ export default pattern((cell) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

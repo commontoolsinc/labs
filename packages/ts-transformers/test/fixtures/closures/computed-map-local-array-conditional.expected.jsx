@@ -11,6 +11,12 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    done: boolean;
+}
+interface State {
+    items: Item[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -76,12 +82,58 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema, ({ view }) => view[0]);
-interface Item {
-    done: boolean;
-}
-interface State {
-    items: Item[];
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    const view = [__cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            "enum": ["Done", "Pending"]
+        } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for(["view", 0], true)];
+    return <span>{__cfLift_2({ view: view })}</span>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-local-array-conditional
 // Verifies: nested ternary inside a callback-local array initializer within a
 //   computed-array .map() callback is lowered at the array element site.
@@ -93,59 +145,8 @@ export default pattern((state) => {
         } }).for("rows", true);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const row = __cf_pattern_input.key("element");
-                const view = [__cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        "enum": ["Done", "Pending"]
-                    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for(["view", 0], true)];
-                return <span>{__cfLift_2({ view: view })}</span>;
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            done: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["done"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+        {rows.mapWithPattern(__cfPattern_1, {})}
+      </div>),
     };
 }, {
     type: "object",
@@ -202,3 +203,8 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfPattern_1
+});

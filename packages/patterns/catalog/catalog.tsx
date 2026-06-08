@@ -90,6 +90,13 @@ interface CatalogInput {
         ];
       },
       {
+        name: "Identity";
+        items: [
+          { id: "avatar"; label: "Avatar" },
+          { id: "profile-badge"; label: "Profile Badge" },
+        ];
+      },
+      {
         name: "Feedback";
         items: [
           { id: "progress"; label: "Progress" },

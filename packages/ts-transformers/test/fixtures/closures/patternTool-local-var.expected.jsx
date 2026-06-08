@@ -11,6 +11,14 @@ import { computed, generateText, pattern, patternTool, type PatternToolResult, W
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const content = __cfHelpers.__cf_data(new Writable("Hello world", {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema).for("content", true));
+type Output = {
+    tool: PatternToolResult<{
+        content: string;
+    }>;
+};
 const __cfLift_1 = __cfHelpers.lift<{
     language: string;
 }, string>({
@@ -66,39 +74,42 @@ const __cfLift_3 = __cfHelpers.lift<{
         return undefined;
     return genResult.result;
 });
-const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
+const __cfPattern_1 = pattern((__cf_pattern_input: {
     language: string;
     content: string;
 }) => {
+    const language = __cf_pattern_input.key("language");
+    const content = __cf_pattern_input.key("content");
     const genResult = generateText({
         system: __cfLift_1({ language: language }).for(["genResult", "system"], true),
         prompt: __cfLift_2({ content: content }).for(["genResult", "prompt"], true)
     }).for("genResult", true);
     return __cfLift_3({ genResult: {
-            pending: genResult.pending,
-            result: genResult.result
-        } });
-});
-const content = __cfHelpers.__cf_data(new Writable("Hello world", {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema).for("content", true));
-type Output = {
-    tool: PatternToolResult<{
-        content: string;
-    }>;
-};
-// Regression test: local variables (genResult) must NOT be captured as
-// extraParams, even when they have a reactive type. Only module-scoped
-// reactive variables (content) should be captured.
+            pending: genResult.key("pending"),
+            result: genResult.key("result")
+        } }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        language: {
+            type: "string"
+        },
+        content: {
+            type: "string"
+        }
+    },
+    required: ["language", "content"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: patternTool-local-var
-// Verifies: patternTool captures module-scoped reactive var but NOT local variables
-//   patternTool(fn, { content }) → extraParams includes only module-scoped `content`
-//   genResult (local) is NOT added to extraParams despite having a reactive type
-// Context: Regression test — local variables like `genResult` (from generateText)
-//   must not be hoisted into extraParams. Only module-scoped reactive bindings
-//   (here, `content` from new Writable) should be captured.
+// Verifies: patternTool's first arg is a pattern() (CT-1655); `content` is a
+//   genuine pattern input supplied via extraParams, while the pattern-local
+//   `genResult` (from generateText) stays a local binding (not pulled into
+//   extraParams).
+//   patternTool(pattern(({ language, content }) => …genResult…), { content })
 export default pattern(() => {
-    const tool = patternTool(__cfModuleCallback_1, { content: content.for(["tool", 1, "content"], true) });
+    const tool = patternTool(__cfPattern_1, { content: content.for(["tool", 1, "content"], true) });
     return { tool };
 }, {
     type: "object",
@@ -151,3 +162,9 @@ export default pattern(() => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfPattern_1
+});

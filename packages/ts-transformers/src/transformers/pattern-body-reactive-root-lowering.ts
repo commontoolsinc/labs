@@ -58,6 +58,57 @@ const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "query",
 ]);
 
+// Mutating methods on cells / reactive arrays. A write of any of these in the
+// pattern body is not lowerable, and the remedy is a module-scope handler<> —
+// NOT computed(), which is read-only (CT-1641).
+const WRITE_METHODS = new Set([
+  // Cell write API
+  "set",
+  "update",
+  "push",
+  "remove",
+  "removeAll",
+  // Array mutators (in case the author reaches for them on a reactive array)
+  "pop",
+  "shift",
+  "unshift",
+  "splice",
+  "sort",
+  "reverse",
+  "fill",
+  "copyWithin",
+]);
+
+// The remedy half of the "method calls are not lowerable" diagnostics. The
+// pattern body runs once at construction, so an event-driven write there has no
+// triggering event and isn't lowerable; route it through a module-scope
+// handler<>. (Wrapping the write in computed() is not the fix either: a write in
+// a computed() re-triggers the computation and must be idempotent — see
+// docs/common/concepts/computed/side-effects.md.) Non-write unsupported calls
+// still belong in computed()/lift().
+function notLowerableMethodRemedy(methodName: string | undefined): string {
+  if (methodName && WRITE_METHODS.has(methodName)) {
+    return "Writes to pattern inputs must go through a module-scope handler<> " +
+      "(typed Writable<T>), not the pattern body, which runs once at " +
+      "construction.";
+  }
+  return "Move this call into computed().";
+}
+
+// Best-effort extraction of the invoked method name from a call expression
+// whose callee is a property access (e.g. `items.push(...)` -> "push").
+function calleeMethodName(call: ts.CallExpression): string | undefined {
+  const callee = call.expression;
+  if (ts.isPropertyAccessExpression(callee)) return callee.name.text;
+  if (
+    ts.isElementAccessExpression(callee) &&
+    ts.isStringLiteralLike(callee.argumentExpression)
+  ) {
+    return callee.argumentExpression.text;
+  }
+  return undefined;
+}
+
 function isSelfPathSegment(
   segment: PathSegment,
   context: TransformationContext,
@@ -820,7 +871,8 @@ function rewriteTrackedOpaquePatternBody(
           reportOnce(
             visited,
             "computation",
-            "Method calls on opaque pattern values are not lowerable. Move this call into computed().",
+            "Method calls on opaque pattern values are not lowerable. " +
+              notLowerableMethodRemedy(visited.name.text),
           );
           return visited;
         }
@@ -854,6 +906,9 @@ function rewriteTrackedOpaquePatternBody(
       );
       if (unsupportedCallRoot === "unsupported-receiver-method") {
         const reactiveContext = context.getReactiveContext(visited);
+        const methodName = calleeMethodName(visited);
+        const isWrite = methodName !== undefined &&
+          WRITE_METHODS.has(methodName);
         if (
           reactiveContext.kind === "pattern" &&
           (reactiveContext.owner === "pattern" ||
@@ -863,13 +918,17 @@ function rewriteTrackedOpaquePatternBody(
           reportOnce(
             visited,
             "receiver-method",
-            "Method calls on reactive values are not yet supported directly in non-JSX pattern bodies. Move this call into computed(() => ...), module-scope lift(), or another safe wrapper.",
+            isWrite
+              ? "Writes to pattern inputs are not supported directly in pattern bodies. " +
+                notLowerableMethodRemedy(methodName)
+              : "Method calls on reactive values are not yet supported directly in non-JSX pattern bodies. Move this call into computed(() => ...), module-scope lift(), or another safe wrapper.",
           );
         } else {
           reportOnce(
             visited,
             "receiver-method",
-            "Method calls on opaque pattern values are not lowerable. Move this call into computed().",
+            "Method calls on opaque pattern values are not lowerable. " +
+              notLowerableMethodRemedy(methodName),
           );
         }
       }

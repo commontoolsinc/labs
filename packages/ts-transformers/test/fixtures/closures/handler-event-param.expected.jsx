@@ -11,6 +11,10 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    selectedValue: Cell<string>;
+    changeCount: Cell<number>;
+}
 const __cfHandler_1 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -46,10 +50,6 @@ const __cfHandler_1 = __cfHelpers.handler({
     state.selectedValue.set(event.detail.value);
     state.changeCount.set(state.changeCount.get() + 1);
 });
-interface State {
-    selectedValue: Cell<string>;
-    changeCount: Cell<number>;
-}
 // FIXTURE: handler-event-param
 // Verifies: inline handler with a named event parameter generates event + capture schemas
 //   onct-change={(event) => ...} → handler(event schema with detail.value, capture schema, (event, { state }) => ...)({ state })
@@ -112,3 +112,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1
+});

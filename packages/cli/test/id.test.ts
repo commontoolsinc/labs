@@ -72,4 +72,71 @@ describe("cli id", () => {
     expect(code).toBe(0);
     checkStderr(stderr);
   });
+
+  it("Derives a passphrase key from stdin via '-'", async () => {
+    // Trailing newline (as `echo`/files produce) must be stripped so the
+    // result matches the equivalent argv invocation.
+    const { code, stdout, stderr } = await cf("id derive -", "common user\n");
+    const keyBuffer = encode(stdout.join("\n"));
+    const identity = await Identity.fromPkcs8(keyBuffer);
+    expect(identity.did()).toBe(COMMON_USER_DID);
+    expect(code).toBe(0);
+    checkStderr(stderr);
+  });
+
+  it("Derives a passphrase key from stdin when the argument is omitted", async () => {
+    const { code, stdout, stderr } = await cf("id derive", "common user");
+    const keyBuffer = encode(stdout.join("\n"));
+    const identity = await Identity.fromPkcs8(keyBuffer);
+    expect(identity.did()).toBe(COMMON_USER_DID);
+    expect(code).toBe(0);
+    checkStderr(stderr);
+  });
+
+  it("Derives a mnemonic key from stdin via '-'", async () => {
+    const { code, stdout, stderr } = await cf(
+      "id from-mnemonic -",
+      `${TEST_MNEMONIC}\n`,
+    );
+    const keyBuffer = encode(stdout.join("\n"));
+    const identity = await Identity.fromPkcs8(keyBuffer);
+    expect(identity.did()).toBe(TEST_MNEMONIC_DID);
+    expect(code).toBe(0);
+    checkStderr(stderr);
+  });
+
+  it("Errors when no secret is provided on stdin", async () => {
+    const { code, stdout } = await cf("id from-mnemonic -", "");
+    expect(code).not.toBe(0);
+    expect(stdout.length).toBe(0);
+  });
+
+  it("Derives a passphrase key from a file via '-- <file>'", async () => {
+    const file = await Deno.makeTempFile();
+    // Trailing newline (as editors/`echo` produce) must be stripped.
+    await Deno.writeTextFile(file, "common user\n");
+    const { code, stdout, stderr } = await cf(`id derive -- ${file}`);
+    const identity = await Identity.fromPkcs8(encode(stdout.join("\n")));
+    expect(identity.did()).toBe(COMMON_USER_DID);
+    expect(code).toBe(0);
+    checkStderr(stderr);
+  });
+
+  it("Derives a mnemonic key from a file via '-- <file>'", async () => {
+    const file = await Deno.makeTempFile();
+    await Deno.writeTextFile(file, `${TEST_MNEMONIC}\n`);
+    const { code, stdout, stderr } = await cf(`id from-mnemonic -- ${file}`);
+    const identity = await Identity.fromPkcs8(encode(stdout.join("\n")));
+    expect(identity.did()).toBe(TEST_MNEMONIC_DID);
+    expect(code).toBe(0);
+    checkStderr(stderr);
+  });
+
+  it("Errors when both an inline value and a -- <file> are given", async () => {
+    const file = await Deno.makeTempFile();
+    await Deno.writeTextFile(file, "common user");
+    const { code, stdout } = await cf(`id derive inline -- ${file}`);
+    expect(code).not.toBe(0);
+    expect(stdout.length).toBe(0);
+  });
 });

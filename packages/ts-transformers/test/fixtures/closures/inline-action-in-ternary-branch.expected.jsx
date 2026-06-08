@@ -19,6 +19,14 @@ import { Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Card {
+    title: string;
+    description: string;
+}
+interface State {
+    card: Card;
+    isEditing: Cell<boolean>;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -79,14 +87,6 @@ const __cfLift_1 = __cfHelpers.lift<{
         isEditing: state.isEditing
     }
 })}>Edit</cf-button>));
-interface Card {
-    title: string;
-    description: string;
-}
-interface State {
-    card: Card;
-    isEditing: Cell<boolean>;
-}
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in a lift-applied computation
 //   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → lift(..., handler(...)(...))({ state: { isEditing: asCell } })
@@ -197,3 +197,7 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfLift_1
+});

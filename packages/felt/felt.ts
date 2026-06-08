@@ -104,14 +104,25 @@ export class Felt {
       return;
     }
 
-    const server = new DevServer({
-      useReloadSocket: isDev,
-      hostname,
-      redirectToIndex,
-      port,
-      outDir,
-      staticDirs: this.config.staticDirs,
-    });
+    let server: DevServer;
+    try {
+      server = new DevServer({
+        useReloadSocket: isDev,
+        hostname,
+        redirectToIndex,
+        port,
+        outDir,
+        staticDirs: this.config.staticDirs,
+      });
+    } catch (error) {
+      if (error instanceof Deno.errors.AddrInUse) {
+        // Reported only when the actual bind fails. Exit code 3 matches the
+        // dev-server scripts so a port collision can be retried elsewhere.
+        console.error(`Port ${port} is already in use`);
+        Deno.exit(3);
+      }
+      throw error;
+    }
 
     if (isDev) {
       builder.addEventListener("build", (_) => {

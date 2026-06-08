@@ -5,6 +5,7 @@
 
 import { type BindValue, Database } from "@db/sqlite";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
+import { columnOrigins } from "./column-origin.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
 
 // Reserved schema names that may never be used as a pattern-db attach alias.
@@ -38,33 +39,17 @@ export function attachDatabase(
   db: Database,
   alias: string,
   path: string,
-  options?: { readOnly?: boolean },
 ): void {
   assertSafeAlias(alias);
   if (db.inTransaction) {
     throw new Error("attachDatabase must be called outside a transaction");
   }
   // Path is bound as a parameter; the alias is a validated literal (it cannot be
-  // a bind parameter in ATTACH).
+  // a bind parameter in ATTACH). Only the cell-derived WRITE path attaches here
+  // (read-write, folded into the commit). Reads — cell-derived and injected
+  // on-disk — run unattached on the read pool (ReadConnectionPool), which opens
+  // each file `readonly`; that is where read-only enforcement now lives.
   db.exec(`ATTACH DATABASE ? AS ${alias}`, path);
-  // SQLite's ATTACH has no per-attachment read-only flag (and `@db/sqlite`'s
-  // connection is not opened with SQLITE_OPEN_URI, so `file:…?mode=ro` ATTACH is
-  // rejected). For injected on-disk sources (Phase 7, read-only v1) the caller
-  // pairs this with `setQueryOnly(db, true)` for the duration of the op, which
-  // makes the whole connection reject writes. The flag documents intent and
-  // leaves room for a real per-attachment read-only path later.
-  void options?.readOnly;
-}
-
-/**
- * Toggle connection-global read-only mode (`PRAGMA query_only`). Used to enforce
- * read-only access to an injected on-disk source (Phase 7). Safe because the
- * attach→op→detach window is synchronous (no interleaving on the shared
- * single-threaded connection — see Server.#onCellDb). Issued directly here, not
- * through the guarded run* paths, so the guard's PRAGMA ban does not apply.
- */
-export function setQueryOnly(db: Database, on: boolean): void {
-  db.exec(`PRAGMA query_only = ${on ? "ON" : "OFF"}`);
 }
 
 /** DETACH a previously attached alias. Must be called outside a transaction and
@@ -100,6 +85,45 @@ export function runQuery<Row = Record<string, unknown>>(
 ): Row[] {
   assertReadOnly(sql);
   return db.prepare(sql).all(...bindArgs(params)) as Row[];
+}
+
+/** A result column's output name plus its TRUE source `(table, column)` origin
+ *  (null for an expression/computed/compound column). */
+export interface QueryColumn {
+  output: string;
+  table: string | null;
+  column: string | null;
+}
+
+/**
+ * Like {@link runQuery}, but also returns each result column's TRUE origin
+ * (resolved by the engine via SQLite column-metadata — see `column-origin.ts`),
+ * so CFC read-labeling can map an aliased/joined result column back to the
+ * declared `(table, column)` it came from, soundly. Only used when the db
+ * declares per-column `ifc` (zero overhead otherwise — callers use `runQuery`).
+ */
+export function runQueryWithOrigins<Row = Record<string, unknown>>(
+  db: Database,
+  sql: string,
+  params?: SqliteParams,
+): { rows: Row[]; columns: QueryColumn[] } {
+  assertReadOnly(sql);
+  const stmt = db.prepare(sql);
+  try {
+    const names = stmt.columnNames();
+    const origins = columnOrigins(stmt.unsafeHandle, names.length);
+    const rows = stmt.all(...bindArgs(params)) as Row[];
+    return {
+      rows,
+      columns: names.map((output, i) => ({
+        output,
+        table: origins[i]?.table ?? null,
+        column: origins[i]?.column ?? null,
+      })),
+    };
+  } finally {
+    stmt.finalize();
+  }
 }
 
 /** Run a single guarded INSERT/UPDATE/DELETE. */

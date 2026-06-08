@@ -39,8 +39,8 @@ type Operation = SetOperation | PatchWriteOperation | DeleteOperation;
 Operations do not include parent hashes or other version identifiers. The server
 validates the read set, assigns a canonical `seq`, and records one or more
 sequenced revisions. `set` carries a logical `EntityDocument`; `patch` carries
-path-targeted edits whose leaf values use the shared rich-value surface rather
-than a JSON-only subset.
+path-targeted edits whose leaf values use the shared FabricValue surface, not
+just a JSON subset.
 
 ## 3.2 Transaction Structure
 

@@ -6,6 +6,7 @@ import {
   isPattern,
   type JSONSchema,
   type Module,
+  type Opaque,
   type Pattern,
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
@@ -238,10 +239,15 @@ describe("pattern", () => {
   it("pattern with map node serializes correctly", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
-        const doubled = values.map(({ x }) => {
-          const double = lift<number>((x) => x * 2);
-          return { doubled: double(x) };
-        });
+        const doubled = (values as any).mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            ((({ x }: any) => {
+              const double = lift<number>((x) => x * 2);
+              return { doubled: double(x) };
+            }) as any)(element, index, array)
+          ),
+          {},
+        );
         return { doubled };
       },
     );

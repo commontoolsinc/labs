@@ -84,15 +84,12 @@ const CELL_SCOPED_CONSTRUCTOR_NAMES = new Set([
 ]);
 const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
-export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
 export const FUNCTION_HARDENING_HELPER_PREFIX = "__cfHardenFn";
 /**
  * Prefix for the module-scope const a hoisted `lift(...)` call is bound to
  * (CT-1644, Phase 2 of derive→lift→selfcontained). The whole lift call —
  * schemas + callback — is hoisted to `const __cfLift_N = __cfHelpers.lift(...)`
- * and the original site becomes `__cfLift_N(captures)`. Distinct from
- * `SYNTHETIC_MODULE_CALLBACK_PREFIX` (which names a hoisted *callback*, the
- * CT-1585 mechanic that no longer applies to lift).
+ * and the original site becomes `__cfLift_N(captures)`.
  */
 export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
 
@@ -107,6 +104,20 @@ export const SYNTHETIC_LIFT_HOIST_PREFIX = "__cfLift";
  * (NOT `lift-applied`) so existing handler-specific dispatchers are unaffected.
  */
 export const SYNTHETIC_HANDLER_HOIST_PREFIX = "__cfHandler";
+
+/**
+ * Prefix for the module-scope const a hoisted `pattern(...)` call is bound to
+ * (CT-1655). Pattern's hoist differs from lift/handler: the bare
+ * `__cfHelpers.pattern(cb, inputSchema, outputSchema)` call sits in the FIRST
+ * argument of an enclosing `receiver.mapWithPattern(pattern(...), { params })`
+ * call (per-instance captures flow through the params object, the second
+ * argument). The bare pattern call is hoisted to
+ * `const __cfPattern_N = __cfHelpers.pattern(...)` and the `*WithPattern` call's
+ * first argument is rewritten to `__cfPattern_N`. The top-level
+ * `export default pattern(...)` is a direct call (not a `*WithPattern`
+ * argument) and is NOT hoisted.
+ */
+export const SYNTHETIC_PATTERN_HOIST_PREFIX = "__cfPattern";
 
 export type ArrayMethodFamilyName = "map" | "filter" | "flatMap";
 
@@ -330,6 +341,86 @@ export function getPatternToolCallbackArgument(
   return callbackArg
     ? resolveCallbackFunctionExpression(callbackArg, checker)
     : undefined;
+}
+
+/**
+ * If `call` is a lowered reactive array-method call in the `*WithPattern`
+ * family — `mapWithPattern` / `filterWithPattern` / `flatMapWithPattern`, and
+ * any future lowered array method registered with `lowered: true` — whose FIRST
+ * argument is a bare `pattern(...)` builder call, return that inner pattern call
+ * (the hoistable unit). Otherwise return undefined. Recognition keys on the
+ * array-method family's `lowered` flag, not a hardcoded method name, so new
+ * `*WithPattern` lowerings are picked up automatically. The canonical shape is
+ * `receiver.mapWithPattern(pattern(...), { params })`.
+ *
+ * This is how the hoisting stage finds the pattern call to relocate (CT-1655):
+ * unlike lift/handler, the pattern call is not *applied* — it sits in the first
+ * argument position of the enclosing `*WithPattern` call, with per-instance
+ * captures threaded through that call's SECOND argument (the params object).
+ * So the bare `pattern(...)` is capture-free and safe to evaluate once at
+ * module scope. The top-level `export default pattern(...)` is a direct call,
+ * not a `*WithPattern` argument, so it is naturally excluded.
+ */
+export function getWithPatternHoistablePatternCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.CallExpression | undefined {
+  const callee = stripWrappers(call.expression);
+  if (!ts.isPropertyAccessExpression(callee)) {
+    return undefined;
+  }
+  const accessKind = getArrayMethodAccessKindByName(callee.name.text);
+  if (!accessKind?.lowered) {
+    return undefined;
+  }
+  const firstArg = call.arguments[0];
+  if (!firstArg) {
+    return undefined;
+  }
+  const patternCall = stripWrappers(firstArg);
+  if (
+    !ts.isCallExpression(patternCall) ||
+    !isPatternBuilderCall(patternCall, checker)
+  ) {
+    return undefined;
+  }
+  return patternCall;
+}
+
+/**
+ * If `call` is a `patternTool(pattern(...), extraParams?)` call whose FIRST
+ * argument is a bare `pattern(...)` builder call, return that inner pattern call
+ * (the hoistable unit). Otherwise return undefined.
+ *
+ * Sibling of {@link getWithPatternHoistablePatternCall}: same hoist mechanic
+ * (relocate the bare pattern call sitting in argument 0, leaving the enclosing
+ * call's callee and remaining arguments intact), different enclosing call shape.
+ * Per-instance values flow through patternTool's SECOND argument (`extraParams`)
+ * and module-scoped reactive reads are absorbed by the pattern itself, so the
+ * bare `pattern(...)` is capture-free and safe to evaluate once at module scope.
+ * As of CT-1655 patternTool's first argument must be a pattern (enforced by
+ * PatternContextValidation), so this recognizer covers every reactive
+ * patternTool.
+ */
+export function getPatternToolHoistablePatternCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): ts.CallExpression | undefined {
+  if (detectCallKind(call, checker)?.kind !== "pattern-tool") {
+    return undefined;
+  }
+  const firstArg = call.arguments[0];
+  if (!firstArg) {
+    return undefined;
+  }
+  const patternCall = stripWrappers(firstArg);
+  if (
+    !ts.isCallExpression(patternCall) ||
+    !isPatternBuilderCall(patternCall, checker)
+  ) {
+    return undefined;
+  }
+  return patternCall;
 }
 
 export function getCapabilitySummaryCallbackArgument(
@@ -589,8 +680,7 @@ function resolveCallbackFunctionExpression(
     return undefined;
   }
 
-  const initializer = getVariableInitializer(target, checker) ??
-    getSyntheticModuleCallbackInitializer(target);
+  const initializer = getVariableInitializer(target, checker);
   return initializer
     ? resolveCallbackFunctionExpression(initializer, checker, seen)
     : undefined;
@@ -612,47 +702,6 @@ function unwrapHardenedCallbackExpression(
   }
 
   return expression.arguments[0];
-}
-
-function getSyntheticModuleCallbackInitializer(
-  identifier: ts.Identifier,
-): ts.Expression | undefined {
-  if (!identifier.text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX)) {
-    return undefined;
-  }
-
-  const sourceFile = findContainingSourceFile(identifier);
-  if (!sourceFile) {
-    return undefined;
-  }
-
-  for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) {
-      continue;
-    }
-
-    for (const declaration of statement.declarationList.declarations) {
-      if (
-        ts.isIdentifier(declaration.name) &&
-        declaration.name.text === identifier.text
-      ) {
-        return declaration.initializer;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
-  let current: ts.Node | undefined = node;
-  while (current) {
-    if (ts.isSourceFile(current)) {
-      return current;
-    }
-    current = current.parent ?? ts.getOriginalNode(current).parent;
-  }
-  return undefined;
 }
 
 export function isWildcardTraversalCall(

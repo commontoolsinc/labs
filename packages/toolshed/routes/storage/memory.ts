@@ -1,6 +1,7 @@
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
@@ -17,6 +18,14 @@ const toByteArray = (value: unknown): Uint8Array | null => {
   if (value instanceof Uint8Array) {
     return value;
   }
+  // A `FabricBytes` is the long-term wire form for the signature, and the
+  // current client (`v2-remote-session.ts`) emits it.
+  if (value instanceof FabricBytes) {
+    return value.slice();
+  }
+  // TODO(danfuzz): the array / numeric-keyed-object branches below are legacy
+  // forms emitted by older clients (pre-`FabricBytes`). Retire them once every
+  // client emitting them has propagated out.
   if (Array.isArray(value) && value.every((item) => Number.isInteger(item))) {
     return Uint8Array.from(value);
   }

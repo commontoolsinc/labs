@@ -16,6 +16,9 @@ import { action, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    label: string;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -40,9 +43,6 @@ const __cfHandler_2 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
 } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() - 1);
 });
-interface State {
-    label: string;
-}
 // FIXTURE: action-result-not-opaque
 // Verifies: action() results used as JSX event handlers are not marked asOpaque in the output
 //   action(() => count.set(...)) → handler(false, { count: { asCell } }, (_, { count }) => ...)({ count })
@@ -111,3 +111,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfHandler_2
+});

@@ -43,11 +43,10 @@ import {
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
-  isStreamTypeNode,
+  preservedWrapperFor,
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
-import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -138,13 +137,6 @@ function extractCellLikeInnerTypeNode(
   if (!ts.isTypeReferenceNode(node)) return undefined;
   if (!node.typeArguments || node.typeArguments.length === 0) return undefined;
   return node.typeArguments[0];
-}
-
-function isStreamCellType(
-  type: ts.Type | undefined,
-  checker: ts.TypeChecker,
-): boolean {
-  return !!type && getCellKind(type, checker) === "stream";
 }
 
 function parameterUsesCellLikeMethods(
@@ -266,8 +258,9 @@ function applyCapabilitySummaryToArgument(
       sourceFile,
     );
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(argumentNode) || isStreamCellType(argumentType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(argumentNode, argumentType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? argumentNode;
   let baseType = shouldWrap && argumentType
     ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
@@ -293,7 +286,7 @@ function applyCapabilitySummaryToArgument(
     mode === "defaults_only" ? "opaque" : paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
@@ -325,9 +318,9 @@ function applyCapabilitySummaryToParameter(
 
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
   const shouldWrap = !!innerTypeNode;
-  const preserveStreamWrapper = shouldWrap &&
-    (isStreamTypeNode(parameterNode) ||
-      isStreamCellType(parameterType, checker));
+  const preservedWrapper = shouldWrap
+    ? preservedWrapperFor(parameterNode, parameterType, checker)
+    : undefined;
   const baseTypeNode = innerTypeNode ?? parameterNode;
   let baseType = shouldWrap && parameterType
     ? (unwrapCellLikeType(parameterType, checker) ?? parameterType)
@@ -353,7 +346,7 @@ function applyCapabilitySummaryToParameter(
     paramSummary.capability,
     context,
     fnNode ?? fn,
-    preserveStreamWrapper,
+    preservedWrapper,
   );
 }
 
@@ -886,13 +879,44 @@ function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
     callee.expression.name.text === "asScope";
 }
 
+/**
+ * A callee can receive a contextual scope if it is itself callable AND exposes
+ * an `asScope(scope)` method (the lowering target). This covers the schema-built
+ * pattern/node/module factories (which `isPatternFactoryCalleeExpression` also
+ * matches) plus opaque builtin factories like `sqliteDatabase`, whose public
+ * type is just `(...) => OpaqueRef<...>` with an `asScope` method and so lacks
+ * the `argumentSchema`/`resultSchema` shape that check keys on.
+ */
+function calleeExposesAsScope(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  const target = unwrapExpression(expression);
+  try {
+    const type = checker.getTypeAtLocation(target);
+    if (checker.getSignaturesOfType(type, ts.SignatureKind.Call).length === 0) {
+      return false;
+    }
+    const asScope = type.getProperty("asScope");
+    if (!asScope) return false;
+    const asScopeType = checker.getTypeOfSymbolAtLocation(asScope, target);
+    return checker.getSignaturesOfType(asScopeType, ts.SignatureKind.Call)
+      .length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function maybeApplyFactoryContextualScope(
   node: ts.CallExpression,
   context: TransformationContext,
 ): ts.CallExpression | undefined {
   const { checker, factory } = context;
   if (isAlreadyScopedFactoryCall(node)) return undefined;
-  if (!isPatternFactoryCalleeExpression(node.expression, checker)) {
+  if (
+    !isPatternFactoryCalleeExpression(node.expression, checker) &&
+    !calleeExposesAsScope(node.expression, checker)
+  ) {
     return undefined;
   }
 
@@ -2365,19 +2389,7 @@ function resolveFunctionLikeExpressionInner(
     );
   }
 
-  const initializer = ts.isIdentifier(unwrapped)
-    ? getSyntheticModuleCallbackInitializer(unwrapped, sourceFile)
-    : undefined;
-  if (!initializer) {
-    return undefined;
-  }
-
-  return resolveFunctionLikeExpressionInner(
-    initializer,
-    checker,
-    sourceFile,
-    seen,
-  );
+  return undefined;
 }
 
 function unwrapHardenedFunctionExpression(
@@ -2396,49 +2408,6 @@ function unwrapHardenedFunctionExpression(
   }
 
   return expression.arguments[0];
-}
-
-function getSyntheticModuleCallbackInitializer(
-  identifier: ts.Identifier,
-  sourceFile: ts.SourceFile | undefined,
-): ts.Expression | undefined {
-  if (!identifier.text.startsWith("__cfModuleCallback")) {
-    return undefined;
-  }
-
-  const containingSourceFile = sourceFile ??
-    findContainingSourceFile(identifier);
-  if (!containingSourceFile) {
-    return undefined;
-  }
-
-  for (const statement of containingSourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) {
-      continue;
-    }
-
-    for (const declaration of statement.declarationList.declarations) {
-      if (
-        ts.isIdentifier(declaration.name) &&
-        declaration.name.text === identifier.text
-      ) {
-        return declaration.initializer;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function findContainingSourceFile(node: ts.Node): ts.SourceFile | undefined {
-  let current: ts.Node | undefined = node;
-  while (current) {
-    if (ts.isSourceFile(current)) {
-      return current;
-    }
-    current = current.parent ?? ts.getOriginalNode(current).parent;
-  }
-  return undefined;
 }
 
 /**

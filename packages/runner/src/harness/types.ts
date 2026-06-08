@@ -7,6 +7,7 @@ import type {
 import type {
   CachedCompiledModule,
   CompiledModuleGraph,
+  HoistRegistrationSink,
 } from "../sandbox/module-record-compiler.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 
@@ -48,6 +49,15 @@ export interface TypeScriptHarnessProcessOptions {
     entryIdentity: string;
     identities: string[];
   }) => Promise<Map<string, CompiledModuleArtifact> | undefined>;
+  // Trust the precompiled bodies on a FULL hit: skip the per-module SES body
+  // verifier (`verifyCompiledModuleBody`). Set ONLY when the bodies came from an
+  // integrity-gated read (the `compileCache` set, loaded with `requiredIntegrity`
+  // via `loadCompiledClosure`) — the CFC integrity label, not the SES verifier,
+  // is the security boundary for cache hits (see the threat model in
+  // `docs/specs/module-loading.md` §"the persistent compilation cache"). Ignored
+  // on a miss/partial hit: freshly compiled bodies are always SES-verified.
+  // Never set for direct `precompiledModules` injection (untrusted bytes).
+  trustedBodies?: boolean;
 }
 
 /** A cached/compiled per-module artifact: emitted JS plus optional source map. */
@@ -93,6 +103,23 @@ export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
   loadId?: string;
+  /**
+   * Per-module namespaces keyed by content identity (the prefix-free
+   * `cf:module/<identity>` hash). Lets the runner register every module in a
+   * just-evaluated bundle into an in-memory identity->Pattern cache, so a later
+   * by-identity load of a sub-pattern reuses the already-live module instead of
+   * re-reading the closure from storage and re-evaluating it (CT-1623).
+   * Populated only on the ESM evaluate paths.
+   */
+  exportsByIdentity?: Map<string, Exports>;
+  /**
+   * Hoist registrations collected during this evaluation (`__cfReg`): module
+   * content identity → (symbol → live builder artifact). The PatternManager turns
+   * each trusted entry into a content-addressed `{ identity, symbol }` reference
+   * and indexes it for synchronous by-identity resolution. Populated only on the
+   * ESM evaluate paths.
+   */
+  registrationsByIdentity?: HoistRegistrationSink;
 }
 
 export interface EvaluateOptions {
@@ -157,7 +184,7 @@ export interface Harness extends EventTarget {
   evaluateCachedModules?(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
-    options?: { sourceFiles?: Source[] },
+    options?: { sourceFiles?: Source[]; trustedBodies?: boolean },
   ): Promise<EvaluateResult>;
 
   // Cold recovery: recompile cacheable modules from the stored (already-resolved,

@@ -1,9 +1,10 @@
+import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 /**
  * Options for `cloneIfNecessary()`.
@@ -178,9 +179,9 @@ export function cloneHelper(
     case NATIVE_TAGS.Primitive:
     case NATIVE_TAGS.EpochNsec:
     case NATIVE_TAGS.EpochDays:
-    case NATIVE_TAGS.ContentHash:
     case NATIVE_TAGS.FabricBytes:
     case NATIVE_TAGS.FabricRegExp:
+    case NATIVE_TAGS.Hash:
       return value;
 
     case NATIVE_TAGS.FabricInstance: {

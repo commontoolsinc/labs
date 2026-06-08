@@ -6,7 +6,7 @@ inputs:
     default: true
   deno-version:
     description: "Deno version to install"
-    default: "2.7.9"
+    default: "2.8.1"
 runs:
   using: "composite"
   steps:

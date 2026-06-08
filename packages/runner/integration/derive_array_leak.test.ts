@@ -212,7 +212,7 @@ async function runTest() {
 Deno.test({
   name: "derive array leak test",
   fn: async () => {
-    let timeoutHandle: number;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(() => {
         reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));

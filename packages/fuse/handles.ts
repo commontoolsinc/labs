@@ -138,6 +138,13 @@ export class HandleMap {
     state.dirty = true;
     state.truncatePending = false;
     state.version++;
+
+    for (const [otherFh, otherState] of this.handles) {
+      if (otherFh !== fh && otherState.ino === state.ino) {
+        otherState.truncatePending = false;
+      }
+    }
+
     return true;
   }
 

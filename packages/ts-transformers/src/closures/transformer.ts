@@ -5,7 +5,6 @@ import { ActionStrategy } from "./strategies/action-strategy.ts";
 import { ArrayMethodStrategy } from "./strategies/array-method-strategy.ts";
 import { LiftAppliedStrategy } from "./strategies/lift-applied-strategy.ts";
 import { HandlerStrategy } from "./strategies/handler-strategy.ts";
-import { PatternToolStrategy } from "./strategies/patternTool-strategy.ts";
 import type { ClosureTransformationStrategy } from "./strategies/strategy.ts";
 
 export class ClosureTransformer extends HelpersOnlyTransformer {
@@ -21,7 +20,6 @@ function createClosureTransformVisitor(
     new HandlerStrategy(),
     new ActionStrategy(),
     new ArrayMethodStrategy(),
-    new PatternToolStrategy(),
     new LiftAppliedStrategy(),
   ];
 

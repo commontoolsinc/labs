@@ -1,4 +1,4 @@
-import { BaseIncrementalHasher } from "./BaseIncrementalHasher.ts";
+import { BaseIncrementalHasher } from "@/BaseIncrementalHasher.ts";
 
 /**
  * When collecting chunks, size of the first chunk to collect into by default.

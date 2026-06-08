@@ -1286,6 +1286,74 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
       assertHasErrorType(errors, "pattern-context:optional-chaining");
     },
   );
+
+  await t.step(
+    "points body-level writes to a module-scope handler<>, not computed() (CT-1641)",
+    async () => {
+      const source =
+        `      import { pattern, UI, Writable } from "commonfabric";
+
+      interface Item { id: string; }
+      interface State { items: Writable<Item[]>; }
+
+      export default pattern<State>(({ items }) => {
+        items.push({ id: "x" });
+        return { [UI]: <div />, items };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected a not-lowerable error");
+      const writeError = errors.find((e) =>
+        e.message.includes("not lowerable")
+      );
+      assertEquals(
+        writeError !== undefined,
+        true,
+        "Expected the not-lowerable diagnostic for the body-level push",
+      );
+      assertStringIncludes(writeError!.message, "module-scope handler<>");
+      // The misleading remedy must NOT appear for a write.
+      assertEquals(
+        writeError!.message.includes("Move this call into computed()"),
+        false,
+        "Writes should not be told to move into computed()",
+      );
+    },
+  );
+
+  await t.step(
+    "still suggests computed() for a non-write non-lowerable method call",
+    async () => {
+      const source = `      import { pattern, UI } from "commonfabric";
+
+      interface Item { label: string; }
+      interface State { items: Item[]; }
+
+      export default pattern<State>(({ items }) => {
+        const s = items.toLocaleString();
+        return { [UI]: <div>{s}</div>, items };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const methodError = errors.find((e) =>
+        e.message.includes("not lowerable")
+      );
+      if (methodError) {
+        assertStringIncludes(methodError.message, "computed()");
+        assertEquals(
+          methodError.message.includes("module-scope handler<>"),
+          false,
+          "Non-write methods should not be pointed at handler<>",
+        );
+      }
+    },
+  );
 });
 
 Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
@@ -2897,7 +2965,31 @@ Deno.test("Standalone Function Validation", async (t) => {
   );
 
   await t.step(
-    "allows reactive operations in functions passed to patternTool()",
+    "allows reactive operations in the pattern passed to patternTool()",
+    async () => {
+      const source =
+        `      import { pattern, patternTool, computed, Cell } from "commonfabric";
+
+      const multiplier = {} as Cell<number>;
+
+      const tool = patternTool(pattern(({ query }: { query: string }) => {
+        return computed(() => query.length * multiplier.get());
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reactive operations inside a patternTool's pattern should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when patternTool's first argument is a bare callback",
     async () => {
       const source =
         `      import { patternTool, computed, Cell } from "commonfabric";
@@ -2912,10 +3004,9 @@ Deno.test("Standalone Function Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
-        errors.length,
-        0,
-        "Reactive operations inside patternTool() should be allowed",
+      assertHasErrorType(
+        errors,
+        "pattern-context:patterntool-requires-pattern",
       );
     },
   );

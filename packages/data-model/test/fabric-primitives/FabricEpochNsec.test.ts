@@ -1,12 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricEpochNsec } from "../../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
-import {
-  resetDataModelConfig,
-  setDataModelConfig,
-  shallowFabricFromNativeValue,
-} from "../../src/fabric-value.ts";
+
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 
 describe("FabricEpochNsec", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -57,14 +54,9 @@ describe("FabricEpochNsec", () => {
   // of the class, so it lives directly under the class `describe()`.
   describe("shallowFabricFromNativeValue() integration", () => {
     it("passes through unchanged even with `freeze=false`", () => {
-      setDataModelConfig(true);
-      try {
-        const nsec = new FabricEpochNsec(123n);
-        // freeze=false should still return the same instance (not a copy).
-        expect(shallowFabricFromNativeValue(nsec, false)).toBe(nsec);
-      } finally {
-        resetDataModelConfig();
-      }
+      const nsec = new FabricEpochNsec(123n);
+      // freeze=false should still return the same instance (not a copy).
+      expect(shallowFabricFromNativeValue(nsec, false)).toBe(nsec);
     });
   });
 });

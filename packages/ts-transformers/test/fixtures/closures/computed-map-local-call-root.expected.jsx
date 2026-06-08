@@ -11,6 +11,13 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const identity = __cfHardenFn((value: string) => value);
+interface Item {
+    done: boolean;
+}
+interface State {
+    items: Item[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -81,13 +88,34 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ row }) => identity(row.done ? "Done" : "Pending"));
-const identity = __cfHardenFn((value: string) => value);
-interface Item {
-    done: boolean;
-}
-interface State {
-    items: Item[];
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    const label = __cfLift_2({ row: {
+            done: row.key("done")
+        } }).for("label", true);
+    return label;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                done: {
+                    type: "boolean"
+                }
+            },
+            required: ["done"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-local-call-root
 // Verifies: callback-local ordinary call roots in a computed-array .map()
 //   callback whole-wrap as callback-local lift-applied computations even when
@@ -98,34 +126,7 @@ export default pattern((state) => {
     const rows = __cfLift_1({ state: {
             items: state.key("items")
         } }).for("rows", true);
-    const labels = rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-        const row = __cf_pattern_input.key("element");
-        const label = __cfLift_2({ row: {
-                done: row.key("done")
-            } }).for("label", true);
-        return label;
-    }, {
-        type: "object",
-        properties: {
-            element: {
-                $ref: "#/$defs/Item"
-            }
-        },
-        required: ["element"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {}).for("labels", true);
+    const labels = rows.mapWithPattern(__cfPattern_1, {}).for("labels", true);
     return { labels };
 }, {
     type: "object",
@@ -164,3 +165,8 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfPattern_1
+});

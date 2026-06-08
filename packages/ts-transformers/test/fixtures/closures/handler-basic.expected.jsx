@@ -11,6 +11,9 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    counter: Cell<number>;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -27,9 +30,6 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => state.counter.set(state.counter.get() + 1));
-interface State {
-    counter: Cell<number>;
-}
 // FIXTURE: handler-basic
 // Verifies: inline arrow function in JSX onClick is extracted into a handler with captures
 //   onClick={() => state.counter.set(...)} → onClick={handler(false, { state: { counter: asCell } }, (_, { state }) => ...)({ state: { counter } })}
@@ -85,3 +85,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1
+});

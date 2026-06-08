@@ -269,8 +269,7 @@ export interface IAnyCell<T> {}
 export interface IReadable<T> {
   /**
    * Read the cell's current value as a Proxy view. See the
-   * {@link IReadable} interface docs for the modern-mode frozenness
-   * contract.
+   * {@link IReadable} interface docs for the frozenness contract.
    */
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
@@ -318,7 +317,7 @@ export interface IMetaCell {
 export interface IWritable<T, C extends AnyBrandedCell<any>> {
   /**
    * Set the cell's value. See the {@link IWritable} interface docs for
-   * the modern-mode frozenness contract on the input.
+   * the frozenness contract on the input.
    */
   set(value: T | AnyCellWrapping<T>): C;
   /**
@@ -332,8 +331,8 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
   ): C;
   /**
    * Append one or more values to an array cell. See the
-   * {@link IWritable} interface docs for the modern-mode frozenness
-   * contract on the inputs.
+   * {@link IWritable} interface docs for the frozenness contract on the
+   * inputs.
    */
   push(
     this: IsThisArray,
@@ -1901,11 +1900,11 @@ export type PatternToolFunction = <
   T,
   E extends object = Record<PropertyKey, never>,
 >(
-  fnOrPattern:
-    | ((
-      input: OpaqueRef<RequireDefaults<T>> & { [SELF]: OpaqueRef<any> },
-    ) => any)
-    | PatternFactory<T, any>,
+  // CT-1655: the first argument must be an explicit `pattern(...)`. Passing a
+  // bare callback (and letting the runtime wrap it / a transformer auto-capture
+  // its closure) is no longer supported — wrap it yourself:
+  // `patternTool(pattern(fn), extraParams?)`.
+  pattern: PatternFactory<T, any>,
   // Validate that E (after stripping cells) is a subset of T
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
@@ -2107,13 +2106,17 @@ export interface ISqliteQueryable {
 }
 
 /**
- * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing the
- * SQLite method surface (`.exec`/`.query`) instead of the general value-cell
- * mutators. It reads back the handle ref and carries the `toCell` back-pointer,
- * but is NOT writable (you can't `.set()` a DB handle).
+ * SqliteDb is a cell variant (kind `"sqlite"`) — a DB handle cell exposing ONLY
+ * the SQLite method surface (`.exec`/`.query`), not the general value-cell
+ * read/write API. In particular it deliberately does **not** extend
+ * `IReadable<T>`: `.get()`/`.sample()` are meaningless on an opaque DB handle
+ * (the handle ref is an internal detail; pattern code reads rows via `.query`),
+ * so omitting them keeps `db.get()` from type-checking. The handle is also not
+ * writable (you can't `.set()` a DB handle). The runtime still reads the raw
+ * handle internally via `getRaw()` to fold writes onto the transaction.
  */
 export interface ISqliteDb<T = SqliteDatabase>
-  extends IAnyCell<T>, IReadable<T>, ISqliteExecutable, ISqliteQueryable {}
+  extends IAnyCell<T>, ISqliteExecutable, ISqliteQueryable {}
 
 export interface SqliteDb<T = SqliteDatabase>
   extends BrandedCell<T, "sqlite">, ISqliteDb<T> {}
@@ -2128,10 +2131,16 @@ export type SqliteDatabaseSource = {
   path: string;
 };
 
-export type SqliteDatabaseFunction = (
-  options?: { tables?: SqliteTableSchemas },
-  source?: SqliteDatabaseSource,
-) => OpaqueRef<SqliteDb>;
+export type SqliteDatabaseFunction = {
+  (
+    options?: { tables?: SqliteTableSchemas },
+    source?: SqliteDatabaseSource,
+  ): OpaqueRef<SqliteDb>;
+  /** Bind the db (and so its on-disk file) to a scope. The transformer lowers
+   *  `const db: PerUser<SqliteDb> = sqliteDatabase(...)` to `.asScope("user")`;
+   *  call it explicitly for the same effect. */
+  asScope(scope: CellScope): SqliteDatabaseFunction;
+};
 
 export type SqliteQueryParams = {
   db: Opaque<SqliteDatabase | SqliteDb>;
@@ -2200,16 +2209,49 @@ export declare const DEFAULT_MARKER: unique symbol;
 
 type DefaultMarker<T> = { readonly [DEFAULT_MARKER]: T };
 
+// True only for the empty tuple `[]` (a length-0 tuple), false for general
+// arrays like `string[]` (whose `length` is the wide `number`) and non-empty
+// tuples. Used by Default<> to special-case `Default<[]>` (see below).
+type IsEmptyTuple<T> = T extends readonly unknown[]
+  ? number extends T["length"] ? false
+  : T["length"] extends 0 ? true
+  : false
+  : false;
+
 // Default type for specifying default values in type definitions.
 // The DEFAULT_MARKER brand enables RequireDefaults<T> to detect which fields
 // have runtime-provided defaults and make them non-optional in pattern bodies.
 // Detection uses conditional type inference (not keyof) for performance.
 // Nullish-only defaults need a standalone marker because `null & Brand` and
 // `undefined & Brand` collapse to `never`.
-export type Default<T, V extends T = T> =
-  | ([T] extends [null | undefined] ? DefaultMarker<T>
-    : T & DefaultMarker<T>)
-  | T;
+//
+// Empty-tuple special case (CT-1640): for `Default<[]>` we keep ONLY the branded
+// arm and drop the bare `| T` arm. Without this, `Default<[]>` would contribute a
+// bare `[]` (i.e. `never[]`) member; in the documented `T[] | Default<[]>` shape
+// that bare member survives `.get()`'s brand-stripping, leaving `T[] | never[]`,
+// and TypeScript intersects parameter-position element types across the union so
+// `.includes(x)`/`.indexOf(x)` collapse their parameter to `never`. Dropping the
+// bare arm lets the sibling `T[]` member supply the value type while the brand is
+// still present for RequireDefaults<> detection. (The lone `Default<[]>` form —
+// no sibling array — is not used in practice; the docs always pair it as
+// `T[] | Default<[]>`.)
+//
+// Why ONLY the empty tuple, and not all tuples: a non-empty literal-tuple default
+// in a union (e.g. `string[] | Default<["seed"]>`) also narrows parameter-position
+// methods — but to the literal element type, which is a legible error, not the
+// confusing `never`. More importantly, the empty tuple is the unique tuple that
+// can never be a legitimate *standalone* field type, so dropping its plain arm is
+// unconditionally safe. Generalizing to all tuples would collapse a standalone
+// tuple default like `Default<[string, number], ["a", 0]>` to `never` (the lone
+// branded arm strips away), breaking that contract. Authors who want an array
+// field with an empty-ish/seed default and a precise element type should use the
+// two-arg form `Default<string[], []>` (T = the array, not the tuple).
+export type Default<T, V extends T = T> = IsEmptyTuple<T> extends true
+  ? T & DefaultMarker<T>
+  :
+    | ([T] extends [null | undefined] ? DefaultMarker<T>
+      : T & DefaultMarker<T>)
+    | T;
 
 /**
  * Marker for partial, recursive object defaults in `T | DeepDefault<V>` schema

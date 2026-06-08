@@ -11,6 +11,9 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    counter: Cell<number>;
+}
 const __cfHandler_1 = __cfHelpers.handler({
     type: "unknown"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -29,9 +32,6 @@ const __cfHandler_1 = __cfHelpers.handler({
     },
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { state }) => state.counter.set(state.counter.get() + 1));
-interface State {
-    counter: Cell<number>;
-}
 // FIXTURE: handler-unused-event
 // Verifies: inline handler with an unused event param (_) still generates an event schema placeholder
 //   onClick={(_: unknown) => state.counter.set(...)) → handler(event schema, capture schema, (_, { state }) => ...)({ state })
@@ -88,3 +88,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1
+});

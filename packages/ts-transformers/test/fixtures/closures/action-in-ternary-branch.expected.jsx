@@ -18,6 +18,13 @@ import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Card {
+    title: string;
+    description: string;
+}
+interface Input {
+    card: Card;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -54,13 +61,6 @@ const __cfLift_1 = __cfHelpers.lift<{
     const desc = card.description;
     return desc && desc.length > 0;
 });
-interface Card {
-    title: string;
-    description: string;
-}
-interface Input {
-    card: Card;
-}
 // FIXTURE: action-in-ternary-branch
 // Verifies: action() result used in a ternary branch alongside computed() keeps
 //   local JSX rewrites instead of forcing a whole-branch lift-applied computation
@@ -194,3 +194,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfLift_1
+});

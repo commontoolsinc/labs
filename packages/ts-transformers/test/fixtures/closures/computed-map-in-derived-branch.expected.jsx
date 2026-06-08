@@ -11,6 +11,14 @@ import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Person {
+    name: string;
+    rank: number;
+}
+interface PatternInput {
+    people?: Cell<Default<Person[], [
+    ]>>;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     people: __cfHelpers.ReadonlyCell<Person[]>;
 }, { name: string; rank: number; isFirst: boolean; }[]>({
@@ -76,14 +84,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length);
-interface Person {
-    name: string;
-    rank: number;
-}
-interface PatternInput {
-    people?: Cell<Default<Person[], [
-    ]>>;
-}
 // FIXTURE: computed-map-in-derived-branch
 // Verifies: moving a reactive computation out of a JSX slot forces the whole
 //   branch into derive(), so nested maps run in compute context and stay plain
@@ -190,3 +190,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

@@ -148,6 +148,18 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
+  /**
+   * Await all in-flight compile-cache write-backs in the worker. Distinct from
+   * `idle()` (reactive/scheduler quiescence): this guarantees persistence
+   * durability, so a subsequent load of an already-compiled pattern reads the
+   * cached entry instead of recompiling in-client.
+   */
+  async flushCompileCacheWrites(): Promise<void> {
+    await this.#conn.request<RequestType.FlushCompileCacheWrites>({
+      type: RequestType.FlushCompileCacheWrites,
+    });
+  }
+
   async createPage<T = unknown>(
     input: string | URL | Program,
     options?: { argument?: JSONValue; run?: boolean },

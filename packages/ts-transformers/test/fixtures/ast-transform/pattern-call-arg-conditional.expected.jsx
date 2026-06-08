@@ -11,6 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const identity = __cfHardenFn(<T,>(value: T) => value);
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         done: boolean;
@@ -32,7 +33,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["Done", "Pending"]
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => identity(state.done ? "Done" : "Pending"));
-const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: pattern-call-arg-conditional
 // Verifies: top-level ordinary helper calls with reactive arguments are lifted
 //   as whole calls rather than lowering only the inner argument expression.
@@ -63,3 +63,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

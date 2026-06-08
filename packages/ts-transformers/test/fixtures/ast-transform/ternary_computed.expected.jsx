@@ -11,6 +11,9 @@ import { Default, NAME, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface PatternState {
+    value: Default<number, 0>;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         value: number;
@@ -53,9 +56,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 2);
-interface PatternState {
-    value: Default<number, 0>;
-}
 // FIXTURE: ternary_computed
 // Verifies: ternary with expressions on both sides produces ifElse() with a lift-applied computation for each branch
 //   state.value + 1 ? state.value + 2 : "undefined" → ifElse(...schemas, lift(...)({...}), lift(...)({...}), "undefined")
@@ -125,3 +125,7 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

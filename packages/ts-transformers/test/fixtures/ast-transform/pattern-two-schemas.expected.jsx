@@ -12,6 +12,13 @@ import "commonfabric/schema";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+// Test that pattern with both schemas already present is not transformed
+interface Input {
+    count: number;
+}
+interface Result {
+    doubled: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     count: number;
 }, number>({
@@ -25,13 +32,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count * 2);
-// Test that pattern with both schemas already present is not transformed
-interface Input {
-    count: number;
-}
-interface Result {
-    doubled: number;
-}
 // FIXTURE: pattern-two-schemas
 // Verifies: pattern with both input and output schemas already present preserves them
 //   pattern<Input, Result>(fn, inputSchema, outputSchema) → pattern(fn, inputSchema, outputSchema) (schemas kept)
@@ -62,3 +62,6 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

@@ -1,5 +1,8 @@
 {
   "name": "@commonfabric/content-hash",
+  "imports": {
+    "@/": "./src/"
+  },
   "tasks": {
     "check": "deno check .",
     "just-test": {

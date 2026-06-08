@@ -351,10 +351,8 @@ export function moduleToJSON(module: Module) {
   const frame = getTopFrame();
   // Destructure-and-drop the runtime-only methods that handler modules
   // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
-  // They are not part of the serialized contract — under the legacy
-  // data-model layer they were silently omitted by `JSON.stringify`-style
-  // semantics; under modern they would surface as
-  // `Cannot store function per se`.
+  // They are not part of the serialized contract; left in, they would surface
+  // as `Cannot store function per se`, so they are destructured out here.
   const {
     implementation: _implementation,
     toJSON: _toJSON,
@@ -442,6 +440,25 @@ export function moduleToJSON(module: Module) {
 }
 
 export function patternToJSON(pattern: Pattern) {
+  // Serialize only the STABLE program identity ({main, mainExport}), never the
+  // authored `files`. The `files` array serializes non-canonically (two
+  // encodings -> two content ids), so embedding it dragged a session-varying
+  // blob into every serialized pattern and thrashed link ids / re-ran actions
+  // on reload. {main, mainExport} are deterministic strings, so they reload
+  // stably; they are kept because consumers read them (e.g. the CLI
+  // `dev --pattern-json` output asserts `program.mainExport`). The full
+  // program-with-files is still recovered from the pattern-meta cell
+  // (savePattern -> `rawMeta.program`) and the `pattern:<identity>` source docs;
+  // sub-patterns are referenced by {identity, symbol} on the ESM path.
+  const program = getPatternProgram(pattern);
+  const programIdentity = program
+    ? {
+      main: program.main,
+      ...(program.mainExport !== undefined
+        ? { mainExport: program.mainExport }
+        : {}),
+    }
+    : undefined;
   return {
     argumentSchema: pattern.argumentSchema,
     resultSchema: pattern.resultSchema,
@@ -451,6 +468,6 @@ export function patternToJSON(pattern: Pattern) {
     ...(pattern.initial ? { initial: pattern.initial } : {}),
     result: pattern.result,
     nodes: pattern.nodes,
-    program: getPatternProgram(pattern),
+    ...(programIdentity ? { program: programIdentity } : {}),
   };
 }

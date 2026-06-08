@@ -208,7 +208,8 @@ export function compileAndRun(
     // Capture requestId for this compilation run
     const thisRequestId = requestId;
 
-    const compilePromise = runtime.patternManager.compileOrGetPattern(program)
+    const compilePromise = runtime.patternManager
+      .compileOrGetPattern(program, parentCell.space)
       .catch(
         (err) => {
           // Only process this error if the request hasn't been superseded

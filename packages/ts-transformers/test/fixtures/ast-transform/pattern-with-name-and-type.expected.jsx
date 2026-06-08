@@ -11,6 +11,9 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface MyInput {
+    value: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     input: {
         value: number;
@@ -32,9 +35,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.value * 2);
-interface MyInput {
-    value: number;
-}
 // FIXTURE: pattern-with-name-and-type
 // Verifies: pattern with inline typed parameter generates input and output schemas
 //   pattern((input: MyInput) => ...)   → pattern((input) => ..., inputSchema, outputSchema)
@@ -66,3 +66,6 @@ export default pattern((input: MyInput) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

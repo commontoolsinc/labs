@@ -6,7 +6,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema, type Opaque } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -221,8 +221,13 @@ describe("Pattern Runner - Reduce", () => {
 
     const sumDoubledPattern = pattern<{ values: number[] }>(
       ({ values }) => {
-        const total = values
-          .map((x) => double(x))
+        const total = (values as any)
+          .mapWithPattern(
+            pattern(({ element, index, array }: Opaque<any>) =>
+              (((x: any) => double(x)) as any)(element, index, array)
+            ),
+            {},
+          )
           .reduce((acc: number, x: number) => acc + x, 0);
         return { total };
       },

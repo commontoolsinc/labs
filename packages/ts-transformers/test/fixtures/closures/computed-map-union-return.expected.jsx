@@ -11,6 +11,18 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface ContentPart {
+    type: "text" | "image";
+    text?: string;
+    image?: string;
+}
+interface Message {
+    role: "user" | "assistant";
+    content: string | ContentPart[];
+}
+interface State {
+    messages: Message[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         messages: Message[];
@@ -94,18 +106,6 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
     return null;
 });
-interface ContentPart {
-    type: "text" | "image";
-    text?: string;
-    image?: string;
-}
-interface Message {
-    role: "user" | "assistant";
-    content: string | ContentPart[];
-}
-interface State {
-    messages: Message[];
-}
 // FIXTURE: computed-map-union-return
 // Verifies: a computed returning a union type (string | null) with a nested .map() infers the correct output schema
 //   computed(() => { ...; return content }) → lift(schema, anyOf[string, null])({ messages })
@@ -204,3 +204,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

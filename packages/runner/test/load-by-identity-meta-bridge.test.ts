@@ -6,6 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
+import { ignoreReadForScheduling } from "../src/storage/reactivity-log.ts";
 
 const signer = await Identity.fromPassphrase("load-by-identity-meta-bridge");
 const space = signer.did();
@@ -109,7 +110,7 @@ describe("load by identity — pattern-metadata bridge", () => {
       const tx1 = rt1.edit();
       const pm1 = rt1.patternManager;
       const cold = await pm1.compilePattern(PROGRAM, { space, tx: tx1 });
-      const entryIdentity = pm1.getPatternEntryRef(cold)?.identity;
+      const entryIdentity = pm1.getArtifactEntryRef(cold)?.identity;
       expect(typeof entryIdentity).toBe("string");
       await tx1.commit();
       await pm1.flushCompileCacheWrites();
@@ -175,8 +176,8 @@ describe("load by identity — pattern-metadata bridge", () => {
       const pm1 = rt1.patternManager;
       const cold = await pm1.compilePattern(NAMED, { space, tx: tx1 });
       // The authored compile records the real export symbol.
-      expect(pm1.getPatternEntryRef(cold)?.symbol).toBe("myPattern");
-      const entryIdentity = pm1.getPatternEntryRef(cold)!.identity;
+      expect(pm1.getArtifactEntryRef(cold)?.symbol).toBe("myPattern");
+      const entryIdentity = pm1.getArtifactEntryRef(cold)!.identity;
       await tx1.commit();
       await pm1.flushCompileCacheWrites();
       await rt1.storageManager.synced();
@@ -190,7 +191,7 @@ describe("load by identity — pattern-metadata bridge", () => {
         space,
       );
       expect(typeof reloaded).toBe("function");
-      expect(pm2.getPatternEntryRef(reloaded!)).toEqual({
+      expect(pm2.getArtifactEntryRef(reloaded!)).toEqual({
         identity: entryIdentity,
         symbol: "myPattern",
       });
@@ -209,6 +210,105 @@ describe("load by identity — pattern-metadata bridge", () => {
     } finally {
       await rt2.dispose();
       await rt1.dispose();
+    }
+  });
+
+  it("tags an imported sub-pattern with its OWN module identity", async () => {
+    // End-to-end guard: a pattern IMPORTED and composed by a parent (never the
+    // selected entry of any compile) must still acquire a {identity, symbol}
+    // reference, so its composed sub-piece's result cell carries `patternIdentity`
+    // meta and the runtime can reload it by identity. The ref is supplied by
+    // `registerEvaluatedModules` (which tags every trusted sub-pattern export in
+    // the per-load WeakMap, keyed by the exact value) and resolved by
+    // `getArtifactEntryRef`'s exact-object-first lookup. This asserts the
+    // user-facing invariant — that the sub-piece's recorded identity is the
+    // CHILD module's, distinct from the parent's — not any single mechanism.
+    const childFile = {
+      name: "/child.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "export default pattern<{ value: number }>(({ value }) => {",
+        "  return { echo: value };",
+        "});",
+      ].join("\n"),
+    };
+    const PARENT: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        childFile,
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "import child from './child.tsx';",
+            "export default pattern<{ value: number }>(({ value }) => {",
+            "  const c = child({ value });",
+            "  return { result: c.echo, child: c };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+    const CHILD_ONLY: RuntimeProgram = {
+      main: "/child.tsx",
+      files: [childFile],
+    };
+
+    const rt = newRuntime();
+    try {
+      const pm = rt.patternManager;
+
+      // Learn the child module's content identity by compiling it standalone.
+      // Same bytes + same resolved imports → same content-addressed identity as
+      // the imported sub-module inside PARENT.
+      const txc = rt.edit();
+      const childStandalone = await pm.compilePattern(CHILD_ONLY, {
+        space,
+        tx: txc,
+      });
+      const childRef = pm.getArtifactEntryRef(childStandalone);
+      txc.abort?.("child identity learned");
+      expect(childRef?.symbol).toBe("default");
+      const childIdentity = childRef!.identity;
+
+      // Compile + run the parent that composes the child.
+      const tx = rt.edit();
+      const parent = await pm.compilePattern(PARENT, { space, tx });
+      const parentRef = pm.getArtifactEntryRef(parent);
+      expect(parentRef?.identity).toBeTruthy();
+      // Distinct per-module identities — the child is not the parent.
+      expect(parentRef!.identity).not.toBe(childIdentity);
+
+      const resultCell = rt.getCell<
+        { result: number; child: { echo: number } }
+      >(
+        space,
+        "sub-pattern entry-ref run",
+        undefined,
+        tx,
+      );
+      const r = rt.run(tx, parent, { value: 5 }, resultCell);
+      await tx.commit();
+      await r.pull();
+      const out = r.getAsQueryResult() as {
+        result: number;
+        child: { echo: number };
+      };
+      expect(out.result).toBe(5);
+      expect(out.child).toEqual({ echo: 5 });
+
+      // The composed CHILD sub-piece (a non-entry pattern) carries a
+      // patternIdentity meta referencing the CHILD module — only possible
+      // because the side-table tags every exported pattern, not just the entry.
+      const childResultCell = resultCell.key("child").resolveAsCell();
+      const meta = childResultCell.getMetaRaw("patternIdentity", {
+        meta: ignoreReadForScheduling,
+      }) as { identity?: unknown; symbol?: unknown } | undefined;
+      expect(meta).toBeTruthy();
+      expect(meta?.symbol).toBe("default");
+      expect(meta?.identity).toBe(childIdentity);
+    } finally {
+      await rt.dispose();
     }
   });
 });

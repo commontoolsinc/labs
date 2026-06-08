@@ -185,6 +185,24 @@ export type CfcWritebackReconciliationResult = {
   diagnostics: string[];
 };
 
+export function safeReconcileCfcWritebacks(options: {
+  context: string;
+  reconcile: () => CfcWritebackReconciliationResult;
+  recordDiagnostics: (messages: string[]) => void;
+}): boolean {
+  try {
+    const result = options.reconcile();
+    options.recordDiagnostics(result.diagnostics);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    options.recordDiagnostics([
+      `${options.context} reconciliation failed: ${message}`,
+    ]);
+    return false;
+  }
+}
+
 const CFC_MODES = [
   "disabled",
   "observe",

@@ -2,8 +2,8 @@
 set -e
 shopt -s extglob nullglob
 
-DENO_VERSION_MIN="2.6.0"
-DENO_VERSION_MAX="2.8.0"
+DENO_VERSION_MIN="2.8.0"
+DENO_VERSION_MAX="2.9.0"
 # This is more portable than parsing `deno --version`
 DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
 IFS='.' read -r DENO_MAJOR DENO_MINOR DENO_PATCH <<<"${DENO_VERSION}"
@@ -12,7 +12,7 @@ if [[ ! "${DENO_MAJOR}" =~ ^[0-9]+$ || ! "${DENO_MINOR}" =~ ^[0-9]+$ || ! "${DEN
   exit 1
 fi
 
-if (( DENO_MAJOR != 2 || DENO_MINOR < 6 || DENO_MINOR >= 8 )); then
+if (( DENO_MAJOR != 2 || DENO_MINOR < 8 || DENO_MINOR >= 9 )); then
   echo "ERROR: Deno version is ${DENO_VERSION}, expected >= ${DENO_VERSION_MIN} and < ${DENO_VERSION_MAX}."
   exit 1
 fi

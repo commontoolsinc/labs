@@ -18,6 +18,10 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    name: string;
+    price: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     items: {
         price: number;
@@ -110,10 +114,6 @@ const __cfLift_2 = __cfHelpers.lift<{
     const localVar = filtered;
     return localVar.map((item) => <li>{item.name}</li>);
 });
-interface Item {
-    name: string;
-    price: number;
-}
 // FIXTURE: computed-local-var-map
 // Verifies: .map() on a local variable assigned from a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => { const localVar = filtered; return localVar.map(fn) }) → lift(({ filtered }) => { const localVar = filtered; return localVar.map(fn) })(...)
@@ -186,3 +186,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

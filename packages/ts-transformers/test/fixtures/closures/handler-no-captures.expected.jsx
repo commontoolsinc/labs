@@ -11,13 +11,13 @@ import { Cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    counter: Cell<number>;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {}
 } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, __cf_handler_params) => console.log("hi"));
-interface State {
-    counter: Cell<number>;
-}
 // FIXTURE: handler-no-captures
 // Verifies: inline handler with no captured outer variables still gets wrapped with empty captures
 //   onClick={() => console.log("hi")) → handler(false, { properties: {} }, (_, __cf_handler_params) => ...)({})
@@ -70,3 +70,6 @@ export default pattern((_state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1
+});

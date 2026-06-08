@@ -16,6 +16,12 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    items: Array<{
+        name: string;
+        done: boolean;
+    }>;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: {
@@ -85,12 +91,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ stats }) => `${stats.count} of ${stats.total} done`);
-interface State {
-    items: Array<{
-        name: string;
-        done: boolean;
-    }>;
-}
 // FIXTURE: computed-result-in-derive-captures
 // Verifies: computed() result properties captured in a subsequent lift-applied computation use .key() access
 //   computed(() => `${stats.count} of ${stats.total} done`) → lift(({ stats }) => ...)({ stats: { count: stats.key("count"), total: stats.key("total") } })
@@ -163,3 +163,7 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

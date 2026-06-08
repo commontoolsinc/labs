@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { initialsForName } from "../cf-avatar/cf-avatar.ts";
 import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 export type CfcAuthorshipState = "verified" | "unverified" | "unknown";
@@ -346,19 +347,6 @@ export const authorshipStateForLabel = (
   }
 
   return hasAuthorshipIntegrity(entries, kind) ? "unverified" : "unknown";
-};
-
-const initialsForName = (name: string | undefined): string => {
-  if (!name) {
-    return "?";
-  }
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("")
-    .slice(0, 2);
-  return initials || "?";
 };
 
 /**

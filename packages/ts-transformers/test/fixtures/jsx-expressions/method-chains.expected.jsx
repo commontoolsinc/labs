@@ -11,6 +11,28 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    text: string;
+    searchTerm: string;
+    items: number[];
+    start: number;
+    end: number;
+    threshold: number;
+    factor: number;
+    names: string[];
+    prefix: string;
+    prices: number[];
+    discount: number;
+    taxRate: number;
+    users: Array<{
+        name: string;
+        age: number;
+        active: boolean;
+    }>;
+    minAge: number;
+    words: string[];
+    separator: string;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         text: string;
@@ -106,6 +128,36 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const x = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return x > state.key("threshold");
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        threshold: {
+                            type: "number"
+                        }
+                    },
+                    required: ["threshold"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     x: number;
     state: {
@@ -131,6 +183,59 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ x, state }) => x * state.factor);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const x = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<li>Value: {__cfLift_5({
+        x: x,
+        state: {
+            factor: state.key("factor")
+        }
+    })}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        factor: {
+                            type: "number"
+                        }
+                    },
+                    required: ["factor"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         items: number[];
@@ -264,6 +369,38 @@ const __cfLift_10 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim().toLowerCase().replace(" ", "-"));
+const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
+    const name = __cf_pattern_input.key("element");
+    return (<li>{__cfLift_10({ name: name })}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         prices: number[];
@@ -479,6 +616,62 @@ const __cfLift_18 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ u }) => u.name.toLowerCase());
+const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
+    const u = __cf_pattern_input.key("element");
+    return (<li>{__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, u.key("active"), __cfLift_17({ u: {
+            name: u.key("name")
+        } }), __cfLift_18({ u: {
+            name: u.key("name")
+        } }))}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                age: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["name", "age", "active"]
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_19 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
@@ -621,28 +814,6 @@ const __cfLift_23 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.words.join(state.separator).toUpperCase());
-interface State {
-    text: string;
-    searchTerm: string;
-    items: number[];
-    start: number;
-    end: number;
-    threshold: number;
-    factor: number;
-    names: string[];
-    prefix: string;
-    prices: number[];
-    discount: number;
-    taxRate: number;
-    users: Array<{
-        name: string;
-        age: number;
-        active: boolean;
-    }>;
-    minAge: number;
-    words: string[];
-    separator: string;
-}
 // FIXTURE: method-chains
 // Verifies: chained method calls and array method chains in JSX are wrapped in a lift-applied computation
 //   state.text.trim().toLowerCase()          → lift(...)({ text })
@@ -687,92 +858,11 @@ export default pattern((state) => {
 
         {/* Filter then map */}
         <ul>
-          {state.key("items").filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const x = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return x > state.key("threshold");
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    threshold: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["threshold"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema), {
+          {state.key("items").filterWithPattern(__cfPattern_1, {
                 state: {
                     threshold: state.key("threshold")
                 }
-            }).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const x = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<li>Value: {__cfLift_5({
-                    x: x,
-                    state: {
-                        factor: state.key("factor")
-                    }
-                })}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    factor: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["factor"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+            }).mapWithPattern(__cfPattern_2, {
                 state: {
                     factor: state.key("factor")
                 }
@@ -819,38 +909,7 @@ export default pattern((state) => {
         <h3>Complex Method Combinations</h3>
         {/* Map with chained operations inside */}
         <ul>
-          {state.key("names").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const name = __cf_pattern_input.key("element");
-                return (<li>{__cfLift_10({ name: name })}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "string"
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+          {state.key("names").mapWithPattern(__cfPattern_3, {})}
         </ul>
 
         {/* Reduce with reactive accumulator */}
@@ -909,62 +968,7 @@ export default pattern((state) => {
 
         {/* Map with conditional logic */}
         <ul>
-          {state.key("users").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const u = __cf_pattern_input.key("element");
-                return (<li>{__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, u.key("active"), __cfLift_17({ u: {
-                        name: u.key("name")
-                    } }), __cfLift_18({ u: {
-                        name: u.key("name")
-                    } }))}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            age: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "age", "active"]
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+          {state.key("users").mapWithPattern(__cfPattern_4, {})}
         </ul>
 
         {/* Some/every with reactive predicates */}
@@ -1140,3 +1144,32 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfPattern_1,
+    __cfLift_5,
+    __cfPattern_2,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10,
+    __cfPattern_3,
+    __cfLift_11,
+    __cfLift_12,
+    __cfLift_13,
+    __cfLift_14,
+    __cfLift_15,
+    __cfLift_16,
+    __cfLift_17,
+    __cfLift_18,
+    __cfPattern_4,
+    __cfLift_19,
+    __cfLift_20,
+    __cfLift_21,
+    __cfLift_22,
+    __cfLift_23
+});

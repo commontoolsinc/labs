@@ -11,6 +11,11 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Problem {
+    price: number;
+    discount: number;
+    tax: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     price: number;
     discount: number;
@@ -49,11 +54,6 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ price, discount, tax }) => (price - discount) * (1 + tax));
-interface Problem {
-    price: number;
-    discount: number;
-    tax: number;
-}
 // FIXTURE: complex-expressions
 // Verifies: multi-variable arithmetic in JSX is wrapped in a lift-applied computation with captured refs
 //   {price - discount}             → lift((...) => price - discount)({ price, discount })
@@ -123,3 +123,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2
+});

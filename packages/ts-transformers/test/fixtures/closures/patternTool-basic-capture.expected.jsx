@@ -11,6 +11,14 @@ import { cell, computed, pattern, patternTool, type PatternToolResult } from "co
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const content = __cfHelpers.__cf_data(cell("Hello world\nGoodbye world", {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema).for("content", true));
+type Output = {
+    grepTool: PatternToolResult<{
+        content: string;
+    }>;
+};
 const __cfLift_1 = __cfHelpers.lift<{
     query: string;
     content: string;
@@ -33,29 +41,41 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, ({ content, query }) => {
     return content.split("\n").filter((c: string) => c.includes(query));
 });
-const content = __cfHelpers.__cf_data(cell("Hello world\nGoodbye world", {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema).for("content", true));
-type Output = {
-    grepTool: PatternToolResult<{
-        content: string;
-    }>;
-};
+const __cfPattern_1 = pattern((__cf_pattern_input: {
+    query: string;
+    content: string;
+}) => {
+    const query = __cf_pattern_input.key("query");
+    const content = __cf_pattern_input.key("content");
+    return __cfLift_1({
+        content: content,
+        query: query
+    }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        query: {
+            type: "string"
+        },
+        content: {
+            type: "string"
+        }
+    },
+    required: ["query", "content"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: patternTool-basic-capture
-// Verifies: patternTool captures a module-scoped cell as an extraParam
-//   patternTool(fn, { content }) → patternTool(fn, { content }) (content passed through)
-// Context: Module-scoped `content` cell is referenced inside the patternTool
-//   callback. The transformer threads it through the existing extraParams object.
+// Verifies: patternTool's first arg is a pattern() (CT-1655); `content` is a
+//   genuine pattern input supplied via extraParams.
+//   patternTool(pattern(({ query, content }) => …), { content })
+// Context: `content` appears in the pattern callback's destructured input and is
+//   pre-filled through extraParams.
 export default pattern(() => {
-    const grepTool = patternTool(({ query, content }: {
-        query: string;
-        content: string;
-    }) => {
-        return __cfLift_1({
-            content: content,
-            query: query
-        });
-    }, { content: content.for(["grepTool", 1, "content"], true) });
+    const grepTool = patternTool(__cfPattern_1, { content: content.for(["grepTool", 1, "content"], true) });
     return { grepTool };
 }, {
     type: "object",
@@ -108,3 +128,7 @@ export default pattern(() => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfPattern_1
+});

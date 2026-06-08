@@ -1,24 +1,25 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
-  DECONSTRUCT,
   DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
-} from "../../src/interface.ts";
-import { FabricSet } from "../../src/fabric-instances/FabricSet.ts";
-import { FrozenSet } from "../../src/frozen-builtins.ts";
-import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
+} from "@/interface.ts";
+import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { FabricSet } from "@/fabric-instances/FabricSet.ts";
+import { FrozenSet } from "@/frozen-builtins.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricSet", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
   // rule (doesn't fit a single member, isn't construction mechanics).
-  it("implements `FabricInstance` with tag `Set@1`", () => {
+  it("implements `FabricInstance` with the expected `.wireTypeTag`", () => {
     const ss = new FabricSet(new Set());
     expect(ss instanceof FabricInstance).toBe(true);
-    expect(ss.typeTag).toBe("Set@1");
+    expect(ss.wireTypeTag).toBe("Set@1");
   });
 
   describe("instance members", () => {

@@ -11,6 +11,31 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const n = __cf_pattern_input.key("element");
+    const multiplier = __cf_pattern_input.key("params", "multiplier");
+    return n * multiplier.get();
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number",
+                    asCell: ["readonly"]
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_1 = __cfHelpers.lift<{
     numbers: __cfHelpers.ReadonlyCell<number[]>;
     multiplier: __cfHelpers.ReadonlyCell<number>;
@@ -35,31 +60,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-    const n = __cf_pattern_input.key("element");
-    const multiplier = __cf_pattern_input.key("params", "multiplier");
-    return n * multiplier.get();
-}, {
-    type: "object",
-    properties: {
-        element: {
-            type: "number"
-        },
-        params: {
-            type: "object",
-            properties: {
-                multiplier: {
-                    type: "number",
-                    asCell: ["readonly"]
-                }
-            },
-            required: ["multiplier"]
-        }
-    },
-    required: ["element", "params"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema), {
+} as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfPattern_1, {
     multiplier: multiplier
 }));
 // FIXTURE: computed-with-closed-over-cell-map
@@ -96,3 +97,7 @@ export default pattern(() => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfPattern_1,
+    __cfLift_1
+});

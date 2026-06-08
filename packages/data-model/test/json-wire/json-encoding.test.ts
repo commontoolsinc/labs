@@ -1,17 +1,22 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
   jsonFromValue,
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "../../src/json-wire/json-encoding.ts";
-import { FabricError } from "../../src/fabric-instances/FabricError.ts";
-import type { FabricValue } from "../../src/fabric-value.ts";
-import { BaseReconstructionContext } from "../../src/BaseReconstructionContext.ts";
+} from "@/json-wire/json-encoding.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import type { FabricValue } from "@/fabric-value.ts";
+import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {
+  constructor() {
+    super(true);
+  }
+
   override getCell(): never {
     throw new Error("getCell not implemented in test runtime");
   }
@@ -160,7 +165,7 @@ describe("json-encoding", () => {
       });
     });
 
-    it("mixed value with modern types and slash-keys round-trips", () => {
+    it("mixed value with fabric types and slash-keys round-trips", () => {
       const value = {
         count: 42n,
         ref: { "/": { "link@1": { id: "of:bafyabc", path: [] } } },
@@ -206,8 +211,8 @@ describe("json-encoding", () => {
     });
 
     it("rejects plain JSON without the prefix", () => {
-      // These are all things the legacy heuristic accepts; under the modern
-      // dispatch they must be rejected, since they don't carry the prefix.
+      // These are plain JSON without the prefix, so the dispatch must reject
+      // them.
       expect(seemsLikeJsonEncodedFabricValue("true")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("false")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("null")).toBe(false);

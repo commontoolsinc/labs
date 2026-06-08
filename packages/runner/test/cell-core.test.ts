@@ -33,8 +33,8 @@ import { trustPattern } from "./support/trusted-builder.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-const richSigner = await Identity.fromPassphrase("test rich raw");
-const richSpace = richSigner.did();
+const rawSigner = await Identity.fromPassphrase("test raw");
+const rawSpace = rawSigner.did();
 
 describe("Cell", () => {
   let runtime: Runtime;
@@ -89,26 +89,23 @@ describe("Cell", () => {
     const localTx = rt.edit();
     const c = rt.getCell<unknown>(
       space,
-      "should wrap Error instances in FabricError on set (modern)",
+      "should wrap Error instances in FabricError on set",
       undefined,
       localTx,
     );
     const error = new TypeError("something went wrong");
     c.set(error);
 
-    // Modern path: error is stored as a `FabricError`-shaped value rather
-    // than the legacy `@Error` wrapper. `c.get()` returns a proxy view of
-    // the stored wrapper — its observable fields (`type`, `name`,
-    // `message`, `stack`, etc.) are exposed directly on the projection,
-    // and its `typeTag` is `"Error@1"` (`FabricError`'s tag).
+    // Error is stored as a `FabricError`-shaped value. `c.get()` returns a
+    // proxy view of the stored wrapper — its observable fields (`type`,
+    // `name`, `message`, `stack`, etc.) are exposed directly on the
+    // projection, and its `wireTypeTag` is `"Error@1"` (`FabricError`'s tag).
     const result = c.get() as {
       message: string;
       stack: string;
-      typeTag: string;
-      "@Error"?: unknown;
+      wireTypeTag: string;
     };
-    expect(result["@Error"]).toBeUndefined();
-    expect(result.typeTag).toBe("Error@1");
+    expect(result.wireTypeTag).toBe("Error@1");
     expect(result.message).toBe("something went wrong");
     expect(typeof result.stack).toBe("string");
     await localTx.commit();
@@ -125,7 +122,7 @@ describe("Cell", () => {
     const localTx = rt.edit();
     const c = rt.getCell<unknown>(
       space,
-      "should preserve Error cause property on set (modern)",
+      "should preserve Error cause property on set",
       undefined,
       localTx,
     );
@@ -133,18 +130,15 @@ describe("Cell", () => {
     const error = new Error("wrapper error", { cause });
     c.set(error);
 
-    // Modern path: outer error is a `FabricError`-shaped value; its cause
-    // is also `FabricError`-shaped (recursively wrapped at conversion
-    // time), not a legacy `@Error` wrapper. The proxy view exposes the
-    // wrapper's observable fields directly.
+    // Outer error is a `FabricError`-shaped value; its cause is also
+    // `FabricError`-shaped (recursively wrapped at conversion time). The
+    // proxy view exposes the wrapper's observable fields directly.
     const result = c.get() as {
       message: string;
       cause: { message: string; stack: string };
-      typeTag: string;
-      "@Error"?: unknown;
+      wireTypeTag: string;
     };
-    expect(result["@Error"]).toBeUndefined();
-    expect(result.typeTag).toBe("Error@1");
+    expect(result.wireTypeTag).toBe("Error@1");
     expect(result.message).toBe("wrapper error");
     expect(result.cause.message).toBe("root cause");
     expect(typeof result.cause.stack).toBe("string");
@@ -163,7 +157,7 @@ describe("Cell", () => {
 
     const target = rt.getCell<unknown>(
       space,
-      "nested redirect target (modern Error)",
+      "nested redirect target",
       undefined,
       localTx,
     );
@@ -176,7 +170,7 @@ describe("Cell", () => {
     // per-key recursion in the `isRecord(newValue)` branch.
     const parent = rt.getCell<{ slot: unknown }>(
       space,
-      "nested redirect parent (modern Error)",
+      "nested redirect parent",
       undefined,
       localTx,
     );
@@ -193,9 +187,9 @@ describe("Cell", () => {
 
     const targetResult = target.get() as {
       message: string;
-      typeTag: string;
+      wireTypeTag: string;
     };
-    expect(targetResult.typeTag).toBe("Error@1");
+    expect(targetResult.wireTypeTag).toBe("Error@1");
     expect(targetResult.message).toBe("through nested redirect");
 
     await localTx.commit();
@@ -252,7 +246,7 @@ describe("Cell", () => {
     const localTx = rt.edit();
     const c = rt.getCell<unknown>(
       space,
-      "sparse sharing modern",
+      "sparse sharing",
       undefined,
       localTx,
     );
@@ -291,10 +285,9 @@ describe("Cell", () => {
 
     const result = recursivelyAddIDIfNeeded(value, frame);
 
-    // Modern: the legacy "preserve identity when nothing to do"
-    // optimization doesn't apply for unfrozen inputs. Instead the
-    // function returns a structurally equivalent, deep-frozen tree
-    // (top-level included).
+    // The "preserve identity when nothing to do" optimization doesn't
+    // apply for unfrozen inputs; the function returns a structurally
+    // equivalent, deep-frozen tree (top-level included).
     expect(result).not.toBe(value);
     expect(result).toEqual(value);
     expect(Object.isFrozen(result)).toBe(true);
@@ -307,7 +300,7 @@ describe("Cell", () => {
       generatedIdCounter: 0,
       opaqueRefs: new Set(),
     };
-    // Deep-freeze before passing in. Under modern, an already-frozen
+    // Deep-freeze before passing in. An already-frozen
     // plain Object/Array is a valid `FabricValue` and shallow fabric
     // conversion returns it as-is, so reference identity survives all
     // the way out.
@@ -340,7 +333,7 @@ describe("Cell", () => {
 
     const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
 
-    // Modern: shallow fabric conversion clones at each level, so no
+    // Shallow fabric conversion clones at each level, so no
     // sub-branch is reference-preserved. The core invariants that
     // remain: ID assignment for objects-in-arrays still fires, and
     // primitive list elements still pass through unchanged. The
@@ -1035,7 +1028,7 @@ describe("Cell raw methods: frozen-or-not", () => {
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: richSigner });
+    storageManager = StorageManager.emulate({ as: rawSigner });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
@@ -1051,7 +1044,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRaw returns a frozen object", () => {
     const cell = runtime.getCell<{ a: number; b: number[] }>(
-      richSpace,
+      rawSpace,
       "getRaw frozen",
       undefined,
       tx,
@@ -1065,7 +1058,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped returns a frozen object", () => {
     const cell = runtime.getCell<{ x: number[] }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen",
       undefined,
       tx,
@@ -1079,7 +1072,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: false }) returns a mutable deep copy", () => {
     const cell = runtime.getCell<{ items: number[] }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false mutable",
       undefined,
       tx,
@@ -1103,7 +1096,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRaw and getRawUntyped agree, both frozen", () => {
     const cell = runtime.getCell<{ v: string }>(
-      richSpace,
+      rawSpace,
       "raw agreement frozen",
       undefined,
       tx,
@@ -1116,10 +1109,10 @@ describe("Cell raw methods: frozen-or-not", () => {
     expect(Object.isFrozen(untyped)).toBe(true);
   });
 
-  it("setRawUntyped stores arrays correctly (rich path)", () => {
+  it("setRawUntyped stores arrays correctly", () => {
     const cell = runtime.getCell<number[]>(
-      richSpace,
-      "setRawUntyped array rich",
+      rawSpace,
+      "setRawUntyped array",
       undefined,
       tx,
     );
@@ -1129,10 +1122,10 @@ describe("Cell raw methods: frozen-or-not", () => {
     expect(Object.isFrozen(raw)).toBe(true);
   });
 
-  it("setRawUntyped stores nested objects correctly (rich path)", () => {
+  it("setRawUntyped stores nested objects correctly", () => {
     const cell = runtime.getCell<{ a: { b: number[] } }>(
-      richSpace,
-      "setRawUntyped nested rich",
+      rawSpace,
+      "setRawUntyped nested",
       undefined,
       tx,
     );
@@ -1144,10 +1137,10 @@ describe("Cell raw methods: frozen-or-not", () => {
     expect(Object.isFrozen(raw.a.b)).toBe(true);
   });
 
-  it("setRawUntyped stores null (rich path)", () => {
+  it("setRawUntyped stores null", () => {
     const cell = runtime.getCell<number | null>(
-      richSpace,
-      "setRawUntyped null rich",
+      rawSpace,
+      "setRawUntyped null",
       undefined,
       tx,
     );
@@ -1158,7 +1151,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: false }) returns mutable array copy", () => {
     const cell = runtime.getCell<number[]>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false array",
       undefined,
       tx,
@@ -1172,7 +1165,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: false }) returns mutable deeply nested copy", () => {
     const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false deep nested",
       undefined,
       tx,
@@ -1192,7 +1185,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: false }) with empty array", () => {
     const cell = runtime.getCell<unknown[]>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false empty array",
       undefined,
       tx,
@@ -1205,7 +1198,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: false }) successive calls return independent copies", () => {
     const cell = runtime.getCell<{ val: number }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false independence",
       undefined,
       tx,
@@ -1219,7 +1212,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: true }) returns frozen (same as default)", () => {
     const cell = runtime.getCell<{ x: number }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen true",
       undefined,
       tx,
@@ -1232,7 +1225,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: false }) with deeply nested structure", () => {
     const cell = runtime.getCell<{ a: { b: { c: number[] } } }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false deep",
       undefined,
       tx,
@@ -1249,7 +1242,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 
   it("getRawUntyped({ frozen: false }) successive calls are independent", () => {
     const cell = runtime.getCell<{ val: number }>(
-      richSpace,
+      rawSpace,
       "getRawUntyped frozen false independence",
       undefined,
       tx,
@@ -1276,13 +1269,11 @@ describe("Cell raw methods: frozen-or-not", () => {
 // originally added (PRs #1472, #1562) to handle string-form values
 // returned from a previous shape of the storage layer. PR #2971 in
 // March 2026 wired `valueFromJson` into the storage-boundary read path
-// (`memory/space.ts`), unconditionally decoding the `is` column to an
-// object before reaching either defensive parse: under flag-OFF
-// `valueFromJsonLegacy` is literally `JSON.parse(json)`, and under flag-ON
-// `valueFromJsonModern` strips the `fvj1:` prefix and decodes. From that
-// point on, neither guard could fire through the standard public API, and
-// the defensive parses became orphaned — which is what motivated their
-// deletion.
+// (`memory/space.ts`): `valueFromJson` unconditionally decodes the `is`
+// column to an object (stripping the `fvj1:` prefix) before reaching
+// either defensive parse. From that point on, neither guard could fire
+// through the standard public API, and the defensive parses became
+// orphaned — which is what motivated their deletion.
 //
 // The tests below pin the round-trip behavior that, post-deletion, is the
 // observable contract. They serve as a passive regression net for any future
@@ -1420,7 +1411,7 @@ describe(
     it("preserves the sign of -0 on set", () => {
       const c = runtime.getCell<unknown>(
         space,
-        "modern: preserve -0",
+        "preserve -0",
         undefined,
         tx,
       );
@@ -1433,7 +1424,7 @@ describe(
     it("stores NaN", () => {
       const c = runtime.getCell<unknown>(
         space,
-        "modern: store NaN",
+        "store NaN",
         undefined,
         tx,
       );
@@ -1445,7 +1436,7 @@ describe(
     it("stores +Infinity and -Infinity", () => {
       const c = runtime.getCell<unknown>(
         space,
-        "modern: store infinities",
+        "store infinities",
         undefined,
         tx,
       );
@@ -1484,7 +1475,7 @@ describe(
     it("round-trips an interned symbol with stable identity", () => {
       const c = runtime.getCell<unknown>(
         space,
-        "modern: interned symbol round-trip",
+        "interned symbol round-trip",
         undefined,
         tx,
       );
@@ -1499,7 +1490,7 @@ describe(
     it("round-trips an interned symbol with an empty key", () => {
       const c = runtime.getCell<unknown>(
         space,
-        "modern: interned empty-key symbol",
+        "interned empty-key symbol",
         undefined,
         tx,
       );
@@ -1511,7 +1502,7 @@ describe(
     it("throws on a unique (uninterned) symbol", () => {
       const c = runtime.getCell<unknown>(
         space,
-        "modern: throw on unique symbol",
+        "throw on unique symbol",
         undefined,
         tx,
       );

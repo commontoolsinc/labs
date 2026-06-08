@@ -11,23 +11,6 @@ import { action, computed, handler, lift, pattern, type Writable } from "commonf
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(false, () => deriveInput.key("foo").get());
-const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        input: {
-            type: "object",
-            properties: {
-                foo: {
-                    type: "string"
-                }
-            },
-            required: ["foo"],
-            asCell: ["readonly"]
-        }
-    },
-    required: ["input"]
-} as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get());
 // FIXTURE: builder-input-path-shrink
 // Verifies: builder input schemas shrink to observed paths when reads/writes are specific,
 // including explicit type arguments and interprocedural helper calls.
@@ -49,6 +32,7 @@ const deriveInput = __cfHelpers.__cf_data({} as Writable<{
     foo: string;
     bar: string;
 }>);
+const __cfLift_1 = __cfHelpers.lift(false, () => deriveInput.key("foo").get());
 const computedObserved = __cfHelpers.__cf_data(__cfLift_1().for("computedObserved", true));
 const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
@@ -143,6 +127,22 @@ const liftExplicit = lift({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, (input) => input.key("foo").get());
+const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        input: {
+            type: "object",
+            properties: {
+                foo: {
+                    type: "string"
+                }
+            },
+            required: ["foo"],
+            asCell: ["readonly"]
+        }
+    },
+    required: ["input"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { input }) => input.key("foo").get());
 const actionPattern = pattern((input: Writable<{
     foo: string;
     bar: string;
@@ -179,3 +179,14 @@ export default __cfHelpers.__cf_data({
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    liftOptional,
+    __cfLift_1,
+    handlerObserved,
+    handlerExplicit,
+    liftInterprocedural,
+    liftWriteOnly,
+    liftExplicit,
+    actionPattern,
+    __cfHandler_1
+});

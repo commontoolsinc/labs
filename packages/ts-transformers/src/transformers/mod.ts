@@ -1,10 +1,9 @@
-export { BuilderCallbackHoistingTransformer } from "./builder-callback-hoisting.ts";
+export { BuilderCallHoistingTransformer } from "./builder-call-hoisting.ts";
 export { CastValidationTransformer } from "./cast-validation.ts";
 export { PatternCallbackLoweringTransformer } from "./pattern-callback-lowering.ts";
 export { EmptyArrayOfValidationTransformer } from "./empty-array-of-validation.ts";
 export { HelperOwnedExpressionSiteLoweringTransformer } from "./helper-owned-expression-site-lowering.ts";
 export { JsxExpressionSiteRouterTransformer } from "./jsx-expression-site-router.ts";
-export { LiftHoistingTransformer } from "./lift-hoisting.ts";
 export { ModuleScopeCfDataTransformer } from "./module-scope-cf-data.ts";
 export { ModuleScopeFunctionHardeningTransformer } from "./module-scope-function-hardening.ts";
 export { ModuleScopeShadowingTransformer } from "./module-scope-shadowing.ts";

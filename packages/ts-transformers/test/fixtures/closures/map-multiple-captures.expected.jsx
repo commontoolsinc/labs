@@ -11,6 +11,16 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    price: number;
+    quantity: number;
+}
+interface State {
+    items: Item[];
+    discount: number;
+    taxRate: number;
+}
+const shippingCost = 5.99;
 const __cfLift_1 = __cfHelpers.lift<{
     item: {
         price: number;
@@ -56,16 +66,87 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost);
-interface Item {
-    price: number;
-    quantity: number;
-}
-interface State {
-    items: Item[];
-    discount: number;
-    taxRate: number;
-}
-const shippingCost = 5.99;
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    const multiplier = __cf_pattern_input.params.multiplier;
+    return (<span>
+            Total: {__cfLift_1({
+        item: {
+            price: item.key("price"),
+            quantity: item.key("quantity")
+        },
+        state: {
+            discount: state.key("discount"),
+            taxRate: state.key("taxRate")
+        },
+        multiplier: multiplier
+    })}
+          </span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        },
+                        taxRate: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount", "taxRate"]
+                },
+                multiplier: {
+                    type: "number"
+                }
+            },
+            required: ["state", "multiplier"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number"
+                },
+                quantity: {
+                    type: "number"
+                }
+            },
+            required: ["price", "quantity"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-multiple-captures
 // Verifies: .map() on reactive array captures multiple outer variables (state + local)
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {discount, taxRate}, multiplier})
@@ -80,87 +161,7 @@ export default pattern((state) => {
     const multiplier = 2;
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                const multiplier = __cf_pattern_input.params.multiplier;
-                return (<span>
-            Total: {__cfLift_1({
-                    item: {
-                        price: item.key("price"),
-                        quantity: item.key("quantity")
-                    },
-                    state: {
-                        discount: state.key("discount"),
-                        taxRate: state.key("taxRate")
-                    },
-                    multiplier: multiplier
-                })}
-          </span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number"
-                                    },
-                                    taxRate: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["discount", "taxRate"]
-                            },
-                            multiplier: {
-                                type: "number"
-                            }
-                        },
-                        required: ["state", "multiplier"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            },
-                            quantity: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price", "quantity"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     discount: state.key("discount"),
                     taxRate: state.key("taxRate")
@@ -233,3 +234,7 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfPattern_1
+});

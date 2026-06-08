@@ -11,6 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const identity = __cfHardenFn(<T,>(value: T) => value);
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         user: {
@@ -132,7 +133,6 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.label ?? "Pending");
-const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
 //   lifted as whole calls instead of lowering only inner argument expressions.
@@ -238,3 +238,10 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5
+});

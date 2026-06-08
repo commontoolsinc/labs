@@ -1,13 +1,14 @@
+import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
+  CODEC,
   DECONSTRUCT,
-  DEEP_FREEZE,
-  type FabricValue,
-  IS_DEEP_FROZEN,
+  type FabricCodec,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "../interface.ts";
-import { TAGS } from "../fabric-type-tags.ts";
-import { FrozenSet } from "../frozen-builtins.ts";
+} from "@/wire-common/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
@@ -16,10 +17,13 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  * wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
-  /** @inheritDoc */
-  readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<FabricValue>) {
     super();
+  }
+
+  /** @inheritDoc */
+  get wireTypeTag(): string {
+    return WIRE_TYPE_TAGS.Set;
   }
 
   [DECONSTRUCT](): FabricValue {
@@ -72,5 +76,32 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     _context: ReconstructionContext,
   ): FabricSet {
     throw new Error("FabricSet: not yet implemented");
+  }
+
+  static #codec = Object.freeze(
+    new (class FabricSetCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Set, FabricSet);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricSet): FabricValue {
+        return value[DECONSTRUCT]();
+      }
+
+      /** @inheritDoc */
+      decode(
+        _wireTypeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        return FabricSet[RECONSTRUCT](state, context);
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }

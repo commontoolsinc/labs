@@ -69,20 +69,24 @@ during design are marked **[resolved]** with the decision.
    a behind db, truncate orphaned in-doubt writes for an ahead one. Rejected:
    per-commit checkpoint+fsync of both files (doesn't actually close the crash
    window and kills WAL throughput).
-8. **Connection contention.** `@db/sqlite` is a single synchronous connection
-   per `Database`. Long queries block the space. Do we need a separate read
-   connection (WAL readers don't block writers), a statement timeout, or a
-   query cost limit for v1?
+8. **[resolved — read pool]** Connection contention. `@db/sqlite` is a single
+   synchronous connection per `Database`, so a long read on the engine
+   connection blocked the space. **Resolved** by routing **all reads** —
+   cell-derived and injected on-disk — onto a separate path-keyed **read-only
+   connection pool** (`ReadConnectionPool`), unattached from the engine; only
+   writes use the engine connection (Section
+   [04](./04-server-execution-and-transactions.md#read-path-a-pooled-read-only-connection)).
+   A statement timeout against a single runaway read remains a worthwhile guard.
 8a. **[resolved — V1 cut] Attach limit & core-table shadowing (Option A).**
    - **Attach limit:** `@db/sqlite` exposes no `sqlite3_limit` binding, so
-     `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10). V1:
-     design within 10 with an **attach/detach LRU cache** — attach a pattern db
-     on demand, evict (`DETACH DATABASE`) the least-recently-used near the limit,
-     managed at **transaction boundaries** (attach before `BEGIN`, detach only
-     when idle). A commit almost always touches one pattern db (2 schemas), far
-     under the limit; reject/split a transaction that would span more at once.
-     A one-time startup **probe only logs** the real limit (no dependency on
-     headroom).
+     `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10).
+     **Update (read pool):** reads no longer attach at all — they run on the
+     read-only connection pool (Q8 above), so the attach limit is now a
+     *write-only* concern, and a commit touches **at most one** cell-db (the one
+     being written), attached before `BEGIN` and detached before the post-commit
+     await. The old LRU attach/detach *read* cache is removed; the limit is
+     effectively never approached. A one-time startup **probe only logs** the
+     real limit (no dependency on headroom).
    - **Core-table shadowing:** V1 ships **without** the core-table rename. Cheap
      mitigations now: the statement guard rejects schema-qualified references,
      `ATTACH`/`DETACH`/`PRAGMA`, and multiple statements; patterns may **not
@@ -202,15 +206,21 @@ during design are marked **[resolved]** with the decision.
     one handler trip the limit only at commit time. A client-side assertion in the
     write seam (`recordSqliteWrite`) could surface this earlier with a clearer
     message. Nicety, not a correctness issue.
-20. **Two schema paths disagree on the `SqliteDb` brand.** The schema-generator's
-    object-formatter stamps `asCell: ["sqlite"]` for a `SqliteDb` field, but the
-    ts-transformer's capability analysis (used for handler-state schemas) infers
-    `asCell: ["readonly"]` from SqliteDb's read-only method surface — it does not
-    recognize the "sqlite" brand. This is **benign today**: `db.exec` reaches the
-    transaction via the materialized handle regardless of the wrapper brand
-    (proven e2e), and `db.query` is build-time only. But the inconsistency is a
-    latent trap; the capability analysis should learn the "sqlite" brand so both
-    paths agree.
+20. **[resolved] Two schema paths disagree on the `SqliteDb` brand.** The
+    schema-generator's object-formatter stamped `asCell: ["sqlite"]` for a
+    `SqliteDb` field, but the ts-transformer's capability analysis (handler-state
+    schemas) inferred `asCell: ["readonly"]` from SqliteDb's read-only method
+    surface. **Resolved** by teaching the transformer that the explicit `"sqlite"`
+    cell brand is authoritative and must survive capability shrinking — the same
+    mechanism that preserves `Stream` (`preservedWrapperFor` in
+    `type-shrinking.ts`); the schema generator now also recognizes the
+    `SqliteDb` wrapper name (`type-utils.ts`/`wrapperKindForName`). Both paths now
+    emit `["sqlite"]`. Making the brands agree surfaced two latent issues that are
+    also fixed: (a) the public `SqliteDb` type no longer extends `IReadable`, so
+    `db.get()`/`db.sample()` (meaningless on an opaque handle) no longer
+    type-check; (b) the runtime's `db.exec` reads the handle via `getRaw()` rather
+    than the schema-shaped `get()` (which, under the real `SqliteDatabase` schema,
+    shaped the handle down to `{}` and dropped `id`/`tables`).
 
 ## Code-review follow-ups (deferred hardening)
 
@@ -229,16 +239,46 @@ during design are marked **[resolved]** with the decision.
     the attachment with `.has()` (no dead `alias` binding) and documents that the
     unqualified statement relies on the ≤1-cell-db invariant + core-table guard,
     not on alias qualification.
-24. **Codec / factory duplication (partly open).** The `toCell` divergence is
-    **fixed**: `encodeSqliteParams` now recovers a bound cell from a `toCell`
-    back-pointer too, matching the read side. Still open: `encodeSqliteParams`
-    inlines the cell→sigil encoding `encodeCfLinkValue` owns, `decodeCfLinkValue`
-    re-implements `parseCfLinkToSigil`'s prologue, and `cell.ts` rebuilds the
-    `sqliteQuery` node factory `builder/built-in.ts` exports. Consolidating these
-    is blocked by the cell.ts ↔ cf-link.ts import cycle (both need `isCell`);
-    resolve via a cycle-free helper module. The write/read codecs MUST stay
-    byte-identical until then.
+24. **[resolved] Codec / factory duplication.** All three are consolidated, with
+    the cell.ts ↔ cf-link.ts cycle broken via a cycle-free leaf module
+    (`builtins/sqlite/cf-link-codec.ts`, which depends only on `link-utils` +
+    types — no runtime `cell.ts` import).
+    - **Cell→sigil encode:** `encodeSqliteParams` (cell.ts) and `encodeCfLinkValue`
+      (cf-link.ts) both call the codec's `encodeCellToSigilString`, so write- and
+      read-path sigils are byte-identical by construction (no inlining).
+    - **Parse prologue:** `parseCfLinkToSigil` lives in the codec; `decodeCfLinkValue`
+      delegates to it (one prologue, not two). cf-link.ts re-exports it so importers
+      are unchanged.
+    - **Bound-cell recovery:** a single exported `asBoundCell` in cell.ts (where
+      `isCell`/`CellImpl` live), imported by cf-link.ts (the direction it already
+      imported `isCell`).
+    - **Factory:** the single `sqliteQuery` node factory lives in
+      `builtins/sqlite/query-node.ts`, imported by both `db.query` (cell.ts) and the
+      `sqliteQuery` builder export (built-in.ts).
 25. **[resolved]** `decodeRowLinkColumns` now copies a result row lazily — only
     when a link column actually decodes to a different value — so rows with no
     link columns (or null values) are returned as-is on the reactive read path,
     avoiding the per-row spread.
+
+## Read pool follow-ups (deferred)
+
+> Risks carried forward from the read-pool work (Section
+> [04](./04-server-execution-and-transactions.md#read-path-a-pooled-read-only-connection)).
+> The pool is in place and correct for the current access pattern; these are
+> sizing/hardening items, not correctness gaps.
+
+26. **fd budget & pool sizing.** The pool caps open read connections with an LRU
+    (evict → `close()`). Pick a sensible default and a per-space ceiling well
+    under the OS file-descriptor budget as cell-db counts grow.
+27. **WAL everywhere.** Reads observe only *committed* state and each query is a
+    fresh read transaction, so WAL is **not** required today (pinned by a test).
+    WAL remains a future hardening for concurrent read-*during*-write; if adopted,
+    assess the `-wal`/`-shm` overhead and checkpointing for many small cell-dbs.
+28. **Pooled-reader staleness on migration.** An additive migration bumps the
+    schema cookie and the pooled reader reloads schema on next access (SQLite
+    re-prepares against committed DDL). If a future case is found where it
+    doesn't, add an explicit drop-and-reopen of the pooled connection on a known
+    schema-version bump.
+29. **Disk-source path disappearing / becoming unreadable** between registration
+    and read — surface a clear error (today an open error from the pool) rather
+    than a generic failure.

@@ -5,10 +5,6 @@ import {
   assertStrictEquals,
 } from "@std/assert";
 import {
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-wire";
@@ -22,7 +18,7 @@ import {
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -2013,8 +2009,7 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
   }
 });
 
-Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric values", async () => {
-  setDataModelConfig(true);
+Deno.test("memory v2 stacked commits: pending visibility preserves fabric values", async () => {
   const harness = await createHarness();
   let commitPromise: Promise<any> | undefined;
   try {
@@ -2034,7 +2029,6 @@ Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric v
   } finally {
     await commitPromise?.catch(() => {});
     await harness.close();
-    resetDataModelConfig();
   }
 });
 

@@ -98,7 +98,7 @@ export class CFCopyButton extends BaseElement {
   declare iconOnly: boolean;
 
   private _copied = false;
-  private _resetTimeout?: number;
+  private _resetTimeout?: ReturnType<typeof setTimeout>;
 
   constructor() {
     super();

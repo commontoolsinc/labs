@@ -11,6 +11,14 @@ import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Person {
+    name: string;
+    rank: number;
+}
+interface PatternInput {
+    people?: Cell<Default<Person[], [
+    ]>>;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     people: __cfHelpers.ReadonlyCell<Person[]>;
 }, { name: string; rank: number; isFirst: boolean; }[]>({
@@ -76,6 +84,52 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const person = __cf_pattern_input.key("element");
+    return (<span>{person.key("name")}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Person"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Person: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                rank: {
+                    type: "number"
+                }
+            },
+            required: ["name", "rank"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     count: number;
 }, string>({
@@ -89,14 +143,61 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + " people");
-interface Person {
-    name: string;
-    rank: number;
-}
-interface PatternInput {
-    people?: Cell<Default<Person[], [
-    ]>>;
-}
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    return (<li>
+                    {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        "enum": ["", "\u2605 "]
+    } as const satisfies __cfHelpers.JSONSchema, entry.key("isFirst"), "★ ", "")}
+                    {entry.key("name")}
+                  </li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                rank: {
+                    type: "number"
+                },
+                isFirst: {
+                    type: "boolean"
+                }
+            },
+            required: ["name", "rank", "isFirst"]
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-in-ternary-branch
 // Verifies: a computed array used inside a ternary JSX branch stays pattern-lowered
 //   const adminData = computed(() => [...people.get()].sort(...).map(...))
@@ -114,52 +215,7 @@ export default pattern((__cf_pattern_input) => {
     const count = __cfLift_2({ people: people }).for("count", true);
     return {
         [UI]: (<div>
-        {people.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const person = __cf_pattern_input.key("element");
-                return (<span>{person.key("name")}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Person"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Person: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            rank: {
-                                type: "number"
-                            }
-                        },
-                        required: ["name", "rank"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+        {people.mapWithPattern(__cfPattern_1, {})}
         {__cfHelpers.ifElse({
             type: "boolean",
             asCell: ["cell"]
@@ -180,61 +236,7 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, showAdmin, <div>
               <span>{__cfLift_3({ count: count })}</span>
               <ul>
-                {adminData.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const entry = __cf_pattern_input.key("element");
-                return (<li>
-                    {__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    "enum": ["", "\u2605 "]
-                } as const satisfies __cfHelpers.JSONSchema, entry.key("isFirst"), "★ ", "")}
-                    {entry.key("name")}
-                  </li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            rank: {
-                                type: "number"
-                            },
-                            isFirst: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "rank", "isFirst"]
-                    }
-                },
-                required: ["element"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+                {adminData.mapWithPattern(__cfPattern_2, {})}
               </ul>
             </div>, null)}
       </div>),
@@ -298,3 +300,10 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfPattern_1,
+    __cfLift_3,
+    __cfPattern_2
+});

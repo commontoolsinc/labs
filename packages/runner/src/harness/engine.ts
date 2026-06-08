@@ -405,9 +405,40 @@ export class Engine extends EventTarget implements Harness {
         graph.records.set(spec, record as VirtualModuleRecord);
       }
 
-      // Security-verify every authored module body before it can execute.
-      for (const [specifier, body] of graph.compiledBodies) {
-        verifyCompiledModuleBody(body, specifier);
+      // Security-verify every authored module body before it can execute —
+      // EXCEPT a trusted, integrity-gated full hit. The CFC integrity label is
+      // the security boundary for cache hits, so re-running the SES body verifier
+      // on integrity-gated bytes is redundant per-load work (threat model:
+      // `docs/specs/module-loading.md`, "the persistent compilation cache").
+      // Trust is gated on PROVENANCE, not just the opt-in flag: the bodies must
+      // have arrived via the lazy `precompiledModulesFor` channel (the cache
+      // callback, which reads the compiled set with `requiredIntegrity`,
+      // fail-closed) — NOT a direct, caller-supplied `precompiledModules` map,
+      // which is untrusted injection. Freshly compiled bodies (miss / partial)
+      // are likewise always verified.
+      const trustBodies = fullHit &&
+        options.trustedBodies === true &&
+        options.precompiledModules === undefined &&
+        options.precompiledModulesFor !== undefined;
+      if (!trustBodies) {
+        // Verify, and record which modules the verifier approved for hoist
+        // registration — only those get the real `__cfReg` registrar (the rest
+        // get a throwing one, so a smuggled call fails closed).
+        for (const [specifier, body] of graph.compiledBodies) {
+          const { hasHoistRegistration } = verifyCompiledModuleBody(
+            body,
+            specifier,
+          );
+          if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+        }
+      } else {
+        // Trusted integrity-gated bytes: SES verification — and its registration
+        // approval — already ran when the cache entry was sealed, so grant the
+        // real registrar to every module (one without a `__cfReg` call never
+        // invokes it).
+        for (const specifier of graph.compiledBodies.keys()) {
+          graph.registrationApproved.add(specifier);
+        }
       }
 
       const mainSpecifier = graph.specifierByPath.get(mappedProgram.main);
@@ -578,8 +609,15 @@ export class Engine extends EventTarget implements Harness {
   ): EvaluateResult {
     const prefix = `/${id}`;
     // Register module hashes up front so the canonical `cf:module/<hash>/<path>`
-    // sources are available for the verified set below.
-    this.registerModuleHashes(id, files);
+    // sources are available for the verified set below. Derive them from the
+    // graph's RESOLVED per-module identities (the same content-addressed
+    // `cf:module/<identity>` the cache + source-free reload use), NOT by
+    // re-hashing the raw `files` — those disagree (the resolved set folds the
+    // injected modules into each module's Merkle hash), which would make a
+    // function's `fn.src` (hence its implementationRef) differ between this
+    // source-based compile and a source-free by-identity reload, breaking
+    // `getExecutableFunction` for resumed callables (CT-1623).
+    this.registerModuleHashesFromGraph(id, graph);
     const verifiedSources = new Set<string>();
     const addVerifiedSource = (value: string | undefined) => {
       if (typeof value !== "string" || value.length === 0) return;
@@ -735,10 +773,20 @@ export class Engine extends EventTarget implements Harness {
       // for sub-pattern resolution.
       const exportMap: Record<string, Exports> = {};
       const exportsByValue = new Map<unknown, RuntimeProgram>();
+      // Per-module namespaces keyed by content identity (stripped from the
+      // `cf:module/<identity>` specifier) for the in-memory identity cache.
+      const exportsByIdentity = new Map<string, Exports>();
+      const MODULE_SPECIFIER_PREFIX = "cf:module/";
       for (const [path, specifier] of graph.specifierByPath) {
         const namespace = loaded.importNow(specifier) as Exports;
         const fileName = ctx.fileNameForPath(path);
         exportMap[fileName] = namespace;
+        if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
+          exportsByIdentity.set(
+            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
+            namespace,
+          );
+        }
         for (const [exportName, value] of Object.entries(namespace)) {
           // Only object/function exports are sub-pattern candidates. Skip the
           // `__esModule` flag and primitives, which would otherwise collide in
@@ -760,7 +808,16 @@ export class Engine extends EventTarget implements Harness {
       this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
-      return { main, exportMap, loadId };
+      // `graph.registrationSink` was populated by each module's `__cfReg` during
+      // the `importNow` loop above (committed only for modules that evaluated
+      // cleanly).
+      return {
+        main,
+        exportMap,
+        loadId,
+        exportsByIdentity,
+        registrationsByIdentity: graph.registrationSink,
+      };
     } finally {
       logger.timeEnd("evaluateRecordGraph");
     }
@@ -779,7 +836,7 @@ export class Engine extends EventTarget implements Harness {
   async evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
-    options: { sourceFiles?: Source[] } = {},
+    options: { sourceFiles?: Source[]; trustedBodies?: boolean } = {},
   ): Promise<EvaluateResult> {
     await this.getRuntimeInternals();
     const { runtimeExports } = await this.getRuntimeInternals();
@@ -809,11 +866,29 @@ export class Engine extends EventTarget implements Harness {
       graph.records.set(spec, record as VirtualModuleRecord);
     }
 
-    // Security-verify every cached body + the whole graph before executing —
-    // the cache's integrity label is still only client-asserted, so cached
-    // bytes are not trusted unverified (mirrors the compile path).
-    for (const [specifier, body] of graph.compiledBodies) {
-      verifyCompiledModuleBody(body, specifier);
+    // Security-verify every cached body before executing — EXCEPT a trusted
+    // warm hit. These bodies always come from the integrity-gated compiled set
+    // (`loadCompiledClosure` reads with `requiredIntegrity`, fail-closed), so
+    // with `trustedBodies` the CFC integrity label is the security boundary and
+    // re-running the SES body verifier is redundant per-load work (threat model:
+    // `docs/specs/module-loading.md`, "the persistent compilation cache"). The
+    // structural graph verify below always runs.
+    if (options.trustedBodies !== true) {
+      // Verify, and record which modules the verifier approved for hoist
+      // registration — only those get the real `__cfReg` registrar.
+      for (const [specifier, body] of graph.compiledBodies) {
+        const { hasHoistRegistration } = verifyCompiledModuleBody(
+          body,
+          specifier,
+        );
+        if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+      }
+    } else {
+      // Trusted integrity-gated bytes: registration approval was sealed at
+      // first compile; grant the real registrar to every module.
+      for (const specifier of graph.compiledBodies.keys()) {
+        graph.registrationApproved.add(specifier);
+      }
     }
     const mainSpecifier = `cf:module/${entryIdentity}`;
     if (!graph.records.has(mainSpecifier)) {
@@ -1069,6 +1144,41 @@ export class Engine extends EventTarget implements Harness {
       this.canonicalSourceByPrefixed.set(
         `/${id}${path}`,
         `cf:module/${hash}${path}`,
+      );
+    }
+  }
+
+  /**
+   * Like {@link registerModuleHashes}, but takes the RESOLVED per-module
+   * identities straight from the compiled graph (`cf:module/<identity>` in
+   * `graph.specifierByPath`) instead of re-hashing the raw program files.
+   *
+   * The two must agree: the cache key, the record-graph specifiers, and the
+   * source-free by-identity reload (`evaluateCachedModules`) all use the
+   * resolved identity (which folds the injected/resolved modules into each
+   * module's Merkle hash). Re-hashing the raw `program.files` here would yield a
+   * DIFFERENT hash for the same module, so a function's `fn.src` — and thus its
+   * minted `implementationRef` — would differ between this source-based compile
+   * and a source-free reload, and `getExecutableFunction` would miss when a
+   * resumed piece invokes a callable (CT-1623). Keying matches the source map's
+   * bundle paths (`/<id>/<authoredPath>`, plus injected modules under their own
+   * specifier path), and the canonical value matches the source-free form.
+   */
+  private registerModuleHashesFromGraph(
+    id: string,
+    graph: CompiledModuleGraph,
+  ): void {
+    const prefix = `/${id}`;
+    for (const [name, specifier] of graph.specifierByPath) {
+      if (!specifier.startsWith("cf:module/")) continue;
+      const identity = specifier.slice("cf:module/".length);
+      const authoredPath = name.startsWith(`${prefix}/`)
+        ? name.slice(prefix.length)
+        : name;
+      this.moduleHashByPrefixedSource.set(name, identity);
+      this.canonicalSourceByPrefixed.set(
+        name,
+        `cf:module/${identity}${authoredPath}`,
       );
     }
   }

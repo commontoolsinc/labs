@@ -3,12 +3,12 @@
  */
 
 import { createSHA256, type IHasher } from "hash-wasm";
-import { BaseCollectingHasher } from "./BaseCollectingHasher.ts";
+import { BaseCollectingHasher } from "@/BaseCollectingHasher.ts";
 import {
   BaseSmallChunkUpdatingHasher,
-} from "./BaseSmallChunkUpdatingHasher.ts";
-import { InstancePool } from "./InstancePool.ts";
-import type { IncrementalHasher } from "./interface.ts";
+} from "@/BaseSmallChunkUpdatingHasher.ts";
+import { InstancePool } from "@/InstancePool.ts";
+import type { IncrementalHasher } from "@/interface.ts";
 
 /**
  * How many hashers to have available for concurrent use.

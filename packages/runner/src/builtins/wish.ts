@@ -1068,7 +1068,11 @@ async function fetchSuggestionPattern(
     if (!program) {
       throw new WishError("Can't load suggestion.tsx");
     }
-    const pattern = await runtime.patternManager.compilePattern(program);
+    // Cache the (space-independent) system pattern in the user's home space so
+    // it's reused across reloads for this user (CT-1623, per-space cache).
+    const pattern = await runtime.patternManager.compilePattern(program, {
+      space: runtime.userIdentityDID,
+    });
 
     if (!pattern) throw new WishError("Can't compile suggestion.tsx");
 
@@ -1090,7 +1094,11 @@ async function fetchProfileCreatePattern(
     if (!program) {
       throw new WishError("Can't load profile-create.tsx");
     }
-    const pattern = await runtime.patternManager.compilePattern(program);
+    // Cache the (space-independent) system pattern in the user's home space so
+    // it's reused across reloads for this user (CT-1623, per-space cache).
+    const pattern = await runtime.patternManager.compilePattern(program, {
+      space: runtime.userIdentityDID,
+    });
 
     if (!pattern) throw new WishError("Can't compile profile-create.tsx");
 

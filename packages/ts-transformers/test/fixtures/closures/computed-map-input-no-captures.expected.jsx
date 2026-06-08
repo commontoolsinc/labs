@@ -20,6 +20,10 @@ import { Cell, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    id: number;
+    value: string;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.ReadonlyCell<Item[]>;
 }, number>({
@@ -51,10 +55,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().map((item) => item.value).length);
-interface Item {
-    id: number;
-    value: string;
-}
 // FIXTURE: computed-map-input-no-captures
 // Verifies: a computed over a captured cell array uses a plain .map() (not .mapWithPattern)
 //   computed(() => items.get().map(...).length) → lift(...)({ items })
@@ -102,3 +102,6 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

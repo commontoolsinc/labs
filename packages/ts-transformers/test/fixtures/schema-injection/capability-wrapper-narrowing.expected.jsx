@@ -137,32 +137,7 @@ const comparable = lift({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, (input: Writable<State>) => input.equals(input));
-const opaqueMap = lift({
-    type: "array",
-    items: {
-        $ref: "#/$defs/Item"
-    },
-    asCell: ["opaque"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "string"
-                },
-                label: {
-                    type: "string"
-                }
-            },
-            required: ["id", "label"]
-        }
-    }
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "array",
-    items: {
-        type: "string"
-    }
-} as const satisfies __cfHelpers.JSONSchema, (input: Writable<Item[]>) => input.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return item.key("id");
 }, {
@@ -189,8 +164,37 @@ const opaqueMap = lift({
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema), {}));
+} as const satisfies __cfHelpers.JSONSchema);
+const opaqueMap = lift({
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item"
+    },
+    asCell: ["opaque"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "string"
+                },
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["id", "label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, (input: Writable<Item[]>) => input.mapWithPattern(__cfPattern_1, {}));
 export { comparable, opaqueMap, pushOnly, readOnly, readWrite, setOnly, updateOnly, };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfPattern_1
+});

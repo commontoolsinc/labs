@@ -11,6 +11,15 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    id: number;
+    price: number;
+}
+interface State {
+    items: Item[];
+    discount: number;
+    threshold: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     item: {
         price: number;
@@ -77,15 +86,95 @@ const __cfLift_2 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 - state.discount));
-interface Item {
-    id: number;
-    price: number;
-}
-interface State {
-    items: Item[];
-    discount: number;
-    threshold: number;
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>
+            Price: ${__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            threshold: state.key("threshold")
+        }
+    }), __cfLift_2({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            discount: state.key("discount")
+        }
+    }), item.key("price"))}
+          </div>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        threshold: {
+                            type: "number"
+                        },
+                        discount: {
+                            type: "number"
+                        }
+                    },
+                    required: ["threshold", "discount"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                price: {
+                    type: "number"
+                }
+            },
+            required: ["id", "price"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-conditional-expression
 // Verifies: ternary expression in .map() callback is transformed to ifElse() with lift-applied branches
 //   item.price > state.threshold ? ... : ... → ifElse(lift(...)(condition), lift(...)(trueBranch), falseBranch)
@@ -95,95 +184,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<div>
-            Price: ${__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        threshold: state.key("threshold")
-                    }
-                }), __cfLift_2({
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        discount: state.key("discount")
-                    }
-                }), item.key("price"))}
-          </div>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    threshold: {
-                                        type: "number"
-                                    },
-                                    discount: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["threshold", "discount"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["id", "price"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     threshold: state.key("threshold"),
                     discount: state.key("discount")
@@ -255,3 +256,8 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfPattern_1
+});

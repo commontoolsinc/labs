@@ -5,13 +5,13 @@ import {
   createHasher,
   type IncrementalHasher,
 } from "@commonfabric/content-hash";
-import { createHasherDeno } from "../src/sha256-deno.ts";
-import { createHasherNoble } from "../src/sha256-noble.ts";
+import { createHasherDeno } from "@/sha256-deno.ts";
+import { createHasherNoble } from "@/sha256-noble.ts";
 import {
   createHasherWasm,
   createHasherWasmCollecting,
   initWasm,
-} from "../src/sha256-wasm.ts";
+} from "@/sha256-wasm.ts";
 import { FIXTURES } from "./fixtures.ts";
 
 const createFuncs = [

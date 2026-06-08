@@ -1,10 +1,10 @@
 /**
  * Ambient runtime flag for the experimental ESM module-record loader (the
- * `esmModuleLoader` experimental option). Mirrors the modern-data-model and
- * persistent-scheduler-state ambient flags: the `Runtime` constructor
+ * `esmModuleLoader` experimental option). Mirrors the
+ * persistent-scheduler-state ambient flag: the `Runtime` constructor
  * propagates the explicit option here and reads the effective value back.
  *
- * Unlike those two, the default is seeded from the `CF_ESM_MODULE_LOADER`
+ * Unlike that one, the default is seeded from the `CF_ESM_MODULE_LOADER`
  * environment variable, so the ESM loader can be exercised suite-wide (e.g. a
  * regression cross-check) without threading the option through every `Runtime`
  * construction. The production default stays OFF (the env var is unset), so this

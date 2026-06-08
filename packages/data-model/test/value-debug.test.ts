@@ -1,15 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
-} from "../src/value-debug.ts";
-import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
-import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricError } from "../src/fabric-instances/FabricError.ts";
-import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "../src/fabric-primitives/FabricRegExp.ts";
+} from "@/value-debug.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricMap } from "@/fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {
@@ -114,6 +115,21 @@ describe("value-debug", () => {
       expect(toCompactDebugString(anon)).toBe("(...) => {...}");
     });
 
+    it("renders a `FabricInstance` in `/Name` form", () => {
+      const inst = FabricError.fromNativeError(new Error("eek!"));
+      expect(toCompactDebugString(inst)).toBe("/Error(...)");
+    });
+
+    it("renders a `FabricPrimive` in `/Name` form", () => {
+      const inst = new FabricEpochNsec(123456789n);
+      expect(toCompactDebugString(inst)).toBe("/EpochNsec(...)");
+    });
+
+    it("renders a non-plain non-fabric objectg in `new Name` form", () => {
+      const inst = new Set();
+      expect(toCompactDebugString(inst)).toBe("new Set(...)");
+    });
+
     it('renders an interned symbol as `Symbol.for("name")`', () => {
       const s = Symbol.for("my-key");
       expect(toCompactDebugString(s)).toBe('Symbol.for("my-key")');
@@ -130,7 +146,11 @@ describe("value-debug", () => {
     });
 
     it("renders an uninterned symbol with no description", () => {
-      expect(toCompactDebugString(Symbol())).toBe('Symbol("")');
+      expect(toCompactDebugString(Symbol())).toBe("Symbol()");
+    });
+
+    it('renders an uninterned symbol with description `""` (empty string)', () => {
+      expect(toCompactDebugString(Symbol(""))).toBe('Symbol("")');
     });
 
     it("renders an uninterned symbol inside a structure", () => {

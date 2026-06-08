@@ -11,6 +11,9 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface TagEvent {
+    label: string;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     recentEvents: TagEvent[];
 }, boolean>({
@@ -27,9 +30,55 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ recentEvents }) => recentEvents.length === 0);
-interface TagEvent {
-    label: string;
-}
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const event = __cf_pattern_input.key("element");
+    const idx = __cf_pattern_input.key("index");
+    return (<cf-hstack key={idx} gap="2">
+                <span>{event.key("label")}</span>
+              </cf-hstack>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/TagEvent"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        TagEvent: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                }
+            },
+            required: ["label"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: ternary-pure-jsx-map-branch
 // Verifies: a plain reactive array map inside a ternary JSX branch stays
 // pattern-lowered without wrapping the whole branch in extra lift-applied noise.
@@ -59,55 +108,7 @@ export default pattern((__cf_pattern_input) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ recentEvents: recentEvents }), <span>No events yet</span>, <div>
-            {recentEvents.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const event = __cf_pattern_input.key("element");
-                const idx = __cf_pattern_input.key("index");
-                return (<cf-hstack key={idx} gap="2">
-                <span>{event.key("label")}</span>
-              </cf-hstack>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/TagEvent"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    TagEvent: {
-                        type: "object",
-                        properties: {
-                            label: {
-                                type: "string"
-                            }
-                        },
-                        required: ["label"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+            {recentEvents.mapWithPattern(__cfPattern_1, {})}
           </div>)}
     </div>),
     });
@@ -166,3 +167,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfPattern_1
+});

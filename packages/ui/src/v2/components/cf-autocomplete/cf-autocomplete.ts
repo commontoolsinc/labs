@@ -220,953 +220,953 @@ export class CFAutocomplete extends BaseElement {
         border-color: var(--cf-theme-color-primary, #3b82f6);
         box-shadow: 0 0 0 3px
           var(--cf-theme-color-primary, rgba(59, 130, 246, 0.15));
-        }
+      }
 
-        input:disabled {
-          cursor: not-allowed;
-          opacity: 0.5;
-          background-color: var(--cf-theme-color-surface, #f1f5f9);
-        }
+      input:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+        background-color: var(--cf-theme-color-surface, #f1f5f9);
+      }
 
-        /* Dropdown styling - uses fixed positioning to escape overflow:hidden containers */
-        .dropdown {
-          position: fixed;
-          background: var(--cf-theme-color-background, #ffffff);
-          border: 1px solid var(--cf-theme-color-border, #e5e7eb);
-          border-radius: var(
-            --cf-theme-border-radius,
-            var(--cf-border-radius-md, 0.375rem)
-          );
-          box-shadow:
-            0 4px 6px -1px rgba(0, 0, 0, 0.1),
-            0 2px 4px -1px rgba(0, 0, 0, 0.06);
-          max-height: calc(var(--max-visible, 8) * 2.5rem);
-          overflow-y: auto;
-          z-index: 9999;
-        }
+      /* Dropdown styling - uses fixed positioning to escape overflow:hidden containers */
+      .dropdown {
+        position: fixed;
+        background: var(--cf-theme-color-background, #ffffff);
+        border: 1px solid var(--cf-theme-color-border, #e5e7eb);
+        border-radius: var(
+          --cf-theme-border-radius,
+          var(--cf-border-radius-md, 0.375rem)
+        );
+        box-shadow:
+          0 4px 6px -1px rgba(0, 0, 0, 0.1),
+          0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        max-height: calc(var(--max-visible, 8) * 2.5rem);
+        overflow-y: auto;
+        z-index: 9999;
+      }
 
-        .dropdown.hidden {
-          display: none;
-        }
+      .dropdown.hidden {
+        display: none;
+      }
 
-        /* Option styling */
-        .option {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 0.5rem 0.75rem;
-          cursor: pointer;
-          transition: background-color 100ms ease;
-        }
+      /* Option styling */
+      .option {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        cursor: pointer;
+        transition: background-color 100ms ease;
+      }
 
-        .option:hover {
-          background-color: var(--cf-theme-color-surface, #f1f5f9);
-        }
+      .option:hover {
+        background-color: var(--cf-theme-color-surface, #f1f5f9);
+      }
 
-        .option.highlighted {
-          background-color: var(--cf-theme-color-primary, #3b82f6);
-          color: white;
-        }
+      .option.highlighted {
+        background-color: var(--cf-theme-color-primary, #3b82f6);
+        color: white;
+      }
 
-        .option.highlighted .option-group {
-          color: rgba(255, 255, 255, 0.7);
-        }
+      .option.highlighted .option-group {
+        color: rgba(255, 255, 255, 0.7);
+      }
 
-        .option-label {
-          font-size: 0.875rem;
-        }
+      .option-label {
+        font-size: 0.875rem;
+      }
 
-        .option-group {
-          font-size: 0.75rem;
-          color: var(--cf-theme-color-text-muted, #6b7280);
-          margin-left: 0.5rem;
-        }
+      .option-group {
+        font-size: 0.75rem;
+        color: var(--cf-theme-color-text-muted, #6b7280);
+        margin-left: 0.5rem;
+      }
 
-        /* Custom value option */
-        .option.custom {
-          border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
-          font-style: italic;
-        }
+      /* Custom value option */
+      .option.custom {
+        border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
+        font-style: italic;
+      }
 
-        /* Already selected items (shown at bottom in multi-select) */
-        .option.already-selected {
-          cursor: pointer;
-          opacity: 0.7;
-          background-color: var(--cf-theme-color-surface, #f1f5f9);
-        }
+      /* Already selected items (shown at bottom in multi-select) */
+      .option.already-selected {
+        cursor: pointer;
+        opacity: 0.7;
+        background-color: var(--cf-theme-color-surface, #f1f5f9);
+      }
 
-        .option.already-selected:hover {
-          background-color: #fef2f2;
-        }
+      .option.already-selected:hover {
+        background-color: #fef2f2;
+      }
 
-        .option.already-selected.highlighted {
-          background-color: #fecaca;
-          color: #991b1b;
-        }
+      .option.already-selected.highlighted {
+        background-color: #fecaca;
+        color: #991b1b;
+      }
 
-        .option.already-selected .status-label {
-          font-size: 0.75rem;
-          font-style: italic;
-          color: var(--cf-theme-color-text-muted, #6b7280);
-          margin-left: 0.5rem;
-        }
+      .option.already-selected .status-label {
+        font-size: 0.75rem;
+        font-style: italic;
+        color: var(--cf-theme-color-text-muted, #6b7280);
+        margin-left: 0.5rem;
+      }
 
-        /* Show "Already added" by default, "Remove" when hovered/highlighted */
-        .option.already-selected .already-added-text {
-          display: inline;
-        }
-        .option.already-selected .remove-text {
-          display: none;
-        }
+      /* Show "Already added" by default, "Remove" when hovered/highlighted */
+      .option.already-selected .already-added-text {
+        display: inline;
+      }
+      .option.already-selected .remove-text {
+        display: none;
+      }
 
-        .option.already-selected:hover .already-added-text,
-        .option.already-selected.highlighted .already-added-text {
-          display: none;
-        }
-        .option.already-selected:hover .remove-text,
-        .option.already-selected.highlighted .remove-text {
-          display: inline;
-          color: #dc2626;
-        }
-        .option.already-selected.highlighted .remove-text {
-          color: #991b1b;
-        }
+      .option.already-selected:hover .already-added-text,
+      .option.already-selected.highlighted .already-added-text {
+        display: none;
+      }
+      .option.already-selected:hover .remove-text,
+      .option.already-selected.highlighted .remove-text {
+        display: inline;
+        color: #dc2626;
+      }
+      .option.already-selected.highlighted .remove-text {
+        color: #991b1b;
+      }
 
-        .selected-separator {
-          border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
-          margin-top: 0.25rem;
-          padding-top: 0.25rem;
-        }
+      .selected-separator {
+        border-top: 1px solid var(--cf-theme-color-border, #e5e7eb);
+        margin-top: 0.25rem;
+        padding-top: 0.25rem;
+      }
 
-        /* Empty state */
-        .empty-state {
-          padding: 0.75rem;
-          text-align: center;
-          color: var(--cf-theme-color-text-muted, #6b7280);
-          font-size: 0.875rem;
-        }
-      `,
-    ];
+      /* Empty state */
+      .empty-state {
+        padding: 0.75rem;
+        text-align: center;
+        color: var(--cf-theme-color-text-muted, #6b7280);
+        font-size: 0.875rem;
+      }
+    `,
+  ];
 
-    static override properties = {
-      items: { attribute: false },
-      value: { attribute: false },
-      placeholder: { type: String },
-      maxVisible: { type: Number },
-      allowCustom: { type: Boolean },
-      multiple: { type: Boolean },
-      disabled: { type: Boolean },
-    };
+  static override properties = {
+    items: { attribute: false },
+    value: { attribute: false },
+    placeholder: { type: String },
+    maxVisible: { type: Number },
+    allowCustom: { type: Boolean },
+    multiple: { type: Boolean },
+    disabled: { type: Boolean },
+  };
 
-    // Public properties
-    declare items: AutocompleteItem[] | CellHandle<AutocompleteItem[]>;
-    declare value:
-      | CellHandle<string>
-      | CellHandle<string[]>
-      | string
-      | string[]
-      | undefined;
-    declare placeholder: string;
-    declare maxVisible: number;
-    declare allowCustom: boolean;
-    declare multiple: boolean;
-    declare disabled: boolean;
+  // Public properties
+  declare items: AutocompleteItem[] | CellHandle<AutocompleteItem[]>;
+  declare value:
+    | CellHandle<string>
+    | CellHandle<string[]>
+    | string
+    | string[]
+    | undefined;
+  declare placeholder: string;
+  declare maxVisible: number;
+  declare allowCustom: boolean;
+  declare multiple: boolean;
+  declare disabled: boolean;
 
-    // Cell controller for value binding
-    // Note: Don't call requestUpdate() in onChange - cell controller already does it
-    private _cellController = createCellController<string | string[]>(this, {
-      timing: { strategy: "debounce", delay: 50 },
-      onChange: (newValue, oldValue) => {
-        this.emit("cf-change", { value: newValue, oldValue });
-      },
+  // Cell controller for value binding
+  // Note: Don't call requestUpdate() in onChange - cell controller already does it
+  private _cellController = createCellController<string | string[]>(this, {
+    timing: { strategy: "debounce", delay: 50 },
+    onChange: (newValue, oldValue) => {
+      this.emit("cf-change", { value: newValue, oldValue });
+    },
+  });
+
+  // Cell controller for items binding - allows reactive items from lift()
+  private _itemsCellController = createCellController<AutocompleteItem[]>(
+    this,
+    {
+      timing: { strategy: "immediate" },
+    },
+  );
+
+  // Internal state
+  @state()
+  private accessor _isOpen = false;
+  @state()
+  private accessor _query = "";
+  @state()
+  private accessor _highlightedIndex = 0;
+  @state()
+  private accessor _dropdownStyle = "";
+
+  // Cached/memoized filter results - updated in willUpdate, not on every render
+  private _cachedFilteredItems: AutocompleteItem[] = [];
+  private _cachedAlreadySelectedItems: AutocompleteItem[] = [];
+  private _cachedShowCustomOption = false;
+  private _lastQuery = "";
+  private _lastSelectedValues: Set<string> = new Set();
+
+  // Element references
+  private _input: HTMLInputElement | null = null;
+  private _dropdown: HTMLElement | null = null;
+
+  // Pre-processed search index for fast filtering
+  private _processedItems: ProcessedItem[] = [];
+
+  // Throttle flag for scroll/resize position updates
+  private _positionUpdateScheduled = false;
+
+  // Debounce timer - setTimeout(0) defers to next task, letting input render first
+  private _debounceTimer: number | null = null;
+
+  constructor() {
+    super();
+    this.items = [];
+    this.value = undefined;
+    this.placeholder = "";
+    this.maxVisible = 8;
+    this.allowCustom = false;
+    this.multiple = false;
+    this.disabled = false;
+  }
+
+  // Theme consumption
+  @consume({ context: cfThemeContext, subscribe: true })
+  @property({ attribute: false })
+  accessor theme: CFTheme = defaultTheme;
+
+  override connectedCallback() {
+    super.connectedCallback();
+    // Listen for clicks outside to close dropdown
+    document.addEventListener("click", this._handleOutsideClick);
+    // Close dropdown on scroll/resize to avoid mispositioned dropdown
+    // Use passive listeners for better scroll performance
+    globalThis.addEventListener("scroll", this._handleScrollOrResize, {
+      capture: true,
+      passive: true,
     });
+    globalThis.addEventListener("resize", this._handleScrollOrResize, {
+      passive: true,
+    });
+  }
 
-    // Cell controller for items binding - allows reactive items from lift()
-    private _itemsCellController = createCellController<AutocompleteItem[]>(
-      this,
-      {
-        timing: { strategy: "immediate" },
-      },
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    document.removeEventListener("click", this._handleOutsideClick);
+    globalThis.removeEventListener(
+      "scroll",
+      this._handleScrollOrResize,
+      true,
+    );
+    globalThis.removeEventListener("resize", this._handleScrollOrResize);
+
+    // Clean up debounce timer
+    if (this._debounceTimer !== null) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+  }
+
+  // Throttle scroll/resize updates to RAF to prevent layout thrashing
+  private _handleScrollOrResize = () => {
+    if (this._isOpen && !this._positionUpdateScheduled) {
+      this._positionUpdateScheduled = true;
+      requestAnimationFrame(() => {
+        this._updateDropdownPosition();
+        this._positionUpdateScheduled = false;
+      });
+    }
+  };
+
+  override firstUpdated() {
+    this._input = this.shadowRoot?.querySelector("input") || null;
+    this._dropdown = this.shadowRoot?.querySelector(".dropdown") || null;
+
+    // Initialize cell controller bindings with appropriate schemas
+    const valueSchema = this.multiple ? stringArraySchema : stringSchema;
+    this._cellController.bind(
+      this.value as CellHandle<string | string[]> | string | string[],
+      valueSchema,
+    );
+    this._itemsCellController.bind(
+      this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
+      AutocompleteItemArraySchema,
     );
 
-    // Internal state
-    @state()
-    private accessor _isOpen = false;
-    @state()
-    private accessor _query = "";
-    @state()
-    private accessor _highlightedIndex = 0;
-    @state()
-    private accessor _dropdownStyle = "";
+    applyThemeToElement(this, this.theme ?? defaultTheme);
+  }
 
-    // Cached/memoized filter results - updated in willUpdate, not on every render
-    private _cachedFilteredItems: AutocompleteItem[] = [];
-    private _cachedAlreadySelectedItems: AutocompleteItem[] = [];
-    private _cachedShowCustomOption = false;
-    private _lastQuery = "";
-    private _lastSelectedValues: Set<string> = new Set();
+  override willUpdate(changedProperties: PropertyValues) {
+    super.willUpdate(changedProperties);
 
-    // Element references
-    private _input: HTMLInputElement | null = null;
-    private _dropdown: HTMLElement | null = null;
-
-    // Pre-processed search index for fast filtering
-    private _processedItems: ProcessedItem[] = [];
-
-    // Throttle flag for scroll/resize position updates
-    private _positionUpdateScheduled = false;
-
-    // Debounce timer - setTimeout(0) defers to next task, letting input render first
-    private _debounceTimer: number | null = null;
-
-    constructor() {
-      super();
-      this.items = [];
-      this.value = undefined;
-      this.placeholder = "";
-      this.maxVisible = 8;
-      this.allowCustom = false;
-      this.multiple = false;
-      this.disabled = false;
-    }
-
-    // Theme consumption
-    @consume({ context: cfThemeContext, subscribe: true })
-    @property({ attribute: false })
-    accessor theme: CFTheme = defaultTheme;
-
-    override connectedCallback() {
-      super.connectedCallback();
-      // Listen for clicks outside to close dropdown
-      document.addEventListener("click", this._handleOutsideClick);
-      // Close dropdown on scroll/resize to avoid mispositioned dropdown
-      // Use passive listeners for better scroll performance
-      globalThis.addEventListener("scroll", this._handleScrollOrResize, {
-        capture: true,
-        passive: true,
-      });
-      globalThis.addEventListener("resize", this._handleScrollOrResize, {
-        passive: true,
-      });
-    }
-
-    override disconnectedCallback() {
-      super.disconnectedCallback();
-      document.removeEventListener("click", this._handleOutsideClick);
-      globalThis.removeEventListener(
-        "scroll",
-        this._handleScrollOrResize,
-        true,
-      );
-      globalThis.removeEventListener("resize", this._handleScrollOrResize);
-
-      // Clean up debounce timer
-      if (this._debounceTimer !== null) {
-        clearTimeout(this._debounceTimer);
-        this._debounceTimer = null;
-      }
-    }
-
-    // Throttle scroll/resize updates to RAF to prevent layout thrashing
-    private _handleScrollOrResize = () => {
-      if (this._isOpen && !this._positionUpdateScheduled) {
-        this._positionUpdateScheduled = true;
-        requestAnimationFrame(() => {
-          this._updateDropdownPosition();
-          this._positionUpdateScheduled = false;
-        });
-      }
-    };
-
-    override firstUpdated() {
-      this._input = this.shadowRoot?.querySelector("input") || null;
-      this._dropdown = this.shadowRoot?.querySelector(".dropdown") || null;
-
-      // Initialize cell controller bindings with appropriate schemas
+    // If the value property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("value")) {
       const valueSchema = this.multiple ? stringArraySchema : stringSchema;
       this._cellController.bind(
         this.value as CellHandle<string | string[]> | string | string[],
         valueSchema,
       );
+    }
+
+    // If the items property changed (e.g., switched to a different cell or array)
+    if (changedProperties.has("items")) {
       this._itemsCellController.bind(
         this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
         AutocompleteItemArraySchema,
       );
+    }
 
+    // Rebuild search index when items change (using resolved value from cell controller)
+    // Always rebuild since the cell controller may have received an update
+    const resolvedItems = this._itemsCellController.getValue() || [];
+    this._processedItems = resolvedItems.map(processItem);
+
+    // Recompute filtered items only when dependencies change
+    this._updateFilteredItemsCache();
+  }
+
+  // Memoized filter computation - only runs when inputs actually change
+  private _updateFilteredItemsCache() {
+    const currentSelectedValues = this._getSelectedValuesSet();
+    const queryChanged = this._query !== this._lastQuery;
+    const selectionChanged = !this._setsEqual(
+      currentSelectedValues,
+      this._lastSelectedValues,
+    );
+
+    if (
+      !queryChanged && !selectionChanged &&
+      this._cachedFilteredItems.length > 0
+    ) {
+      return; // No change, use cached values
+    }
+
+    this._lastQuery = this._query;
+    this._lastSelectedValues = currentSelectedValues;
+
+    // Compute filtered items
+    const selectableProcessed = this.multiple
+      ? this._processedItems.filter(
+        (p) => !currentSelectedValues.has(p.item.value),
+      )
+      : this._processedItems;
+
+    if (!this._query.trim()) {
+      this._cachedFilteredItems = selectableProcessed.map((p) => p.item);
+    } else {
+      const queryWords = splitIntoWords(this._query);
+      if (queryWords.length === 0) {
+        this._cachedFilteredItems = selectableProcessed.map((p) => p.item);
+      } else {
+        this._cachedFilteredItems = selectableProcessed
+          .filter((p) => this._processedItemMatchesQuery(p, queryWords))
+          .map((p) => p.item);
+      }
+    }
+
+    // Compute already-selected items
+    if (!this.multiple) {
+      this._cachedAlreadySelectedItems = [];
+    } else {
+      const selectedItems = this._processedItems
+        .filter((p) => currentSelectedValues.has(p.item.value))
+        .map((p) => p.item);
+
+      if (!this._query.trim()) {
+        this._cachedAlreadySelectedItems = selectedItems;
+      } else {
+        const queryWords = splitIntoWords(this._query);
+        this._cachedAlreadySelectedItems = selectedItems.filter((item) => {
+          const processed = this._processedItems.find(
+            (p) => p.item === item,
+          );
+          return (
+            processed &&
+            this._processedItemMatchesQuery(processed, queryWords)
+          );
+        });
+      }
+    }
+
+    // Compute show custom option
+    this._cachedShowCustomOption = this._computeShowCustomOption();
+  }
+
+  private _getSelectedValuesSet(): Set<string> {
+    if (!this.multiple) return new Set();
+    const selected = (this._getCurrentValue() as string[] | undefined) || [];
+    return new Set(selected);
+  }
+
+  private _setsEqual(a: Set<string>, b: Set<string>): boolean {
+    if (a.size !== b.size) return false;
+    for (const item of a) {
+      if (!b.has(item)) return false;
+    }
+    return true;
+  }
+
+  private _computeShowCustomOption(): boolean {
+    if (!this.allowCustom || !this._query.trim()) {
+      return false;
+    }
+
+    const queryLower = this._query.toLowerCase();
+    const queryTrimmed = this._query.trim();
+
+    const matchesExistingItem = this._resolvedItems.some(
+      (item: AutocompleteItem) =>
+        item.value.toLowerCase() === queryLower ||
+        (item.label || "").toLowerCase() === queryLower,
+    );
+
+    if (matchesExistingItem) {
+      return false;
+    }
+
+    if (this.multiple) {
+      const selected = (this._getCurrentValue() as string[] | undefined) ||
+        [];
+      if (selected.includes(queryTrimmed)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  override updated(changedProperties: PropertyValues) {
+    if (changedProperties.has("theme")) {
       applyThemeToElement(this, this.theme ?? defaultTheme);
     }
 
-    override willUpdate(changedProperties: PropertyValues) {
-      super.willUpdate(changedProperties);
+    // Update dropdown position when opening
+    if (changedProperties.has("_isOpen") && this._isOpen) {
+      this._updateDropdownPosition();
+    }
+  }
 
-      // If the value property itself changed (e.g., switched to a different cell)
-      if (changedProperties.has("value")) {
-        const valueSchema = this.multiple ? stringArraySchema : stringSchema;
-        this._cellController.bind(
-          this.value as CellHandle<string | string[]> | string | string[],
-          valueSchema,
-        );
-      }
+  // Helper to get current value from cell controller
+  private _getCurrentValue(): string | readonly string[] | undefined {
+    return this._cellController.getValue();
+  }
 
-      // If the items property changed (e.g., switched to a different cell or array)
-      if (changedProperties.has("items")) {
-        this._itemsCellController.bind(
-          this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
-          AutocompleteItemArraySchema,
-        );
-      }
+  // Helper to get resolved items (either from Cell or direct array)
+  private get _resolvedItems(): readonly AutocompleteItem[] {
+    return this._itemsCellController.getValue() || [];
+  }
 
-      // Rebuild search index when items change (using resolved value from cell controller)
-      // Always rebuild since the cell controller may have received an update
-      const resolvedItems = this._itemsCellController.getValue() || [];
-      this._processedItems = resolvedItems.map(processItem);
+  // Helper to get display label for a value
+  private _getLabelForValue(value: string): string {
+    const item = this._resolvedItems.find((i) => i.value === value);
+    return item?.label || value;
+  }
 
-      // Recompute filtered items only when dependencies change
-      this._updateFilteredItemsCache();
+  // Get the display value for the input in single-select mode
+  private get _displayValue(): string {
+    // If in multi-select mode, always show the query (user is always searching)
+    if (this.multiple) {
+      return this._query;
     }
 
-    // Memoized filter computation - only runs when inputs actually change
-    private _updateFilteredItemsCache() {
-      const currentSelectedValues = this._getSelectedValuesSet();
-      const queryChanged = this._query !== this._lastQuery;
-      const selectionChanged = !this._setsEqual(
-        currentSelectedValues,
-        this._lastSelectedValues,
-      );
-
-      if (
-        !queryChanged && !selectionChanged &&
-        this._cachedFilteredItems.length > 0
-      ) {
-        return; // No change, use cached values
-      }
-
-      this._lastQuery = this._query;
-      this._lastSelectedValues = currentSelectedValues;
-
-      // Compute filtered items
-      const selectableProcessed = this.multiple
-        ? this._processedItems.filter(
-          (p) => !currentSelectedValues.has(p.item.value),
-        )
-        : this._processedItems;
-
-      if (!this._query.trim()) {
-        this._cachedFilteredItems = selectableProcessed.map((p) => p.item);
-      } else {
-        const queryWords = splitIntoWords(this._query);
-        if (queryWords.length === 0) {
-          this._cachedFilteredItems = selectableProcessed.map((p) => p.item);
-        } else {
-          this._cachedFilteredItems = selectableProcessed
-            .filter((p) => this._processedItemMatchesQuery(p, queryWords))
-            .map((p) => p.item);
-        }
-      }
-
-      // Compute already-selected items
-      if (!this.multiple) {
-        this._cachedAlreadySelectedItems = [];
-      } else {
-        const selectedItems = this._processedItems
-          .filter((p) => currentSelectedValues.has(p.item.value))
-          .map((p) => p.item);
-
-        if (!this._query.trim()) {
-          this._cachedAlreadySelectedItems = selectedItems;
-        } else {
-          const queryWords = splitIntoWords(this._query);
-          this._cachedAlreadySelectedItems = selectedItems.filter((item) => {
-            const processed = this._processedItems.find(
-              (p) => p.item === item,
-            );
-            return (
-              processed &&
-              this._processedItemMatchesQuery(processed, queryWords)
-            );
-          });
-        }
-      }
-
-      // Compute show custom option
-      this._cachedShowCustomOption = this._computeShowCustomOption();
+    // In single-select mode:
+    // - If user is typing (has query), show the query
+    // - Otherwise, show the selected value's label
+    if (this._query) {
+      return this._query;
     }
 
-    private _getSelectedValuesSet(): Set<string> {
-      if (!this.multiple) return new Set();
-      const selected = (this._getCurrentValue() as string[] | undefined) || [];
-      return new Set(selected);
+    const currentValue = this._getCurrentValue() as string | undefined;
+    if (currentValue) {
+      return this._getLabelForValue(currentValue);
     }
 
-    private _setsEqual(a: Set<string>, b: Set<string>): boolean {
-      if (a.size !== b.size) return false;
-      for (const item of a) {
-        if (!b.has(item)) return false;
-      }
-      return true;
-    }
+    return "";
+  }
 
-    private _computeShowCustomOption(): boolean {
-      if (!this.allowCustom || !this._query.trim()) {
-        return false;
-      }
+  // Helper to check if a processed item matches the search query
+  // Uses pre-indexed words with startsWith for O(words) instead of O(chars*aliases)
+  private _processedItemMatchesQuery(
+    processed: ProcessedItem,
+    queryWords: string[],
+  ): boolean {
+    // All query words must match at least one item word (startsWith)
+    return queryWords.every((queryWord) =>
+      processed.words.some((itemWord) => itemWord.startsWith(queryWord))
+    );
+  }
 
-      const queryLower = this._query.toLowerCase();
-      const queryTrimmed = this._query.trim();
+  // Memoized getters - return cached values computed in willUpdate
+  private get _filteredItems(): AutocompleteItem[] {
+    return this._cachedFilteredItems;
+  }
 
-      const matchesExistingItem = this._resolvedItems.some(
-        (item: AutocompleteItem) =>
-          item.value.toLowerCase() === queryLower ||
-          (item.label || "").toLowerCase() === queryLower,
-      );
+  private get _alreadySelectedItems(): AutocompleteItem[] {
+    return this._cachedAlreadySelectedItems;
+  }
 
-      if (matchesExistingItem) {
-        return false;
-      }
+  private get _showCustomOption(): boolean {
+    return this._cachedShowCustomOption;
+  }
 
-      if (this.multiple) {
-        const selected = (this._getCurrentValue() as string[] | undefined) ||
-          [];
-        if (selected.includes(queryTrimmed)) {
-          return false;
-        }
-      }
+  // Computed: total selectable items (limited to what's actually rendered)
+  private get _totalSelectableItems(): number {
+    const maxRender = this.maxVisible + 4;
+    const filteredCount = Math.min(this._filteredItems.length, maxRender);
+    return filteredCount +
+      (this._showCustomOption ? 1 : 0) +
+      this._alreadySelectedItems.length;
+  }
 
-      return true;
-    }
+  override render() {
+    const dropdownClasses = {
+      dropdown: true,
+      hidden: !this._isOpen,
+    };
 
-    override updated(changedProperties: PropertyValues) {
-      if (changedProperties.has("theme")) {
-        applyThemeToElement(this, this.theme ?? defaultTheme);
-      }
+    return html`
+      <div class="autocomplete-container">
+        <input
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded="${this._isOpen}"
+          aria-controls="dropdown"
+          aria-activedescendant="${this._isOpen
+            ? `option-${this._highlightedIndex}`
+            : ""}"
+          .value="${this._displayValue}"
+          placeholder="${this.placeholder}"
+          ?disabled="${this.disabled}"
+          @input="${this._handleInput}"
+          @focus="${this._handleFocus}"
+          @keydown="${this._handleKeyDown}"
+          part="input"
+        />
 
-      // Update dropdown position when opening
-      if (changedProperties.has("_isOpen") && this._isOpen) {
-        this._updateDropdownPosition();
-      }
-    }
-
-    // Helper to get current value from cell controller
-    private _getCurrentValue(): string | readonly string[] | undefined {
-      return this._cellController.getValue();
-    }
-
-    // Helper to get resolved items (either from Cell or direct array)
-    private get _resolvedItems(): readonly AutocompleteItem[] {
-      return this._itemsCellController.getValue() || [];
-    }
-
-    // Helper to get display label for a value
-    private _getLabelForValue(value: string): string {
-      const item = this._resolvedItems.find((i) => i.value === value);
-      return item?.label || value;
-    }
-
-    // Get the display value for the input in single-select mode
-    private get _displayValue(): string {
-      // If in multi-select mode, always show the query (user is always searching)
-      if (this.multiple) {
-        return this._query;
-      }
-
-      // In single-select mode:
-      // - If user is typing (has query), show the query
-      // - Otherwise, show the selected value's label
-      if (this._query) {
-        return this._query;
-      }
-
-      const currentValue = this._getCurrentValue() as string | undefined;
-      if (currentValue) {
-        return this._getLabelForValue(currentValue);
-      }
-
-      return "";
-    }
-
-    // Helper to check if a processed item matches the search query
-    // Uses pre-indexed words with startsWith for O(words) instead of O(chars*aliases)
-    private _processedItemMatchesQuery(
-      processed: ProcessedItem,
-      queryWords: string[],
-    ): boolean {
-      // All query words must match at least one item word (startsWith)
-      return queryWords.every((queryWord) =>
-        processed.words.some((itemWord) => itemWord.startsWith(queryWord))
-      );
-    }
-
-    // Memoized getters - return cached values computed in willUpdate
-    private get _filteredItems(): AutocompleteItem[] {
-      return this._cachedFilteredItems;
-    }
-
-    private get _alreadySelectedItems(): AutocompleteItem[] {
-      return this._cachedAlreadySelectedItems;
-    }
-
-    private get _showCustomOption(): boolean {
-      return this._cachedShowCustomOption;
-    }
-
-    // Computed: total selectable items (limited to what's actually rendered)
-    private get _totalSelectableItems(): number {
-      const maxRender = this.maxVisible + 4;
-      const filteredCount = Math.min(this._filteredItems.length, maxRender);
-      return filteredCount +
-        (this._showCustomOption ? 1 : 0) +
-        this._alreadySelectedItems.length;
-    }
-
-    override render() {
-      const dropdownClasses = {
-        dropdown: true,
-        hidden: !this._isOpen,
-      };
-
-      return html`
-        <div class="autocomplete-container">
-          <input
-            type="text"
-            role="combobox"
-            aria-autocomplete="list"
-            aria-expanded="${this._isOpen}"
-            aria-controls="dropdown"
-            aria-activedescendant="${this._isOpen
-              ? `option-${this._highlightedIndex}`
-              : ""}"
-            .value="${this._displayValue}"
-            placeholder="${this.placeholder}"
-            ?disabled="${this.disabled}"
-            @input="${this._handleInput}"
-            @focus="${this._handleFocus}"
-            @keydown="${this._handleKeyDown}"
-            part="input"
-          />
-
-          <div
-            id="dropdown"
-            class="${classMap(dropdownClasses)}"
-            role="listbox"
-            style="${this._dropdownStyle}; --max-visible: ${this.maxVisible}"
-          >
-            ${this._renderDropdownContent()}
-          </div>
+        <div
+          id="dropdown"
+          class="${classMap(dropdownClasses)}"
+          role="listbox"
+          style="${this._dropdownStyle}; --max-visible: ${this.maxVisible}"
+        >
+          ${this._renderDropdownContent()}
         </div>
+      </div>
+    `;
+  }
+
+  private _renderDropdownContent() {
+    const filtered = this._filteredItems;
+    const alreadySelected = this._alreadySelectedItems;
+
+    // Show empty state only if no selectable items, no custom option, AND no already-selected items
+    if (
+      filtered.length === 0 && !this._showCustomOption &&
+      alreadySelected.length === 0
+    ) {
+      return html`
+        <div class="empty-state">No matching options</div>
       `;
     }
 
-    private _renderDropdownContent() {
-      const filtered = this._filteredItems;
-      const alreadySelected = this._alreadySelectedItems;
+    // Limit rendered items to maxVisible + small buffer for performance
+    // This avoids rendering 600 DOM nodes when only 8 are visible
+    const maxRender = this.maxVisible + 4;
+    const filteredToRender = filtered.slice(0, maxRender);
 
-      // Show empty state only if no selectable items, no custom option, AND no already-selected items
-      if (
-        filtered.length === 0 && !this._showCustomOption &&
-        alreadySelected.length === 0
-      ) {
-        return html`
-          <div class="empty-state">No matching options</div>
-        `;
-      }
+    const options = filteredToRender.map((item, index) => {
+      const optionClasses = {
+        option: true,
+        highlighted: index === this._highlightedIndex,
+      };
 
-      // Limit rendered items to maxVisible + small buffer for performance
-      // This avoids rendering 600 DOM nodes when only 8 are visible
-      const maxRender = this.maxVisible + 4;
-      const filteredToRender = filtered.slice(0, maxRender);
+      return html`
+        <div
+          id="option-${index}"
+          class="${classMap(optionClasses)}"
+          role="option"
+          aria-selected="${index === this._highlightedIndex}"
+          @click="${() => this._selectItem(item)}"
+          @mouseenter="${() => this._setHighlight(index)}"
+        >
+          <span class="option-label">${item.label || item.value}</span>
+          ${item.group
+            ? html`
+              <span class="option-group">${item.group}</span>
+            `
+            : nothing}
+        </div>
+      `;
+    });
 
-      const options = filteredToRender.map((item, index) => {
+    // Add already-selected items after filtered items (multi-select only)
+    // Order: filtered items → already-selected items → custom option
+    const alreadySelectedStartIndex = filtered.length;
+    if (alreadySelected.length > 0) {
+      // Add separator if there are selectable items above
+      const needsSeparator = filtered.length > 0;
+
+      alreadySelected.forEach((item, index) => {
+        const globalIndex = alreadySelectedStartIndex + index;
         const optionClasses = {
           option: true,
-          highlighted: index === this._highlightedIndex,
-        };
-
-        return html`
-          <div
-            id="option-${index}"
-            class="${classMap(optionClasses)}"
-            role="option"
-            aria-selected="${index === this._highlightedIndex}"
-            @click="${() => this._selectItem(item)}"
-            @mouseenter="${() => this._setHighlight(index)}"
-          >
-            <span class="option-label">${item.label || item.value}</span>
-            ${item.group
-              ? html`
-                <span class="option-group">${item.group}</span>
-              `
-              : nothing}
-          </div>
-        `;
-      });
-
-      // Add already-selected items after filtered items (multi-select only)
-      // Order: filtered items → already-selected items → custom option
-      const alreadySelectedStartIndex = filtered.length;
-      if (alreadySelected.length > 0) {
-        // Add separator if there are selectable items above
-        const needsSeparator = filtered.length > 0;
-
-        alreadySelected.forEach((item, index) => {
-          const globalIndex = alreadySelectedStartIndex + index;
-          const optionClasses = {
-            option: true,
-            "already-selected": true,
-            "selected-separator": needsSeparator && index === 0,
-            highlighted: globalIndex === this._highlightedIndex,
-          };
-
-          options.push(html`
-            <div
-              id="option-${globalIndex}"
-              class="${classMap(optionClasses)}"
-              role="option"
-              aria-selected="${globalIndex === this._highlightedIndex}"
-              @click="${() => this._removeItem(item)}"
-              @mouseenter="${() => this._setHighlight(globalIndex)}"
-            >
-              <span class="option-label">${item.label || item.value}</span>
-              <span class="status-label">
-                <span class="already-added-text">Already added</span>
-                <span class="remove-text">Remove</span>
-              </span>
-            </div>
-          `);
-        });
-      }
-
-      // Add custom value option at the very end
-      if (this._showCustomOption) {
-        const customIndex = filtered.length + alreadySelected.length;
-        const customClasses = {
-          option: true,
-          custom: true,
-          highlighted: customIndex === this._highlightedIndex,
+          "already-selected": true,
+          "selected-separator": needsSeparator && index === 0,
+          highlighted: globalIndex === this._highlightedIndex,
         };
 
         options.push(html`
           <div
-            id="option-${customIndex}"
-            class="${classMap(customClasses)}"
+            id="option-${globalIndex}"
+            class="${classMap(optionClasses)}"
             role="option"
-            aria-selected="${customIndex === this._highlightedIndex}"
-            @click="${this._selectCustomValue}"
-            @mouseenter="${() => this._setHighlight(customIndex)}"
+            aria-selected="${globalIndex === this._highlightedIndex}"
+            @click="${() => this._removeItem(item)}"
+            @mouseenter="${() => this._setHighlight(globalIndex)}"
           >
-            <span class="option-label">Add "${this._query}"</span>
+            <span class="option-label">${item.label || item.value}</span>
+            <span class="status-label">
+              <span class="already-added-text">Already added</span>
+              <span class="remove-text">Remove</span>
+            </span>
           </div>
         `);
-      }
-
-      return options;
-    }
-
-    // Event handlers
-    //
-    // PERFORMANCE NOTE (Dec 2025):
-    // We use setTimeout(0) here instead of synchronous state updates. This was extensively
-    // investigated and verified:
-    //
-    // 1. VERIFIED: Typing does NOT trigger pattern/cell recomputation - filtering is purely
-    //    internal Lit state (_query). Console instrumentation confirmed no framework overhead.
-    //
-    // 2. WHY setTimeout(0) FEELS FASTER than synchronous updates:
-    //    - Synchronous: Lit queues microtasks → blocks rendering → user sees lag
-    //    - setTimeout(0): Returns immediately → browser paints keystroke → dropdown updates next frame
-    //    The browser event loop order is: Task → Microtasks → Render → Next Task
-    //    By deferring to the next task, we let the browser paint the input first.
-    //
-    // 3. clearTimeout prevents "flashing" when typing quickly by canceling stale updates.
-    //
-    // See commit history for detailed performance investigation with Oracle agents.
-    //
-    private _handleInput(e: Event) {
-      const input = e.target as HTMLInputElement;
-      const newValue = input.value;
-
-      // Clear pending update to prevent stale renders (no flashing)
-      if (this._debounceTimer !== null) {
-        clearTimeout(this._debounceTimer);
-      }
-
-      // Defer state updates to next task, allowing input to render immediately
-      this._debounceTimer = setTimeout(() => {
-        if (!this._isOpen && newValue) {
-          this._isOpen = true;
-          this.emit("cf-open", {});
-        }
-        this._query = newValue;
-        this._highlightedIndex = 0;
-        this._debounceTimer = null;
-      }, 0) as unknown as number;
-    }
-
-    private _handleFocus() {
-      // In single-select mode with a selected value, select all text so user can easily replace
-      if (!this.multiple && this._displayValue && this._input) {
-        // Copy the selected label to query so user can modify it
-        this._query = this._displayValue;
-        // Select all text after render
-        requestAnimationFrame(() => {
-          this._input?.select();
-        });
-      }
-
-      if (!this._isOpen) {
-        this._open();
-      }
-    }
-
-    private _handleKeyDown(e: KeyboardEvent) {
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          if (!this._isOpen) {
-            this._open();
-          } else {
-            this._moveHighlight(1);
-          }
-          break;
-
-        case "ArrowUp":
-          e.preventDefault();
-          if (this._isOpen) {
-            this._moveHighlight(-1);
-          }
-          break;
-
-        case "Enter":
-          if (this._isOpen) {
-            e.preventDefault();
-            this._selectHighlighted();
-          }
-          // If dropdown is closed, don't prevent default - allow form submission
-          break;
-
-        case "Escape":
-          e.preventDefault();
-          this._close();
-          break;
-
-        case "Backspace":
-          // In single-select mode, if input is empty (showing selected label),
-          // clear the selection
-          if (!this.multiple && !this._query) {
-            const currentValue = this._getCurrentValue();
-            if (currentValue) {
-              e.preventDefault();
-              this._cellController.setValue("");
-              this._query = "";
-            }
-          }
-          break;
-
-        case "Tab":
-          this._close();
-          break;
-      }
-    }
-
-    private _handleOutsideClick = (e: MouseEvent) => {
-      if (!this._isOpen) return;
-
-      const path = e.composedPath();
-      if (!path.includes(this)) {
-        this._close();
-      }
-    };
-
-    // Selection methods
-    private _selectItem(item: AutocompleteItem) {
-      // Always emit cf-select for side effects
-      // Include data field if present (allows passing arbitrary objects through selection)
-      this.emit("cf-select", {
-        value: item.value,
-        label: item.label || item.value,
-        group: item.group,
-        isCustom: false,
-        ...(item.data !== undefined && { data: item.data }),
-      });
-
-      // Update value through cell controller
-      if (this.multiple) {
-        // Add to array
-        const current =
-          (this._getCurrentValue() as readonly string[] | undefined) || [];
-        if (!current.includes(item.value)) {
-          this._cellController.setValue([...current, item.value]);
-        }
-      } else {
-        // Replace single value
-        this._cellController.setValue(item.value);
-      }
-
-      // Clear query for multi, keep empty for single (user can see there's no selection displayed)
-      this._query = "";
-      this._close();
-    }
-
-    private _selectCustomValue() {
-      if (!this._query.trim()) return;
-
-      const customValue = this._query.trim();
-
-      // Always emit cf-select for side effects
-      this.emit("cf-select", {
-        value: customValue,
-        label: customValue,
-        isCustom: true,
-      });
-
-      // Update value through cell controller
-      if (this.multiple) {
-        // Add to array
-        const current =
-          (this._getCurrentValue() as readonly string[] | undefined) || [];
-        if (!current.includes(customValue)) {
-          this._cellController.setValue([...current, customValue]);
-        }
-      } else {
-        // Replace single value
-        this._cellController.setValue(customValue);
-      }
-
-      this._query = "";
-      this._close();
-    }
-
-    private _selectHighlighted() {
-      const filtered = this._filteredItems;
-      const alreadySelected = this._alreadySelectedItems;
-      // Limit to rendered items
-      const maxRender = this.maxVisible + 4;
-      const renderedFilteredCount = Math.min(filtered.length, maxRender);
-      // Order: filtered items → already-selected items → custom option
-      const alreadySelectedStartIndex = renderedFilteredCount;
-      const customOptionIndex = renderedFilteredCount + alreadySelected.length;
-
-      if (this._highlightedIndex < renderedFilteredCount) {
-        // Regular selectable item
-        this._selectItem(filtered[this._highlightedIndex]);
-      } else if (
-        this._highlightedIndex >= alreadySelectedStartIndex &&
-        this._highlightedIndex < customOptionIndex
-      ) {
-        // Already-selected item - remove it
-        const alreadySelectedIndex = this._highlightedIndex -
-          alreadySelectedStartIndex;
-        this._removeItem(alreadySelected[alreadySelectedIndex]);
-      } else if (
-        this._showCustomOption && this._highlightedIndex === customOptionIndex
-      ) {
-        // Custom value option (at the end)
-        this._selectCustomValue();
-      }
-    }
-
-    // Remove an item from the selected values (multi-select only)
-    private _removeItem(item: AutocompleteItem) {
-      if (!this.multiple) return;
-
-      const current =
-        (this._getCurrentValue() as readonly string[] | undefined) || [];
-      const newValue = current.filter((v) => v !== item.value);
-      this._cellController.setValue(newValue);
-
-      // Don't close - user might want to remove more or add new ones
-      this._query = "";
-    }
-
-    // Highlight navigation
-    private _setHighlight(index: number) {
-      this._highlightedIndex = index;
-    }
-
-    private _moveHighlight(delta: number) {
-      const total = this._totalSelectableItems;
-      if (total === 0) return;
-
-      this._highlightedIndex = (this._highlightedIndex + delta + total) % total;
-
-      // Scroll the highlighted option into view
-      this._scrollHighlightedIntoView();
-    }
-
-    private _scrollHighlightedIntoView() {
-      // Use requestAnimationFrame to ensure DOM has updated
-      requestAnimationFrame(() => {
-        const option = this.shadowRoot?.querySelector(
-          `#option-${this._highlightedIndex}`,
-        );
-        if (option) {
-          option.scrollIntoView({ block: "nearest", behavior: "auto" });
-        }
       });
     }
 
-    // Open/close methods
-    private _open() {
-      if (this.disabled) return;
+    // Add custom value option at the very end
+    if (this._showCustomOption) {
+      const customIndex = filtered.length + alreadySelected.length;
+      const customClasses = {
+        option: true,
+        custom: true,
+        highlighted: customIndex === this._highlightedIndex,
+      };
 
-      this._isOpen = true;
+      options.push(html`
+        <div
+          id="option-${customIndex}"
+          class="${classMap(customClasses)}"
+          role="option"
+          aria-selected="${customIndex === this._highlightedIndex}"
+          @click="${this._selectCustomValue}"
+          @mouseenter="${() => this._setHighlight(customIndex)}"
+        >
+          <span class="option-label">Add "${this._query}"</span>
+        </div>
+      `);
+    }
+
+    return options;
+  }
+
+  // Event handlers
+  //
+  // PERFORMANCE NOTE (Dec 2025):
+  // We use setTimeout(0) here instead of synchronous state updates. This was extensively
+  // investigated and verified:
+  //
+  // 1. VERIFIED: Typing does NOT trigger pattern/cell recomputation - filtering is purely
+  //    internal Lit state (_query). Console instrumentation confirmed no framework overhead.
+  //
+  // 2. WHY setTimeout(0) FEELS FASTER than synchronous updates:
+  //    - Synchronous: Lit queues microtasks → blocks rendering → user sees lag
+  //    - setTimeout(0): Returns immediately → browser paints keystroke → dropdown updates next frame
+  //    The browser event loop order is: Task → Microtasks → Render → Next Task
+  //    By deferring to the next task, we let the browser paint the input first.
+  //
+  // 3. clearTimeout prevents "flashing" when typing quickly by canceling stale updates.
+  //
+  // See commit history for detailed performance investigation with Oracle agents.
+  //
+  private _handleInput(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const newValue = input.value;
+
+    // Clear pending update to prevent stale renders (no flashing)
+    if (this._debounceTimer !== null) {
+      clearTimeout(this._debounceTimer);
+    }
+
+    // Defer state updates to next task, allowing input to render immediately
+    this._debounceTimer = setTimeout(() => {
+      if (!this._isOpen && newValue) {
+        this._isOpen = true;
+        this.emit("cf-open", {});
+      }
+      this._query = newValue;
       this._highlightedIndex = 0;
-      this.emit("cf-open", {});
+      this._debounceTimer = null;
+    }, 0) as unknown as number;
+  }
+
+  private _handleFocus() {
+    // In single-select mode with a selected value, select all text so user can easily replace
+    if (!this.multiple && this._displayValue && this._input) {
+      // Copy the selected label to query so user can modify it
+      this._query = this._displayValue;
+      // Select all text after render
+      requestAnimationFrame(() => {
+        this._input?.select();
+      });
     }
 
-    private _close() {
-      this._isOpen = false;
-      // Clear query so display reverts to selected value (in single mode)
-      // or empty (in multi mode)
-      this._query = "";
-      this.emit("cf-close", {});
-    }
-
-    // Dropdown positioning
-    private _updateDropdownPosition() {
-      if (!this._input) return;
-
-      const inputRect = this._input.getBoundingClientRect();
-      const viewportHeight = globalThis.innerHeight;
-      const dropdownHeight = Math.min(
-        this._totalSelectableItems * 40,
-        this.maxVisible * 40,
-      );
-
-      const spaceBelow = viewportHeight - inputRect.bottom;
-      const spaceAbove = inputRect.top;
-
-      // Calculate fixed position coordinates
-      const left = inputRect.left;
-      const width = inputRect.width;
-
-      // Position above if not enough space below but enough above
-      let top: number;
-      if (spaceBelow < dropdownHeight && spaceAbove > dropdownHeight) {
-        // Position above the input
-        top = inputRect.top - dropdownHeight - 4;
-      } else {
-        // Position below the input
-        top = inputRect.bottom + 4;
-      }
-
-      this._dropdownStyle = `top: ${top}px; left: ${left}px; width: ${width}px`;
-    }
-
-    // Public API
-    override focus(): void {
-      this._input?.focus();
-    }
-
-    override blur(): void {
-      this._input?.blur();
-      this._close();
-    }
-
-    /** Clear the current query */
-    clear(): void {
-      this._query = "";
-      this._close();
+    if (!this._isOpen) {
+      this._open();
     }
   }
 
-  globalThis.customElements.define("cf-autocomplete", CFAutocomplete);
+  private _handleKeyDown(e: KeyboardEvent) {
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        if (!this._isOpen) {
+          this._open();
+        } else {
+          this._moveHighlight(1);
+        }
+        break;
+
+      case "ArrowUp":
+        e.preventDefault();
+        if (this._isOpen) {
+          this._moveHighlight(-1);
+        }
+        break;
+
+      case "Enter":
+        if (this._isOpen) {
+          e.preventDefault();
+          this._selectHighlighted();
+        }
+        // If dropdown is closed, don't prevent default - allow form submission
+        break;
+
+      case "Escape":
+        e.preventDefault();
+        this._close();
+        break;
+
+      case "Backspace":
+        // In single-select mode, if input is empty (showing selected label),
+        // clear the selection
+        if (!this.multiple && !this._query) {
+          const currentValue = this._getCurrentValue();
+          if (currentValue) {
+            e.preventDefault();
+            this._cellController.setValue("");
+            this._query = "";
+          }
+        }
+        break;
+
+      case "Tab":
+        this._close();
+        break;
+    }
+  }
+
+  private _handleOutsideClick = (e: MouseEvent) => {
+    if (!this._isOpen) return;
+
+    const path = e.composedPath();
+    if (!path.includes(this)) {
+      this._close();
+    }
+  };
+
+  // Selection methods
+  private _selectItem(item: AutocompleteItem) {
+    // Always emit cf-select for side effects
+    // Include data field if present (allows passing arbitrary objects through selection)
+    this.emit("cf-select", {
+      value: item.value,
+      label: item.label || item.value,
+      group: item.group,
+      isCustom: false,
+      ...(item.data !== undefined && { data: item.data }),
+    });
+
+    // Update value through cell controller
+    if (this.multiple) {
+      // Add to array
+      const current =
+        (this._getCurrentValue() as readonly string[] | undefined) || [];
+      if (!current.includes(item.value)) {
+        this._cellController.setValue([...current, item.value]);
+      }
+    } else {
+      // Replace single value
+      this._cellController.setValue(item.value);
+    }
+
+    // Clear query for multi, keep empty for single (user can see there's no selection displayed)
+    this._query = "";
+    this._close();
+  }
+
+  private _selectCustomValue() {
+    if (!this._query.trim()) return;
+
+    const customValue = this._query.trim();
+
+    // Always emit cf-select for side effects
+    this.emit("cf-select", {
+      value: customValue,
+      label: customValue,
+      isCustom: true,
+    });
+
+    // Update value through cell controller
+    if (this.multiple) {
+      // Add to array
+      const current =
+        (this._getCurrentValue() as readonly string[] | undefined) || [];
+      if (!current.includes(customValue)) {
+        this._cellController.setValue([...current, customValue]);
+      }
+    } else {
+      // Replace single value
+      this._cellController.setValue(customValue);
+    }
+
+    this._query = "";
+    this._close();
+  }
+
+  private _selectHighlighted() {
+    const filtered = this._filteredItems;
+    const alreadySelected = this._alreadySelectedItems;
+    // Limit to rendered items
+    const maxRender = this.maxVisible + 4;
+    const renderedFilteredCount = Math.min(filtered.length, maxRender);
+    // Order: filtered items → already-selected items → custom option
+    const alreadySelectedStartIndex = renderedFilteredCount;
+    const customOptionIndex = renderedFilteredCount + alreadySelected.length;
+
+    if (this._highlightedIndex < renderedFilteredCount) {
+      // Regular selectable item
+      this._selectItem(filtered[this._highlightedIndex]);
+    } else if (
+      this._highlightedIndex >= alreadySelectedStartIndex &&
+      this._highlightedIndex < customOptionIndex
+    ) {
+      // Already-selected item - remove it
+      const alreadySelectedIndex = this._highlightedIndex -
+        alreadySelectedStartIndex;
+      this._removeItem(alreadySelected[alreadySelectedIndex]);
+    } else if (
+      this._showCustomOption && this._highlightedIndex === customOptionIndex
+    ) {
+      // Custom value option (at the end)
+      this._selectCustomValue();
+    }
+  }
+
+  // Remove an item from the selected values (multi-select only)
+  private _removeItem(item: AutocompleteItem) {
+    if (!this.multiple) return;
+
+    const current =
+      (this._getCurrentValue() as readonly string[] | undefined) || [];
+    const newValue = current.filter((v) => v !== item.value);
+    this._cellController.setValue(newValue);
+
+    // Don't close - user might want to remove more or add new ones
+    this._query = "";
+  }
+
+  // Highlight navigation
+  private _setHighlight(index: number) {
+    this._highlightedIndex = index;
+  }
+
+  private _moveHighlight(delta: number) {
+    const total = this._totalSelectableItems;
+    if (total === 0) return;
+
+    this._highlightedIndex = (this._highlightedIndex + delta + total) % total;
+
+    // Scroll the highlighted option into view
+    this._scrollHighlightedIntoView();
+  }
+
+  private _scrollHighlightedIntoView() {
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      const option = this.shadowRoot?.querySelector(
+        `#option-${this._highlightedIndex}`,
+      );
+      if (option) {
+        option.scrollIntoView({ block: "nearest", behavior: "auto" });
+      }
+    });
+  }
+
+  // Open/close methods
+  private _open() {
+    if (this.disabled) return;
+
+    this._isOpen = true;
+    this._highlightedIndex = 0;
+    this.emit("cf-open", {});
+  }
+
+  private _close() {
+    this._isOpen = false;
+    // Clear query so display reverts to selected value (in single mode)
+    // or empty (in multi mode)
+    this._query = "";
+    this.emit("cf-close", {});
+  }
+
+  // Dropdown positioning
+  private _updateDropdownPosition() {
+    if (!this._input) return;
+
+    const inputRect = this._input.getBoundingClientRect();
+    const viewportHeight = globalThis.innerHeight;
+    const dropdownHeight = Math.min(
+      this._totalSelectableItems * 40,
+      this.maxVisible * 40,
+    );
+
+    const spaceBelow = viewportHeight - inputRect.bottom;
+    const spaceAbove = inputRect.top;
+
+    // Calculate fixed position coordinates
+    const left = inputRect.left;
+    const width = inputRect.width;
+
+    // Position above if not enough space below but enough above
+    let top: number;
+    if (spaceBelow < dropdownHeight && spaceAbove > dropdownHeight) {
+      // Position above the input
+      top = inputRect.top - dropdownHeight - 4;
+    } else {
+      // Position below the input
+      top = inputRect.bottom + 4;
+    }
+
+    this._dropdownStyle = `top: ${top}px; left: ${left}px; width: ${width}px`;
+  }
+
+  // Public API
+  override focus(): void {
+    this._input?.focus();
+  }
+
+  override blur(): void {
+    this._input?.blur();
+    this._close();
+  }
+
+  /** Clear the current query */
+  clear(): void {
+    this._query = "";
+    this._close();
+  }
+}
+
+globalThis.customElements.define("cf-autocomplete", CFAutocomplete);

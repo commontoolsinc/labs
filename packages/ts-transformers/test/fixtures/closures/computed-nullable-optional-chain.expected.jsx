@@ -11,6 +11,12 @@ import { computed, pattern, UI, NAME } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+// Represents a question that may or may not exist
+type Question = {
+    question: string;
+    category: string;
+    priority: number;
+};
 const __cfLift_1 = __cfHelpers.lift(false, (): Question | null => {
     // In real code this would filter and return first match, or null
     return null;
@@ -133,12 +139,6 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.category);
-// Represents a question that may or may not exist
-type Question = {
-    question: string;
-    category: string;
-    priority: number;
-};
 // FIXTURE: computed-nullable-optional-chain
 // Verifies: computed() capturing a nullable computed result preserves anyOf [type, null] in schema
 //   computed(() => topQuestion?.question || "") → lift(({ topQuestion }) => topQuestion?.question || "")({ topQuestion })
@@ -202,3 +202,10 @@ export default pattern((_) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5
+});

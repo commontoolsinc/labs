@@ -1,12 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import {
   CloneForMutationError,
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
-} from "../src/fabric-value.ts";
-import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
-import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
+} from "@/fabric-value.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 
 // deno-lint-ignore no-explicit-any
 const obj = (v: unknown) => v as any;

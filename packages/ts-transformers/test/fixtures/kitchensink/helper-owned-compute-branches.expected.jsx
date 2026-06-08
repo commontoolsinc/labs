@@ -22,6 +22,17 @@ import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Badge {
+    text: string;
+    active: boolean;
+}
+interface Project {
+    id: string;
+    name: string;
+    archived: boolean;
+    members: string[];
+    badges: Badge[];
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         showArchived: boolean;
@@ -142,6 +153,73 @@ const __cfLift_3 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ project, member }) => `${project.name}-${member}`);
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const member = __cf_pattern_input.key("element");
+    const memberIndex = __cf_pattern_input.key("index");
+    const project = __cf_pattern_input.params.project;
+    return (<small>
+              {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ memberIndex: memberIndex }), __cfLift_3({
+        project: {
+            name: project.name
+        },
+        member: member
+    }), member)}
+            </small>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                project: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                }
+            },
+            required: ["project"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     visibleProjects: {
         name: string;
@@ -258,73 +336,7 @@ visibleProjects.map((project, projectIndex) => {
                     : ""}
             </span>))}
           {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside computed */}
-          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const member = __cf_pattern_input.key("element");
-            const memberIndex = __cf_pattern_input.key("index");
-            const project = __cf_pattern_input.params.project;
-            return (<small>
-              {__cfHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ memberIndex: memberIndex }), __cfLift_3({
-                project: {
-                    name: project.name
-                },
-                member: member
-            }), member)}
-            </small>);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "string"
-                },
-                index: {
-                    type: "number"
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        project: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["project"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {
+          {fallbackMembers.mapWithPattern(__cfPattern_1, {
             project: {
                 name: project.name
             }
@@ -340,17 +352,6 @@ visibleProjects.map((project, projectIndex) => {
             </span>))}
         </div>);
 }));
-interface Badge {
-    text: string;
-    active: boolean;
-}
-interface Project {
-    id: string;
-    name: string;
-    archived: boolean;
-    members: string[];
-    badges: Badge[];
-}
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
     // [TRANSFORM] new Writable: schema arg injected
@@ -467,3 +468,10 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfPattern_1,
+    __cfLift_4
+});

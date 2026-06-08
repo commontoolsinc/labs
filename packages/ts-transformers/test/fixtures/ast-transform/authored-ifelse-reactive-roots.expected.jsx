@@ -11,6 +11,7 @@ import { ifElse, pattern, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const identity = __cfHardenFn(<T,>(value: T) => value);
 const __cfLift_1 = __cfHelpers.lift<{
     name: string;
 }, string>({
@@ -77,7 +78,6 @@ const __cfLift_5 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim());
-const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
 //   ifElse(show, count + 1, 0)         → compute-wrapped branch
@@ -164,3 +164,10 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5
+});

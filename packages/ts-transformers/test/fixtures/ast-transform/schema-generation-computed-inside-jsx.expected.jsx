@@ -11,8 +11,8 @@ import { computed } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(false, () => value * 2);
 declare const value: number;
+const __cfLift_1 = __cfHelpers.lift(false, () => value * 2);
 // FIXTURE: schema-generation-computed-inside-jsx
 // Verifies: a reactive builder inside a JSX expression still gets schemas injected
 //   computed(() => value * 2) → captures `value` and lowers to lift(inputSchema, outputSchema, ...)
@@ -23,3 +23,6 @@ export const result = (<div>
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

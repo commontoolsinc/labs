@@ -80,6 +80,76 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     expect(q.error).toBeUndefined();
     expect(q.result).toEqual([]);
   });
+
+  // The db's on-disk file is the server's job; what the *runner* must get right
+  // is forwarding the author-declared scope to the wire. `.asScope("user")` is
+  // what the transformer lowers `const db: PerUser<SqliteDb> = sqliteDatabase()`
+  // into; it sets the node default scope, which the runner folds into the output
+  // binding and the builtin stamps onto the SqliteDbRef. We spy on the storage
+  // provider to capture the ref `db.query` actually sends.
+  async function capturedQueryScope(
+    // deno-lint-ignore no-explicit-any
+    makeDb: () => any,
+    label: string,
+  ): Promise<unknown> {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (db: { scope?: unknown }, ...rest: unknown[]) => unknown;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    let seenScope: unknown = "<<unset>>";
+    provider.sqliteQuery = (db, ...rest) => {
+      seenScope = db?.scope;
+      return original(db, ...rest);
+    };
+    try {
+      const queryPattern = cf.pattern(() => {
+        const db = makeDb();
+        return cf.sqliteQuery({
+          db,
+          sql: "SELECT body FROM notes",
+          reactOn: db,
+        });
+      });
+      const resultCell = runtime.getCell(
+        space,
+        label,
+        queryPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, queryPattern, {}, resultCell);
+      tx.commit();
+      await waitUntil<QueryState>(
+        runtime,
+        result,
+        () => seenScope !== "<<unset>>",
+      );
+      return seenScope;
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  }
+
+  const tables = () => ({
+    tables: { notes: cf.table({ id: "integer primary key", body: "text" }) },
+  });
+
+  it("forwards a user-scoped db (.asScope) to the query wire", async () => {
+    expect(
+      await capturedQueryScope(
+        () => cf.sqliteDatabase.asScope("user")(tables()),
+        "sqlite-scope-user",
+      ),
+    ).toBe("user");
+  });
+
+  it("forwards space scope for an unscoped db", async () => {
+    expect(
+      await capturedQueryScope(
+        () => cf.sqliteDatabase(tables()),
+        "sqlite-scope-default",
+      ),
+    ).toBe("space");
+  });
 });
 
 type QueryState = { pending: boolean; result?: unknown[]; error?: unknown };

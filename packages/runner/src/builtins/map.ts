@@ -24,6 +24,8 @@ import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { outputSpotFromBinding } from "./scope-policy.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
@@ -33,6 +35,7 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
 
 /**
  * Implementation of built-in map module. Unlike regular modules, this will be
@@ -70,6 +73,7 @@ export function map(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
+  outputBinding?: NormalizedFullLink,
 ): Action {
   let result: Cell<any[]> | undefined;
 
@@ -81,7 +85,19 @@ export function map(
     { resultCell: Cell<any>; lastIndex: number }
   >();
 
+  // Only the initial (resume) reconcile should defer its per-element sub-pattern
+  // runs until storage sync completes. This map action is itself sync-gated when
+  // resumed, so its first reconcile already runs against synced data; elements
+  // added by later (post-resume) reconciles are fresh and must not wait.
+  let resumeBatchAwaitSync = !!(cause as { awaitSync?: boolean } | undefined)
+    ?.awaitSync;
+
   return (tx: IExtendedStorageTransaction) => {
+    // Captured before the loop consumes it: this reconcile's element runs use
+    // the current value; the flag is cleared only once a non-empty resume batch
+    // has been processed (below), so a transient empty first reconcile doesn't
+    // burn it.
+    const elementAwaitSync = resumeBatchAwaitSync;
     const mappedInputs = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
     const op = mappedInputs.key("op").get();
     const sourceListCell = inputsCell.key("list");
@@ -97,8 +113,10 @@ export function map(
     const listCell = sourceListCell.withTx(tx).resolveAsCell();
     const list = listCell.asSchema(MAP_LIST_SCHEMA).withTx(tx).get();
     // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern.
-    const opPattern = op.getRaw();
+    // aliases in the pattern. The raw value is either a compact
+    // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
+    // identity) or, on the legacy path, the embedded pattern graph itself.
+    const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
@@ -106,13 +124,22 @@ export function map(
         "map",
         opPattern.resultSchema,
       );
+      // CT-1623: identify the result container by the reserved output spot —
+      // the fully-resolved write-redirect target the runner supplies as the
+      // `outputBinding`. It is a stable, position-derived, program-independent
+      // identity, unlike the serialized `op` / inputs, both of which drag in the
+      // session-varying `program` and force the container id (and every per-row
+      // id derived from it) to churn across reloads. A `map` node always writes
+      // through a write redirect, so the absence of an output spot is a bug.
+      const outputSpot = outputSpotFromBinding(outputBinding);
+      if (!outputSpot) {
+        throw new Error(
+          "map: result container requires a write-redirect output binding",
+        );
+      }
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        {
-          map: parentCell.entityId,
-          op: inputsCell.getAsQueryResult([], tx)?.op,
-          cause,
-        },
+        { map: parentCell.entityId, outputSpot },
         resultSchema,
         tx,
       );
@@ -153,6 +180,9 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
+    // The resume batch has now been observed; later reconciles are post-resume.
+    if (list.length > 0) resumeBatchAwaitSync = false;
+
     const keyCounts = new Map<string, number>();
     const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {
@@ -172,7 +202,10 @@ export function map(
             opPattern,
             createRunInput(list[i], i),
             existing.resultCell,
-            { doNotUpdateOnPatternChange: true },
+            {
+              doNotUpdateOnPatternChange: true,
+              awaitSyncBeforeInitialRun: elementAwaitSync,
+            },
           );
         }
         existing.lastIndex = i;
@@ -189,7 +222,10 @@ export function map(
           opPattern,
           createRunInput(list[i], i),
           resultCell,
-          { doNotUpdateOnPatternChange: true },
+          {
+            doNotUpdateOnPatternChange: true,
+            awaitSyncBeforeInitialRun: elementAwaitSync,
+          },
         );
         // Link these individual cells to the top cell
         setResultCell(resultCell, parentCell);

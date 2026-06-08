@@ -15,6 +15,52 @@ interface State {
     items: number[];
     highlight: string;
 }
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const _ = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    const element = __cf_pattern_input.key("params", "element");
+    return (<span key={index}>{element}</span>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                element: {
+                    type: "string"
+                }
+            },
+            required: ["element"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-outer-element
 // Verifies: .map() on reactive array captures a local variable aliased from state
 //   .map(fn) → .mapWithPattern(pattern(...), {element: ...})
@@ -23,52 +69,7 @@ export default pattern((state) => {
     const element = state.key("highlight");
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const _ = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                const element = __cf_pattern_input.key("params", "element");
-                return (<span key={index}>{element}</span>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "number"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            element: {
-                                type: "string"
-                            }
-                        },
-                        required: ["element"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {state.key("items").mapWithPattern(__cfPattern_1, {
                 element: element
             })}
       </div>),
@@ -120,3 +121,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfPattern_1
+});

@@ -103,8 +103,8 @@ Read path:   storage → traverseDAG → normalizeAndDiff → builtins (map, etc
 These layers handle sparse arrays correctly and are less likely to regress
 because their sparse support was part of the original design:
 
-- **`packages/data-model/fabric-value-modern.ts`** — `shallowFabricFromNativeValueModern` and
-  `fabricFromNativeValueModern` use `i in arr` checks.
+- **`packages/data-model/native-conversion.ts`** — `shallowFabricFromNativeValue` and
+  `fabricFromNativeValue` use `i in arr` checks.
 - **`packages/memory/serialization.ts`** — Encodes holes as run-length-encoded
   `/hole` entries; decodes them back to true holes via `new Array(len)`.
 - **`packages/data-model/value-hash.ts`** — Handles holes in hash computation.
@@ -112,9 +112,7 @@ because their sparse support was part of the original design:
 ### Value validation (`packages/data-model/fabric-value.ts`)
 
 `isFabricArray` accepts sparse arrays — holes are valid fabric structure. It
-uses `for` + `i in` because it needs early return.  `fabricFromNativeValueLegacy` and
-`toDeepFabricValueInternal` both use `forEach` to preserve holes during
-conversion.
+uses `for` + `i in` because it needs early return.
 
 ### v2-transaction write path (`packages/runner/src/storage/v2-transaction.ts`)
 
@@ -233,8 +231,10 @@ the preferred entry point in runner code.
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/data-model/test/fabric-value.test.ts`** — `isFabricValue` accepts
-  sparse arrays; `fabricFromNativeValue` and `toDeepFabricValue` preserve holes.
+- **`packages/data-model/test/type-check.test.ts`** — `isFabricValueLayer()`
+  accepts sparse arrays.
+- **`packages/data-model/test/native-conversion.test.ts`** — 
+  `fabricFromNativeValue()` preserves holes.
 - **`packages/runner/test/cell-core.test.ts`** — sparse-array writes through
   the full Cell write path (which lands in `applyMutablePathWrite`) preserve
   holes; the helper's `cloneForMutation` + leaf-mutation steps round-trip
@@ -258,6 +258,7 @@ will fail these assertions.
 
 ## Known limitations
 
-- **`fabric-value-modern.ts` `HasToJSON` path:** `Object.freeze([...converted])`
-  in the `HasToJSON` case would densify a sparse array returned from `toJSON()`.
-  This is an edge case — `toJSON()` rarely returns sparse arrays.
+- **`data-model/native-conversion.ts` `HasToJSON` path:**
+  `Object.freeze([...converted])` in the `HasToJSON` case would densify a sparse
+  array returned from `toJSON()`. This is an edge case — `toJSON()` rarely
+  returns sparse arrays.

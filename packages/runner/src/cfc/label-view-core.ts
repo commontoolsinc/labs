@@ -65,7 +65,7 @@ const sortEntries = (entries: CfcLabelViewEntry[]): CfcLabelViewEntry[] =>
     return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
   });
 
-const mergeLabel = (
+export const mergeLabel = (
   left: IFCLabel | undefined,
   right: IFCLabel,
 ): IFCLabel => {

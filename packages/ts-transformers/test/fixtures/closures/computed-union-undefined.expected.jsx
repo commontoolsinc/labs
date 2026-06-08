@@ -11,6 +11,10 @@ import { Writable, computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Config {
+    required: number;
+    unionUndefined: number | undefined;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     value: __cfHelpers.ReadonlyCell<number>;
     config: {
@@ -41,10 +45,6 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() + config.required + (config.unionUndefined ?? 0));
-interface Config {
-    required: number;
-    unionUndefined: number | undefined;
-}
 // FIXTURE: computed-union-undefined
 // Verifies: captured properties with `number | undefined` union types produce correct schemas
 //   computed(() => ...) → lift(...)({ value, config: { required, unionUndefined } })
@@ -78,3 +78,6 @@ export default pattern((config: Config) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

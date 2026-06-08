@@ -11,6 +11,12 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface State {
+    items: Array<{
+        value: number;
+    }>;
+    multiplier: number;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -41,12 +47,6 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     const scaled = state.items.map((item) => item.value * state.multiplier);
     console.log(scaled);
 });
-interface State {
-    items: Array<{
-        value: number;
-    }>;
-    multiplier: number;
-}
 // FIXTURE: handler-nested-map
 // Verifies: .map() inside a handler body is NOT transformed to .mapWithPattern()
 //   onClick={() => { state.items.map(...) }) → handler(..., (_, { state }) => { state.items.map(...) })
@@ -115,3 +115,6 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1
+});

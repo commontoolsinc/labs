@@ -1,4 +1,5 @@
-import { FabricInstance } from "../interface.ts";
+import { FabricInstance, type FabricValue } from "@/interface.ts";
+import { DECONSTRUCT, FabricDeconstructable } from "@/wire-common/interface.ts";
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
@@ -12,7 +13,20 @@ import { FabricInstance } from "../interface.ts";
  * `shallowClone()`/`shallowUnfrozenClone()` template-method split), at which
  * point individual subclasses stop implementing `deepClone()` directly.
  */
-export abstract class BaseFabricInstance extends FabricInstance {
+export abstract class BaseFabricInstance extends FabricInstance
+  implements FabricDeconstructable {
+  //
+  // Instance members
+  //
+
+  /** @inheritDoc */
+  abstract [DECONSTRUCT](): FabricValue;
+
+  /**
+   * The type tag to use for this instance to identify it in wire protocols.
+   */
+  abstract get wireTypeTag(): string;
+
   /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
@@ -33,5 +47,33 @@ export abstract class BaseFabricInstance extends FabricInstance {
     // Cast needed: `Object.freeze()` returns `Readonly<T>`, which TS considers
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Gets the `.wireTypeTag` from a value which is _supposed_ to be an instance
+   * of this class but is only statically known / assumed to be an instance of
+   * the fully abstract `FabricInstance`. Throws a "shouldn't happen" error if
+   * there's trouble.
+   */
+  static wireTypeTagOf(value: FabricInstance | FabricDeconstructable): string {
+    if (!(value instanceof BaseFabricInstance)) {
+      throw new Error(
+        "Shouldn't happen: Encountered a `FabricInstance` which is not a `BaseFabricInstance`.",
+      );
+    }
+
+    const result = value.wireTypeTag;
+
+    if (typeof result !== "string") {
+      throw new Error(
+        "Shouldn't happen: Encountered a `BaseFabricInstance` with a non-string `wireTypeTag`.",
+      );
+    }
+
+    return result;
   }
 }

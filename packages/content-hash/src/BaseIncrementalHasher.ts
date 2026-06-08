@@ -1,5 +1,5 @@
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import type { IncrementalHasher } from "./interface.ts";
+import type { IncrementalHasher } from "@/interface.ts";
 
 /**
  * Base implementation for the `IncrementalHasher` interface. This takes

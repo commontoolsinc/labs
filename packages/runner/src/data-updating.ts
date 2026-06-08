@@ -1,8 +1,8 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import {
   fabricFromNativeValue,
-  FabricInstance,
   type FabricObject,
+  FabricSpecialObject,
   type FabricValue,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -750,8 +750,8 @@ export function normalizeAndDiff(
     ];
   }
 
-  // Convert the (top level of) the value to something JSON-encodable if not
-  // already JSON-encodable, or throw if it's neither already valid nor
+  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
+  // if it isn't already, or throw if it's neither already valid nor
   // convertible.
   const fabricValue = shallowFabricFromNativeValue(newValue);
   if (fabricValue !== newValue) {
@@ -844,17 +844,19 @@ export function normalizeAndDiff(
     return changes;
   }
 
-  // `FabricInstance` values are atomic from this layer's perspective: their
+  // `FabricSpecialObject` values (`FabricInstance` wrappers and `FabricPrimitive`
+  // leaves alike) are atomic from this layer's perspective: their
   // own-enumerable properties are implementation details, not
   // user-visible structure, and iterating them via the generic
-  // `isRecord` branch below would walk wrapper-internal fields, which
+  // `isRecord` branch below would walk wrapper-internal fields (or, for a
+  // primitive whose state is private, flatten it to `{}`), which
   // is meaningless at the change-emission level. Emit a single change at
-  // this link with the wrapper as the
-  // value — the storage layer's JSON encoding handles serialization via
-  // `[DECONSTRUCT]`/`[RECONSTRUCT]`. Placed after the write-redirect
+  // this link with the value as-is — the storage layer's JSON encoding handles
+  // serialization (via `[DECONSTRUCT]`/`[RECONSTRUCT]` for instances, the codec
+  // for primitives). Placed after the write-redirect
   // resolution above so writes through a redirect land on the target,
   // not on the redirect itself.
-  if (newValue instanceof FabricInstance) {
+  if (newValue instanceof FabricSpecialObject) {
     diffLogger.debug(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
@@ -898,9 +900,15 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_OBJECT] Processing object at path=${pathStr}`,
     );
-    // If the current value is not a (regular) object, set it to an empty object
-    // Note that the alias case is handled above
-    if (!isRecord(currentValue) || isPrimitiveCellLink(currentValue)) {
+    // If the current value is not a (regular) object, set it to an empty object.
+    // Note that the alias case is handled above.
+    // We use `isObject` (not `isRecord`) here deliberately: `isRecord` is true
+    // for arrays (`typeof [] === "object"`), whereas `isObject` excludes them.
+    // Resetting on an array→object transition is required; otherwise per-key
+    // writes land in a slot whose stored parent is still an array and storage
+    // rejects them with a TypeMismatchError. This mirrors the array branch
+    // above, which resets a mismatched container via `value: []`.
+    if (!isObject(currentValue) || isPrimitiveCellLink(currentValue)) {
       diffLogger.debug(
         "diff",
         () =>

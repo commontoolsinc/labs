@@ -1,10 +1,8 @@
 import ts from "typescript";
 import {
   classifyArrayMethodCall,
-  FUNCTION_HARDENING_HELPER_PREFIX,
   getCapabilitySummaryCallbackArgument,
   getPatternBuilderCallbackArgument,
-  SYNTHETIC_MODULE_CALLBACK_PREFIX,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
@@ -16,8 +14,6 @@ import {
   addBindingTargetSymbols,
   isOpaqueSourceExpression,
 } from "./opaque-roots.ts";
-import { rewritePatternCallbackBody } from "./pattern-body-reactive-root-lowering.ts";
-import { unwrapExpression } from "../utils/expression.ts";
 
 interface PatternScopeInfo {
   opaqueNames: Set<string>;
@@ -248,144 +244,10 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
       return visitedNode;
     };
 
-    const mainPass = visitEachChildWithJsx(
+    return visitEachChildWithJsx(
       context.sourceFile,
       visit,
       context.tsContext,
     ) as ts.SourceFile;
-
-    // ── Module-extracted callback post-pass ────────────────────────────
-    // ClosureTransformer hoists reactive callback bodies (from lift-applied
-    // forms — the lowered shape of `computed(...)`, etc.)
-    // into top-level
-    // `const __cfModuleCallback_N = (() => { ... })` declarations. The
-    // main pass above only walks INSIDE pattern callbacks, so those
-    // module-level bodies never receive the reactive-root lowering pass
-    // and end up with shapes like `const foo = wish(...).result!` un-
-    // lowered. Walk them now with empty pattern-scope, applying the
-    // same body rewrite the inline case gets.
-    return rewriteModuleExtractedCallbackBodies(mainPass, context);
   }
-}
-
-function rewriteModuleExtractedCallbackBodies(
-  sourceFile: ts.SourceFile,
-  context: TransformationContext,
-): ts.SourceFile {
-  const { factory } = context;
-  let changed = false;
-  const newStatements = sourceFile.statements.map((statement) => {
-    if (!ts.isVariableStatement(statement)) return statement;
-    if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) {
-      return statement;
-    }
-    let declChanged = false;
-    const newDeclarations = statement.declarationList.declarations.map(
-      (declaration) => {
-        if (
-          !ts.isIdentifier(declaration.name) ||
-          !declaration.name.text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX) ||
-          !declaration.initializer
-        ) {
-          return declaration;
-        }
-        const updated = rewriteModuleCallbackInitializer(
-          declaration.initializer,
-          context,
-        );
-        if (updated === declaration.initializer) return declaration;
-        declChanged = true;
-        return factory.updateVariableDeclaration(
-          declaration,
-          declaration.name,
-          declaration.exclamationToken,
-          declaration.type,
-          updated,
-        );
-      },
-    );
-    if (!declChanged) return statement;
-    changed = true;
-    return factory.updateVariableStatement(
-      statement,
-      statement.modifiers,
-      factory.updateVariableDeclarationList(
-        statement.declarationList,
-        newDeclarations,
-      ),
-    );
-  });
-  if (!changed) return sourceFile;
-  return factory.updateSourceFile(sourceFile, newStatements);
-}
-
-// Unwrap `__cfHardenFn(<fn>)` if present, walk the underlying function's
-// body with `rewritePatternCallbackBody` (empty pattern scope), and re-wrap
-// when needed. Returns the original initializer if nothing changed.
-function rewriteModuleCallbackInitializer(
-  initializer: ts.Expression,
-  context: TransformationContext,
-): ts.Expression {
-  const { factory } = context;
-  const unwrapped = unwrapExpression(initializer);
-  // Form 1: bare arrow / function expression.
-  if (ts.isArrowFunction(unwrapped) || ts.isFunctionExpression(unwrapped)) {
-    const newFn = rewriteModuleCallbackFunction(unwrapped, context);
-    return newFn === unwrapped ? initializer : newFn;
-  }
-  // Form 2: `__cfHardenFn(<fn>)` wrapper around the function.
-  if (
-    ts.isCallExpression(unwrapped) &&
-    unwrapped.arguments.length === 1 &&
-    ts.isIdentifier(unwrapped.expression) &&
-    unwrapped.expression.text.startsWith(FUNCTION_HARDENING_HELPER_PREFIX)
-  ) {
-    const inner = unwrapped.arguments[0];
-    if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner)) {
-      const newFn = rewriteModuleCallbackFunction(inner, context);
-      if (newFn === inner) return initializer;
-      return factory.updateCallExpression(
-        unwrapped,
-        unwrapped.expression,
-        unwrapped.typeArguments,
-        [newFn],
-      );
-    }
-  }
-  return initializer;
-}
-
-function rewriteModuleCallbackFunction(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
-  context: TransformationContext,
-): ts.ArrowFunction | ts.FunctionExpression {
-  const newBody = rewritePatternCallbackBody(
-    fn.body,
-    new Set<string>(),
-    new Set<ts.Symbol>(),
-    context,
-  );
-  if (newBody === fn.body) return fn;
-  const { factory } = context;
-  if (ts.isArrowFunction(fn)) {
-    return factory.updateArrowFunction(
-      fn,
-      fn.modifiers,
-      fn.typeParameters,
-      fn.parameters,
-      fn.type,
-      fn.equalsGreaterThanToken,
-      newBody,
-    );
-  }
-  return factory.updateFunctionExpression(
-    fn,
-    fn.modifiers,
-    fn.asteriskToken,
-    fn.name,
-    fn.typeParameters,
-    fn.parameters,
-    fn.type,
-    newBody as ts.Block,
-  );
 }

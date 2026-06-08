@@ -9,6 +9,7 @@ import {
 } from "../src/link-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type Cell, createCell } from "../src/cell.ts";
+import { type Opaque } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1409,7 +1410,12 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
       (x: number) => x + 1,
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
-      mapped: values.map((value) => increment(value)),
+      mapped: (values as any).mapWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((value: any) => increment(value)) as any)(element, index, array)
+        ),
+        {},
+      ),
     }));
 
     const resultCell = runtime.getCell(
@@ -1515,8 +1521,16 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
       )({ conversation, selectedRoom });
-      const bodies = messages.map((message) =>
-        lift((current: Message) => current.body)(message)
+      const bodies = (messages as any).mapWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((message: any) =>
+            lift((current: Message) => current.body)(message)) as any)(
+              element,
+              index,
+              array,
+            )
+        ),
+        {},
       );
       return {
         messages,
@@ -1612,8 +1626,16 @@ Deno.test("map materializes initially populated list selected by session input",
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
       )({ conversation, selectedRoom });
-      const bodies = messages.map((message) =>
-        lift((current: Message) => current.body)(message)
+      const bodies = (messages as any).mapWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((message: any) =>
+            lift((current: Message) => current.body)(message)) as any)(
+              element,
+              index,
+              array,
+            )
+        ),
+        {},
       );
       return { messages, bodies };
     });
@@ -1697,8 +1719,16 @@ Deno.test("ifElse selected branch materializes map over session-derived list", a
       const rendered = ifElse(
         isEmpty,
         [],
-        messages.map((message) =>
-          lift((current: Message) => current.body)(message)
+        (messages as any).mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            (((message: any) =>
+              lift((current: Message) => current.body)(message)) as any)(
+                element,
+                index,
+                array,
+              )
+          ),
+          {},
         ),
       );
       return { rendered };
@@ -1786,12 +1816,16 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
         h(
           "div",
           null,
-          messages.map((message) =>
-            h(
-              "span",
-              null,
-              lift((current: Message) => current.body)(message),
-            )
+          (messages as any).mapWithPattern(
+            pattern(({ element, index, array }: Opaque<any>) =>
+              (((message: any) =>
+                h(
+                  "span",
+                  null,
+                  lift((current: Message) => current.body)(message),
+                )) as any)(element, index, array)
+            ),
+            {},
           ),
         ),
       );
@@ -1946,17 +1980,21 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
           h(
             "div",
             null,
-            lift(
+            (lift(
               selectedRoomRefInputSchema,
               { type: "unknown" } as const,
               (current: any) =>
                 current.selectedRoomRef.get()?.messages as Message[],
-            )({ selectedRoomRef }).map((message: any) =>
-              h(
-                "span",
-                null,
-                lift((current: Message) => current.body)(message),
-              )
+            )({ selectedRoomRef }) as any).mapWithPattern(
+              pattern(({ element, index, array }: Opaque<any>) =>
+                (((message: any) =>
+                  h(
+                    "span",
+                    null,
+                    lift((current: Message) => current.body)(message),
+                  )) as any)(element, index, array)
+              ),
+              {},
             ),
           ),
         );
@@ -2027,7 +2065,12 @@ Deno.test("filter narrows output list when scoped element controls cardinality",
       (x: number) => x > 0,
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
-      filtered: values.filter((value) => positive(value)),
+      filtered: (values as any).filterWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((value: any) => positive(value)) as any)(element, index, array)
+        ),
+        {},
+      ),
     }));
 
     const resultCell = runtime.getCell(
@@ -2085,7 +2128,12 @@ Deno.test("flatMap narrows output list when scoped element controls cardinality"
       (x: number) => [x, x + 1],
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
-      expanded: values.flatMap((value) => expand(value)),
+      expanded: (values as any).flatMapWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((value: any) => expand(value)) as any)(element, index, array)
+        ),
+        {},
+      ),
     }));
 
     const resultCell = runtime.getCell(

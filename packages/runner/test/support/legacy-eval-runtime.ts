@@ -5,6 +5,14 @@ import {
   SourceMapParser,
 } from "@commonfabric/js-compiler";
 
+// The CF transformer emits a trailing `__cfReg({ … })` hoist-registration call
+// in every module with hoists. This differential harness `eval()`s the AMD
+// bundle directly (no SES compartment), so `__cfReg` must resolve to *something*.
+// Identity addressing is not exercised here, so a no-op global suffices — the
+// same role the no-op `__cfReg` plays on the real legacy/AMD path
+// (compartment-globals.ts).
+(globalThis as Record<string, unknown>).__cfReg ??= () => {};
+
 export interface JsValue {
   invoke(...args: unknown[]): JsValue;
   inner(): unknown;

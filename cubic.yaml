@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://cubic.dev/schema/cubic-repository-config.schema.json
+#
+# Cubic config — make the AI reviewer use the same guidance as the repo-local
+# `/cf-review` skill and human reviewers. See https://docs.cubic.dev/configure/cubic-yaml
+#
+# Single source of truth: the review guidance lives in skills/cf-review/SKILL.md.
+# Edit the skill, not this file. (Cubic reads at most ~10k chars per custom
+# agent and the skill is larger, so the durable, principle-level lenses are
+# restated in `description` — concatenated first, so always kept — while
+# `file_paths` carries the full detail. The rot-prone specifics, e.g. exact
+# canonical-home module names, live only in the skill.)
+
+version: 1
+
+reviews:
+  # Posture mirrors the skill's bandwidth discipline: flag real bugs and
+  # regressions loudly, keep nits minimal, don't demand a pristine first pass.
+  sensitivity: medium
+
+  custom_rules:
+    - name: cf-review (Common Fabric review guidance)
+      description: >-
+        Apply Common Fabric's code-review guidance (full text follows, sourced
+        from skills/cf-review/SKILL.md). Repo-specific lenses to apply even if
+        the text below is truncated: (1) Anti-duplication — never re-fork
+        hashing, serialization, cloning, or identity; reuse the canonical
+        @commonfabric modules instead of hand-rolling. (2) Framework-fit — in
+        patterns and the runtime that serves them, flag code fighting the
+        transformer pipeline / reactive-graph model (error-swallowing try/catch,
+        singletons, async/await in handlers, transformer escape hatches). (3) Coherence — a change to runtime
+        semantics must update the docs, comments, and examples it makes stale,
+        so someone searching later is not misled. (4) Test rigor — each touched
+        test should guard a nameable principle. (5) Bandwidth — separate
+        blocking bugs from non-blocking improvements and optional nits.
+      file_paths:
+        - skills/cf-review/SKILL.md

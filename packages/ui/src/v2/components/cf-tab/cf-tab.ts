@@ -120,124 +120,124 @@ export class CFTab extends BaseElement {
           var(--cf-transition-timing-ease, ease),
           color var(--cf-transition-duration-fast, 150ms)
           var(--cf-transition-timing-ease, ease);
-        }
-
-        /* Hover on unselected chip tab */
-        :host([data-variant="chip"])
-          .tab:hover:not(:disabled):not([data-selected="true"]) {
-          background: var(
-            --cf-theme-color-surface-hover,
-            var(--cf-colors-gray-200, #eceef1)
-          );
-          color: var(--cf-theme-color-text, #111827);
-        }
-
-        /* Selected chip tab - filled pill appearance */
-        :host([data-variant="chip"]) .tab[data-selected="true"] {
-          background: var(
-            --cf-theme-color-surface,
-            var(--cf-colors-gray-100, #f2f3f6)
-          );
-          border: 1px solid
-            var(
-              --cf-theme-color-border,
-              var(--cf-colors-gray-300, #d5d7dd)
-            );
-          color: var(--cf-theme-color-text, var(--cf-colors-gray-900, #16181d));
-          font-weight: var(--cf-font-weight-medium, 500);
-        }
-      `,
-    ];
-
-    declare value: string;
-    declare disabled: boolean;
-    declare selected: boolean;
-
-    private _button: HTMLButtonElement | null = null;
-
-    constructor() {
-      super();
-      this.value = "";
-      this.disabled = false;
-      this.selected = false;
-    }
-
-    get button(): HTMLButtonElement | null {
-      if (!this._button) {
-        this._button =
-          this.shadowRoot?.querySelector(".tab") as HTMLButtonElement || null;
       }
-      return this._button;
+
+      /* Hover on unselected chip tab */
+      :host([data-variant="chip"])
+        .tab:hover:not(:disabled):not([data-selected="true"]) {
+        background: var(
+          --cf-theme-color-surface-hover,
+          var(--cf-colors-gray-200, #eceef1)
+        );
+        color: var(--cf-theme-color-text, #111827);
+      }
+
+      /* Selected chip tab - filled pill appearance */
+      :host([data-variant="chip"]) .tab[data-selected="true"] {
+        background: var(
+          --cf-theme-color-surface,
+          var(--cf-colors-gray-100, #f2f3f6)
+        );
+        border: 1px solid
+          var(
+            --cf-theme-color-border,
+            var(--cf-colors-gray-300, #d5d7dd)
+          );
+        color: var(--cf-theme-color-text, var(--cf-colors-gray-900, #16181d));
+        font-weight: var(--cf-font-weight-medium, 500);
+      }
+    `,
+  ];
+
+  declare value: string;
+  declare disabled: boolean;
+  declare selected: boolean;
+
+  private _button: HTMLButtonElement | null = null;
+
+  constructor() {
+    super();
+    this.value = "";
+    this.disabled = false;
+    this.selected = false;
+  }
+
+  get button(): HTMLButtonElement | null {
+    if (!this._button) {
+      this._button =
+        this.shadowRoot?.querySelector(".tab") as HTMLButtonElement || null;
     }
+    return this._button;
+  }
 
-    override connectedCallback() {
-      super.connectedCallback();
+  override connectedCallback() {
+    super.connectedCallback();
 
-      // Set ARIA attributes
-      this.setAttribute("role", "tab");
-      this.updateAriaAttributes();
-    }
+    // Set ARIA attributes
+    this.setAttribute("role", "tab");
+    this.updateAriaAttributes();
+  }
 
-    override updated(
-      changedProperties: Map<string | number | symbol, unknown>,
+  override updated(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ) {
+    super.updated(changedProperties);
+
+    if (
+      changedProperties.has("selected") || changedProperties.has("disabled")
     ) {
-      super.updated(changedProperties);
-
-      if (
-        changedProperties.has("selected") || changedProperties.has("disabled")
-      ) {
-        this.updateAriaAttributes();
-      }
-    }
-
-    override render() {
-      return html`
-        <button
-          class="tab"
-          part="tab"
-          ?disabled="${this.disabled}"
-          data-selected="${this.selected}"
-          data-disabled="${this.disabled}"
-          @click="${this.handleClick}"
-        >
-          <slot></slot>
-        </button>
-      `;
-    }
-
-    private updateAriaAttributes(): void {
-      this.setAttribute("aria-selected", String(this.selected));
-      this.setAttribute("aria-disabled", String(this.disabled));
-      this.setAttribute(
-        "tabindex",
-        this.selected && !this.disabled ? "0" : "-1",
-      );
-    }
-
-    private handleClick = (event: Event): void => {
-      if (this.disabled) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-
-      // Emit custom event for parent tabs component
-      this.emit("tab-click", { tab: this });
-    };
-
-    /**
-     * Focus the tab button
-     */
-    override focus(): void {
-      this.button?.focus();
-    }
-
-    /**
-     * Blur the tab button
-     */
-    override blur(): void {
-      this.button?.blur();
+      this.updateAriaAttributes();
     }
   }
 
-  globalThis.customElements.define("cf-tab", CFTab);
+  override render() {
+    return html`
+      <button
+        class="tab"
+        part="tab"
+        ?disabled="${this.disabled}"
+        data-selected="${this.selected}"
+        data-disabled="${this.disabled}"
+        @click="${this.handleClick}"
+      >
+        <slot></slot>
+      </button>
+    `;
+  }
+
+  private updateAriaAttributes(): void {
+    this.setAttribute("aria-selected", String(this.selected));
+    this.setAttribute("aria-disabled", String(this.disabled));
+    this.setAttribute(
+      "tabindex",
+      this.selected && !this.disabled ? "0" : "-1",
+    );
+  }
+
+  private handleClick = (event: Event): void => {
+    if (this.disabled) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    // Emit custom event for parent tabs component
+    this.emit("tab-click", { tab: this });
+  };
+
+  /**
+   * Focus the tab button
+   */
+  override focus(): void {
+    this.button?.focus();
+  }
+
+  /**
+   * Blur the tab button
+   */
+  override blur(): void {
+    this.button?.blur();
+  }
+}
+
+globalThis.customElements.define("cf-tab", CFTab);

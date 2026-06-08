@@ -36,6 +36,47 @@ const __cfLift_1 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ item, suffix }) => item.label.endsWith(suffix));
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const suffix = __cf_pattern_input.params.suffix;
+    return __cfLift_1({
+        item: {
+            label: item.key("label")
+        },
+        suffix: suffix
+    }).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                tags: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["label", "tags"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                suffix: {
+                    type: "string"
+                }
+            },
+            required: ["suffix"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     item: {
         tags: string[];
@@ -67,6 +108,65 @@ const __cfLift_2 = __cfHelpers.lift<{
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema, ({ item, prefix }) => [prefix + item.tags[0]]);
+const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const prefix = __cf_pattern_input.params.prefix;
+    return __cfHelpers.ifElse({
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: false
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfLift_2({
+        item: {
+            tags: item.key("tags")
+        },
+        prefix: prefix
+    }), []).for("__patternResult", true);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                tags: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["label", "tags"]
+        },
+        params: {
+            type: "object",
+            properties: {
+                prefix: {
+                    type: "string"
+                }
+            },
+            required: ["prefix"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups
@@ -79,107 +179,9 @@ export default pattern((__cf_pattern_input) => {
     const suffix = "!";
     const prefix = "#";
     return {
-        labels: items.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const item = __cf_pattern_input.key("element");
-            const suffix = __cf_pattern_input.params.suffix;
-            return __cfLift_1({
-                item: {
-                    label: item.key("label")
-                },
-                suffix: suffix
-            });
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["label", "tags"]
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        suffix: {
-                            type: "string"
-                        }
-                    },
-                    required: ["suffix"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema), {
+        labels: items.filterWithPattern(__cfPattern_1, {
             suffix: suffix
-        }).flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const item = __cf_pattern_input.key("element");
-            const prefix = __cf_pattern_input.params.prefix;
-            return __cfHelpers.ifElse({
-                type: "number"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    type: "string"
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: false
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    type: "string"
-                }
-            } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfLift_2({
-                item: {
-                    tags: item.key("tags")
-                },
-                prefix: prefix
-            }), []);
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["label", "tags"]
-                },
-                params: {
-                    type: "object",
-                    properties: {
-                        prefix: {
-                            type: "string"
-                        }
-                    },
-                    required: ["prefix"]
-                }
-            },
-            required: ["element", "params"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {
+        }).flatMapWithPattern(__cfPattern_2, {
             prefix: prefix
         }).for(["__patternResult", "labels"], true)
     };
@@ -221,3 +223,9 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfPattern_1,
+    __cfLift_2,
+    __cfPattern_2
+});

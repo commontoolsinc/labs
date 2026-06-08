@@ -99,7 +99,7 @@ function validateModuleSafeValue(
 
   // TODO(danfuzz): This part of the code will probably have to gain the
   // ability to reason specifically about `FabricSpecialObject`s in order
-  // to fully support the modern data model.
+  // to fully support the data model.
   try {
     if (Array.isArray(objectValue)) {
       validateOwnProperties(objectValue, path, visited, { skipLength: true });

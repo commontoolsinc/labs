@@ -43,6 +43,7 @@ import {
   normalizeCfcWritebackXattrName,
   parseCfcMode,
   resolveCfcMode,
+  safeReconcileCfcWritebacks,
   shouldEnableCfcAnnotations,
 } from "./cfc-writeback.ts";
 import {
@@ -597,9 +598,12 @@ export async function main(argv: string[] = Deno.args) {
     }
   }
 
-  function reconcileCfcWritebacks(): void {
-    const result = cfcWritebacks.reconcileTree(tree);
-    recordCfcDiagnostics(result.diagnostics);
+  function reconcileCfcWritebacks(context = "CFC writeback"): boolean {
+    return safeReconcileCfcWritebacks({
+      context,
+      reconcile: () => cfcWritebacks.reconcileTree(tree),
+      recordDiagnostics: recordCfcDiagnostics,
+    });
   }
 
   function authorizeExistingCfcWrite(
@@ -1566,6 +1570,7 @@ export async function main(argv: string[] = Deno.args) {
           }
           markExistingReady();
           await bridge.finalizeSourceWritePath(writeTarget.target);
+          reconcileCfcWritebacks("source flush post-finalize");
           markExistingFinalized();
           if (handle.version === flushVersion) {
             handle.dirty = false;
@@ -1612,6 +1617,7 @@ export async function main(argv: string[] = Deno.args) {
         if (!ok) return EINVAL;
         markExistingReady();
         await bridge.finalizeWritePath(writePath);
+        reconcileCfcWritebacks("fs projection flush post-finalize");
         markExistingFinalized();
         if (handle.version === flushVersion) {
           handle.dirty = false;
@@ -1667,6 +1673,7 @@ export async function main(argv: string[] = Deno.args) {
       await bridge.writeValue(writePath, value);
       markExistingReady();
       await bridge.finalizeWritePath(writePath);
+      reconcileCfcWritebacks("value flush post-finalize");
       markExistingFinalized();
       if (handle.version === flushVersion) {
         handle.dirty = false;
@@ -2163,6 +2170,7 @@ export async function main(argv: string[] = Deno.args) {
         }
       }
       if (!attrValue) {
+        reconcileCfcWritebacks("getxattr");
         attrValue = getCfcXattrValue(tree, ino, attrName, {
           enabled: cfcAnnotationsEnabled,
           namespace: cfcXattrNamespace,
@@ -2216,6 +2224,9 @@ export async function main(argv: string[] = Deno.args) {
         xattrNames.push("user.json.type");
       }
 
+      if (cfcAnnotationsEnabled) {
+        reconcileCfcWritebacks("listxattr");
+      }
       xattrNames.push(
         ...listCfcXattrNames(tree, inode, {
           enabled: cfcAnnotationsEnabled,

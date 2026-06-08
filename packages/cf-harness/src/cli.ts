@@ -1,5 +1,16 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { dirname, isAbsolute, join, relative, resolve } from "@std/path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "@std/path";
+import {
+  isAbsolute as isAbsoluteSandboxPath,
+  normalize as normalizeSandboxPath,
+} from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
@@ -10,7 +21,6 @@ import {
 } from "./config.ts";
 import {
   createHarnessImageAttachment,
-  isRelativePathWithinWorkspace,
   parseImageAttachmentPaths,
 } from "./image-attachments.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
@@ -49,6 +59,7 @@ import {
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DEFAULT_FABRIC_MOUNT_PATH,
 } from "./sandbox/docker-runsc.ts";
+import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
@@ -56,14 +67,16 @@ import {
 } from "./prompt-loop.ts";
 import {
   discoverHarnessSkills,
-  isHarnessSkillRootWithinWorkspace,
   loadHarnessSkillContext,
 } from "./skills/registry.ts";
 import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
-import type { HarnessAllowedSkillScript } from "./contracts/skill.ts";
+import type {
+  HarnessAllowedSkillScript,
+  HarnessSkillScriptExecutionTarget,
+} from "./contracts/skill.ts";
 import {
   digestJsonValue,
   parseStructuredResultJson,
@@ -94,6 +107,7 @@ const CLI_STRING_FLAGS = [
   "model",
   "skills-root",
   "skill",
+  "skill-script-execution-target",
   "gateway-base-url",
   "gateway-auth-mode",
   "artifact-root",
@@ -106,6 +120,7 @@ const CLI_STRING_FLAGS = [
   "sandbox-image",
   "max-model-turns",
   "fabric-mount",
+  "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
   "browser-access-owner",
@@ -126,6 +141,7 @@ const CLI_COLLECT_FLAGS = [
   "allow-subagent-profile",
   "skill",
   "image",
+  "host-mount",
 ] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
@@ -147,6 +163,7 @@ export interface CfHarnessCliConfig {
   skillsRootSandboxPath?: string;
   skillNames: readonly string[];
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];
+  skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   skillCatalogEnabled: boolean;
   model?: string;
   gatewayBaseUrl: string;
@@ -163,6 +180,16 @@ export interface CfHarnessCliConfig {
   apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
   sandboxImage?: string;
   fabricMount?: string;
+  hostMounts: readonly CfHarnessHostMountConfig[];
+}
+
+export type CfHarnessHostMountMode = "readonly" | "writable";
+
+export interface CfHarnessHostMountConfig {
+  name: string;
+  hostPath: string;
+  sandboxPath: string;
+  mode: CfHarnessHostMountMode;
 }
 
 export interface CfHarnessStructuredResultConfig {
@@ -187,6 +214,7 @@ export interface CfHarnessCliCapabilities {
     skillScripts: true;
     runManifest: true;
     fabricMount: true;
+    hostMounts: true;
     resumeRun: true;
   };
 }
@@ -303,6 +331,8 @@ Options:
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
   --skill <name>                Preload a skill for this run (repeatable)
+  --skill-script-execution-target <target>
+                                Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --gateway-base-url <url>      OpenAI-compatible gateway URL
@@ -322,6 +352,7 @@ Options:
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
+  --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
   --describe-capabilities       Print machine-readable capability JSON and exit
@@ -391,6 +422,7 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     skillScripts: true,
     runManifest: true,
     fabricMount: true,
+    hostMounts: true,
     resumeRun: true,
   },
 });
@@ -458,6 +490,20 @@ const parseAllowedSkillScripts = (
       }`,
     );
   }
+};
+
+const parseSkillScriptExecutionTarget = (
+  input: string | undefined,
+): HarnessSkillScriptExecutionTarget => {
+  if (input === undefined || input === "") {
+    return "sandbox";
+  }
+  if (input === "sandbox" || input === "host") {
+    return input;
+  }
+  throw new Error(
+    "skill script execution target must be one of sandbox, host",
+  );
 };
 
 const parseSubagentProfile = (
@@ -597,20 +643,242 @@ const parseSkillNames = (
   ];
 };
 
-const assertSkillsRootRealPathWithinWorkspace = async (
-  workspace: string,
-  skillsRoot: string,
-): Promise<void> => {
-  let workspaceRealPath: string;
+interface CfHarnessAllowedHostRoot {
+  hostPath: string;
+  sandboxPath: string;
+  readOnly: boolean;
+  name?: string;
+}
+
+const HOST_MOUNT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+const normalizeSandboxMountPath = (path: string, label: string): string => {
+  const normalized = normalizeSandboxPath(path);
+  if (!isAbsoluteSandboxPath(normalized) || normalized === "/") {
+    throw new Error(`${label} must be an absolute non-root sandbox path`);
+  }
+  return normalized.length > 1 && normalized.endsWith("/")
+    ? normalized.slice(0, -1)
+    : normalized;
+};
+
+const parseHostMountSpecParts = (
+  spec: string,
+): Record<string, string> => {
+  const parts: Record<string, string> = {};
+  for (const segment of spec.split(",")) {
+    const trimmed = segment.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const index = trimmed.indexOf("=");
+    if (index <= 0) {
+      throw new Error(
+        "--host-mount entries must use key=value comma-separated fields",
+      );
+    }
+    const key = trimmed.slice(0, index).trim();
+    const value = trimmed.slice(index + 1).trim();
+    if (key.length === 0 || value.length === 0) {
+      throw new Error("--host-mount fields require non-empty keys and values");
+    }
+    if (parts[key] !== undefined) {
+      throw new Error(`--host-mount field repeated: ${key}`);
+    }
+    parts[key] = value;
+  }
+  return parts;
+};
+
+const realPathIfDirectory = async (
+  path: string,
+  label: string,
+): Promise<string> => {
+  let realPath: string;
   try {
-    workspaceRealPath = await Deno.realPath(workspace);
+    realPath = await Deno.realPath(path);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
-      throw new Error(`workspace must exist: ${workspace}`);
+      throw new Error(`${label} must exist: ${path}`);
     }
     throw error;
   }
+  const stat = await Deno.stat(realPath);
+  if (!stat.isDirectory) {
+    throw new Error(`${label} must be a directory: ${path}`);
+  }
+  if (realPath === dirname(realPath)) {
+    throw new Error(`${label} must not be the filesystem root`);
+  }
+  return realPath;
+};
 
+const parseHostMountSpec = async (
+  spec: string,
+  cwd: string,
+): Promise<CfHarnessHostMountConfig> => {
+  if (spec.trim().length === 0) {
+    throw new Error("--host-mount requires a non-empty spec");
+  }
+  const parts = parseHostMountSpecParts(spec);
+  const name = parts.name;
+  const source = parts.source;
+  const target = parts.target;
+  const mode = parts.mode ?? "readonly";
+  if (name === undefined || source === undefined || target === undefined) {
+    throw new Error(
+      "--host-mount requires name, source, and target fields",
+    );
+  }
+  if (!HOST_MOUNT_NAME_PATTERN.test(name)) {
+    throw new Error(
+      "--host-mount name must start with an alphanumeric character and contain only alphanumerics, dot, underscore, or dash",
+    );
+  }
+  if (mode !== "readonly" && mode !== "writable") {
+    throw new Error("--host-mount mode must be readonly or writable");
+  }
+  return {
+    name,
+    hostPath: await realPathIfDirectory(
+      isAbsolute(source) ? resolve(source) : resolve(cwd, source),
+      "--host-mount source",
+    ),
+    sandboxPath: normalizeSandboxMountPath(target, "--host-mount target"),
+    mode,
+  };
+};
+
+const parseHostMountSpecs = async (
+  input: string | readonly string[] | undefined,
+  cwd: string,
+): Promise<readonly CfHarnessHostMountConfig[]> => {
+  const specs = input === undefined
+    ? []
+    : Array.isArray(input)
+    ? input
+    : [input];
+  const mounts = await Promise.all(
+    specs.map((spec) => parseHostMountSpec(spec, cwd)),
+  );
+  const names = new Set<string>();
+  for (const mount of mounts) {
+    if (names.has(mount.name)) {
+      throw new Error(`--host-mount name repeated: ${mount.name}`);
+    }
+    names.add(mount.name);
+  }
+  return mounts;
+};
+
+const resolveHostPathThroughNearestRealParent = (hostPath: string): string => {
+  const suffix: string[] = [];
+  let candidate = hostPath;
+  while (true) {
+    try {
+      const realCandidate = Deno.realPathSync(candidate);
+      return suffix.length === 0
+        ? realCandidate
+        : join(realCandidate, ...suffix);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      return hostPath;
+    }
+    suffix.unshift(basename(candidate));
+    candidate = parent;
+  }
+};
+
+const createAllowedHostRoots = (
+  workspace: string,
+  hostMounts: readonly CfHarnessHostMountConfig[],
+): readonly CfHarnessAllowedHostRoot[] => [
+  {
+    hostPath: resolveHostPathThroughNearestRealParent(workspace),
+    sandboxPath: "/workspace",
+    readOnly: false,
+  },
+  ...hostMounts.map((mount) => ({
+    hostPath: mount.hostPath,
+    sandboxPath: mount.sandboxPath,
+    readOnly: mount.mode === "readonly",
+    name: mount.name,
+  })),
+];
+
+const isHostPathWithinRoot = (root: string, path: string): boolean => {
+  const relativePath = relative(root, path);
+  return relativePath === "" ||
+    (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+};
+
+const findAllowedHostRoot = (
+  roots: readonly CfHarnessAllowedHostRoot[],
+  hostPath: string,
+): CfHarnessAllowedHostRoot | undefined =>
+  roots
+    .filter((root) => isHostPathWithinRoot(root.hostPath, hostPath))
+    .sort((left, right) => right.hostPath.length - left.hostPath.length)[0];
+
+const resolveCliHostPath = (
+  workspace: string,
+  input: string,
+): string => isAbsolute(input) ? resolve(input) : resolve(workspace, input);
+
+const toSandboxPathForAllowedHostPath = (
+  root: CfHarnessAllowedHostRoot,
+  hostPath: string,
+): string => {
+  const relativePath = relative(root.hostPath, hostPath);
+  if (relativePath === "") {
+    return root.sandboxPath;
+  }
+  return normalizeSandboxPath(
+    `${root.sandboxPath}/${relativePath.replaceAll("\\", "/")}`,
+  );
+};
+
+const resolvePathWithinAllowedHostRoots = (
+  roots: readonly CfHarnessAllowedHostRoot[],
+  workspace: string,
+  input: string,
+  flagName: string,
+  options: { requireWritable?: boolean } = {},
+): {
+  hostPath: string;
+  sandboxPath: string;
+  root: CfHarnessAllowedHostRoot;
+} => {
+  const requestedHostPath = resolveCliHostPath(workspace, input);
+  const realHostPath = resolveHostPathThroughNearestRealParent(
+    requestedHostPath,
+  );
+  const hostPath = realHostPath;
+  const root = findAllowedHostRoot(roots, realHostPath);
+  if (root === undefined) {
+    throw new Error(
+      `${flagName} must stay within the workspace or a host mount`,
+    );
+  }
+  if (options.requireWritable && root.readOnly) {
+    throw new Error(`${flagName} must be inside a writable host mount`);
+  }
+  return {
+    hostPath,
+    sandboxPath: toSandboxPathForAllowedHostPath(root, hostPath),
+    root,
+  };
+};
+
+const assertSkillsRootRealPathWithinAllowedHostRoots = async (
+  roots: readonly CfHarnessAllowedHostRoot[],
+  skillsRoot: string,
+): Promise<void> => {
   let skillsRootRealPath: string;
   try {
     skillsRootRealPath = await Deno.realPath(skillsRoot);
@@ -620,11 +888,10 @@ const assertSkillsRootRealPathWithinWorkspace = async (
     }
     throw error;
   }
-
-  if (
-    !isHarnessSkillRootWithinWorkspace(workspaceRealPath, skillsRootRealPath)
-  ) {
-    throw new Error("--skills-root must stay within the workspace");
+  if (findAllowedHostRoot(roots, skillsRootRealPath) === undefined) {
+    throw new Error(
+      "--skills-root must stay within the workspace or a host mount",
+    );
   }
 };
 
@@ -673,36 +940,26 @@ const resolvePrompt = async (
   return positionalPrompt!;
 };
 
-const resolvePathWithinWorkspace = (
-  workspace: string,
-  input: string,
-  flagName: string,
-): string => {
-  const hostPath = isAbsolute(input)
-    ? resolve(input)
-    : resolve(workspace, input);
-  if (!isRelativePathWithinWorkspace(relative(workspace, hostPath))) {
-    throw new Error(`${flagName} must stay within the workspace`);
-  }
-  return hostPath;
-};
-
 const parseStructuredResultConfig = async (
   args: ReturnType<typeof parseArgs>,
   options: {
     cwd: string;
     workspace: string;
+    allowedHostRoots: readonly CfHarnessAllowedHostRoot[];
     readTextFile: (path: string) => Promise<string>;
   },
 ): Promise<CfHarnessStructuredResultConfig | undefined> => {
-  const structuredResultPath =
+  const structuredResultPathResolution =
     typeof args["structured-result-path"] === "string"
-      ? resolvePathWithinWorkspace(
+      ? resolvePathWithinAllowedHostRoots(
+        options.allowedHostRoots,
         options.workspace,
         args["structured-result-path"],
         "--structured-result-path",
+        { requireWritable: true },
       )
       : undefined;
+  const structuredResultPath = structuredResultPathResolution?.hostPath;
   const inlineSchema = typeof args["structured-result-schema"] === "string"
     ? args["structured-result-schema"]
     : undefined;
@@ -741,14 +998,7 @@ const parseStructuredResultConfig = async (
   }
   return {
     path: structuredResultPath,
-    sandboxPath: toWorkspaceSandboxPath(
-      options.workspace,
-      structuredResultPath,
-      {
-        strict: true,
-        errorPrefix: "--structured-result-path",
-      },
-    ),
+    sandboxPath: structuredResultPathResolution!.sandboxPath,
     schema: parsed.schema,
   };
 };
@@ -778,30 +1028,38 @@ export const parseCfHarnessCliArgs = async (
   const workspace = resolve(
     typeof args.workspace === "string" ? args.workspace : cwd,
   );
+  const hostMounts = await parseHostMountSpecs(
+    args["host-mount"] as string | readonly string[] | undefined,
+    cwd,
+  );
+  const allowedHostRoots = createAllowedHostRoots(workspace, hostMounts);
   const initialCwd = typeof args.cwd === "string"
-    ? toWorkspaceSandboxPath(workspace, resolve(workspace, args.cwd), {
-      strict: true,
-      errorPrefix: "--cwd",
-    })
+    ? resolvePathWithinAllowedHostRoots(
+      allowedHostRoots,
+      workspace,
+      args.cwd,
+      "--cwd",
+    ).sandboxPath
     : undefined;
   const focusRoot = typeof args["focus-root"] === "string"
     ? resolve(workspace, args["focus-root"])
     : undefined;
   const skillsRoot = typeof args["skills-root"] === "string"
-    ? resolve(workspace, args["skills-root"])
+    ? resolvePathWithinAllowedHostRoots(
+      allowedHostRoots,
+      workspace,
+      args["skills-root"],
+      "--skills-root",
+    ).hostPath
     : undefined;
   const skillsRootSandboxPath = skillsRoot !== undefined
-    ? toWorkspaceSandboxPath(workspace, skillsRoot, {
-      strict: true,
-      errorPrefix: "--skills-root",
-    })
+    ? resolvePathWithinAllowedHostRoots(
+      allowedHostRoots,
+      workspace,
+      skillsRoot,
+      "--skills-root",
+    ).sandboxPath
     : undefined;
-  if (
-    skillsRoot !== undefined &&
-    !isHarnessSkillRootWithinWorkspace(workspace, skillsRoot)
-  ) {
-    throw new Error("--skills-root must stay within the workspace");
-  }
   const skillNames = parseSkillNames(
     args.skill as string | readonly string[] | undefined,
   );
@@ -814,6 +1072,11 @@ export const parseCfHarnessCliArgs = async (
   if (allowedSkillScripts.length > 0 && skillsRoot === undefined) {
     throw new Error("--allow-skill-script requires --skills-root");
   }
+  const skillScriptExecutionTarget = parseSkillScriptExecutionTarget(
+    typeof args["skill-script-execution-target"] === "string"
+      ? args["skill-script-execution-target"]
+      : undefined,
+  );
   const allowedToolIds = parseBuiltinToolIds(
     args["allow-tool"] as string | readonly string[] | undefined,
   );
@@ -862,7 +1125,10 @@ export const parseCfHarnessCliArgs = async (
     throw new Error("--image is not supported with --resume-run");
   }
   if (skillsRoot !== undefined) {
-    await assertSkillsRootRealPathWithinWorkspace(workspace, skillsRoot);
+    await assertSkillsRootRealPathWithinAllowedHostRoots(
+      allowedHostRoots,
+      skillsRoot,
+    );
   }
   const artifactRoot = resolve(
     typeof args["artifact-root"] === "string"
@@ -896,17 +1162,24 @@ export const parseCfHarnessCliArgs = async (
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
     workspace,
+    allowedHostRoots,
     readTextFile,
   });
   const prompt = await resolvePrompt(args, cwd, readTextFile);
   const imageAttachments = await Promise.all(
-    imagePaths.map((path) =>
-      createHarnessImageAttachment({
-        workspaceHostPath: workspace,
-        cwd: workspace,
+    imagePaths.map((path) => {
+      const resolved = resolvePathWithinAllowedHostRoots(
+        allowedHostRoots,
+        workspace,
         path,
-      })
-    ),
+        "--image",
+      );
+      return createHarnessImageAttachment({
+        workspaceHostPath: resolved.root.hostPath,
+        cwd: resolved.root.hostPath,
+        path: resolved.hostPath,
+      });
+    }),
   );
   const env = deps.env ??
     {
@@ -976,6 +1249,7 @@ export const parseCfHarnessCliArgs = async (
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
     allowedSkillScripts,
+    skillScriptExecutionTarget,
     skillCatalogEnabled: args["no-skill-catalog"] !== true,
     ...(typeof args.model === "string"
       ? { model: args.model }
@@ -1003,6 +1277,7 @@ export const parseCfHarnessCliArgs = async (
     ...(apiKeySource !== undefined ? { apiKeySource } : {}),
     ...(sandboxImage !== undefined ? { sandboxImage } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
+    hostMounts,
   };
 };
 
@@ -1013,6 +1288,24 @@ const readRunManifest = async (
   path === undefined
     ? undefined
     : parseLoomRunManifestJson(await readTextFile(path));
+
+const createAdditionalMountConfigs = (
+  config: Pick<CfHarnessCliConfig, "fabricMount" | "hostMounts">,
+): readonly DockerRunscAdditionalMountConfig[] => [
+  ...(config.fabricMount !== undefined
+    ? [{
+      kind: "fabric-fuse" as const,
+      hostPath: config.fabricMount,
+    }]
+    : []),
+  ...config.hostMounts.map((mount) => ({
+    kind: "host-bind" as const,
+    name: mount.name,
+    hostPath: mount.hostPath,
+    sandboxPath: mount.sandboxPath,
+    readOnly: mount.mode === "readonly",
+  })),
+];
 
 export const formatCfHarnessCliUsage = (): string => usage;
 
@@ -1076,14 +1369,40 @@ const appendStructuredResultInstructions = (
   );
 };
 
+const appendHostMountInstructions = (
+  lines: string[],
+  config: {
+    hostMounts?: readonly CfHarnessHostMountConfig[];
+    fabricMountPath?: string;
+  },
+): void => {
+  if (config.fabricMountPath !== undefined) {
+    lines.push(
+      `- A Common Fabric space is mounted at ${config.fabricMountPath}. You may browse its contents for context.`,
+    );
+  }
+  const hostMounts = config.hostMounts ?? [];
+  if (hostMounts.length === 0) {
+    return;
+  }
+  lines.push("- Additional host mounts are available in the sandbox:");
+  for (const mount of hostMounts) {
+    lines.push(`  - ${mount.sandboxPath}: ${mount.mode} (${mount.name})`);
+  }
+};
+
 export const buildCfHarnessOperatorSystemPrompt = (
   config:
     & Pick<
       CfHarnessCliConfig,
-      "workspace" | "focusRoot" | "systemPrompt" | "structuredResult"
+      | "workspace"
+      | "focusRoot"
+      | "systemPrompt"
+      | "structuredResult"
     >
     & {
       fabricMountPath?: string;
+      hostMounts?: readonly CfHarnessHostMountConfig[];
     },
 ): string => {
   const focusRoot = toWorkspaceSandboxPath(config.workspace, config.focusRoot);
@@ -1097,11 +1416,7 @@ export const buildCfHarnessOperatorSystemPrompt = (
     "- Read source files only when needed to answer the prompt accurately.",
     "- Stop once you have enough evidence to answer.",
   ];
-  if (config.fabricMountPath !== undefined) {
-    lines.push(
-      `- A Common Fabric space is mounted at ${config.fabricMountPath}. You may browse its contents for context.`,
-    );
-  }
+  appendHostMountInstructions(lines, config);
   appendStructuredResultInstructions(lines, config.structuredResult);
   appendAdditionalInstructions(lines, config.systemPrompt);
   return lines.join("\n");
@@ -1112,14 +1427,16 @@ export const buildCfHarnessBatchSystemPrompt = (
     & Pick<CfHarnessCliConfig, "systemPrompt" | "structuredResult">
     & {
       fabricMountPath?: string;
+      hostMounts?: readonly CfHarnessHostMountConfig[];
     },
 ): string => {
   const lines = [buildCfHarnessBaseSystemPrompt()];
-  if (config.fabricMountPath !== undefined) {
-    lines.push(
-      "",
-      `A Common Fabric space is mounted at ${config.fabricMountPath}. You may browse its contents for context.`,
-    );
+  if (
+    config.fabricMountPath !== undefined ||
+    (config.hostMounts ?? []).length > 0
+  ) {
+    lines.push("");
+    appendHostMountInstructions(lines, config);
   }
   appendStructuredResultInstructions(lines, config.structuredResult);
   appendAdditionalInstructions(lines, config.systemPrompt);
@@ -1138,6 +1455,7 @@ export const resolveCfHarnessCliSystemPrompt = (
     >
     & {
       fabricMountPath?: string;
+      hostMounts?: readonly CfHarnessHostMountConfig[];
       skillCatalogEnabled?: boolean;
       skillNames?: readonly string[];
     },
@@ -1528,6 +1846,7 @@ export const runCfHarnessCli = async (
         }
       }
       : undefined;
+    const additionalMounts = createAdditionalMountConfigs(parsed);
     const prepareSkillContextMessages = async (
       engine: CfHarnessEngine,
     ): Promise<string[]> => {
@@ -1572,6 +1891,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
@@ -1580,14 +1900,7 @@ export const runCfHarnessCli = async (
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(parsed.fabricMount !== undefined
-          ? {
-            additionalMounts: [{
-              kind: "fabric-fuse" as const,
-              hostPath: parsed.fabricMount,
-            }],
-          }
-          : {}),
+        ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -1604,6 +1917,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
@@ -1650,6 +1964,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         ...(parsed.browserAccess !== undefined
           ? { browserAccess: parsed.browserAccess }
           : {}),
@@ -1658,14 +1973,7 @@ export const runCfHarnessCli = async (
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        ...(parsed.fabricMount !== undefined
-          ? {
-            additionalMounts: [{
-              kind: "fabric-fuse" as const,
-              hostPath: parsed.fabricMount,
-            }],
-          }
-          : {}),
+        ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -1682,6 +1990,7 @@ export const runCfHarnessCli = async (
         ...(parsed.allowedSkillScripts.length > 0
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
+        skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,

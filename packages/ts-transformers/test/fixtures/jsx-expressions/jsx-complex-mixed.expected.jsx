@@ -11,6 +11,18 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Item {
+    id: number;
+    name: string;
+    price: number;
+    active: boolean;
+}
+interface State {
+    items: Item[];
+    filter: string;
+    discount: number;
+    taxRate: number;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         items: {
@@ -118,6 +130,102 @@ const __cfLift_3 = __cfHelpers.lift<{
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
     .toFixed(2));
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<li key={item.key("id")}>
+              <span>{item.key("name")}</span>
+              <span>- Original: ${item.key("price")}</span>
+              <span>
+                - Discounted: ${__cfLift_2({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            discount: state.key("discount")
+        }
+    })}
+              </span>
+              <span>
+                - With tax:
+                ${__cfLift_3({
+        item: {
+            price: item.key("price")
+        },
+        state: {
+            discount: state.key("discount"),
+            taxRate: state.key("taxRate")
+        }
+    })}
+              </span>
+            </li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                state: {
+                    type: "object",
+                    properties: {
+                        discount: {
+                            type: "number"
+                        },
+                        taxRate: {
+                            type: "number"
+                        }
+                    },
+                    required: ["discount", "taxRate"]
+                }
+            },
+            required: ["state"]
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: Item[];
@@ -309,18 +417,6 @@ const __cfLift_10 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.filter.length > 0);
-interface Item {
-    id: number;
-    name: string;
-    price: number;
-    active: boolean;
-}
-interface State {
-    items: Item[];
-    filter: string;
-    discount: number;
-    taxRate: number;
-}
 // FIXTURE: jsx-complex-mixed
 // Verifies: mixed transforms -- map, filter, arithmetic, ternary/ifElse, attribute bindings in one pattern
 //   .filter(fn)              → .filterWithPattern(pattern(...), {captures})
@@ -343,102 +439,7 @@ export default pattern((state) => {
 
         <h3>Array with Complex Expressions</h3>
         <ul>
-          {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<li key={item.key("id")}>
-              <span>{item.key("name")}</span>
-              <span>- Original: ${item.key("price")}</span>
-              <span>
-                - Discounted: ${__cfLift_2({
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        discount: state.key("discount")
-                    }
-                })}
-              </span>
-              <span>
-                - With tax:
-                ${__cfLift_3({
-                    item: {
-                        price: item.key("price")
-                    },
-                    state: {
-                        discount: state.key("discount"),
-                        taxRate: state.key("taxRate")
-                    }
-                })}
-              </span>
-            </li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    discount: {
-                                        type: "number"
-                                    },
-                                    taxRate: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["discount", "taxRate"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "number"
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            price: {
-                                type: "number"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["id", "name", "price", "active"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+          {state.key("items").mapWithPattern(__cfPattern_1, {
                 state: {
                     discount: state.key("discount"),
                     taxRate: state.key("taxRate")
@@ -581,3 +582,16 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfPattern_1,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10
+});

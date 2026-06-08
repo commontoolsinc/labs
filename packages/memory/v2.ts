@@ -5,7 +5,7 @@ import {
 } from "@commonfabric/data-model/json-wire";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
@@ -308,10 +308,16 @@ export interface GraphQueryRequest {
 export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
 
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
- *  entity id) plus the declared table schemas (for additive create/migrate). */
+ *  entity id) plus the declared table schemas (for additive create/migrate).
+ *
+ *  `scope` is the SqliteDb cell's declared scope (space/user/session). The
+ *  server folds it (with the request's principal / session id) into the on-disk
+ *  filename so a `user`/`session`-scoped db gets a per-user / per-session file;
+ *  `space` (or absent) keeps the original unqualified name. */
 export interface SqliteDbRef {
   id: string;
   tables?: Record<string, unknown>;
+  scope?: CellScope;
 }
 
 export interface SqliteQueryRequest {
@@ -324,8 +330,29 @@ export interface SqliteQueryRequest {
   params?: SqliteParamsWire;
 }
 
+/** A result column's output name plus its TRUE source `(table, column)` origin
+ *  (null for an expression/computed/compound column). */
+export interface SqliteResultColumn {
+  output: string;
+  table: string | null;
+  column: string | null;
+}
+
+/** Whether a column's `ifc` annotation is present and non-empty — the single
+ *  predicate for "this column participates in CFC labeling". Shared by the
+ *  server's declares-ifc gate (which decides whether to capture column origins)
+ *  and the runner's per-column label schema, so the two can't drift. */
+export function columnDeclaresIfc(ifc: unknown): boolean {
+  return !!ifc && typeof ifc === "object" && Object.keys(ifc).length > 0;
+}
+
 export interface SqliteQueryResult {
   rows: unknown[];
+  /** Per-result-column origin, present ONLY when the queried db declares
+   *  per-column `ifc` (CFC read-labeling needs sound provenance — an aliased or
+   *  joined column maps back to its declared `(table, column)`). Undefined
+   *  otherwise, so unlabeled queries pay nothing. */
+  columns?: SqliteResultColumn[];
 }
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit

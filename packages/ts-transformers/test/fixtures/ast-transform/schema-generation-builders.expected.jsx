@@ -40,6 +40,42 @@ const addTodo = handler({
 } as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     state.items.push(event.add);
 });
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return <li key={index}>{item}</li>;
+}, {
+    type: "object",
+    properties: {
+        element: {
+            type: "string"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: schema-generation-builders
 // Verifies: handler with generic type args generates event+state schemas; .map() becomes .mapWithPattern()
 //   handler<TodoEvent, { items: Cell<string[]> }>(fn) → handler(eventSchema, stateSchema, fn)
@@ -52,42 +88,7 @@ export default pattern((state) => {
           Add
         </button>
         <ul>
-          {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const item = __cf_pattern_input.key("element");
-            const index = __cf_pattern_input.key("index");
-            return <li key={index}>{item}</li>;
-        }, {
-            type: "object",
-            properties: {
-                element: {
-                    type: "string"
-                },
-                index: {
-                    type: "number"
-                }
-            },
-            required: ["element"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }
-                    },
-                    required: ["$UI"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema), {})}
+          {state.key("items").mapWithPattern(__cfPattern_1, {})}
         </ul>
       </div>),
     };
@@ -136,3 +137,7 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    addTodo,
+    __cfPattern_1
+});

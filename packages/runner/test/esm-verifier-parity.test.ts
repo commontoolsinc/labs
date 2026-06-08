@@ -47,6 +47,15 @@ const ACCEPT: Case[] = [
       `const inner_1 = require("./inner.ts");\nObject.defineProperty(exports, "x", { enumerable: true, get: function () { return inner_1.x; } });`,
   },
   {
+    // CT-1661: `export { x } from "./m"` emits the module reference as `var`
+    // (hoisted ahead of the getter), not `const`. AMD accepts re-exports
+    // (imports are factory params); the ESM import-preamble must accept the
+    // `var` form too, or the same source diverges between the two verifiers.
+    name: "named reexport getter from a var require preamble",
+    body:
+      `var inner_1 = require("./inner.ts");\nObject.defineProperty(exports, "x", { enumerable: true, get: function () { return inner_1.x; } });`,
+  },
+  {
     name: "ambient safe global inside a builder callback",
     body: `${IMPORT}\nexports.v = (0, cf_1.pattern)((s) => fetch(s.url));`,
   },
@@ -125,6 +134,14 @@ const REJECT: Case[] = [
     name: "require of a disallowed specifier (node:fs)",
     body: `const fs_1 = require("node:fs");\nexports.fs = fs_1;`,
     reject: /.*/,
+  },
+  {
+    // CT-1661: the `var` re-export relaxation must not extend to trusted runtime
+    // bindings — `var` is mutable at runtime, so a runtime require must be
+    // `const`. Mirrors `const` accept "named reexport getter from a var require".
+    name: "var require of a trusted runtime module",
+    body: `var cf = require("commonfabric");\nexports.cf = cf;`,
+    reject: /mutable/i,
   },
   {
     name: "bare side-effect import of a disallowed specifier",

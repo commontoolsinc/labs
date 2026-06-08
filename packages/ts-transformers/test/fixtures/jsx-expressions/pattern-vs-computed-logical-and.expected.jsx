@@ -11,24 +11,6 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift<{
-    bar: string;
-}, string | false>({
-    type: "object",
-    properties: {
-        bar: {
-            type: "string"
-        }
-    },
-    required: ["bar"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    anyOf: [{
-            type: "string"
-        }, {
-            type: "boolean",
-            "enum": [false]
-        }]
-} as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo && bar);
 // FIXTURE: pattern-vs-computed-logical-and
 // Verifies: top-level pattern JSX logical roots lower structurally, but computed-owned logical roots stay authored
 //   <div>{foo && name}</div> in a pattern body → __cfHelpers.when(...)
@@ -81,6 +63,24 @@ export const PatternLogicalAnd = pattern((__cf_pattern_input) => {
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_1 = __cfHelpers.lift<{
+    bar: string;
+}, string | false>({
+    type: "object",
+    properties: {
+        bar: {
+            type: "string"
+        }
+    },
+    required: ["bar"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "boolean",
+            "enum": [false]
+        }]
+} as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo && bar);
 export const ComputedLogicalAnd = pattern((__cf_pattern_input) => {
     const foo = __cf_pattern_input.key("foo");
     const bar = __cf_pattern_input.key("bar");
@@ -123,3 +123,6 @@ export const ComputedLogicalAnd = pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

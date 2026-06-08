@@ -35,6 +35,7 @@ export interface HarnessToolContext {
   workspaceHostPath?: string;
   resolvePath(path: string): string;
   resolveHostPath(path: string): string;
+  resolveHostRootPath(path: string): string;
   hostPathToWorkspacePath(path: string): string | undefined;
   isHostPathWithinWorkspace(
     path: string,

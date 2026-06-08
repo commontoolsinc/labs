@@ -18,6 +18,13 @@ import { action, Cell, computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+interface Card {
+    title: string;
+    description: string;
+}
+interface Input {
+    card: Card;
+}
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -76,13 +83,6 @@ const __cfLift_1 = __cfHelpers.lift<{
                 <span>{card.description}</span>
                 <cf-button onClick={startEditing}>Edit</cf-button>
               </div>));
-interface Card {
-    title: string;
-    description: string;
-}
-interface Input {
-    card: Card;
-}
 // FIXTURE: action-in-ternary-with-explicit-computed
 // Verifies: action() referenced inside an explicit computed() in JSX is captured in the lift-applied wrapper
 //   action(() => ...) → handler(...)({ isEditing })
@@ -200,3 +200,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfHandler_1,
+    __cfLift_1
+});

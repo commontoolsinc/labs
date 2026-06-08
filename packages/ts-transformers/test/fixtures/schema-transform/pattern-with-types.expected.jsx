@@ -134,6 +134,54 @@ const addItem = handler // <
 }) => {
     items.push({ text: event.detail.message });
 });
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return (<li key={index}>{item.key("text")}</li>);
+}, {
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["element"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                text: {
+                    type: "string",
+                    "default": ""
+                }
+            },
+            required: ["text"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }, {
+            type: "object",
+            properties: {}
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-with-types
 // Verifies: full pattern with toSchema, handler, JSX, and .map() all transform correctly together
 //   toSchema<T>() → inline JSON schema literal with Default<> mapped to "default" values
@@ -152,54 +200,7 @@ export default pattern((__cf_pattern_input) => {
         <p>Basic pattern</p>
         <p>Items count: {items_count}</p>
         <ul>
-          {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                return (<li key={index}>{item.key("text")}</li>);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Item"
-                    },
-                    index: {
-                        type: "number"
-                    }
-                },
-                required: ["element"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            text: {
-                                type: "string",
-                                "default": ""
-                            }
-                        },
-                        required: ["text"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {})}
+          {items.mapWithPattern(__cfPattern_1, {})}
         </ul>
         <cf-message-input name="Send" placeholder="Type a message..." appearance="rounded" oncf-send={addItem({ items })}/>
       </div>),
@@ -270,3 +271,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    addItem,
+    __cfPattern_1
+});

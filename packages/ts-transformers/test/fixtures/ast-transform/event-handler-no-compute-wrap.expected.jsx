@@ -11,20 +11,6 @@ import { Cell, Default, handler, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift<{
-    count: Default<number, 0>;
-}, number>({
-    type: "object",
-    properties: {
-        count: {
-            type: "number",
-            "default": 0
-        }
-    },
-    required: ["count"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1);
 declare global {
     namespace JSX {
         interface IntrinsicElements {
@@ -46,6 +32,20 @@ const handleClick = handler({
 } as const satisfies __cfHelpers.JSONSchema, (_, { count }) => {
     count.set(count.get() + 1);
 });
+const __cfLift_1 = __cfHelpers.lift<{
+    count: Default<number, 0>;
+}, number>({
+    type: "object",
+    properties: {
+        count: {
+            type: "number",
+            "default": 0
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + 1);
 // FIXTURE: event-handler-no-compute-wrap
 // Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
 // wrapper (formerly derive, now lift-applied post-CT-1615), while
@@ -120,3 +120,7 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    handleClick,
+    __cfLift_1
+});

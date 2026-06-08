@@ -1,21 +1,20 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
-import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
-import { isConvertibleNativeInstance } from "../../src/native-instance-utils.ts";
+
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   isFabricCompatible,
-  resetDataModelConfig,
-  setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../../src/fabric-value.ts";
+} from "@/fabric-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../../src/native-type-tags.ts";
-import { jsonFromValue, valueFromJson } from "../../src/json-wire/index.ts";
-import { hashOf } from "../../src/value-hash.ts";
+} from "@/native-type-tags.ts";
+import { jsonFromValue, valueFromJson } from "@/json-wire/index.ts";
+import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
@@ -152,30 +151,20 @@ describe("FabricRegExp", () => {
     });
   });
 
-  describe("shallowFabricFromNativeValue() (modern path)", () => {
+  describe("shallowFabricFromNativeValue()", () => {
     it("converts a `RegExp` to a `FabricRegExp`", () => {
-      setDataModelConfig(true);
-      try {
-        const result = shallowFabricFromNativeValue(/abc/gi);
-        expect(result).toBeInstanceOf(FabricRegExp);
-        expect((result as FabricRegExp).source).toBe("abc");
-        expect((result as FabricRegExp).flags).toBe("gi");
-      } finally {
-        resetDataModelConfig();
-      }
+      const result = shallowFabricFromNativeValue(/abc/gi);
+      expect(result).toBeInstanceOf(FabricRegExp);
+      expect((result as FabricRegExp).source).toBe("abc");
+      expect((result as FabricRegExp).flags).toBe("gi");
     });
 
     it("rejects a `RegExp` with extra enumerable properties", () => {
-      setDataModelConfig(true);
-      try {
-        const re = /abc/;
-        (re as unknown as Record<string, unknown>).custom = 1;
-        expect(() => shallowFabricFromNativeValue(re)).toThrow(
-          "Cannot store RegExp with extra enumerable properties",
-        );
-      } finally {
-        resetDataModelConfig();
-      }
+      const re = /abc/;
+      (re as unknown as Record<string, unknown>).custom = 1;
+      expect(() => shallowFabricFromNativeValue(re)).toThrow(
+        "Cannot store RegExp with extra enumerable properties",
+      );
     });
   });
 
@@ -195,13 +184,6 @@ describe("FabricRegExp", () => {
   });
 
   describe("isFabricCompatible()", () => {
-    beforeEach(() => {
-      setDataModelConfig(true);
-    });
-    afterEach(() => {
-      resetDataModelConfig();
-    });
-
     it("returns `true` for a plain `RegExp`", () => {
       expect(isFabricCompatible(/abc/gi)).toBe(true);
     });

@@ -11,6 +11,92 @@ import { computed, handler, ifElse, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const openNoteEditor = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        subPieces: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        editingNoteIndex: {
+            type: ["number", "undefined"]
+        },
+        editingNoteText: {
+            type: "string"
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["subPieces", "editingNoteIndex", "editingNoteText", "index"]
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
+const openSettings = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        settingsModuleIndex: {
+            type: ["number", "undefined"]
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["settingsModuleIndex", "index"]
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
+const toggleExpanded = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        expandedIndex: {
+            type: ["number", "undefined"]
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["expandedIndex", "index"]
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
+const trashSubPiece = handler({
+    type: "unknown"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        subPieces: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        trashedSubPieces: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        expandedIndex: {
+            type: ["number", "undefined"]
+        },
+        settingsModuleIndex: {
+            type: ["number", "undefined"]
+        },
+        index: {
+            type: "number"
+        }
+    },
+    required: ["subPieces", "trashedSubPieces", "expandedIndex", "settingsModuleIndex", "index"]
+} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
+interface Item {
+    note?: string;
+    collapsed?: boolean;
+    pinned?: boolean;
+    allowMultiple: boolean;
+}
 const __cfLift_1 = __cfHelpers.lift<{
     items: Item[];
 }, { entry: Item; index: number; isExpanded: boolean; isPinned: boolean; allowMultiple: boolean; }[]>({
@@ -192,92 +278,228 @@ const __cfLift_6 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded);
-const openNoteEditor = handler({
-    type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        subPieces: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-        editingNoteIndex: {
-            type: ["number", "undefined"]
-        },
-        editingNoteText: {
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element", "entry");
+    const index = __cf_pattern_input.key("element", "index");
+    const isExpanded = __cf_pattern_input.key("element", "isExpanded");
+    const isPinned = __cf_pattern_input.key("element", "isPinned");
+    const allowMultiple = __cf_pattern_input.key("element", "allowMultiple");
+    const subPieces = __cf_pattern_input.key("params", "subPieces");
+    const editingNoteIndex = __cf_pattern_input.key("params", "editingNoteIndex");
+    const editingNoteText = __cf_pattern_input.key("params", "editingNoteText");
+    const settingsModuleIndex = __cf_pattern_input.key("params", "settingsModuleIndex");
+    const expandedIndex = __cf_pattern_input.key("params", "expandedIndex");
+    const trashedSubPieces = __cf_pattern_input.key("params", "trashedSubPieces");
+    return ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "null"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ entry: {
+            collapsed: entry.key("collapsed")
+        } }), <div>
+              {ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{}, {
+                    type: "object",
+                    properties: {}
+                }]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "null"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "null"
+                }, {}]
+        } as const satisfies __cfHelpers.JSONSchema, allowMultiple, <button type="button" onClick={openNoteEditor({
+                subPieces,
+                editingNoteIndex,
+                editingNoteText,
+                index,
+            })} style={__cfLift_3({ entry: entry })} title={__cfLift_4({ entry: entry })}>
+                  note
+                </button>, null)}
+              {__cfHelpers.when({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: ["boolean", "null"]
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({ isExpanded: isExpanded }), ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "null"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, true, <button type="button" onClick={openSettings({ settingsModuleIndex, index })}>
+                  settings
+                </button>, null))}
+              <button type="button" onClick={toggleExpanded({ expandedIndex, index })} style={{ background: __cfHelpers.ifElse({
+            type: "boolean"
+        } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        },
-        index: {
-            type: "number"
-        }
-    },
-    required: ["subPieces", "editingNoteIndex", "editingNoteText", "index"]
-} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-const openSettings = handler({
-    type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, {
+            "enum": ["a", "b"]
+        } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b") }}>
+                expand
+              </button>
+              {__cfHelpers.when({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "boolean"
+            }, {}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, __cfLift_6({ isExpanded: isExpanded }), <button type="button" onClick={trashSubPiece({
+            subPieces,
+            trashedSubPieces,
+            expandedIndex,
+            settingsModuleIndex,
+            index,
+        })}>
+                  trash
+                </button>)}
+            </div>, null).for("__patternResult", true);
+}, {
     type: "object",
     properties: {
-        settingsModuleIndex: {
-            type: ["number", "undefined"]
+        element: {
+            type: "object",
+            properties: {
+                entry: {
+                    $ref: "#/$defs/Item"
+                },
+                index: {
+                    type: "number"
+                },
+                isExpanded: {
+                    type: "boolean"
+                },
+                isPinned: {
+                    type: "boolean"
+                },
+                allowMultiple: {
+                    type: "boolean"
+                }
+            },
+            required: ["entry", "index", "isExpanded", "isPinned", "allowMultiple"]
         },
-        index: {
-            type: "number"
+        params: {
+            type: "object",
+            properties: {
+                subPieces: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                },
+                editingNoteIndex: {
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
+                },
+                editingNoteText: {
+                    type: "string",
+                    asCell: ["readonly"]
+                },
+                settingsModuleIndex: {
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
+                },
+                expandedIndex: {
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
+                },
+                trashedSubPieces: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["subPieces", "editingNoteIndex", "editingNoteText", "settingsModuleIndex", "expandedIndex", "trashedSubPieces"]
         }
     },
-    required: ["settingsModuleIndex", "index"]
-} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-const toggleExpanded = handler({
-    type: "unknown"
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                note: {
+                    type: "string"
+                },
+                collapsed: {
+                    type: "boolean"
+                },
+                pinned: {
+                    type: "boolean"
+                },
+                allowMultiple: {
+                    type: "boolean"
+                }
+            },
+            required: ["allowMultiple"]
+        }
+    }
 } as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        expandedIndex: {
-            type: ["number", "undefined"]
-        },
-        index: {
-            type: "number"
+    anyOf: [{
+            type: "null"
+        }, {
+            $ref: "https://commonfabric.org/schemas/vnode.json"
+        }, {
+            $ref: "#/$defs/UIRenderable"
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }
+            },
+            required: ["$UI"]
         }
-    },
-    required: ["expandedIndex", "index"]
-} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-const trashSubPiece = handler({
-    type: "unknown"
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        subPieces: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-        trashedSubPieces: {
-            type: "array",
-            items: {
-                type: "string"
-            }
-        },
-        expandedIndex: {
-            type: ["number", "undefined"]
-        },
-        settingsModuleIndex: {
-            type: ["number", "undefined"]
-        },
-        index: {
-            type: "number"
-        }
-    },
-    required: ["subPieces", "trashedSubPieces", "expandedIndex", "settingsModuleIndex", "index"]
-} as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
-interface Item {
-    note?: string;
-    collapsed?: boolean;
-    pinned?: boolean;
-    allowMultiple: boolean;
-}
+    }
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: branch-lowered-capture-preservation
 // Verifies: branch-lowered UI chunks inside a computed-array map preserve captured
 // params needed by nested ifElse branches, inline computed() attributes, and handlers
@@ -306,228 +528,7 @@ export default pattern((__cf_pattern_input) => {
     const allEntries = __cfLift_1({ items: items }).for("allEntries", true);
     return {
         [UI]: (<div>
-        {allEntries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const entry = __cf_pattern_input.key("element", "entry");
-                const index = __cf_pattern_input.key("element", "index");
-                const isExpanded = __cf_pattern_input.key("element", "isExpanded");
-                const isPinned = __cf_pattern_input.key("element", "isPinned");
-                const allowMultiple = __cf_pattern_input.key("element", "allowMultiple");
-                const subPieces = __cf_pattern_input.key("params", "subPieces");
-                const editingNoteIndex = __cf_pattern_input.key("params", "editingNoteIndex");
-                const editingNoteText = __cf_pattern_input.key("params", "editingNoteText");
-                const settingsModuleIndex = __cf_pattern_input.key("params", "settingsModuleIndex");
-                const expandedIndex = __cf_pattern_input.key("params", "expandedIndex");
-                const trashedSubPieces = __cf_pattern_input.key("params", "trashedSubPieces");
-                return ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "null"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "null"
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, __cfLift_2({ entry: {
-                        collapsed: entry.key("collapsed")
-                    } }), <div>
-              {ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{}, {
-                                type: "object",
-                                properties: {}
-                            }]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "null"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{
-                                type: "null"
-                            }, {}]
-                    } as const satisfies __cfHelpers.JSONSchema, allowMultiple, <button type="button" onClick={openNoteEditor({
-                            subPieces,
-                            editingNoteIndex,
-                            editingNoteText,
-                            index,
-                        })} style={__cfLift_3({ entry: entry })} title={__cfLift_4({ entry: entry })}>
-                  note
-                </button>, null)}
-              {__cfHelpers.when({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "null"
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: ["boolean", "null"]
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, __cfLift_5({ isExpanded: isExpanded }), ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "null"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "null"
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, true, <button type="button" onClick={openSettings({ settingsModuleIndex, index })}>
-                  settings
-                </button>, null))}
-              <button type="button" onClick={toggleExpanded({ expandedIndex, index })} style={{ background: __cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        "enum": ["a", "b"]
-                    } as const satisfies __cfHelpers.JSONSchema, isPinned, "a", "b") }}>
-                expand
-              </button>
-              {__cfHelpers.when({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "boolean"
-                        }, {}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfLift_6({ isExpanded: isExpanded }), <button type="button" onClick={trashSubPiece({
-                        subPieces,
-                        trashedSubPieces,
-                        expandedIndex,
-                        settingsModuleIndex,
-                        index,
-                    })}>
-                  trash
-                </button>)}
-            </div>, null).for("__patternResult", true);
-            }, {
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            entry: {
-                                $ref: "#/$defs/Item"
-                            },
-                            index: {
-                                type: "number"
-                            },
-                            isExpanded: {
-                                type: "boolean"
-                            },
-                            isPinned: {
-                                type: "boolean"
-                            },
-                            allowMultiple: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["entry", "index", "isExpanded", "isPinned", "allowMultiple"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            subPieces: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            },
-                            editingNoteIndex: {
-                                anyOf: [{
-                                        type: "number"
-                                    }, {
-                                        type: "undefined"
-                                    }],
-                                asCell: ["readonly"]
-                            },
-                            editingNoteText: {
-                                type: "string",
-                                asCell: ["readonly"]
-                            },
-                            settingsModuleIndex: {
-                                anyOf: [{
-                                        type: "number"
-                                    }, {
-                                        type: "undefined"
-                                    }],
-                                asCell: ["readonly"]
-                            },
-                            expandedIndex: {
-                                anyOf: [{
-                                        type: "number"
-                                    }, {
-                                        type: "undefined"
-                                    }],
-                                asCell: ["readonly"]
-                            },
-                            trashedSubPieces: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            }
-                        },
-                        required: ["subPieces", "editingNoteIndex", "editingNoteText", "settingsModuleIndex", "expandedIndex", "trashedSubPieces"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Item: {
-                        type: "object",
-                        properties: {
-                            note: {
-                                type: "string"
-                            },
-                            collapsed: {
-                                type: "boolean"
-                            },
-                            pinned: {
-                                type: "boolean"
-                            },
-                            allowMultiple: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["allowMultiple"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                anyOf: [{
-                        type: "null"
-                    }, {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                    }, {
-                        $ref: "#/$defs/UIRenderable"
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }
-                        },
-                        required: ["$UI"]
-                    }
-                }
-            } as const satisfies __cfHelpers.JSONSchema), {
+        {allEntries.mapWithPattern(__cfPattern_1, {
                 subPieces: subPieces,
                 editingNoteIndex: editingNoteIndex,
                 editingNoteText: editingNoteText,
@@ -535,7 +536,7 @@ export default pattern((__cf_pattern_input) => {
                 expandedIndex: expandedIndex,
                 trashedSubPieces: trashedSubPieces
             })}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",
@@ -613,3 +614,16 @@ export default pattern((__cf_pattern_input) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    openNoteEditor,
+    openSettings,
+    toggleExpanded,
+    trashSubPiece,
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfPattern_1
+});

@@ -273,6 +273,7 @@ Deno.test({
                   delegatedToCfc: false,
                 },
               },
+              hostBinds: [],
             },
             protectedXattrs: {
               expectedSandboxVisible: false,

@@ -21,12 +21,7 @@ const items = __cfHelpers.__cf_data(new Cell<string[]>([], {
         type: "string"
     }
 } as const satisfies __cfHelpers.JSONSchema).for("items", true));
-export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
-    type: "array",
-    items: {
-        type: "string"
-    }
-} as const satisfies __cfHelpers.JSONSchema, () => items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     return item;
 }, {
@@ -39,7 +34,16 @@ export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
     required: ["element"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema), {}));
+} as const satisfies __cfHelpers.JSONSchema);
+export const fn = lift(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "string"
+    }
+} as const satisfies __cfHelpers.JSONSchema, () => items.mapWithPattern(__cfPattern_1, {}));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfPattern_1
+});
