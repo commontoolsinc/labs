@@ -179,3 +179,7 @@ export default __cfHelpers.__cf_data({
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfHandler_1
+});

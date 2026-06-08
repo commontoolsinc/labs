@@ -226,6 +226,17 @@ function hoistBuilderCalls(
   // hoisted const).
   const counters = new Map<string, number>();
 
+  // Every hoisted builder-artifact name (`__cfPattern_N`, `__cfLift_N`,
+  // `__cfHandler_N`), in creation order. After the whole file is visited we emit
+  // a SINGLE trailing `__cfReg({ __cfPattern_1, __cfLift_1, … })` call so the
+  // runtime can assign each a content-addressed `{ identity, symbol }` reference
+  // (the property key is the symbol). A single trailing call — rather than
+  // exporting each hoist or registering it inline — keeps the verifier's job to
+  // "exactly one top-level `__cfReg` call" and lets a run-once trap reject any
+  // injected duplicate. See PatternManager.registerHoistedValues / the
+  // `__cfReg` factory parameter wired up by the module-record compiler.
+  const registeredNames: string[] = [];
+
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
     const visited = ts.visitEachChild(node, visit, context.tsContext);
     if (!ts.isCallExpression(visited)) {
@@ -240,7 +251,9 @@ function hoistBuilderCalls(
 
       const next = (counters.get(builder.prefix) ?? 0) + 1;
       counters.set(builder.prefix, next);
-      const name = factory.createIdentifier(`${builder.prefix}_${next}`);
+      const nameText = `${builder.prefix}_${next}`;
+      const name = factory.createIdentifier(nameText);
+      registeredNames.push(nameText);
       // Carry the hoisted call's identity on the synthetic call-site identifier.
       // The checker can't resolve a synthetic identifier to its const
       // initializer, so detectCallKind would otherwise fail to recognize
@@ -303,6 +316,34 @@ function hoistBuilderCalls(
     pendingHoists = [];
     const visitedStatement = ts.visitNode(statement, visit) as ts.Statement;
     resultStatements.push(...pendingHoists, visitedStatement);
+  }
+
+  // Register every hoisted builder artifact with one trailing call. `__cfReg` is
+  // a free identifier supplied by the module wrapper (the 4th factory parameter
+  // under the ESM loader; a no-op global on the legacy/AMD path). The object uses
+  // shorthand so each value is the module-level `const` binding itself — the
+  // registrar receives `{ symbol -> live value }` and the runtime pairs it with
+  // this module's content identity. Emitted only when there is something to
+  // register, so hoist-free modules are unchanged.
+  if (registeredNames.length > 0) {
+    resultStatements.push(
+      factory.createExpressionStatement(
+        factory.createCallExpression(
+          factory.createIdentifier("__cfReg"),
+          undefined,
+          [
+            factory.createObjectLiteralExpression(
+              registeredNames.map((n) =>
+                factory.createShorthandPropertyAssignment(
+                  factory.createIdentifier(n),
+                )
+              ),
+              true,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   return factory.updateSourceFile(sourceFile, resultStatements);
