@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
@@ -57,17 +56,22 @@ describe("FabricEpochDays", () => {
         expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.EpochDays);
       });
 
+      it("claims a `FabricEpochDays` via `canEncode()`, rejecting others", () => {
+        expect(codec.canEncode(new FabricEpochDays(0n))).toBe(true);
+        expect(codec.canEncode("not an epoch")).toBe(false);
+      });
+
       it("encodes to a flat base64 string (epoch zero)", () => {
         const sd = new FabricEpochDays(0n);
         // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
-        expect(codec.encode(sd as FabricValue)).toBe("AA");
+        expect(codec.encode(sd)).toBe("AA");
       });
 
       it("round-trips at top level (epoch zero)", () => {
         const sd = new FabricEpochDays(0n);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(sd as FabricValue),
+          codec.encode(sd),
           context,
         ) as unknown as FabricEpochDays;
         expect(decoded).toBeInstanceOf(FabricEpochDays);
@@ -79,7 +83,7 @@ describe("FabricEpochDays", () => {
         const sd = new FabricEpochDays(days);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(sd as FabricValue),
+          codec.encode(sd),
           context,
         ) as unknown as FabricEpochDays;
         expect(decoded).toBeInstanceOf(FabricEpochDays);
@@ -91,7 +95,7 @@ describe("FabricEpochDays", () => {
         const sd = new FabricEpochDays(days);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(sd as FabricValue),
+          codec.encode(sd),
           context,
         ) as unknown as FabricEpochDays;
         expect(decoded).toBeInstanceOf(FabricEpochDays);

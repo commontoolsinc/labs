@@ -2,7 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import type { FabricValue } from "@/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
@@ -133,9 +132,14 @@ describe("FabricRegExp", () => {
         expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.RegExp);
       });
 
+      it("claims a `FabricRegExp` via `canEncode()`, rejecting other values", () => {
+        expect(codec.canEncode(new FabricRegExp(/ab+c/gi))).toBe(true);
+        expect(codec.canEncode("not a regexp")).toBe(false);
+      });
+
       it("encodes to a `{ source, flags, flavor }` object", () => {
         const re = new FabricRegExp(/ab+c/gi);
-        expect(codec.encode(re as FabricValue)).toEqual({
+        expect(codec.encode(re)).toEqual({
           flags: "gi",
           flavor: "es2025",
           source: "ab+c",
@@ -146,7 +150,7 @@ describe("FabricRegExp", () => {
         const re = new FabricRegExp(/ab+c/gi);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(re as FabricValue),
+          codec.encode(re),
           context,
         ) as unknown as FabricRegExp;
         expect(decoded).toBeInstanceOf(FabricRegExp);
@@ -159,7 +163,7 @@ describe("FabricRegExp", () => {
         const re = new FabricRegExp("es2025", "^x*$", "");
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(re as FabricValue),
+          codec.encode(re),
           context,
         ) as unknown as FabricRegExp;
         expect(decoded).toBeInstanceOf(FabricRegExp);
@@ -170,7 +174,7 @@ describe("FabricRegExp", () => {
       it("decodes non-object state to `ProblematicValue`", () => {
         const decoded = codec.decode(
           codec.wireTypeTag,
-          "nope" as unknown as FabricValue,
+          "nope",
           context,
         );
         expect(decoded).toBeInstanceOf(ProblematicValue);

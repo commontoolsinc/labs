@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { FabricValue } from "@/interface.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
@@ -160,9 +159,14 @@ describe("FabricHash", () => {
         expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Hash);
       });
 
+      it("claims a `FabricHash` via `canEncode()`, rejecting other values", () => {
+        expect(codec.canEncode(new FabricHash(SAMPLE_HASH, "fid1"))).toBe(true);
+        expect(codec.canEncode("not a hash")).toBe(false);
+      });
+
       it("encodes to a `{ tag, hash }` object", () => {
         const cid = new FabricHash(SAMPLE_HASH, "fid1");
-        expect(codec.encode(cid as FabricValue)).toEqual({
+        expect(codec.encode(cid)).toEqual({
           tag: "fid1",
           hash: cid.hashString,
         });
@@ -185,7 +189,7 @@ describe("FabricHash", () => {
         const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(cid as FabricValue),
+          codec.encode(cid),
           context,
         );
         expect(decoded).toBeInstanceOf(FabricHash);
@@ -196,7 +200,7 @@ describe("FabricHash", () => {
       it("decodes non-object state to a `ProblematicValue`", () => {
         const decoded = codec.decode(
           codec.wireTypeTag,
-          123 as unknown as FabricValue,
+          123,
           context,
         );
         expect(decoded).toBeInstanceOf(ProblematicValue);
@@ -205,7 +209,7 @@ describe("FabricHash", () => {
       it("decodes missing/non-string fields to a `ProblematicValue`", () => {
         const decoded = codec.decode(
           codec.wireTypeTag,
-          { tag: "fid1" } as unknown as FabricValue,
+          { tag: "fid1" },
           context,
         );
         expect(decoded).toBeInstanceOf(ProblematicValue);
@@ -214,7 +218,7 @@ describe("FabricHash", () => {
       it("decodes a malformed base64 `hash` to a `ProblematicValue`", () => {
         const decoded = codec.decode(
           codec.wireTypeTag,
-          { tag: "fid1", hash: "not valid base64!!" } as unknown as FabricValue,
+          { tag: "fid1", hash: "not valid base64!!" },
           context,
         );
         expect(decoded).toBeInstanceOf(ProblematicValue);

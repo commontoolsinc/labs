@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
@@ -63,17 +62,22 @@ describe("FabricEpochNsec", () => {
         expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.EpochNsec);
       });
 
+      it("claims a `FabricEpochNsec` via `canEncode()`, rejecting others", () => {
+        expect(codec.canEncode(new FabricEpochNsec(0n))).toBe(true);
+        expect(codec.canEncode("not an epoch")).toBe(false);
+      });
+
       it("encodes to a flat base64 string (epoch zero)", () => {
         const sn = new FabricEpochNsec(0n);
         // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
-        expect(codec.encode(sn as FabricValue)).toBe("AA");
+        expect(codec.encode(sn)).toBe("AA");
       });
 
       it("round-trips at top level (epoch zero)", () => {
         const sn = new FabricEpochNsec(0n);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(sn as FabricValue),
+          codec.encode(sn),
           context,
         ) as unknown as FabricEpochNsec;
         expect(decoded).toBeInstanceOf(FabricEpochNsec);
@@ -86,7 +90,7 @@ describe("FabricEpochNsec", () => {
         const sn = new FabricEpochNsec(nsec);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(sn as FabricValue),
+          codec.encode(sn),
           context,
         ) as unknown as FabricEpochNsec;
         expect(decoded).toBeInstanceOf(FabricEpochNsec);
@@ -98,7 +102,7 @@ describe("FabricEpochNsec", () => {
         const sn = new FabricEpochNsec(nsec);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(sn as FabricValue),
+          codec.encode(sn),
           context,
         ) as unknown as FabricEpochNsec;
         expect(decoded).toBeInstanceOf(FabricEpochNsec);
@@ -111,7 +115,7 @@ describe("FabricEpochNsec", () => {
         const sn = new FabricEpochNsec(nsec);
         const decoded = codec.decode(
           codec.wireTypeTag,
-          codec.encode(sn as FabricValue),
+          codec.encode(sn),
           context,
         ) as unknown as FabricEpochNsec;
         expect(decoded.value).toBe(nsec);
