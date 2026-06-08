@@ -922,6 +922,15 @@ export class PatternManager {
         `No "${symbol}" export or hoist registration found in compiled pattern.`,
       );
     }
+    // Gate is pattern-only on purpose: `seedVerifiedLoadIds` is CFC's
+    // pattern-specific verified-load association, so it must not run for a
+    // lift/handler. The forward `{ identity, symbol }` ref for a NON-pattern
+    // artifact is NOT skipped here — `registerEvaluatedModules` (called at the
+    // top of this method) already set it via `indexArtifact`, whose gate is the
+    // wider `isTrustedBuilderArtifact`. Keep that ordering: widening this gate
+    // instead would (wrongly) seed load-ids for non-patterns, and narrowing
+    // `indexArtifact` would drop exported lift/handler forward refs — the gap
+    // Codex flagged on an earlier revision of #3912.
     if (isTrustedPattern(pattern)) {
       this.valueToEntryRef.set(pattern, { identity: entryIdentity, symbol });
       if (loadId) {
@@ -1008,8 +1017,18 @@ export class PatternManager {
     else bucket = new Map<string, unknown>();
     bucket.set(symbol, value);
     this.addressableByIdentity.set(identity, bucket);
-    // Forward map — don't overwrite an existing ref (e.g. a value that is both a
-    // `__cfReg` entry and an export, or whose entry ref the caller set first).
+    // Forward map is FIRST-WRITE-WINS, deliberately, on two grounds:
+    //   - One artifact instance legitimately reachable under two refs (e.g. both
+    //     a `__cfReg` entry AND an export, or set first by `patternFromMain`)
+    //     keeps a single canonical `{ identity, symbol }` for serialization.
+    //   - The reverse index above already overwrote, so by-identity LOOKUP
+    //     (`artifactFromIdentitySync`) is always fresh; the forward ref only
+    //     needs to be A valid name for the value, not the newest.
+    // Caveat: if the SAME instance is later re-registered under a CHANGED
+    // identity (a content edit that preserves object identity across re-eval),
+    // the forward ref stays pinned to the original — acceptable because the
+    // value is, by content identity, the original. `getArtifactEntryRef`
+    // consumers tolerate this (it resolves to a real, addressable artifact).
     if (!this.valueToEntryRef.has(value as object)) {
       this.valueToEntryRef.set(value as object, { identity, symbol });
     }

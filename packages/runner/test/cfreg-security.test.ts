@@ -111,3 +111,88 @@ describe("HoistRegistrationSink stays untouched on a rejected registration", () 
     expect(sink.get("id")?.has("__cfPattern_1")).toBe(true);
   });
 });
+
+// CT-1623 follow-up: lock the CONTRACT between the transformer's emitted
+// `__cfReg({ … })` shape and the verifier's static approval check. The transformer
+// and the verifier hold two independent definitions of "a valid registration
+// call"; if they drift, a real registration silently routes to the rejecting
+// registrar (fail-closed, but a confusing breakage). These pin the exact shapes
+// the transformer emits (builder-call-hoisting.ts: a trailing call whose argument
+// is a multiline shorthand object of previously-declared top-level bindings) as
+// APPROVED, and assert the tamper shapes the verifier is meant to refuse are not.
+describe("transformer __cfReg emit round-trips through the verifier", () => {
+  it("approves the exact multiline shorthand shape the transformer emits", () => {
+    // Mirrors builder-call-hoisting.ts: `factory.createObjectLiteralExpression(
+    // …, /* multiline */ true)` over shorthand assignments — one entry per line.
+    const body = `${IMPORT}
+const __cfPattern_1 = (0, cf.pattern)((s) => s);
+const __cfLift_1 = (0, cf.lift)((x) => x);
+__cfReg({
+    __cfPattern_1,
+    __cfLift_1
+});`;
+    expect(verifyCompiledModuleBody(body, "/main.tsx").hasHoistRegistration)
+      .toBe(true);
+  });
+
+  it("approves the single-entry trailing-comma form", () => {
+    const body = `${IMPORT}
+const __cfLift_1 = (0, cf.lift)((x) => x);
+__cfReg({
+    __cfLift_1,
+});`;
+    expect(verifyCompiledModuleBody(body, "/main.tsx").hasHoistRegistration)
+      .toBe(true);
+  });
+
+  it("does NOT approve a __cfReg over a binding that was never declared", () => {
+    // Every key must be a previously-seen top-level binding. A registration that
+    // names an undeclared symbol is not a valid call (the whole statement then
+    // falls through to unknown-identifier rejection — the body is refused).
+    const body = `${IMPORT}\n__cfReg({ __cfPattern_99 });`;
+    expect(() => verifyCompiledModuleBody(body, "/main.tsx")).toThrow();
+  });
+
+  it("does NOT approve a key:value (non-shorthand) registration", () => {
+    // Only shorthand identifiers are a valid registration; `key: value` lets the
+    // value be an arbitrary expression, so the call shape is refused.
+    const body =
+      `${IMPORT}\nconst __cfLift_1 = (0, cf.lift)((x) => x);\n__cfReg({ __cfLift_1: globalThis });`;
+    expect(() => verifyCompiledModuleBody(body, "/main.tsx")).toThrow();
+  });
+
+  it("refuses a second top-level __cfReg call (tampering signal)", () => {
+    const body = `${IMPORT}
+const __cfLift_1 = (0, cf.lift)((x) => x);
+__cfReg({ __cfLift_1 });
+__cfReg({ __cfLift_1 });`;
+    expect(() => verifyCompiledModuleBody(body, "/main.tsx")).toThrow();
+  });
+});
+
+// CT-1623 follow-up: pin the staleness-overwrite contract at the public sink
+// layer. `indexArtifact` overwrites the reverse mapping on re-eval so by-identity
+// LOOKUP is always fresh; the same freshness must hold one layer down, where a
+// module that re-evaluates (same identity, fresh artifact instance) re-stages and
+// commits. A second commit under the same identity must REPLACE the prior staged
+// map, not merge a stale instance into it.
+describe("re-registration under the same identity commits the fresh staged set", () => {
+  it("a later commit replaces the sink entry for that identity", () => {
+    const sink: HoistRegistrationSink = new Map();
+
+    const first = brandTrustedBuilderArtifact({});
+    const r1 = createHoistRegistrar("idX", sink);
+    r1.register({ __cfLift_1: first });
+    r1.commit();
+    expect(sink.get("idX")?.get("__cfLift_1")).toBe(first);
+
+    // Re-eval of the same module identity yields a fresh registrar + instance.
+    const second = brandTrustedBuilderArtifact({});
+    const r2 = createHoistRegistrar("idX", sink);
+    r2.register({ __cfLift_1: second });
+    r2.commit();
+    // The sink reflects the freshest instance, never the stale one.
+    expect(sink.get("idX")?.get("__cfLift_1")).toBe(second);
+    expect(sink.get("idX")?.get("__cfLift_1")).not.toBe(first);
+  });
+});
