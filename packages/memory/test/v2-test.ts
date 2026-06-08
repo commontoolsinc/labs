@@ -5,6 +5,10 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
+import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
@@ -223,5 +227,47 @@ describe("memory v2 boundary decode", () => {
       decoded.value.nested.count = 2;
     }, TypeError);
     assertEquals(decoded.value.nested.count, 1);
+  });
+});
+
+describe("memory v2 boundary encode", () => {
+  // Native values must be converted to `FabricValue`s before serialization, so
+  // they survive the wire boundary faithfully rather than being flattened to
+  // `{}` by the encoder's structural fallthrough.
+  it("converts a native `Date` to a round-trippable `FabricEpochNsec`", () => {
+    const date = new Date("2024-01-01T00:00:00Z");
+    const wire = encodeMemoryBoundary({ when: date });
+
+    // Proper tagged form, not a mangled `{}`.
+    assert(
+      wire.includes("EpochNsec"),
+      `expected an EpochNsec-tagged wire form, got: ${wire}`,
+    );
+
+    const decoded = decodeMemoryBoundary<{ when: FabricEpochNsec }>(wire);
+    assert(
+      decoded.when instanceof FabricEpochNsec,
+      `expected a FabricEpochNsec, got: ${decoded.when}`,
+    );
+    assertEquals(decoded.when.value, BigInt(date.getTime()) * 1_000_000n);
+  });
+
+  it("converts a native `Uint8Array` to a round-trippable `FabricBytes`", () => {
+    const bytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+    const decoded = decodeMemoryBoundary<{ sig: FabricBytes }>(
+      encodeMemoryBoundary({ sig: bytes }),
+    );
+    assert(
+      decoded.sig instanceof FabricBytes,
+      `expected a FabricBytes, got: ${decoded.sig}`,
+    );
+    assertEquals(decoded.sig.slice(), bytes);
+  });
+
+  it("leaves plain JSON values unchanged", () => {
+    const wire = encodeMemoryBoundary({ a: [1, "two", { three: 3 }, true] });
+    assertEquals(decodeMemoryBoundary(wire), {
+      a: [1, "two", { three: 3 }, true],
+    });
   });
 });
