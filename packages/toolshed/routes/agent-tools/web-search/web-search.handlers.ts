@@ -5,8 +5,126 @@ import { sha256 } from "@/lib/sha2.ts";
 import { ensureDir } from "@std/fs";
 
 const CACHE_DIR = `${env.CACHE_DIR}/agent-tools-web-search`;
-const JINA_SEARCH_ENDPOINT = "https://s.jina.ai/";
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+// Web search is backed by Google Search grounding via the gateway (Gemini),
+// replacing the former Jina Search dependency. We send the query with the
+// `google_search` tool and read the REAL search hits from the response's
+// `grounding_metadata.groundingChunks` — these are actual results, not the
+// model's prose (which hallucinates URLs). Each chunk's `web.uri` is a Google
+// redirect that we follow to the real destination (which also validates it).
+const GROUNDED_SEARCH_MODEL = "gemini-3.5-flash";
+const RESOLVE_UA =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146 Safari/537.36";
+
+// Review/directory/aggregator/social brands to skip so we prefer a business's
+// OWN site. Grounding sometimes ranks these above the official homepage; when a
+// chunk resolves to one, we fall through to the next chunk. Matched by domain
+// *label* (any TLD), so `yellowpages.do`, `yellowpages.ca`, etc. all count.
+const AGGREGATOR_BRANDS: ReadonlySet<string> = new Set([
+  "yelp",
+  "tripadvisor",
+  "opentable",
+  "threebestrated",
+  "checkle",
+  "wanderboat",
+  "placejoys",
+  "restaurantji",
+  "yellowpages",
+  "mapquest",
+  "grubhub",
+  "doordash",
+  "ubereats",
+  "postmates",
+  "seamless",
+  "zomato",
+  "allmenus",
+  "menupix",
+  "foursquare",
+  "facebook",
+  "instagram",
+  "nextdoor",
+  "reddit",
+  "wikipedia",
+  "google",
+  "bing",
+  "yahoo",
+  "mapcarta",
+  "chamberofcommerce",
+  "loopnet",
+  "bbb",
+  "trustpilot",
+  "interstatelogos",
+  "menuism",
+  "menupages",
+  "zmenu",
+  "sirved",
+  "yellowbook",
+  "manta",
+  "citysearch",
+  "ezlocal",
+  "hotfrog",
+  "n49",
+  "twitter",
+  "linkedin",
+  "pinterest",
+  "tiktok",
+  "youtube",
+]);
+
+function isAggregatorHost(host: string): boolean {
+  // Any label of the host matching a known aggregator brand disqualifies it
+  // (e.g. "www.yellowpages.do" → label "yellowpages").
+  return host.toLowerCase().split(".").some((label) =>
+    AGGREGATOR_BRANDS.has(label)
+  );
+}
+
+interface GroundingChunk {
+  web?: { uri?: string; title?: string };
+}
+
+/** Pull groundingChunks out of a gateway chat-completion response. */
+function extractGroundingChunks(completion: unknown): GroundingChunk[] {
+  const gm = (completion as {
+    choices?: Array<{ message?: { grounding_metadata?: unknown } }>;
+  })?.choices?.[0]?.message?.grounding_metadata as
+    | { groundingChunks?: unknown }
+    | undefined;
+  const chunks = gm?.groundingChunks;
+  return Array.isArray(chunks) ? (chunks as GroundingChunk[]) : [];
+}
+
+/**
+ * Follow a Google grounding redirect to its real destination, returning the
+ * final URL only if it resolves to a reachable, non-Google http(s) page. This
+ * both de-references the redirect AND validates the candidate in one request.
+ */
+async function resolveGroundingUrl(
+  redirectUrl: string,
+): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(redirectUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "User-Agent": RESOLVE_UA },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    // Drain the body so the connection can be reused/closed promptly.
+    await res.body?.cancel();
+    if (res.status >= 400) return null;
+    const finalUrl = res.url || redirectUrl;
+    const host = new URL(finalUrl).host.toLowerCase();
+    if (host.includes("vertexaisearch")) return null; // never left the redirect
+    if (isAggregatorHost(host)) return null; // prefer the business's own site
+    return finalUrl;
+  } catch {
+    return null;
+  }
+}
 
 async function isValidCache(path: string): Promise<boolean> {
   try {
@@ -62,71 +180,107 @@ export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
   }
 
   try {
-    // Build the search URL with query parameters
-    const searchUrl = new URL(JINA_SEARCH_ENDPOINT);
-    searchUrl.searchParams.set("q", query);
+    // Grounded search: send the query to Gemini with the `google_search` tool
+    // and read the REAL search hits from `grounding_metadata.groundingChunks`
+    // (NOT the model's prose, which hallucinates URLs). Each chunk's `web.uri`
+    // is a Google redirect we follow to the real destination — which also
+    // validates reachability.
+    const gatewayUrl = env.CFTS_AI_GATEWAY_URL.replace(/\/+$/, "");
 
-    // Build headers based on whether we want content or not
-    const headers: Record<string, string> = {
-      "Accept": "application/json",
-      "Authorization": `Bearer ${env.JINA_API_KEY}`,
-    };
-
-    if (include_content) {
-      headers["X-Engine"] = "direct"; // Fetch content from search results
-    } else {
-      headers["X-Respond-With"] = "no-content"; // Only search results, no content
-    }
-
-    const response = await fetch(searchUrl.toString(), {
-      method: "GET",
-      headers,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const statusCode = response.status;
-      logger.error(
-        {
-          status: statusCode,
-          error: errorText,
-          headers: Object.fromEntries(response.headers.entries()),
+    const runGroundedSearch = async (): Promise<{
+      chunks: GroundingChunk[];
+      finishReason: string | undefined;
+    }> => {
+      const res = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer gateway-internal",
         },
-        "Jina Search API request failed",
-      );
-      return c.json(
-        { error: `Search failed: ${errorText}` },
-        500,
+        body: JSON.stringify({
+          model: GROUNDED_SEARCH_MODEL,
+          messages: [{ role: "user", content: query }],
+          tools: [{ type: "google_search", google_search: {} }],
+          stream: false,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`gateway ${res.status}: ${await res.text()}`);
+      }
+      const json = await res.json();
+      return {
+        chunks: extractGroundingChunks(json),
+        finishReason: json?.choices?.[0]?.finish_reason as string | undefined,
+      };
+    };
+
+    // A search occasionally trips Vertex's content filter (no grounding).
+    // Retry once before giving up.
+    let chunks: GroundingChunk[] = [];
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      let finishReason: string | undefined;
+      try {
+        const r = await runGroundedSearch();
+        chunks = r.chunks;
+        finishReason = r.finishReason;
+      } catch (e) {
+        logger.error(
+          { attempt, err: String(e) },
+          "Grounded search call failed",
+        );
+        if (attempt === 2) return c.json({ error: "Search failed" }, 500);
+        continue;
+      }
+      if (chunks.length > 0) break;
+      logger.warn(
+        { attempt, finishReason },
+        "No grounding chunks returned; retrying",
       );
     }
 
-    const result = await response.json();
-    logger.info({ result }, "Search completed successfully");
+    // Resolve each chunk's redirect to its real URL (dedup by host, validate),
+    // stopping once we have max_results reachable sources.
+    const seenHosts = new Set<string>();
+    const results: Array<
+      { title: string; url: string; description: string; content: string }
+    > = [];
+    for (const chunk of chunks) {
+      if (results.length >= max_results) break;
+      const redirect = chunk?.web?.uri;
+      if (typeof redirect !== "string" || !redirect) continue;
+      const url = await resolveGroundingUrl(redirect);
+      if (!url) continue;
+      const host = new URL(url).host.toLowerCase();
+      if (seenHosts.has(host)) continue;
+      seenHosts.add(host);
+      const title =
+        typeof chunk.web?.title === "string" && chunk.web.title.trim()
+          ? chunk.web.title.trim()
+          : host;
+      results.push({ title, url, description: "", content: "" });
+    }
 
-    // Transform the Jina response to our API schema, preserving more fields
     const transformedResult = {
-      code: result.code,
-      status: result.status,
       query,
-      results: (result.data || []).slice(0, max_results).map((item: any) => ({
-        title: item.title || "Untitled",
-        url: item.url,
-        description: item.description || item.content?.substring(0, 200) || "",
-        content: item.content || "",
-        date: item.date,
-        usage: item.usage,
-      })),
-      total_results: result.data?.length || 0,
-      meta: result.meta,
+      results,
+      total_results: results.length,
     };
 
-    // Save to cache
-    await ensureDir(CACHE_DIR);
-    await Deno.writeFile(
-      cachePath,
-      new TextEncoder().encode(JSON.stringify(transformedResult)),
+    logger.info(
+      { query, chunks: chunks.length, count: results.length },
+      "Grounded web search completed",
     );
-    logger.info({ promptSha }, "Search results cached");
+
+    // Cache only non-empty result sets, so a transient empty/filtered
+    // generation doesn't pin zero results for the whole TTL.
+    if (results.length > 0) {
+      await ensureDir(CACHE_DIR);
+      await Deno.writeFile(
+        cachePath,
+        new TextEncoder().encode(JSON.stringify(transformedResult)),
+      );
+      logger.info({ promptSha }, "Search results cached");
+    }
 
     return c.json(transformedResult, {
       headers: {

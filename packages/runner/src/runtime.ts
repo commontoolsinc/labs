@@ -408,11 +408,15 @@ export class Runtime {
     this.navigateCallback = options.navigateCallback;
     this.pieceCreatedCallback = options.pieceCreatedCallback;
 
-    // Handle pattern environment configuration
-    if (options.patternEnvironment) {
-      // This is still a singleton. TODO(seefeld): Fix this.
-      setPatternEnvironment(options.patternEnvironment);
-    }
+    // Handle pattern environment configuration. Default the pattern-visible
+    // `apiUrl` to this runtime's configured `apiUrl`, so server-side patterns
+    // (e.g. handlers doing `fetch`) reach THIS toolshed rather than the
+    // hardcoded `localhost:<ports.toolshed>` fallback in builder/env.ts — which
+    // is wrong for any toolshed not on the default port (offset dev, etc.).
+    // This is still a singleton. TODO(seefeld): Fix this.
+    setPatternEnvironment(
+      options.patternEnvironment ?? { apiUrl: this.apiUrl },
+    );
 
     // Fire-and-forget startup eviction for compilation cache
     if (this.cachedCompiler) {

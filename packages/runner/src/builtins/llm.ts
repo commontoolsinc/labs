@@ -3,8 +3,10 @@ import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
   extractTextFromLLMResponse,
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   LLMClient,
   LLMGenerateObjectRequest,
+  type LLMNativeModelToolId,
   LLMRequest,
   LLMResponse,
 } from "@commonfabric/llm";
@@ -462,8 +464,19 @@ export function llm(
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
-    const { system, messages, stop, maxTokens, model } = inputs.withTx(tx)
-      .get();
+    const {
+      system,
+      messages,
+      stop,
+      maxTokens,
+      model,
+      search,
+      nativeModelToolIds,
+    } = inputs.withTx(tx).get();
+    const effectiveNativeModelToolIds = resolveNativeModelToolIds(
+      search,
+      nativeModelToolIds,
+    );
 
     // Build context documentation from context cells and append to system prompt
     const contextDocs = buildContextDocumentation(
@@ -512,6 +525,9 @@ export function llm(
         context: "piece",
       },
       cache: true,
+      ...(effectiveNativeModelToolIds
+        ? { nativeModelToolIds: effectiveNativeModelToolIds }
+        : {}),
       // tools will be added below if present
     };
 
@@ -603,6 +619,7 @@ export function llm(
                   if (hash !== previousCallHash) return;
 
                   await runtime.idle();
+                  const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
                     resultCell.key("pending").withTx(tx).set(false);
@@ -612,6 +629,9 @@ export function llm(
                       extractTextFromLLMResponse(llmResult),
                     );
                     resultCell.key("requestHash").withTx(tx).set(hash);
+                    resultCell.key("groundingSources").withTx(tx).set(
+                      groundingSources,
+                    );
                   });
                 },
               });
@@ -669,6 +689,61 @@ export function llm(
  *   As individual docs, representing `pending` state, final `result` and
  *   incrementally updating `partial` result.
  */
+/**
+ * Resolve the effective native-model-tool ids for a request from the friendly
+ * `search` flag (shorthand for Google Search grounding) plus any explicit
+ * `nativeModelToolIds`. Returns undefined when none are requested.
+ */
+function resolveNativeModelToolIds(
+  search: unknown,
+  nativeModelToolIds: unknown,
+): readonly LLMNativeModelToolId[] | undefined {
+  const ids: string[] = [];
+  if (search === true) ids.push(GOOGLE_SEARCH_NATIVE_MODEL_TOOL);
+  if (Array.isArray(nativeModelToolIds)) {
+    for (const id of nativeModelToolIds) {
+      if (typeof id === "string" && !ids.includes(id)) ids.push(id);
+    }
+  }
+  return ids.length > 0 ? (ids as readonly LLMNativeModelToolId[]) : undefined;
+}
+
+/**
+ * Flatten grounding/source URLs out of an LLM response's
+ * `nativeModelToolResults[].sources` (e.g. from `google_search`) into the
+ * compact `{ url, title, snippet }[]` shape surfaced on builtin result state.
+ */
+function extractGroundingSources(
+  llmResult: LLMResponse,
+): Array<{ url?: string; title?: string; snippet?: string }> | undefined {
+  const results =
+    (llmResult as { nativeModelToolResults?: readonly { sources?: unknown }[] })
+      .nativeModelToolResults;
+  if (!Array.isArray(results) || results.length === 0) return undefined;
+  const out: Array<{ url?: string; title?: string; snippet?: string }> = [];
+  const seen = new Set<string>();
+  for (const r of results) {
+    const sources = r?.sources;
+    if (!Array.isArray(sources)) continue;
+    for (const s of sources) {
+      if (!s || typeof s !== "object") continue;
+      const rec = s as Record<string, unknown>;
+      const url = typeof rec.url === "string" ? rec.url : undefined;
+      const title = typeof rec.title === "string" ? rec.title : undefined;
+      const snippet = typeof rec.snippet === "string"
+        ? rec.snippet
+        : typeof rec.description === "string"
+        ? rec.description
+        : undefined;
+      const key = url ?? title ?? JSON.stringify(rec);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (url || title || snippet) out.push({ url, title, snippet });
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 export function generateText(
   inputsCell: Cell<BuiltInGenerateTextParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
@@ -687,8 +762,19 @@ export function generateText(
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
-    const { system, prompt, messages, model, maxTokens } = inputs.withTx(tx)
-      .get();
+    const {
+      system,
+      prompt,
+      messages,
+      model,
+      maxTokens,
+      search,
+      nativeModelToolIds,
+    } = inputs.withTx(tx).get();
+    const effectiveNativeModelToolIds = resolveNativeModelToolIds(
+      search,
+      nativeModelToolIds,
+    );
 
     // Build context documentation from context cells and append to system prompt
     const contextDocs = buildContextDocumentation(
@@ -748,6 +834,9 @@ export function generateText(
         context: "piece",
       },
       cache: true,
+      ...(effectiveNativeModelToolIds
+        ? { nativeModelToolIds: effectiveNativeModelToolIds }
+        : {}),
       // tools will be added below if present
     };
 
@@ -847,6 +936,7 @@ export function generateText(
                   await runtime.idle();
 
                   const textResult = extractTextFromLLMResponse(llmResult);
+                  const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
                     resultCell.key("pending").withTx(tx).set(false);
@@ -854,6 +944,9 @@ export function generateText(
                     resultCell.key("error").withTx(tx).set(undefined);
                     resultCell.key("partial").withTx(tx).set(textResult);
                     resultCell.key("requestHash").withTx(tx).set(hash);
+                    resultCell.key("groundingSources").withTx(tx).set(
+                      groundingSources,
+                    );
                   });
                 },
               });
@@ -940,7 +1033,13 @@ export function generateObject<T extends Record<string, unknown>>(
       tools,
       metadata,
       schemaSanitizePromptInjection,
+      search,
+      nativeModelToolIds,
     } = inputs.withTx(tx).get() ?? {};
+    const effectiveNativeModelToolIds = resolveNativeModelToolIds(
+      search,
+      nativeModelToolIds,
+    );
     const context = inputs.key("context").withTx(tx).get() as
       | Record<string, unknown>
       | undefined;
@@ -1064,6 +1163,9 @@ export function generateObject<T extends Record<string, unknown>>(
           context: "piece",
         },
         cache: cache ?? true,
+        ...(effectiveNativeModelToolIds
+          ? { nativeModelToolIds: effectiveNativeModelToolIds }
+          : {}),
       };
 
       const toolsCell = inputs.key("tools").asSchema({
@@ -1411,6 +1513,9 @@ export function generateObject<T extends Record<string, unknown>>(
           context: "piece",
         },
         cache: cache ?? true,
+        ...(effectiveNativeModelToolIds
+          ? { nativeModelToolIds: effectiveNativeModelToolIds }
+          : {}),
       };
 
       // Always set system prompt with context documentation

@@ -30,6 +30,7 @@ import {
   computed,
   Default,
   fetchData,
+  getPatternEnvironment,
   handler,
   NAME,
   nonPrivateRandom,
@@ -53,6 +54,11 @@ export interface Option {
   id: string;
   title: string;
   addedByName: string;
+  // Homepage link enrichment, persisted so we don't re-run the grounded web
+  // search on every load. `homePageUrl` is the auto-found official site; a host
+  // can refresh it. `homePageUrlOverride` is a human-supplied link that wins.
+  homePageUrl?: string;
+  homePageUrlOverride?: string;
 }
 
 // Cuisine illustration for each option, generated on the fly via the
@@ -156,6 +162,8 @@ export interface RemoveHistoryEntryEvent {
 export type ClearHistoryEvent = Record<PropertyKey, never>;
 
 type QuestionCell = Writable<string | Default<"Where should we eat?">>;
+type CityCell = Writable<string | Default<"Berkeley, CA">>;
+type LinkTargetCell = Writable<string | null>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
 type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
@@ -320,6 +328,163 @@ const addOption = handler<AddOptionEvent, {
     addedByName: me,
   });
   optionDraft.set("");
+});
+
+export interface SetCityEvent {
+  city?: string;
+}
+
+// Host sets the city the poll is happening in. This scopes the menu-link web
+// search to local restaurants. Gate: host only.
+const setCity = handler<SetCityEvent, {
+  city: CityCell;
+  myName: NameCell;
+  adminName: NameCell;
+  cityDraft: NameCell;
+}>(({ city: cityArg }, { city, myName, adminName, cityDraft }) => {
+  const me = trimmedName(myName.get());
+  const admin = trimmedName(adminName.get());
+  if (!me || me !== admin) return;
+  const next = trimmedName(cityArg ?? cityDraft.get());
+  if (!next) return;
+  city.set(next);
+  cityDraft.set("");
+});
+
+// Ask the LLM whether a candidate URL really is this restaurant's official
+// homepage — a cheap sanity check that catches wrong-but-real results the
+// domain denylist misses (e.g. a similarly-named different restaurant, or a
+// stray directory). Fail-open: if the verifier itself errors, don't drop the
+// candidate.
+async function verifyHomePage(
+  base: URL,
+  url: string,
+  title: string,
+  city: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(new URL("/api/ai/llm", base).toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemini-3.5-flash",
+        messages: [{
+          role: "user",
+          content:
+            `Is ${url} the official website of the restaurant "${title}" in ` +
+            `${city}? Judge mainly by whether the domain name belongs to that ` +
+            `restaurant (not a directory, review, or aggregator site). Answer ` +
+            `with only the word "yes" or "no".`,
+        }],
+        stream: false,
+        cache: true,
+      }),
+    });
+    if (!res.ok) return true;
+    const data = await res.json();
+    const ans = String(
+      data?.content ?? data?.choices?.[0]?.message?.content ?? "",
+    ).trim().toLowerCase();
+    return ans.startsWith("yes");
+  } catch {
+    return true;
+  }
+}
+
+// Reduce a resolved result URL to the site's homepage (root). Grounding often
+// lands on a deep/junk path (e.g. `/Account/SignUp//`, `/accessibility`) even
+// when the domain is right; we only want the homepage. We don't re-validate the
+// root server-side — the web-search route already confirmed the domain is
+// reachable, and bare-root fetches from the server are unreliable (bot blocks)
+// even for sites that load fine in a browser. The clean root link is what we
+// store; the browser follows any root → landing-page redirect itself.
+function toHomepage(url: string): string {
+  try {
+    return new URL(url).origin + "/";
+  } catch {
+    return url;
+  }
+}
+
+export type EnrichHomePagesEvent = Record<PropertyKey, never>;
+
+// Host-only: (re-)run the grounded web search for every option and persist the
+// resulting official homepage URL onto each option, so loads don't re-run the
+// LLM. Async handler — fetches the web-search route (resolved against the
+// runtime's apiUrl) per option and writes the result back. Overwrites existing
+// `homePageUrl` (this doubles as "refresh"); never touches a user's override.
+const enrichHomePages = handler<EnrichHomePagesEvent, {
+  options: OptionsCell;
+  city: CityCell;
+  myName: NameCell;
+  adminName: NameCell;
+}>(async (_evt, { options, city, myName, adminName }) => {
+  const me = trimmedName(myName.get());
+  const admin = trimmedName(adminName.get());
+  if (!me || me !== admin) return;
+  const cityVal = trimmedName(city.get()) || "Berkeley, CA";
+  const base = getPatternEnvironment().apiUrl;
+  for (const opt of options.get()) {
+    try {
+      const target = new URL("/api/agent-tools/web-search", base).toString();
+      const res = await fetch(target, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query:
+            `official website of the restaurant "${opt.title}" in ${cityVal}`,
+          max_results: 4,
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const candidates = Array.isArray(data?.results) ? data.results : [];
+      // Take the first candidate the LLM confirms is the restaurant's own site.
+      let chosen = "";
+      for (const cand of candidates) {
+        const url = cand?.url;
+        if (typeof url !== "string" || !url) continue;
+        // Normalize to the validated homepage root before confirming.
+        const home = toHomepage(url);
+        if (await verifyHomePage(base, home, opt.title, cityVal)) {
+          chosen = home;
+          break;
+        }
+      }
+      if (!chosen) continue;
+      // Re-find by id — the array may have shifted across awaits.
+      const cur = options.get();
+      const idx = cur.findIndex((o) => o.id === opt.id);
+      if (idx >= 0) options.key(idx).key("homePageUrl").set(chosen);
+    } catch (_e) {
+      // best-effort; leave this option's link unchanged on failure
+    }
+  }
+});
+
+export interface SetOptionUrlEvent {
+  optionId: string;
+  url?: string;
+}
+
+// Any joined user supplies/overrides the homepage link for an option. An empty
+// value clears the override (reverting to the auto-enriched value). The
+// override always wins over the auto-found URL.
+const setOptionUrl = handler<SetOptionUrlEvent, {
+  options: OptionsCell;
+  myName: NameCell;
+  linkDraft: NameCell;
+  linkEditTarget: LinkTargetCell;
+}>(({ optionId, url }, { options, myName, linkDraft, linkEditTarget }) => {
+  const me = trimmedName(myName.get());
+  if (!me) return;
+  const cur = options.get();
+  const idx = cur.findIndex((o) => o.id === optionId);
+  if (idx < 0) return;
+  const next = trimmedName(url ?? linkDraft.get());
+  options.key(idx).key("homePageUrlOverride").set(next);
+  linkDraft.set("");
+  linkEditTarget.set(null);
 });
 
 const removeOption = handler<RemoveOptionEvent, {
@@ -500,6 +665,9 @@ const myVoteFor = (
 
 export interface CozyPollInput {
   question?: PerSpace<string | Default<"Where should we eat?">>;
+  // City the poll is happening in — scopes the menu-link web search so it
+  // finds the right local restaurants. Defaults to Berkeley, CA.
+  city?: PerSpace<string | Default<"Berkeley, CA">>;
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
@@ -514,6 +682,7 @@ export interface CozyPollOutput {
   [NAME]: string;
   [UI]: VNode;
   question: string;
+  city: string;
   options: readonly Option[];
   votes: readonly Vote[];
   users: readonly User[];
@@ -536,12 +705,16 @@ export interface CozyPollOutput {
   logVisit: Stream<LogVisitEvent>;
   removeHistoryEntry: Stream<RemoveHistoryEntryEvent>;
   clearHistory: Stream<ClearHistoryEvent>;
+  setCity: Stream<SetCityEvent>;
+  enrichHomePages: Stream<EnrichHomePagesEvent>;
+  setOptionUrl: Stream<SetOptionUrlEvent>;
 }
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
     {
       question,
+      city,
       options,
       votes,
       users,
@@ -555,6 +728,12 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // introduced by parking-coordinator (PR #3610).
     const joinName = Writable.perSession.of<string>("");
     const optionDraft = Writable.perSession.of<string>("");
+    // Host's draft for the poll's city (scopes the menu web search).
+    const cityDraft = Writable.perSession.of<string>("");
+    // Which option's homepage link is being edited (null = none), plus the
+    // in-progress URL text. Per-session, like the other form drafts.
+    const linkEditTarget = Writable.perSession.of<string | null>(null);
+    const linkDraft = Writable.perSession.of<string>("");
     // Host's backdate field for "we went here" — a "YYYY-MM-DD" draft, blank
     // means today. Per-session like the other form drafts.
     const visitDate = Writable.perSession.of<string>("");
@@ -598,6 +777,19 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       adminName,
     });
     const boundClearHistory = clearHistory({ history, myName, adminName });
+    const boundSetCity = setCity({ city, myName, adminName, cityDraft });
+    const boundEnrichHomePages = enrichHomePages({
+      options,
+      city,
+      myName,
+      adminName,
+    });
+    const boundSetOptionUrl = setOptionUrl({
+      options,
+      myName,
+      linkDraft,
+      linkEditTarget,
+    });
 
     const userCount = users.length;
     const optionCount = options.length;
@@ -616,6 +808,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // `(n ?? "").trim is not a function`, silently nulling out each option's
     // `myVote` (so nothing dimmed). Passing this resolved value down avoids it.
     const me = trimmedName(myName);
+    // Resolve the poll's city ONCE here (same reason as `me`): the raw ref
+    // doesn't resolve inside the per-option `options.map` lift where the menu
+    // search query is built. Blank → Berkeley, CA.
+    const cityLabel = trimmedName(city) || "Berkeley, CA";
     const isJoined = trimmedName(myName) !== "";
     const isAdmin = trimmedName(myName) !== "" &&
       trimmedName(myName) === trimmedName(adminName);
@@ -670,6 +866,15 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   >
                     {question}
                   </h2>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      marginTop: "2px",
+                    }}
+                  >
+                    📍 {cityLabel}
+                  </div>
                   {computed(() => {
                     const u = userCount ?? 0;
                     const o = optionCount ?? 0;
@@ -1120,6 +1325,33 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       ?.image_url?.url;
                     return typeof u === "string" && u.length > 0 ? u : "";
                   });
+                  // Persisted homepage-link enrichment — NO per-load LLM/fetch.
+                  // A host runs the grounded search once (the "refresh" button)
+                  // and we store the official-site URL on the option. The link
+                  // shown resolves by priority: user override > stored auto URL >
+                  // a guaranteed-working Google Maps fallback (so there's always
+                  // a working link, even before enrichment runs).
+                  const homeUrl = computed(() => {
+                    const o = trimmedName(option.homePageUrlOverride);
+                    if (o) return o;
+                    const s = trimmedName(option.homePageUrl);
+                    if (s) return s;
+                    return `https://www.google.com/maps/search/?api=1&query=${
+                      encodeURIComponent(`${option.title} ${cityLabel}`)
+                    }`;
+                  });
+                  const isEditingLink = computed(() =>
+                    linkEditTarget.get() === option.id
+                  );
+                  const homeLabel = computed(() => {
+                    if (trimmedName(option.homePageUrlOverride)) {
+                      return "🔗 Website (edited)";
+                    }
+                    if (
+                      !trimmedName(option.homePageUrl)
+                    ) return "🔎 Find on Maps";
+                    return "🔗 Website";
+                  });
                   // The castVote handler toggles per-color: clicking your
                   // active color clears, a different color updates, none
                   // pushes. JSX dispatches one event per click; the handler
@@ -1204,6 +1436,103 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         >
                           {optionTitle}
                         </div>
+                        {
+                          /* Homepage link — persisted enrichment (no per-load
+                            LLM). Priority: user override > stored official site
+                            > Google Maps fallback, so there's always a working
+                            link. A joined viewer can edit/override it. */
+                        }
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "baseline",
+                            gap: "8px",
+                            marginTop: "2px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <a
+                            href={homeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              fontSize: "11px",
+                              color: "#2f6f4e",
+                              textDecoration: "underline",
+                            }}
+                          >
+                            {homeLabel}
+                          </a>
+                          {isJoined
+                            ? (
+                              <button
+                                type="button"
+                                aria-label="Edit homepage link"
+                                title="Edit link"
+                                style={{
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "#9ca3af",
+                                  cursor: "pointer",
+                                  fontSize: "11px",
+                                  padding: 0,
+                                }}
+                                onClick={() => linkEditTarget.set(option.id)}
+                              >
+                                ✎ edit
+                              </button>
+                            )
+                            : null}
+                        </div>
+                        {isEditingLink
+                          ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "6px",
+                                alignItems: "center",
+                                marginTop: "4px",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <cf-input
+                                $value={linkDraft}
+                                placeholder="Paste a homepage URL…"
+                                aria-label="Homepage URL"
+                                timing-strategy="immediate"
+                                style="flex:1; min-width:160px;"
+                              />
+                              <cf-button
+                                size="sm"
+                                variant="primary"
+                                onClick={() =>
+                                  boundSetOptionUrl.send({
+                                    optionId: option.id,
+                                  })}
+                              >
+                                Save
+                              </cf-button>
+                              <cf-button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  boundSetOptionUrl.send({
+                                    optionId: option.id,
+                                    url: "",
+                                  })}
+                              >
+                                Clear
+                              </cf-button>
+                              <cf-button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => linkEditTarget.set(null)}
+                              >
+                                Cancel
+                              </cf-button>
+                            </div>
+                          )
+                          : null}
                         <div
                           style={{
                             fontSize: "11px",
@@ -1555,6 +1884,30 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           display: "flex",
                           gap: "8px",
                           alignItems: "center",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        <cf-input
+                          $value={cityDraft}
+                          placeholder={`City for menu search (now: ${cityLabel})`}
+                          aria-label="Poll city"
+                          timing-strategy="immediate"
+                          style="flex:1"
+                        />
+                        <cf-button onClick={boundSetCity}>Set city</cf-button>
+                        <cf-button
+                          variant="secondary"
+                          onClick={boundEnrichHomePages}
+                          title="Look up each option's official homepage and store it"
+                        >
+                          🔄 Refresh homepage links
+                        </cf-button>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          alignItems: "center",
                         }}
                       >
                         <cf-input
@@ -1628,6 +1981,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
         </cf-theme>
       ),
       question,
+      city: cityLabel,
       options,
       votes,
       users,
@@ -1650,6 +2004,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       logVisit: boundLogVisit,
       removeHistoryEntry: boundRemoveHistoryEntry,
       clearHistory: boundClearHistory,
+      setCity: boundSetCity,
+      enrichHomePages: boundEnrichHomePages,
+      setOptionUrl: boundSetOptionUrl,
     };
   },
 );
