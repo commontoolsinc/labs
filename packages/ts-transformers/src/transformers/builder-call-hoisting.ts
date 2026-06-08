@@ -418,7 +418,7 @@ function unwrapDefaultExportExpression(expr: ts.Expression): ts.Expression {
   let current = expr;
   while (
     ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
-    ts.isSatisfiesExpression(current)
+    ts.isSatisfiesExpression(current) || ts.isTypeAssertionExpression(current)
   ) {
     current = current.expression;
   }
