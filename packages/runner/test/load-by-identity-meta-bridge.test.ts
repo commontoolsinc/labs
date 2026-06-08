@@ -110,7 +110,7 @@ describe("load by identity — pattern-metadata bridge", () => {
       const tx1 = rt1.edit();
       const pm1 = rt1.patternManager;
       const cold = await pm1.compilePattern(PROGRAM, { space, tx: tx1 });
-      const entryIdentity = pm1.getPatternEntryRef(cold)?.identity;
+      const entryIdentity = pm1.getArtifactEntryRef(cold)?.identity;
       expect(typeof entryIdentity).toBe("string");
       await tx1.commit();
       await pm1.flushCompileCacheWrites();
@@ -176,8 +176,8 @@ describe("load by identity — pattern-metadata bridge", () => {
       const pm1 = rt1.patternManager;
       const cold = await pm1.compilePattern(NAMED, { space, tx: tx1 });
       // The authored compile records the real export symbol.
-      expect(pm1.getPatternEntryRef(cold)?.symbol).toBe("myPattern");
-      const entryIdentity = pm1.getPatternEntryRef(cold)!.identity;
+      expect(pm1.getArtifactEntryRef(cold)?.symbol).toBe("myPattern");
+      const entryIdentity = pm1.getArtifactEntryRef(cold)!.identity;
       await tx1.commit();
       await pm1.flushCompileCacheWrites();
       await rt1.storageManager.synced();
@@ -191,7 +191,7 @@ describe("load by identity — pattern-metadata bridge", () => {
         space,
       );
       expect(typeof reloaded).toBe("function");
-      expect(pm2.getPatternEntryRef(reloaded!)).toEqual({
+      expect(pm2.getArtifactEntryRef(reloaded!)).toEqual({
         identity: entryIdentity,
         symbol: "myPattern",
       });
@@ -220,7 +220,7 @@ describe("load by identity — pattern-metadata bridge", () => {
     // meta and the runtime can reload it by identity. The ref is supplied by
     // `registerEvaluatedModules` (which tags every trusted sub-pattern export in
     // the per-load WeakMap, keyed by the exact value) and resolved by
-    // `getPatternEntryRef`'s exact-object-first lookup. This asserts the
+    // `getArtifactEntryRef`'s exact-object-first lookup. This asserts the
     // user-facing invariant — that the sub-piece's recorded identity is the
     // CHILD module's, distinct from the parent's — not any single mechanism.
     const childFile = {
@@ -266,7 +266,7 @@ describe("load by identity — pattern-metadata bridge", () => {
         space,
         tx: txc,
       });
-      const childRef = pm.getPatternEntryRef(childStandalone);
+      const childRef = pm.getArtifactEntryRef(childStandalone);
       txc.abort?.("child identity learned");
       expect(childRef?.symbol).toBe("default");
       const childIdentity = childRef!.identity;
@@ -274,7 +274,7 @@ describe("load by identity — pattern-metadata bridge", () => {
       // Compile + run the parent that composes the child.
       const tx = rt.edit();
       const parent = await pm.compilePattern(PARENT, { space, tx });
-      const parentRef = pm.getPatternEntryRef(parent);
+      const parentRef = pm.getArtifactEntryRef(parent);
       expect(parentRef?.identity).toBeTruthy();
       // Distinct per-module identities — the child is not the parent.
       expect(parentRef!.identity).not.toBe(childIdentity);

@@ -60,7 +60,7 @@ describe("resume a result cell by {identity, symbol}", () => {
       const pm1 = rt1.patternManager;
       const compiled = await pm1.compilePattern(PROGRAM, { space, tx: tx1 });
       // The cold ESM compile learned the entry identity.
-      expect(pm1.getPatternEntryRef(compiled)?.identity).toBeTruthy();
+      expect(pm1.getArtifactEntryRef(compiled)?.identity).toBeTruthy();
 
       const resultCell1 = rt1.getCell<{ result: number }>(
         space,

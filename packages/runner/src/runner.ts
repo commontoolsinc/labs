@@ -906,7 +906,7 @@ export class Runner {
     // time); we never recompute it from `pattern`'s program here, since a
     // source-free reloaded pattern only has a stub program (mainExport
     // "default"), which would clobber a non-"default" export name.
-    const entryRef = this.runtime.patternManager.getPatternEntryRef(pattern);
+    const entryRef = this.runtime.patternManager.getArtifactEntryRef(pattern);
     if (entryRef) {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
         identity: entryRef.identity,

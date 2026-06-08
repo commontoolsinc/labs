@@ -22,6 +22,7 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import { moduleToJSON } from "./json-utils.ts";
+import { brandTrustedBuilderArtifact } from "./pattern-metadata.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -148,6 +149,13 @@ export function createNodeFactory<T = any, R = any>(
   }, module) as ModuleFactory<T, R>;
   factory.asScope = (scope: CellScope) =>
     createNodeFactory({ ...module, defaultScope: scope });
+  // Provenance brand: every node factory (lift / handler / byRef / the list-op
+  // factories) is a trusted builder artifact, so a hoisted one registered via
+  // `__cfReg` may receive a content-addressed `{ identity, symbol }` reference.
+  // Only the trusted builders call `createNodeFactory`, so a `__cf_data`-forged
+  // look-alike never acquires the brand. (Patterns brand separately in
+  // builder/pattern.ts.)
+  brandTrustedBuilderArtifact(factory);
   return factory;
 }
 

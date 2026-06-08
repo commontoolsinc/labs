@@ -421,8 +421,23 @@ export class Engine extends EventTarget implements Harness {
         options.precompiledModules === undefined &&
         options.precompiledModulesFor !== undefined;
       if (!trustBodies) {
+        // Verify, and record which modules the verifier approved for hoist
+        // registration — only those get the real `__cfReg` registrar (the rest
+        // get a throwing one, so a smuggled call fails closed).
         for (const [specifier, body] of graph.compiledBodies) {
-          verifyCompiledModuleBody(body, specifier);
+          const { hasHoistRegistration } = verifyCompiledModuleBody(
+            body,
+            specifier,
+          );
+          if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+        }
+      } else {
+        // Trusted integrity-gated bytes: SES verification — and its registration
+        // approval — already ran when the cache entry was sealed, so grant the
+        // real registrar to every module (one without a `__cfReg` call never
+        // invokes it).
+        for (const specifier of graph.compiledBodies.keys()) {
+          graph.registrationApproved.add(specifier);
         }
       }
 
@@ -793,7 +808,16 @@ export class Engine extends EventTarget implements Harness {
       this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
-      return { main, exportMap, loadId, exportsByIdentity };
+      // `graph.registrationSink` was populated by each module's `__cfReg` during
+      // the `importNow` loop above (committed only for modules that evaluated
+      // cleanly).
+      return {
+        main,
+        exportMap,
+        loadId,
+        exportsByIdentity,
+        registrationsByIdentity: graph.registrationSink,
+      };
     } finally {
       logger.timeEnd("evaluateRecordGraph");
     }
@@ -850,8 +874,20 @@ export class Engine extends EventTarget implements Harness {
     // `docs/specs/module-loading.md`, "the persistent compilation cache"). The
     // structural graph verify below always runs.
     if (options.trustedBodies !== true) {
+      // Verify, and record which modules the verifier approved for hoist
+      // registration — only those get the real `__cfReg` registrar.
       for (const [specifier, body] of graph.compiledBodies) {
-        verifyCompiledModuleBody(body, specifier);
+        const { hasHoistRegistration } = verifyCompiledModuleBody(
+          body,
+          specifier,
+        );
+        if (hasHoistRegistration) graph.registrationApproved.add(specifier);
+      }
+    } else {
+      // Trusted integrity-gated bytes: registration approval was sealed at
+      // first compile; grant the real registrar to every module.
+      for (const specifier of graph.compiledBodies.keys()) {
+        graph.registrationApproved.add(specifier);
       }
     }
     const mainSpecifier = `cf:module/${entryIdentity}`;

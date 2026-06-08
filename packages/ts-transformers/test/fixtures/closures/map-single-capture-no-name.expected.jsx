@@ -178,3 +178,7 @@ export default pattern((state: State) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfPattern_1
+});

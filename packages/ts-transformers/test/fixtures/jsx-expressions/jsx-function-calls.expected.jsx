@@ -719,3 +719,29 @@ export default pattern((state) => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1,
+    __cfLift_2,
+    __cfLift_3,
+    __cfLift_4,
+    __cfLift_5,
+    __cfLift_6,
+    __cfLift_7,
+    __cfLift_8,
+    __cfLift_9,
+    __cfLift_10,
+    __cfLift_11,
+    __cfLift_12,
+    __cfLift_13,
+    __cfLift_14,
+    __cfLift_15,
+    __cfLift_16,
+    __cfLift_17,
+    __cfLift_18,
+    __cfLift_19,
+    __cfLift_20,
+    __cfLift_21,
+    __cfLift_22,
+    __cfLift_23,
+    __cfLift_24
+});

@@ -34,6 +34,25 @@ const verifiedLoadIdByValue = new WeakMap<object, string>();
 // derivation copies and independently re-resolves node implementations).
 const trustedPatterns = new WeakSet<object>();
 
+// Provenance brand for the OTHER trusted builder artifacts — `lift`, `handler`,
+// and the node factories they produce (see builder/module.ts `createNodeFactory`).
+// `pattern()` brands `trustedPatterns` instead. Kept as a separate set so the
+// pattern-only trust gate (`isTrustedPattern`, used by CFC) is unchanged, while
+// `isTrustedBuilderArtifact` accepts any trusted builder output. Like the pattern
+// brand, this is the gate that stops `__cf_data`-forged data from acquiring a
+// content-addressed `{ identity, symbol }` reference via `__cfReg`.
+//
+// Held lazily on this hoisted accessor rather than a top-level `const`/`let`:
+// unlike `pattern()`, `createNodeFactory` is invoked at MODULE-INIT time by some
+// builtins (e.g. builtins/sqlite/query-node), which runs inside the builder
+// import cycle — a top-level binding would still be in its temporal dead zone at
+// that point. A function declaration IS fully hoisted, so caching the `WeakSet`
+// on it sidesteps the init-order dependency entirely.
+function trustedBuilderArtifacts(): WeakSet<object> {
+  const self = trustedBuilderArtifacts as { set?: WeakSet<object> };
+  return (self.set ??= new WeakSet<object>());
+}
+
 function asKey(value: unknown): object | undefined {
   if (value === null) return undefined;
   return (typeof value === "object" || typeof value === "function")
@@ -98,6 +117,46 @@ export function isTrustedPattern(value: unknown): value is Pattern {
     if (seen.has(current)) break;
     seen.add(current);
     current = (current as Record<symbol, unknown>)[unsafe_originalPattern];
+  }
+  return false;
+}
+
+/** Stamp a value as produced by a trusted non-pattern builder (lift/handler/…). */
+export function brandTrustedBuilderArtifact<T>(value: T): T {
+  const key = asKey(value);
+  if (key) trustedBuilderArtifacts().add(key);
+  return value;
+}
+
+/**
+ * True for any value with trusted-builder provenance — a trusted pattern OR a
+ * branded lift/handler/node-factory — walking the `unsafe_originalPattern` chain
+ * so derivation / serialized copies inherit trust. This is the gate that decides
+ * whether a `__cfReg`-registered value may receive a content-addressed
+ * `{ identity, symbol }` reference; forged plain data carries no brand and is
+ * rejected.
+ */
+export function isTrustedBuilderArtifact(value: unknown): boolean {
+  let current: unknown = value;
+  const seen = new Set<unknown>();
+  while (
+    current && (typeof current === "object" || typeof current === "function")
+  ) {
+    if (
+      trustedBuilderArtifacts().has(current as object) ||
+      trustedPatterns.has(current as object)
+    ) {
+      return true;
+    }
+    if (seen.has(current)) break;
+    seen.add(current);
+    // Fail closed: reading the (module-private) symbol off an exotic value — e.g.
+    // a Proxy with a throwing get trap — must not abort registration/lookup.
+    try {
+      current = (current as Record<symbol, unknown>)[unsafe_originalPattern];
+    } catch {
+      return false;
+    }
   }
   return false;
 }
