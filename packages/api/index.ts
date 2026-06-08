@@ -1704,6 +1704,16 @@ export type BuiltInLLMTool =
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
 
+/**
+ * A web source surfaced by a native search/grounding tool (e.g.
+ * `google_search`). Populated on the result state when grounding is requested.
+ */
+export interface BuiltInLLMGroundingSource {
+  url?: string;
+  title?: string;
+  snippet?: string;
+}
+
 // Built-in types
 export interface BuiltInLLMParams {
   messages?: BuiltInLLMMessage[];
@@ -1724,6 +1734,13 @@ export interface BuiltInLLMParams {
    * Each tool has a description, input schema, and handler function that runs client-side.
    */
   tools?: Record<string, BuiltInLLMTool>;
+  /**
+   * Enable Google Search grounding (shorthand for the `google_search` native
+   * model tool). Source URLs are surfaced on the state's `groundingSources`.
+   */
+  search?: boolean;
+  /** Raw native model tool ids to request, e.g. `["google_search"]`. */
+  nativeModelToolIds?: readonly string[];
   /**
    * Context cells to make available to the LLM.
    * These cells appear in the system prompt with their schemas and current values.
@@ -1747,6 +1764,8 @@ export interface BuiltInLLMState {
   partial?: string;
   error?: unknown;
   cancelGeneration: Stream<void>;
+  /** Web sources from native search grounding, when `search`/`google_search` was requested. */
+  groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
 
 export interface BuiltInLLMGenerateObjectState<T> {
@@ -1756,6 +1775,10 @@ export interface BuiltInLLMGenerateObjectState<T> {
   partial?: string;
   error?: unknown;
   cancelGeneration: Stream<void>;
+  // NOTE: `generateObject` accepts `search`/`nativeModelToolIds` (grounding can
+  // improve the structured result), but does NOT surface `groundingSources` —
+  // its JSON-mode path returns only the object, not the grounded response. Use
+  // `generateText` when you need the source URLs.
 }
 
 export interface BuiltInLLMDialogState {
@@ -1784,6 +1807,18 @@ export type BuiltInGenerateObjectParams =
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
     queue?: string;
   }
   | {
@@ -1799,6 +1834,18 @@ export type BuiltInGenerateObjectParams =
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
     queue?: string;
   };
 
@@ -1811,6 +1858,18 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
     queue?: string;
   }
   | {
@@ -1821,6 +1880,18 @@ export type BuiltInGenerateTextParams =
     model?: string;
     maxTokens?: number;
     tools?: Record<string, BuiltInLLMTool>;
+    /**
+     * Enable Google Search grounding (shorthand for the `google_search`
+     * native model tool). Real, current web results inform the answer, and
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
+     */
+    search?: boolean;
+    /**
+     * Raw native model tool ids to request (e.g. `["google_search"]`).
+     * `search: true` is the friendly shorthand for `["google_search"]`.
+     */
+    nativeModelToolIds?: readonly string[];
     queue?: string;
   };
 
@@ -1830,6 +1901,8 @@ export interface BuiltInGenerateTextState {
   error?: unknown;
   partial?: string;
   requestHash?: string;
+  /** Web sources from native search grounding, when `search`/`google_search` was requested. */
+  groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
 
 export interface BuiltInCompileAndRunParams<T> {
