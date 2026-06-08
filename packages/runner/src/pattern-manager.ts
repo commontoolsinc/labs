@@ -114,7 +114,7 @@ export class PatternManager {
   >();
   // THE in-memory reverse index for content-addressed builder artifacts: module
   // identity -> (symbol -> live value). The single source for
-  // `patternFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
+  // `artifactFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
   // populated by ONE path (`indexArtifact`) from BOTH a module's `__cfReg`
   // registrations (hoists + non-exported top-level) AND its exports — so callers
   // never look in two places. Bounded (FIFO); a miss returns undefined and
@@ -1002,16 +1002,18 @@ export class PatternManager {
    * so the list builtins can resolve a map/filter/flatMap `op` during a
    * synchronous Action.
    */
-  patternFromIdentitySync(
+  artifactFromIdentitySync(
     identity: string,
     symbol: string,
-  ): Pattern | undefined {
+  ): unknown {
     const bucket = this.addressableByIdentity.get(identity);
     if (!bucket || !bucket.has(symbol)) return undefined;
     // Refresh recency.
     this.addressableByIdentity.delete(identity);
     this.addressableByIdentity.set(identity, bucket);
-    return bucket.get(symbol) as Pattern;
+    // Returns the live builder artifact (pattern / lift / handler). Callers know
+    // the kind they expect from the symbol's origin and cast accordingly.
+    return bucket.get(symbol);
   }
 
   /**
@@ -1114,21 +1116,20 @@ export class PatternManager {
   }
 
   /**
-   * The content-addressed {identity, symbol} reference for a pattern object, if
-   * known (learned on the ESM cache path). Lets callers persist a result cell's
-   * reference so the pattern reloads straight from the compiled cache. Returns
-   * undefined for legacy/AMD patterns.
+   * The content-addressed `{ identity, symbol }` reference for a builder artifact
+   * (pattern / lift / handler), if known (learned on the ESM path). Lets callers
+   * persist a result cell's reference so the artifact reloads straight from the
+   * compiled cache. Returns undefined for legacy/AMD artifacts.
    */
-  getPatternEntryRef(
-    pattern: Pattern | Module,
+  getArtifactEntryRef(
+    value: object,
   ): { identity: string; symbol: string } | undefined {
-    // `valueToEntryRef` is keyed by the EXACT exported value (the entry, set
-    // by patternFromMain/patternFromEvaluation, and every imported sub-pattern,
-    // set by registerEvaluatedModules). Check the exact object FIRST, then the
-    // normalized original: a copied/wrapped pattern whose `unsafe_originalPattern`
-    // root differs from the keyed object would otherwise never resolve its ref.
-    return this.valueToEntryRef.get(pattern as Pattern) ??
-      this.valueToEntryRef.get(this.findOriginalPattern(pattern as Pattern));
+    // `valueToEntryRef` is keyed by the EXACT registered/exported value. Check
+    // the exact object FIRST, then the normalized original: a copied/wrapped
+    // artifact whose `unsafe_originalPattern` root differs from the keyed object
+    // would otherwise never resolve its ref.
+    return this.valueToEntryRef.get(value) ??
+      this.valueToEntryRef.get(this.findOriginalPattern(value as Pattern));
   }
 
   /**

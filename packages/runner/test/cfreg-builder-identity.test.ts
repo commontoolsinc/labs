@@ -105,7 +105,7 @@ export default pattern<State>((state) => {
     try {
       const compiled = await runtime.patternManager.compilePattern(PROGRAM);
       const pm = runtime.patternManager;
-      const entryRef = pm.getPatternEntryRef(compiled);
+      const entryRef = pm.getArtifactEntryRef(compiled);
       expect(entryRef).toBeDefined();
       const { identity } = entryRef!;
 
@@ -122,10 +122,10 @@ export default pattern<State>((state) => {
 
       for (const symbol of symbols) {
         // Reverse: { identity, symbol } resolves synchronously to a live value.
-        const value = pm.patternFromIdentitySync(identity, symbol);
+        const value = pm.artifactFromIdentitySync(identity, symbol);
         expect(value).toBeDefined();
         // Forward: that live value reports the same { identity, symbol }.
-        expect(pm.getPatternEntryRef(value as never)).toEqual({
+        expect(pm.getArtifactEntryRef(value as never)).toEqual({
           identity,
           symbol,
         });
@@ -163,11 +163,11 @@ export default pattern<State>((state) => {
     try {
       const compiled = await runtime.patternManager.compilePattern(program);
       const pm = runtime.patternManager;
-      const { identity } = pm.getPatternEntryRef(compiled)!;
+      const { identity } = pm.getArtifactEntryRef(compiled)!;
       // Non-exported const → reachable only via __cfReg.
-      expect(pm.patternFromIdentitySync(identity, "helper")).toBeDefined();
+      expect(pm.artifactFromIdentitySync(identity, "helper")).toBeDefined();
       // Exported pattern → reachable via the module namespace.
-      expect(pm.patternFromIdentitySync(identity, "named")).toBeDefined();
+      expect(pm.artifactFromIdentitySync(identity, "named")).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -184,7 +184,7 @@ export default pattern<State>((state) => {
     });
     try {
       expect(
-        runtime.patternManager.patternFromIdentitySync(
+        runtime.patternManager.artifactFromIdentitySync(
           "cf-module-does-not-exist",
           "__cfPattern_1",
         ),
