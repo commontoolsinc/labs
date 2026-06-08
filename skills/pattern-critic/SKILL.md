@@ -17,11 +17,19 @@ cell, usually via `$value` or `$checked`, treat an event handler that writes the
 same value back into that same cell as a reactive-loop hazard unless it is
 clearly necessary and idempotent.
 
+- **Dead-string identity (multi-user):** flag a person rendered as a bare name
+  or `<img>` (use `cf-avatar` / `cf-profile-badge`), a typed-name field used as
+  the current viewer (resolve `#profile`), and roster dedup / "is this me?" by
+  display-name instead of `equals()` on a cell reference. See
+  `docs/common/patterns/multi-user-patterns.md#presenting-identity`
+  (critique-guide category 14).
+
 Then use the detailed references already maintained in the repo for:
 
 - `docs/development/debugging/README.md`
 - `docs/development/debugging/gotchas/`
 - `docs/common/components/COMPONENTS.md`
+- `docs/common/patterns/multi-user-patterns.md`
 - `docs/common/patterns/ui-cookbook.md`
 - `docs/common/capabilities/llm.md` - LLM integration
 
