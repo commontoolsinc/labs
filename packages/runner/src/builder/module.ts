@@ -29,6 +29,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { createRef } from "../create-ref.ts";
 import {
   hardenVerifiedFunction,
+  registerVerifiedBindingCandidate,
   registerVerifiedFunctionImplementation,
 } from "../sandbox/function-hardening.ts";
 
@@ -156,6 +157,17 @@ export function createNodeFactory<T = any, R = any>(
   // look-alike never acquires the brand. (Patterns brand separately in
   // builder/pattern.ts.)
   brandTrustedBuilderArtifact(factory);
+  // CT-1665: surface the factory so the engine can register verified binding
+  // metadata for non-exported lift/derive/computed bindings (see handlerInternal).
+  // Only JS-function modules can be trusted-binding writers (and carry
+  // `__cfVerifiedBindingIdentity`); `type: "ref"` builtins never do. Guarding on
+  // the implementation also keeps an implementation-less builtin node factory
+  // built at module load (e.g. builtins/sqlite/query-node.ts) from touching the
+  // registrar before function-hardening.ts has initialized under a circular
+  // import.
+  if (typeof module.implementation === "function") {
+    registerVerifiedBindingCandidate(factory);
+  }
   return factory;
 }
 
@@ -476,6 +488,13 @@ function handlerInternal<E, T>(
 
     return eventStream;
   }, module);
+
+  // CT-1665: surface the factory so the engine can register its verified binding
+  // metadata after evaluation. The transformer-emitted `__cfBindVerifiedBinding`
+  // annotates THIS object (the builder's return value) once the module body
+  // finishes; a non-exported binding is otherwise unreachable from the capture
+  // walk and CFC would reject its owner-protected writes.
+  registerVerifiedBindingCandidate(factory);
 
   return factory;
 }

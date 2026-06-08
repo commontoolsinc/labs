@@ -69,7 +69,10 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
-import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
+import {
+  setVerifiedBindingCandidateRegistrar,
+  setVerifiedFunctionRegistrar,
+} from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
 import { CompiledBundleValidator } from "../sandbox/compiled-bundle-validation.ts";
@@ -746,6 +749,14 @@ export class Engine extends EventTarget implements Harness {
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
         this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
       );
+      // CT-1665: collect trusted-binding factory objects surfaced by the
+      // builder so their (export-independent) verified binding metadata can be
+      // registered after evaluation.
+      const bindingCandidates: unknown[] = [];
+      const restoreBindingCandidateRegistrar =
+        setVerifiedBindingCandidateRegistrar((candidate) => {
+          bindingCandidates.push(candidate);
+        });
       const frame = pushFrame({
         runtime: this.ctRuntime,
         verifiedLoadId: loadId,
@@ -766,10 +777,17 @@ export class Engine extends EventTarget implements Harness {
       } finally {
         popFrame(frame);
         restoreVerifiedFunctionRegistrar();
+        restoreBindingCandidateRegistrar();
       }
 
       const main = loaded.namespace as Exports;
       this.executableRegistry.captureVerifiedValue(loadId, main);
+      // Record binding metadata for non-exported bindings (CT-1665). The
+      // candidates carry their metadata now that the module body (including the
+      // transformer's `__cfBindVerifiedBinding` calls) has finished executing.
+      this.executableRegistry.captureVerifiedBindingCandidates(
+        bindingCandidates,
+      );
 
       // Build the per-module export map (keyed by normalized source path) from
       // the SAME load, and map each exported value back to its RuntimeProgram
@@ -978,6 +996,14 @@ export class Engine extends EventTarget implements Harness {
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
         this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
       );
+      // CT-1665: collect trusted-binding factory objects surfaced by the builder
+      // (see the source-based path) so non-exported bindings resolve their
+      // verified binding metadata on source-free (resume-by-identity) loads too.
+      const bindingCandidates: unknown[] = [];
+      const restoreBindingCandidateRegistrar =
+        setVerifiedBindingCandidateRegistrar((candidate) => {
+          bindingCandidates.push(candidate);
+        });
       const sourceLocationFrame = pushFrame({
         runtime: this.ctRuntime,
         verifiedLoadId: loadId,
@@ -993,6 +1019,7 @@ export class Engine extends EventTarget implements Harness {
       } finally {
         popFrame(sourceLocationFrame);
         restoreVerifiedFunctionRegistrar();
+        restoreBindingCandidateRegistrar();
       }
       if (
         result && typeof result === "object" && "main" in result &&
@@ -1002,6 +1029,9 @@ export class Engine extends EventTarget implements Harness {
         const exportMap = result.exportMap as Record<string, Exports>;
         this.executableRegistry.captureVerifiedValue(loadId, main);
         this.executableRegistry.captureVerifiedValue(loadId, exportMap);
+        this.executableRegistry.captureVerifiedBindingCandidates(
+          bindingCandidates,
+        );
 
         // Create a map from exported values to `RuntimeProgram` that can
         // generate them and pass to the callback from the exports.
