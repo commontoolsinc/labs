@@ -93,65 +93,69 @@ describe("FabricBytes", () => {
       const codec = FabricBytes[CODEC];
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      it("has the `Bytes` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Bytes);
+      describe("wireTypeTag", () => {
+        it("is the `Bytes` wire type tag", () => {
+          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Bytes);
+        });
       });
 
-      it("claims a `FabricBytes` via `canEncode()`, rejecting other values", () => {
-        expect(codec.canEncode(new FabricBytes(new Uint8Array([1, 2, 3]))))
-          .toBe(true);
-        expect(codec.canEncode("not bytes")).toBe(false);
+      describe("canEncode()", () => {
+        it("claims a `FabricBytes`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricBytes(new Uint8Array([1, 2, 3]))))
+            .toBe(true);
+          expect(codec.canEncode("not bytes")).toBe(false);
+        });
       });
 
-      it("encodes to an unpadded base64url string", () => {
-        // [1, 2, 3] -> base64url "AQID".
-        const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
-        expect(codec.encode(fb)).toBe("AQID");
+      describe("encode()", () => {
+        it("encodes to an unpadded base64url string", () => {
+          // [1, 2, 3] -> base64url "AQID".
+          const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
+          expect(codec.encode(fb)).toBe("AQID");
+        });
+
+        it("encodes empty bytes to the empty string", () => {
+          const fb = new FabricBytes(new Uint8Array());
+          expect(codec.encode(fb)).toBe("");
+        });
       });
 
-      it("encodes empty bytes to the empty string", () => {
-        const fb = new FabricBytes(new Uint8Array());
-        expect(codec.encode(fb)).toBe("");
-      });
+      describe("decode()", () => {
+        it("round-trips via encode -> decode", () => {
+          const fb = new FabricBytes(new Uint8Array([10, 20, 30, 40]));
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(fb),
+            context,
+          ) as unknown as FabricBytes;
+          expect(decoded).toBeInstanceOf(FabricBytes);
+          expect(decoded.slice()).toEqual(new Uint8Array([10, 20, 30, 40]));
+        });
 
-      it("round-trips via encode -> decode", () => {
-        const fb = new FabricBytes(new Uint8Array([10, 20, 30, 40]));
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          codec.encode(fb),
-          context,
-        ) as unknown as FabricBytes;
-        expect(decoded).toBeInstanceOf(FabricBytes);
-        expect(decoded.slice()).toEqual(new Uint8Array([10, 20, 30, 40]));
-      });
+        it("round-trips empty bytes", () => {
+          const fb = new FabricBytes(new Uint8Array());
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(fb),
+            context,
+          ) as unknown as FabricBytes;
+          expect(decoded).toBeInstanceOf(FabricBytes);
+          expect(decoded.length).toBe(0);
+        });
 
-      it("round-trips empty bytes", () => {
-        const fb = new FabricBytes(new Uint8Array());
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          codec.encode(fb),
-          context,
-        ) as unknown as FabricBytes;
-        expect(decoded).toBeInstanceOf(FabricBytes);
-        expect(decoded.length).toBe(0);
-      });
+        it("decodes non-string state to a `ProblematicValue`", () => {
+          const decoded = codec.decode(codec.wireTypeTag, 42, context);
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
 
-      it("decodes non-string state to a `ProblematicValue`", () => {
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          42,
-          context,
-        );
-        expect(decoded).toBeInstanceOf(ProblematicValue);
-      });
-
-      it("decodes malformed base64 to a `ProblematicValue`", () => {
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          "not valid base64!!",
-          context,
-        );
-        expect(decoded).toBeInstanceOf(ProblematicValue);
+        it("decodes malformed base64 to a `ProblematicValue`", () => {
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            "not valid base64!!",
+            context,
+          );
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
       });
     });
   });

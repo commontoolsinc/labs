@@ -155,73 +155,79 @@ describe("FabricHash", () => {
       const codec = FabricHash[CODEC];
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      it("has the `Hash` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Hash);
-      });
-
-      it("claims a `FabricHash` via `canEncode()`, rejecting other values", () => {
-        expect(codec.canEncode(new FabricHash(SAMPLE_HASH, "fid1"))).toBe(true);
-        expect(codec.canEncode("not a hash")).toBe(false);
-      });
-
-      it("encodes to a `{ tag, hash }` object", () => {
-        const cid = new FabricHash(SAMPLE_HASH, "fid1");
-        expect(codec.encode(cid)).toEqual({
-          tag: "fid1",
-          hash: cid.hashString,
+      describe("wireTypeTag", () => {
+        it("is the `Hash` wire type tag", () => {
+          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Hash);
         });
       });
 
-      it("decodes a `{ tag, hash }` object back to a `FabricHash`", () => {
-        const cid = new FabricHash(SAMPLE_HASH, "fid1");
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          { tag: "fid1", hash: cid.hashString },
-          context,
-        );
-        expect(decoded).toBeInstanceOf(FabricHash);
-        expect((decoded as FabricHash).taggedHashString).toBe(
-          cid.taggedHashString,
-        );
+      describe("canEncode()", () => {
+        it("claims a `FabricHash`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricHash(SAMPLE_HASH, "fid1"))).toBe(
+            true,
+          );
+          expect(codec.canEncode("not a hash")).toBe(false);
+        });
       });
 
-      it("round-trips via encode -> decode (non-`fid1` tag)", () => {
-        const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          codec.encode(cid),
-          context,
-        );
-        expect(decoded).toBeInstanceOf(FabricHash);
-        expect((decoded as FabricHash).tag).toBe("sha3");
-        expect((decoded as FabricHash).bytes).toEqual(cid.bytes);
+      describe("encode()", () => {
+        it("encodes to a `{ tag, hash }` object", () => {
+          const cid = new FabricHash(SAMPLE_HASH, "fid1");
+          expect(codec.encode(cid)).toEqual({
+            tag: "fid1",
+            hash: cid.hashString,
+          });
+        });
       });
 
-      it("decodes non-object state to a `ProblematicValue`", () => {
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          123,
-          context,
-        );
-        expect(decoded).toBeInstanceOf(ProblematicValue);
-      });
+      describe("decode()", () => {
+        it("decodes a `{ tag, hash }` object back to a `FabricHash`", () => {
+          const cid = new FabricHash(SAMPLE_HASH, "fid1");
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            { tag: "fid1", hash: cid.hashString },
+            context,
+          );
+          expect(decoded).toBeInstanceOf(FabricHash);
+          expect((decoded as FabricHash).taggedHashString).toBe(
+            cid.taggedHashString,
+          );
+        });
 
-      it("decodes missing/non-string fields to a `ProblematicValue`", () => {
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          { tag: "fid1" },
-          context,
-        );
-        expect(decoded).toBeInstanceOf(ProblematicValue);
-      });
+        it("round-trips via encode -> decode (non-`fid1` tag)", () => {
+          const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(cid),
+            context,
+          );
+          expect(decoded).toBeInstanceOf(FabricHash);
+          expect((decoded as FabricHash).tag).toBe("sha3");
+          expect((decoded as FabricHash).bytes).toEqual(cid.bytes);
+        });
 
-      it("decodes a malformed base64 `hash` to a `ProblematicValue`", () => {
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          { tag: "fid1", hash: "not valid base64!!" },
-          context,
-        );
-        expect(decoded).toBeInstanceOf(ProblematicValue);
+        it("decodes non-object state to a `ProblematicValue`", () => {
+          const decoded = codec.decode(codec.wireTypeTag, 123, context);
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+
+        it("decodes missing/non-string fields to a `ProblematicValue`", () => {
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            { tag: "fid1" },
+            context,
+          );
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+
+        it("decodes a malformed base64 `hash` to a `ProblematicValue`", () => {
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            { tag: "fid1", hash: "not valid base64!!" },
+            context,
+          );
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
       });
     });
   });

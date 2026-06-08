@@ -128,56 +128,60 @@ describe("FabricRegExp", () => {
       const codec = FabricRegExp[CODEC];
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      it("has the `RegExp` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.RegExp);
-      });
-
-      it("claims a `FabricRegExp` via `canEncode()`, rejecting other values", () => {
-        expect(codec.canEncode(new FabricRegExp(/ab+c/gi))).toBe(true);
-        expect(codec.canEncode("not a regexp")).toBe(false);
-      });
-
-      it("encodes to a `{ source, flags, flavor }` object", () => {
-        const re = new FabricRegExp(/ab+c/gi);
-        expect(codec.encode(re)).toEqual({
-          flags: "gi",
-          flavor: "es2025",
-          source: "ab+c",
+      describe("wireTypeTag", () => {
+        it("is the `RegExp` wire type tag", () => {
+          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.RegExp);
         });
       });
 
-      it("round-trips a regex (source, flags, flavor)", () => {
-        const re = new FabricRegExp(/ab+c/gi);
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          codec.encode(re),
-          context,
-        ) as unknown as FabricRegExp;
-        expect(decoded).toBeInstanceOf(FabricRegExp);
-        expect(decoded.source).toBe("ab+c");
-        expect(decoded.flags).toBe("gi");
-        expect(decoded.flavor).toBe("es2025");
+      describe("canEncode()", () => {
+        it("claims a `FabricRegExp`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricRegExp(/ab+c/gi))).toBe(true);
+          expect(codec.canEncode("not a regexp")).toBe(false);
+        });
       });
 
-      it("round-trips a flagless regex", () => {
-        const re = new FabricRegExp("es2025", "^x*$", "");
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          codec.encode(re),
-          context,
-        ) as unknown as FabricRegExp;
-        expect(decoded).toBeInstanceOf(FabricRegExp);
-        expect(decoded.source).toBe("^x*$");
-        expect(decoded.flags).toBe("");
+      describe("encode()", () => {
+        it("encodes to a `{ source, flags, flavor }` object", () => {
+          const re = new FabricRegExp(/ab+c/gi);
+          expect(codec.encode(re)).toEqual({
+            flags: "gi",
+            flavor: "es2025",
+            source: "ab+c",
+          });
+        });
       });
 
-      it("decodes non-object state to `ProblematicValue`", () => {
-        const decoded = codec.decode(
-          codec.wireTypeTag,
-          "nope",
-          context,
-        );
-        expect(decoded).toBeInstanceOf(ProblematicValue);
+      describe("decode()", () => {
+        it("round-trips a regex (source, flags, flavor)", () => {
+          const re = new FabricRegExp(/ab+c/gi);
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(re),
+            context,
+          ) as unknown as FabricRegExp;
+          expect(decoded).toBeInstanceOf(FabricRegExp);
+          expect(decoded.source).toBe("ab+c");
+          expect(decoded.flags).toBe("gi");
+          expect(decoded.flavor).toBe("es2025");
+        });
+
+        it("round-trips a flagless regex", () => {
+          const re = new FabricRegExp("es2025", "^x*$", "");
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(re),
+            context,
+          ) as unknown as FabricRegExp;
+          expect(decoded).toBeInstanceOf(FabricRegExp);
+          expect(decoded.source).toBe("^x*$");
+          expect(decoded.flags).toBe("");
+        });
+
+        it("decodes non-object state to `ProblematicValue`", () => {
+          const decoded = codec.decode(codec.wireTypeTag, "nope", context);
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
       });
     });
   });
