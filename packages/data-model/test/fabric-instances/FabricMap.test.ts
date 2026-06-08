@@ -7,7 +7,9 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC, DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
@@ -119,6 +121,43 @@ describe("FabricMap", () => {
         expect(() => FabricMap[RECONSTRUCT](null, dummyContext)).toThrow(
           "not yet implemented",
         );
+      });
+    });
+
+    // Nominal coverage: the codec exists and reports its wire tag and claims
+    // its instances, but `encode()`/`decode()` are still stubs that delegate
+    // to the not-yet-implemented `[DECONSTRUCT]`/`[RECONSTRUCT]` protocol.
+    describe("[CODEC]", () => {
+      const codec = FabricMap[CODEC];
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+      describe("wireTypeTag", () => {
+        it("is the `Map` wire type tag", () => {
+          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Map);
+        });
+      });
+
+      describe("canEncode()", () => {
+        it("claims a `FabricMap`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricMap(new Map()))).toBe(true);
+          expect(codec.canEncode("not a map")).toBe(false);
+        });
+      });
+
+      describe("encode()", () => {
+        it("throws (stub, via `[DECONSTRUCT]`)", () => {
+          expect(() => codec.encode(new FabricMap(new Map()))).toThrow(
+            "not yet implemented",
+          );
+        });
+      });
+
+      describe("decode()", () => {
+        it("throws (stub, via `[RECONSTRUCT]`)", () => {
+          expect(() => codec.decode(codec.wireTypeTag, null, context)).toThrow(
+            "not yet implemented",
+          );
+        });
       });
     });
   });

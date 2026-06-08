@@ -4,6 +4,9 @@ import { expect } from "@std/expect";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
+import { CODEC } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 
 describe("FabricEpochNsec", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -46,6 +49,84 @@ describe("FabricEpochNsec", () => {
         const nsec = 32503680000000000000n;
         const sn = new FabricEpochNsec(nsec);
         expect(sn.value).toBe(nsec);
+      });
+    });
+  });
+
+  describe("static members", () => {
+    describe("[CODEC]", () => {
+      const codec = FabricEpochNsec[CODEC];
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+      describe("wireTypeTag", () => {
+        it("is the `EpochNsec` wire type tag", () => {
+          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.EpochNsec);
+        });
+      });
+
+      describe("canEncode()", () => {
+        it("claims a `FabricEpochNsec`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricEpochNsec(0n))).toBe(true);
+          expect(codec.canEncode("not an epoch")).toBe(false);
+        });
+      });
+
+      describe("encode()", () => {
+        it("encodes to a flat base64 string (epoch zero)", () => {
+          const sn = new FabricEpochNsec(0n);
+          // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
+          expect(codec.encode(sn)).toBe("AA");
+        });
+      });
+
+      describe("decode()", () => {
+        it("round-trips at top level (epoch zero)", () => {
+          const sn = new FabricEpochNsec(0n);
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(sn),
+            context,
+          ) as unknown as FabricEpochNsec;
+          expect(decoded).toBeInstanceOf(FabricEpochNsec);
+          expect(decoded.value).toBe(0n);
+        });
+
+        it("round-trips positive nanosecond timestamp", () => {
+          // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200000000000 nsec
+          const nsec = 1704067200000000000n;
+          const sn = new FabricEpochNsec(nsec);
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(sn),
+            context,
+          ) as unknown as FabricEpochNsec;
+          expect(decoded).toBeInstanceOf(FabricEpochNsec);
+          expect(decoded.value).toBe(nsec);
+        });
+
+        it("round-trips negative nanosecond timestamp (pre-epoch)", () => {
+          const nsec = -86400000000000n; // -1 day in nanoseconds
+          const sn = new FabricEpochNsec(nsec);
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(sn),
+            context,
+          ) as unknown as FabricEpochNsec;
+          expect(decoded).toBeInstanceOf(FabricEpochNsec);
+          expect(decoded.value).toBe(nsec);
+        });
+
+        it("round-trips large future date", () => {
+          // Year 3000-ish
+          const nsec = 32503680000000000000n;
+          const sn = new FabricEpochNsec(nsec);
+          const decoded = codec.decode(
+            codec.wireTypeTag,
+            codec.encode(sn),
+            context,
+          ) as unknown as FabricEpochNsec;
+          expect(decoded.value).toBe(nsec);
+        });
       });
     });
   });
