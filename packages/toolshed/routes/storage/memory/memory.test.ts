@@ -48,8 +48,13 @@ const createSessionOpenAuth = async (
   }
   return {
     invocation,
+    // Mirror the production producer: send the signature as an explicit number
+    // array (a plain `FabricValue`), not a raw `Uint8Array` that only survives
+    // the wire boundary via the encoder's lenient structural fallback.
+    // TODO(danfuzz): When the producer flips to sending a `FabricBytes`, update
+    // this helper to match.
     authorization: {
-      signature: signature.ok,
+      signature: Array.from(signature.ok),
     },
   };
 };
@@ -353,7 +358,9 @@ serialTest(
         ...auth,
         authorization: {
           ...auth.authorization,
-          signature: new FabricBytes(auth.authorization.signature),
+          signature: new FabricBytes(
+            Uint8Array.from(auth.authorization.signature),
+          ),
         },
       }));
 
