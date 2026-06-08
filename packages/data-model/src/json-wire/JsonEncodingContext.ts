@@ -306,13 +306,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // unencodable and must fail loudly rather than be silently mis-encoded as
     // a plain object.
     if (!isPlainObject(value)) {
-      const kind = (typeof value === "object" && value !== null)
-        ? `a \`${
-          (value as { constructor?: { name?: string } }).constructor?.name ??
-            "(anonymous)"
-        }\` instance`
-        : toCompactDebugString(value, 50);
-      throw new Error(`Cannot encode ${kind}: no applicable codec.`);
+      throw new Error(
+        `Cannot encode ${
+          toCompactDebugString(value, 50)
+        }: no applicable codec.`,
+      );
     }
 
     // Plain objects
