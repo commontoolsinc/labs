@@ -7,7 +7,9 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
@@ -93,6 +95,45 @@ describe("FabricSet", () => {
         expect(() => fs[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
           "FabricSet: not yet implemented",
         );
+      });
+    });
+  });
+
+  describe("static members", () => {
+    // Nominal coverage: the codec exists and reports its wire tag and claims
+    // its instances, but `encode()`/`decode()` are still stubs that delegate
+    // to the not-yet-implemented `[DECONSTRUCT]`/`[RECONSTRUCT]` protocol.
+    describe("[CODEC]", () => {
+      const codec = FabricSet[CODEC];
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+      describe("wireTypeTag", () => {
+        it("is the `Set` wire type tag", () => {
+          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Set);
+        });
+      });
+
+      describe("canEncode()", () => {
+        it("claims a `FabricSet`, rejecting other values", () => {
+          expect(codec.canEncode(new FabricSet(new Set()))).toBe(true);
+          expect(codec.canEncode("not a set")).toBe(false);
+        });
+      });
+
+      describe("encode()", () => {
+        it("throws (stub, via `[DECONSTRUCT]`)", () => {
+          expect(() => codec.encode(new FabricSet(new Set()))).toThrow(
+            "not yet implemented",
+          );
+        });
+      });
+
+      describe("decode()", () => {
+        it("throws (stub, via `[RECONSTRUCT]`)", () => {
+          expect(() => codec.decode(codec.wireTypeTag, null, context)).toThrow(
+            "not yet implemented",
+          );
+        });
       });
     });
   });
