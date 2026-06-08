@@ -111,6 +111,27 @@ export type HoistRegistrationSink = Map<string, Map<string, unknown>>;
  * Security (trust of the registered values) is enforced separately, per value,
  * by the PatternManager — not here.
  */
+/**
+ * The registrar handed to a module the verifier did NOT approve for hoist
+ * registration (no valid top-level `__cfReg({ … })` call). Any invocation throws
+ * — so a `__cfReg` reference the verifier's static check failed to reject still
+ * fails closed at runtime (terminating the import) instead of registering
+ * attacker-chosen values. `commit` is a no-op (nothing was staged).
+ */
+export function createRejectingRegistrar(): {
+  register: (entries: Record<string, unknown>) => void;
+  commit: () => void;
+} {
+  return {
+    register: () => {
+      throw new Error(
+        "__cfReg called by a module with no verifier-approved registration",
+      );
+    },
+    commit: () => {},
+  };
+}
+
 export function createHoistRegistrar(
   identity: string,
   sink: HoistRegistrationSink,
@@ -289,6 +310,14 @@ export interface CompiledModuleGraph {
    * after evaluation; the PatternManager assigns `{ identity, symbol }` refs.
    */
   registrationSink: HoistRegistrationSink;
+  /**
+   * Specifiers of modules the VERIFIER approved for hoist registration (a valid
+   * top-level `__cfReg({ … })` call). The engine fills this during the verify
+   * pass (before evaluation); a module absent from it gets a throwing registrar
+   * (see `createRejectingRegistrar`), so a `__cfReg` call the static verifier
+   * missed fails closed at runtime instead of registering attacker values.
+   */
+  registrationApproved: Set<string>;
 }
 
 /**
@@ -418,6 +447,7 @@ export function compileSourcesToRecords(
   const compiledBodies = new Map<string, string>();
   const moduleSourceMaps = new Map<string, SourceMap>();
   const registrationSink: HoistRegistrationSink = new Map();
+  const registrationApproved = new Set<string>();
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
     const moduleHash = identityByPath.get(source.name)!;
@@ -522,10 +552,11 @@ export function compileSourcesToRecords(
         // A throw inside the factory is terminal for this module: SES caches the
         // error and re-throws it on every subsequent importNow (the same
         // contract as a failed AMD factory).
-        const { register, commit } = createHoistRegistrar(
-          moduleHash,
-          registrationSink,
-        );
+        // Grant the real registrar ONLY if the verifier approved this module's
+        // `__cfReg` call; otherwise a throwing one (fail closed).
+        const { register, commit } = registrationApproved.has(specifier)
+          ? createHoistRegistrar(moduleHash, registrationSink)
+          : createRejectingRegistrar();
         populateModuleExports(
           moduleExports,
           exportNames,
@@ -546,6 +577,7 @@ export function compileSourcesToRecords(
     compiledBodies,
     moduleSourceMaps,
     registrationSink,
+    registrationApproved,
   };
 }
 
@@ -629,6 +661,7 @@ export function buildRecordsFromCompiled(
   const moduleSourceMaps = new Map<string, SourceMap>();
   const specifierByPath = new Map<string, string>();
   const registrationSink: HoistRegistrationSink = new Map();
+  const registrationApproved = new Set<string>();
 
   for (const m of modules) {
     const specifier = specifierOf(m.identity);
@@ -668,10 +701,9 @@ export function buildRecordsFromCompiled(
         ) => void;
         const requireShim = (spec: string) =>
           compartment.importNow(resolvedImports[spec] ?? spec);
-        const { register, commit } = createHoistRegistrar(
-          m.identity,
-          registrationSink,
-        );
+        const { register, commit } = registrationApproved.has(specifier)
+          ? createHoistRegistrar(m.identity, registrationSink)
+          : createRejectingRegistrar();
         populateModuleExports(
           moduleExports,
           exportNames,
@@ -692,6 +724,7 @@ export function buildRecordsFromCompiled(
     compiledBodies,
     moduleSourceMaps,
     registrationSink,
+    registrationApproved,
   };
 }
 

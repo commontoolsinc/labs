@@ -265,16 +265,18 @@ export function classifyModuleItems(
   statements: readonly StatementChunk[],
   env: Map<string, BindingInfo>,
   options: ModuleItemClassificationOptions,
-): void {
+): { hasHoistRegistration: boolean } {
   predeclareTopLevelBindings(source, statements, env, options);
 
   logger.timeStart("classifyModuleItems", "statements");
+  // The transformer emits at most one trailing `__cfReg({ … })` registration
+  // call per module; a second is a tampering signal (the runtime registrar also
+  // traps it, but reject it here too). Whether a VALID call was seen is returned
+  // so the loader grants the real registrar only to approved modules and a
+  // throwing one to the rest (fail closed against a smuggled call).
+  let sawHoistRegistration = false;
   try {
     const missingRequiredGuards = new Set(options.requiredGuards);
-    // The transformer emits at most one trailing `__cfReg({ … })` registration
-    // call per module; a second is a tampering signal (the runtime registrar also
-    // traps it, but reject it here too).
-    let sawHoistRegistration = false;
     for (const statement of statements) {
       const trimmed = trimRange(source, statement.start, statement.end);
       if (trimmed.start >= trimmed.end) continue;
@@ -427,6 +429,7 @@ export function classifyModuleItems(
   } finally {
     logger.timeEnd("classifyModuleItems", "statements");
   }
+  return { hasHoistRegistration: sawHoistRegistration };
 }
 
 function predeclareFactoryDependencies(

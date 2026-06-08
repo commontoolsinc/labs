@@ -268,6 +268,74 @@ const ATTACKS: Attack[] = [
     name: "require fast-path defeated by trailing declarator",
     body: `const x = require("commonfabric"), y = globalThis;`,
   },
+
+  // --- `__cfReg` hoist-registration call (CT-1623) ---
+  // `__cfReg` is supplied to the module wrapper as a parameter (the registrar);
+  // it is deliberately NOT a referenceable binding, and only a single top-level
+  // `__cfReg({ <shorthand top-level bindings> })` statement is approved. Every
+  // other shape must be rejected so an attacker can neither register an arbitrary
+  // symbol nor smuggle a second/aliased registrar call.
+  {
+    name: "__cfReg: legitimate single shorthand registration (control)",
+    accept: true,
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n__cfReg({ __cfPattern_1 });`,
+  },
+  {
+    // The case the spec calls out: a name not declared at module level.
+    name: "__cfReg: registers an undeclared (non-module-level) symbol",
+    body: `${IMPORT}\n__cfReg({ smuggled });`,
+  },
+  {
+    name: "__cfReg: a second registration call",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n__cfReg({ __cfPattern_1 });\n__cfReg({ __cfPattern_1 });`,
+  },
+  {
+    name: "__cfReg: aliased/member-call callee (cf.__cfReg)",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\ncf.__cfReg({ __cfPattern_1 });`,
+  },
+  {
+    name: "__cfReg: reassigned to a local then invoked",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\nconst r = __cfReg;\nr({ __cfPattern_1 });`,
+  },
+  {
+    name: "__cfReg: captured as a variable initializer",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\nconst z = __cfReg({ __cfPattern_1 });\nexports.z = z;`,
+  },
+  {
+    name: "__cfReg: string-keyed property (not shorthand)",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n__cfReg({ "__cfPattern_1": __cfPattern_1 });`,
+  },
+  {
+    name: "__cfReg: key:value property naming a different binding",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n__cfReg({ alias: __cfPattern_1 });`,
+  },
+  {
+    name: "__cfReg: computed key",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n__cfReg({ ["__cfPattern_1"]: __cfPattern_1 });`,
+  },
+  {
+    name: "__cfReg: object spread of an attacker value",
+    body:
+      `${IMPORT}\nconst evil = (0, cf.__cf_data)({ x: 1 });\n__cfReg({ ...evil });`,
+  },
+  {
+    name: "__cfReg: extra trailing argument",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n__cfReg({ __cfPattern_1 }, globalThis);`,
+  },
+  {
+    name: "__cfReg: unicode-escaped callee",
+    body:
+      `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n\\u005f\\u005fcfReg({ __cfPattern_1 });`,
+  },
 ];
 
 describe("ESM verifier adversarial corpus", () => {

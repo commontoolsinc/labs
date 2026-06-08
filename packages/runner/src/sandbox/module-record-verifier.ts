@@ -135,7 +135,7 @@ function shadowNamesInStatement(
 export function verifyCompiledModuleBody(
   compiled: string,
   filename = "<module>",
-): void {
+): { hasHoistRegistration: boolean } {
   // Wrap so the AMD parser can extract the top-level statements as a function
   // body; offsets stay consistent with `wrapped` for classification.
   const wrapped = `function () {\n${compiled}\n}`;
@@ -229,7 +229,7 @@ export function verifyCompiledModuleBody(
     classifiable.push(statement);
   });
 
-  classifyModuleItems(wrapped, filename, classifiable, env, {
+  return classifyModuleItems(wrapped, filename, classifiable, env, {
     requiredGuards: EMPTY_BINDING_SET,
     reservedBindings: EMPTY_BINDING_SET,
     missingGuardsErrorAt: 0,
