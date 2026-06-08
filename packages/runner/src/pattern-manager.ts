@@ -981,11 +981,13 @@ export class PatternManager {
     value: unknown,
   ): void {
     if (!isTrustedBuilderArtifact(value)) return;
-    // Reverse index, refreshing recency (FIFO ~ LRU).
+    // Reverse index, refreshing recency (FIFO ~ LRU). Overwrite an existing
+    // symbol so a re-evaluation of the same identity resolves to the FRESH
+    // artifact instance, not a stale one from a prior eval.
     let bucket = this.addressableByIdentity.get(identity);
     if (bucket) this.addressableByIdentity.delete(identity);
     else bucket = new Map<string, unknown>();
-    if (!bucket.has(symbol)) bucket.set(symbol, value);
+    bucket.set(symbol, value);
     this.addressableByIdentity.set(identity, bucket);
     // Forward map — don't overwrite an existing ref (e.g. a value that is both a
     // `__cfReg` entry and an export, or whose entry ref the caller set first).

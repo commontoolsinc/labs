@@ -412,6 +412,19 @@ function collectTopLevelBuilderArtifactNames(
  * `foo`), and `export default foo`. Used to keep exported builder artifacts out
  * of `__cfReg` (they are addressable through the module namespace instead).
  */
+/** Strip parentheses and `as` / `satisfies` wrappers to reach the underlying
+ * `export default` expression (so a wrapped identifier is still recognized). */
+function unwrapDefaultExportExpression(expr: ts.Expression): ts.Expression {
+  let current = expr;
+  while (
+    ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
 function collectExportedLocalNames(sourceFile: ts.SourceFile): Set<string> {
   const names = new Set<string>();
   for (const statement of sourceFile.statements) {
@@ -431,11 +444,12 @@ function collectExportedLocalNames(sourceFile: ts.SourceFile): Set<string> {
       for (const el of statement.exportClause.elements) {
         names.add((el.propertyName ?? el.name).text);
       }
-    } else if (
-      ts.isExportAssignment(statement) && !statement.isExportEquals &&
-      ts.isIdentifier(statement.expression)
-    ) {
-      names.add(statement.expression.text);
+    } else if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      // `export default foo` — unwrap parens / `as` / `satisfies` so a wrapped
+      // identifier (`export default (foo)`, `export default foo satisfies T`) is
+      // still recognized as exporting the local `foo`.
+      const expr = unwrapDefaultExportExpression(statement.expression);
+      if (ts.isIdentifier(expr)) names.add(expr.text);
     }
   }
   return names;
