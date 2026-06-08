@@ -95,35 +95,142 @@ function extractGroundingChunks(completion: unknown): GroundingChunk[] {
   return Array.isArray(chunks) ? (chunks as GroundingChunk[]) : [];
 }
 
+// --- SSRF guard ---------------------------------------------------------
+// This route fetches URLs that come from search results (and follows their
+// redirects), so it must never be coaxed into reaching internal hosts. We
+// validate every hop's host (name + resolved IP) against private/reserved
+// ranges before connecting.
+
+function isPrivateIpv4(ip: string): boolean {
+  const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 0 || a === 10 || a === 127) return true; // unspecified/private/loopback
+  if (a === 169 && b === 254) return true; // link-local
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  return false;
+}
+
+function isPrivateIp(ip: string): boolean {
+  const h = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h.includes(":")) {
+    if (h === "::1" || h === "::") return true; // loopback/unspecified
+    if (h.startsWith("fc") || h.startsWith("fd")) return true; // unique-local fc00::/7
+    if (/^fe[89ab]/.test(h)) return true; // link-local fe80::/10
+    const mapped = h.match(/::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+    if (mapped) return isPrivateIpv4(mapped[1]);
+    return false;
+  }
+  return isPrivateIpv4(h);
+}
+
+function isIpLiteral(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, "");
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":");
+}
+
+/** True if `host` is (or resolves to) an internal/private/loopback target. */
+async function hostIsBlocked(host: string): Promise<boolean> {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    !h || h === "localhost" || h.endsWith(".localhost") ||
+    h.endsWith(".local") || h.endsWith(".internal")
+  ) {
+    return true;
+  }
+  if (isIpLiteral(h)) return isPrivateIp(h);
+  // Resolve and block if ANY address is private. Block on resolution failure
+  // too (don't fetch a host we can't vet).
+  try {
+    const [a, aaaa] = await Promise.all([
+      Deno.resolveDns(h, "A").catch(() => [] as string[]),
+      Deno.resolveDns(h, "AAAA").catch(() => [] as string[]),
+    ]);
+    const ips = [...a, ...aaaa];
+    return ips.length === 0 || ips.some(isPrivateIp);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * GET a URL, following redirects MANUALLY so each hop's host is SSRF-validated
+ * before we connect. Returns the response (caller reads/cancels the body) plus
+ * a `cleanup` that clears the timeout — call it only after the body is handled,
+ * so the timeout budget spans the body read, not just the headers.
+ */
+async function ssrfSafeGet(
+  initialUrl: string,
+  timeoutMs: number,
+): Promise<{ res: Response; finalUrl: string; cleanup: () => void } | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const cleanup = () => clearTimeout(timer);
+  let url = initialUrl;
+  try {
+    for (let hop = 0; hop < 6; hop++) {
+      let u: URL;
+      try {
+        u = new URL(url);
+      } catch {
+        cleanup();
+        return null;
+      }
+      if (u.protocol !== "http:" && u.protocol !== "https:") {
+        cleanup();
+        return null;
+      }
+      if (await hostIsBlocked(u.hostname)) {
+        cleanup();
+        return null;
+      }
+      const res = await fetch(url, {
+        method: "GET",
+        redirect: "manual",
+        headers: { "User-Agent": RESOLVE_UA },
+        signal: ctrl.signal,
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        await res.body?.cancel();
+        if (!loc) {
+          cleanup();
+          return null;
+        }
+        url = new URL(loc, url).toString();
+        continue;
+      }
+      return { res, finalUrl: url, cleanup };
+    }
+    cleanup(); // too many redirects
+    return null;
+  } catch {
+    cleanup();
+    return null;
+  }
+}
+
 /**
  * Follow a Google grounding redirect to its real destination, returning the
- * final URL only if it resolves to a reachable, non-Google http(s) page. This
- * both de-references the redirect AND validates the candidate in one request.
+ * final URL only if it resolves to a reachable, non-Google, non-aggregator
+ * http(s) page. De-references the redirect AND validates the candidate.
  */
 async function resolveGroundingUrl(
   redirectUrl: string,
 ): Promise<string | null> {
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(redirectUrl, {
-      method: "GET",
-      redirect: "follow",
-      headers: { "User-Agent": RESOLVE_UA },
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    // Drain the body so the connection can be reused/closed promptly.
-    await res.body?.cancel();
-    if (res.status >= 400) return null;
-    const finalUrl = res.url || redirectUrl;
-    const host = new URL(finalUrl).host.toLowerCase();
-    if (host.includes("vertexaisearch")) return null; // never left the redirect
-    if (isAggregatorHost(host)) return null; // prefer the business's own site
-    return finalUrl;
-  } catch {
-    return null;
-  }
+  const got = await ssrfSafeGet(redirectUrl, 8000);
+  if (!got) return null;
+  const { res, finalUrl, cleanup } = got;
+  await res.body?.cancel();
+  cleanup();
+  if (res.status >= 400) return null;
+  const host = new URL(finalUrl).host.toLowerCase();
+  if (host.includes("vertexaisearch")) return null; // never left the redirect
+  if (isAggregatorHost(host)) return null; // prefer the business's own site
+  return finalUrl;
 }
 
 /**
@@ -132,16 +239,10 @@ async function resolveGroundingUrl(
  * length cap; returns "" on any error or non-text response.
  */
 async function fetchPageText(url: string): Promise<string> {
+  const got = await ssrfSafeGet(url, 8000);
+  if (!got) return "";
+  const { res, cleanup } = got;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      headers: { "User-Agent": RESOLVE_UA },
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
     const contentType = res.headers.get("content-type") ?? "";
     if (
       !res.ok ||
@@ -161,6 +262,8 @@ async function fetchPageText(url: string): Promise<string> {
       .slice(0, 4000);
   } catch {
     return "";
+  } finally {
+    cleanup();
   }
 }
 

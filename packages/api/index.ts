@@ -1810,7 +1810,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`.
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
     /**
@@ -1836,7 +1837,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`.
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
     /**
@@ -1859,7 +1861,8 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`.
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
     /**
@@ -1880,7 +1883,8 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`.
+     * the source URLs are surfaced on the result state's `groundingSources`
+     * (generateText / llm only — generateObject does not surface them).
      */
     search?: boolean;
     /**

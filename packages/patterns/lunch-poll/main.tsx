@@ -216,22 +216,26 @@ const VOTE_SWATCH: Record<VoteColor, string> = {
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 
-// Normalize a human-entered link to a safe http(s) URL (auto-prefixing
-// `https://` when the scheme is missing). Returns "" for anything that isn't
-// http/https — this is what keeps a pasted `javascript:`/`data:` override from
-// ever reaching an `href`. Also used defensively at render time.
+// Normalize a human-entered link to a safe http(s) URL. Returns "" for anything
+// that isn't http/https — this is what keeps a pasted `javascript:`/`data:`
+// override from ever reaching an `href`. We parse the value as-is first (so a
+// real `http(s)://` URL is honored), and only on failure retry with an
+// `https://` prefix — so a scheme-less `host:port` like `example.com:8080`
+// isn't mistaken for a `scheme:` and rejected. Also used defensively at render.
+const httpsOrNull = (candidate: string): string | null => {
+  try {
+    const u = new URL(candidate);
+    return (u.protocol === "http:" || u.protocol === "https:")
+      ? u.toString()
+      : null;
+  } catch {
+    return null;
+  }
+};
 const safeHttpUrl = (raw: string | undefined): string => {
   const s = (raw ?? "").trim();
   if (!s) return "";
-  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s) ? s : `https://${s}`;
-  try {
-    const u = new URL(withScheme);
-    return (u.protocol === "http:" || u.protocol === "https:")
-      ? u.toString()
-      : "";
-  } catch {
-    return "";
-  }
+  return httpsOrNull(s) ?? httpsOrNull(`https://${s}`) ?? "";
 };
 
 const newOptionId = () =>
