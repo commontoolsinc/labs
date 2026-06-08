@@ -36,7 +36,9 @@ export function selectRunnerTestFiles(
   shard: { index: number; total: number },
 ): string[] {
   return files
-    .filter((file) => shardForRunnerTestFile(file.name, shard.total) === shard.index)
+    .filter((file) =>
+      shardForRunnerTestFile(file.name, shard.total) === shard.index
+    )
     .map((file) => file.name)
     .sort();
 }
