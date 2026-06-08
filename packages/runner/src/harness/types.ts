@@ -7,6 +7,7 @@ import type {
 import type {
   CachedCompiledModule,
   CompiledModuleGraph,
+  HoistRegistrationSink,
 } from "../sandbox/module-record-compiler.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 
@@ -111,6 +112,14 @@ export interface EvaluateResult {
    * Populated only on the ESM evaluate paths.
    */
   exportsByIdentity?: Map<string, Exports>;
+  /**
+   * Hoist registrations collected during this evaluation (`__cfReg`): module
+   * content identity → (symbol → live builder artifact). The PatternManager turns
+   * each trusted entry into a content-addressed `{ identity, symbol }` reference
+   * and indexes it for synchronous by-identity resolution. Populated only on the
+   * ESM evaluate paths.
+   */
+  registrationsByIdentity?: HoistRegistrationSink;
 }
 
 export interface EvaluateOptions {

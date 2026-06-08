@@ -9,6 +9,7 @@ import {
 import {
   getPatternProgram,
   getVerifiedLoadId,
+  isTrustedBuilderArtifact,
   isTrustedPattern,
   setPatternProgram,
   setVerifiedLoadId,
@@ -25,7 +26,10 @@ import type {
   Exports,
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
-import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
+import type {
+  CachedCompiledModule,
+  HoistRegistrationSink,
+} from "./sandbox/module-record-compiler.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -100,18 +104,23 @@ export class PatternManager {
   private patternIdMap = new Map<URI, Pattern>();
   // Map from pattern object instance to patternId
   private patternToIdMap = new WeakMap<Pattern, URI>();
-  // Map from pattern object instance to its content-addressed {identity, symbol}
-  // reference — the entry module's identity (prefix-free `cf:module/<hash>`
-  // minus the scheme) and the export name this pattern was selected by. Learned
-  // on the ESM cache path; lets a result cell reference a pattern by
-  // {identity, symbol} and load it straight from the compiled cache without the
-  // program/meta indirection. The symbol is recorded from the authored program
-  // (cold) or the load symbol (warm) — never recomputed from a source-free
-  // pattern's stub program, which would lose a non-"default" export name.
-  private patternToEntryRef = new WeakMap<
-    Pattern,
+  // Map from a builder artifact (pattern / lift / handler) to its content-
+  // addressed {identity, symbol} reference — the module's identity (prefix-free
+  // `cf:module/<hash>` minus the scheme) and the symbol it was registered/exported
+  // under. Learned on the ESM path: for an authored export the symbol is its
+  // export name; for a hoisted artifact it is the `__cfReg` key. Lets a value be
+  // referenced by {identity, symbol} and resolved straight from the in-memory
+  // cache without the program/meta indirection.
+  private valueToEntryRef = new WeakMap<
+    object,
     { identity: string; symbol: string }
   >();
+  // In-memory reverse index for HOISTED builder artifacts (`__cfReg`): module
+  // identity -> (symbol -> live value). The forward map above answers "what is
+  // this value's ref"; this answers "what value does this ref name", which the
+  // list builtins use to resolve a map/filter/flatMap `op` synchronously. Bounded
+  // (FIFO) like `modulesByIdentity`; a miss falls back to an embedded graph.
+  private hoistsByIdentity = new Map<string, Map<string, unknown>>();
   private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
@@ -896,7 +905,7 @@ export class PatternManager {
     }
     const pattern = main[symbol] as Pattern;
     if (isTrustedPattern(pattern)) {
-      this.patternToEntryRef.set(pattern, { identity: entryIdentity, symbol });
+      this.valueToEntryRef.set(pattern, { identity: entryIdentity, symbol });
       if (loadId) {
         this.seedVerifiedLoadIds(pattern, loadId);
       }
@@ -911,37 +920,112 @@ export class PatternManager {
    */
   private registerEvaluatedModules(result: EvaluateResult): void {
     const byId = result.exportsByIdentity;
-    if (!byId) return;
-    for (const [identity, exports] of byId) {
-      // Refresh insertion order (Map is FIFO-ordered) so eviction is ~LRU.
-      this.modulesByIdentity.delete(identity);
-      this.modulesByIdentity.set(identity, { exports, loadId: result.loadId });
-      // Give each pattern-exporting sub-module a content-addressed entry ref so
-      // its result cell reloads BY IDENTITY (and hits the in-memory module
-      // cache / cell cache) instead of falling back to a source recompile via
-      // loadPattern. Without this only the bundle entry carried a ref, so every
-      // sub-pattern cold-recompiled on reload (CT-1623). Don't overwrite an
-      // existing ref (the entry's is set authoritatively by the caller).
-      for (const exportName of Object.keys(exports)) {
-        if (exportName === "__esModule") continue;
-        const value = exports[exportName];
-        if (
-          (typeof value === "object" || typeof value === "function") &&
-          value !== null && isTrustedPattern(value as Pattern) &&
-          !this.patternToEntryRef.has(value as Pattern)
-        ) {
-          this.patternToEntryRef.set(value as Pattern, {
-            identity,
-            symbol: exportName,
-          });
+    if (byId) {
+      for (const [identity, exports] of byId) {
+        // Refresh insertion order (Map is FIFO-ordered) so eviction is ~LRU.
+        this.modulesByIdentity.delete(identity);
+        this.modulesByIdentity.set(identity, {
+          exports,
+          loadId: result.loadId,
+        });
+        // Give each pattern-exporting sub-module a content-addressed entry ref so
+        // its result cell reloads BY IDENTITY (and hits the in-memory module
+        // cache / cell cache) instead of falling back to a source recompile via
+        // loadPattern. Without this only the bundle entry carried a ref, so every
+        // sub-pattern cold-recompiled on reload (CT-1623). Don't overwrite an
+        // existing ref (the entry's is set authoritatively by the caller).
+        for (const exportName of Object.keys(exports)) {
+          if (exportName === "__esModule") continue;
+          const value = exports[exportName];
+          if (
+            (typeof value === "object" || typeof value === "function") &&
+            value !== null && isTrustedPattern(value as Pattern) &&
+            !this.valueToEntryRef.has(value as Pattern)
+          ) {
+            this.valueToEntryRef.set(value as Pattern, {
+              identity,
+              symbol: exportName,
+            });
+          }
         }
       }
+      while (this.modulesByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+        const oldest = this.modulesByIdentity.keys().next().value;
+        if (oldest === undefined) break;
+        this.modulesByIdentity.delete(oldest);
+      }
     }
-    while (this.modulesByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
-      const oldest = this.modulesByIdentity.keys().next().value;
+
+    this.registerHoistedValues(result.registrationsByIdentity);
+  }
+
+  /**
+   * Index the hoisted builder artifacts a module graph registered via `__cfReg`
+   * (CT-1623). Each entry is a `{ identity, symbol } -> live value` pairing: the
+   * forward `valueToEntryRef` lets the value be serialized by reference, and the
+   * reverse `hoistsByIdentity` lets it be resolved synchronously by reference
+   * (e.g. a map/filter/flatMap `op`).
+   *
+   * SECURITY: only a genuine trusted builder artifact (pattern / lift / handler —
+   * `isTrustedBuilderArtifact`) is indexed. A `__cf_data`-forged plain object in
+   * the registration map carries no brand and is dropped, so it can never acquire
+   * a content-addressed reference or be handed back as a trusted value. (Cross-
+   * module forgery is independently impossible: identity is a content hash, so a
+   * module can only register under its own bytes' identity.)
+   */
+  private registerHoistedValues(sink?: HoistRegistrationSink): void {
+    if (!sink || sink.size === 0) return;
+    for (const [identity, entries] of sink) {
+      let bucket = this.hoistsByIdentity.get(identity);
+      // Refresh recency (FIFO ~ LRU).
+      this.hoistsByIdentity.delete(identity);
+      if (!bucket) bucket = new Map<string, unknown>();
+      for (const [symbol, value] of entries) {
+        if (!isTrustedBuilderArtifact(value)) continue;
+        bucket.set(symbol, value);
+        // Don't overwrite an existing forward ref (e.g. a value that is also an
+        // authored export already keyed by the loop above).
+        if (
+          (typeof value === "object" || typeof value === "function") &&
+          value !== null && !this.valueToEntryRef.has(value as object)
+        ) {
+          this.valueToEntryRef.set(value as object, { identity, symbol });
+        }
+      }
+      if (bucket.size > 0) this.hoistsByIdentity.set(identity, bucket);
+    }
+    while (this.hoistsByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+      const oldest = this.hoistsByIdentity.keys().next().value;
       if (oldest === undefined) break;
-      this.modulesByIdentity.delete(oldest);
+      this.hoistsByIdentity.delete(oldest);
     }
+  }
+
+  /**
+   * Resolve a content-addressed `{ identity, symbol }` reference to its live
+   * builder artifact, synchronously, from the in-memory caches — or `undefined`
+   * on a miss (the value was never registered, or rolled out of the bounded
+   * cache; callers fall back, e.g. to an embedded op graph). Checks hoisted
+   * artifacts (`__cfReg`) first, then authored module exports. Public so the list
+   * builtins can resolve a map/filter/flatMap `op` during a synchronous Action.
+   */
+  patternFromIdentitySync(
+    identity: string,
+    symbol: string,
+  ): Pattern | undefined {
+    const bucket = this.hoistsByIdentity.get(identity);
+    if (bucket && bucket.has(symbol)) {
+      // Refresh recency.
+      this.hoistsByIdentity.delete(identity);
+      this.hoistsByIdentity.set(identity, bucket);
+      return bucket.get(symbol) as Pattern;
+    }
+    const mod = this.modulesByIdentity.get(identity);
+    const exported = mod?.exports?.[symbol];
+    if (exported !== undefined && isTrustedBuilderArtifact(exported)) {
+      return exported as Pattern;
+    }
+    return undefined;
   }
 
   /**
@@ -960,7 +1044,7 @@ export class PatternManager {
     // Refresh recency.
     this.modulesByIdentity.delete(entryIdentity);
     this.modulesByIdentity.set(entryIdentity, cached);
-    this.patternToEntryRef.set(pattern, { identity: entryIdentity, symbol });
+    this.valueToEntryRef.set(pattern, { identity: entryIdentity, symbol });
     if (cached.loadId) this.seedVerifiedLoadIds(pattern, cached.loadId);
     return pattern;
   }
@@ -1031,7 +1115,7 @@ export class PatternManager {
     if (isTrustedPattern(pattern)) {
       setPatternProgram(pattern, program);
       if (entryIdentity) {
-        this.patternToEntryRef.set(pattern, {
+        this.valueToEntryRef.set(pattern, {
           identity: entryIdentity,
           symbol: exportName,
         });
@@ -1052,13 +1136,13 @@ export class PatternManager {
   getPatternEntryRef(
     pattern: Pattern | Module,
   ): { identity: string; symbol: string } | undefined {
-    // `patternToEntryRef` is keyed by the EXACT exported value (the entry, set
+    // `valueToEntryRef` is keyed by the EXACT exported value (the entry, set
     // by patternFromMain/patternFromEvaluation, and every imported sub-pattern,
     // set by registerEvaluatedModules). Check the exact object FIRST, then the
     // normalized original: a copied/wrapped pattern whose `unsafe_originalPattern`
     // root differs from the keyed object would otherwise never resolve its ref.
-    return this.patternToEntryRef.get(pattern as Pattern) ??
-      this.patternToEntryRef.get(this.findOriginalPattern(pattern as Pattern));
+    return this.valueToEntryRef.get(pattern as Pattern) ??
+      this.valueToEntryRef.get(this.findOriginalPattern(pattern as Pattern));
   }
 
   /**

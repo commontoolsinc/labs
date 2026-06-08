@@ -271,6 +271,10 @@ export function classifyModuleItems(
   logger.timeStart("classifyModuleItems", "statements");
   try {
     const missingRequiredGuards = new Set(options.requiredGuards);
+    // The transformer emits at most one trailing `__cfReg({ … })` registration
+    // call per module; a second is a tampering signal (the runtime registrar also
+    // traps it, but reject it here too).
+    let sawHoistRegistration = false;
     for (const statement of statements) {
       const trimmed = trimRange(source, statement.start, statement.end);
       if (trimmed.start >= trimmed.end) continue;
@@ -380,6 +384,27 @@ export function classifyModuleItems(
         isAllowedFunctionHardeningStatementNormalized(normalized, env) ||
         isAllowedBindingIdentityStatementNormalized(normalized, env)
       ) {
+        continue;
+      }
+
+      // The single trailing `__cfReg({ __cfPattern_1, … })` hoist-registration
+      // call: a shorthand object of top-level builder-artifact bindings. `__cfReg`
+      // is supplied by the module wrapper (the registrar param under the ESM
+      // loader; a no-op global on the AMD path) and is intentionally NOT a
+      // referenceable binding — so any OTHER use (nested, aliased, dynamic) falls
+      // through to the unknown-identifier rejection below. Trust of the registered
+      // values, single-call, and the closed-window guarantee are enforced at
+      // runtime by the registrar (see module-record-compiler.createHoistRegistrar).
+      if (isHoistRegistrationCallNormalized(normalized, env)) {
+        if (sawHoistRegistration) {
+          throw verificationErrorAt(
+            source,
+            filename,
+            statement.start,
+            "A module may contain at most one __cfReg() registration call",
+          );
+        }
+        sawHoistRegistration = true;
         continue;
       }
 
@@ -1457,6 +1482,33 @@ function tryParseCompiledReexportNormalized(
 
 function isCompiledExportStarStatementNormalized(normalized: string): boolean {
   return /^__exportStar\([A-Za-z_$][\w$]*,exports\);?$/.test(normalized);
+}
+
+/**
+ * Recognize the transformer's hoist-registration statement:
+ * `__cfReg({ __cfPattern_1, __cfLift_1, … })` — a call to `__cfReg` with a single
+ * object literal of shorthand properties, each naming a top-level binding. The
+ * shorthand form guarantees every registered value IS a module-level binding (no
+ * arbitrary expression / closure value). Returns false for anything else, so a
+ * non-conforming `__cfReg` use is rejected as unsupported.
+ */
+function isHoistRegistrationCallNormalized(
+  normalized: string,
+  env: Map<string, BindingInfo>,
+): boolean {
+  const match = normalized.match(/^__cfReg\(\{([\s\S]*)\}\);?$/);
+  if (!match) return false;
+  const inner = match[1].replace(/,$/, "").trim();
+  if (inner.length === 0) return false;
+  for (const raw of inner.split(",")) {
+    const name = raw.trim();
+    // Shorthand identifiers only (`{a,b}`); `key:value`, spreads, computed keys,
+    // and string keys all contain a disallowed character and are rejected.
+    if (!/^[A-Za-z_$][\w$]*$/.test(name)) return false;
+    // Each must be a top-level binding the verifier already saw declared.
+    if (!env.has(name)) return false;
+  }
+  return true;
 }
 
 function isCompiledEsModuleMarkerNormalized(normalized: string): boolean {

@@ -793,7 +793,16 @@ export class Engine extends EventTarget implements Harness {
       this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
-      return { main, exportMap, loadId, exportsByIdentity };
+      // `graph.registrationSink` was populated by each module's `__cfReg` during
+      // the `importNow` loop above (committed only for modules that evaluated
+      // cleanly).
+      return {
+        main,
+        exportMap,
+        loadId,
+        exportsByIdentity,
+        registrationsByIdentity: graph.registrationSink,
+      };
     } finally {
       logger.timeEnd("evaluateRecordGraph");
     }

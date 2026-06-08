@@ -66,16 +66,81 @@ export function populateModuleExports(
     exports: Record<string, unknown>,
     require: (specifier: string) => Record<string, unknown>,
     module: { exports: Record<string, unknown> },
+    register: (entries: Record<string, unknown>) => void,
   ) => void,
   requireShim: (specifier: string) => Record<string, unknown>,
+  // `__cfReg`: the transformer emits a single trailing `__cfReg({ symbol: value })`
+  // call to register a module's hoisted builder artifacts. It is passed as the
+  // factory's 4th parameter (shadowing the no-op compartment global) so it is
+  // bound to THIS module's evaluation. Defaults to a no-op for callers that do
+  // not register (e.g. tests, runtime modules).
+  register: (entries: Record<string, unknown>) => void = () => {},
 ): void {
   const writeOnceExports = createWriteOnceExports();
   const moduleObject = Object.freeze({ exports: writeOnceExports });
-  factory(writeOnceExports, requireShim, moduleObject);
+  factory(writeOnceExports, requireShim, moduleObject, register);
   for (const name of exportNames) {
     moduleExports[name] = hardenExportedValue(writeOnceExports[name]);
   }
   moduleExports.__esModule = true;
+}
+
+/**
+ * Hoist registrations collected while evaluating a module graph: module content
+ * identity (the prefix-free `cf:module/<hash>`) → (symbol → live value). Only
+ * modules whose factory completed normally are present (see
+ * {@link createHoistRegistrar}). The engine reads this after `importNow` and the
+ * PatternManager turns each trusted entry into a `{ identity, symbol }` ref.
+ */
+export type HoistRegistrationSink = Map<string, Map<string, unknown>>;
+
+/**
+ * Build the per-module `__cfReg` registrar (the module factory's 4th parameter)
+ * plus a `commit` hook. The registrar enforces the integrity invariants that let
+ * the verifier stay simple:
+ *
+ * - **Run-once**: a second `__cfReg(...)` call throws — an injected/duplicate
+ *   registration aborts the import (which is terminal for the module).
+ * - **Closed window**: calls after the module body returns throw, so a closure
+ *   that captured `__cfReg` cannot register late (e.g. from a handler callback).
+ * - **Transactional**: entries are staged locally and only flushed into `sink`
+ *   by `commit()`, which the caller invokes ONLY after the factory returns
+ *   normally. A throw (including the run-once trap) therefore leaves nothing
+ *   behind.
+ *
+ * Security (trust of the registered values) is enforced separately, per value,
+ * by the PatternManager — not here.
+ */
+export function createHoistRegistrar(
+  identity: string,
+  sink: HoistRegistrationSink,
+): {
+  register: (entries: Record<string, unknown>) => void;
+  commit: () => void;
+} {
+  const staged = new Map<string, unknown>();
+  let called = false;
+  let open = true;
+  const register = (entries: Record<string, unknown>) => {
+    if (!open) {
+      throw new Error("__cfReg called after module evaluation completed");
+    }
+    if (called) {
+      throw new Error("__cfReg may be called at most once per module");
+    }
+    called = true;
+    if (entries === null || typeof entries !== "object") {
+      throw new Error("__cfReg expects an object of { symbol: value }");
+    }
+    for (const key of Object.keys(entries)) {
+      staged.set(key, (entries as Record<string, unknown>)[key]);
+    }
+  };
+  const commit = () => {
+    open = false;
+    if (staged.size > 0) sink.set(identity, staged);
+  };
+  return { register, commit };
 }
 
 /**
@@ -218,6 +283,12 @@ export interface CompiledModuleGraph {
   compiledBodies: Map<string, string>;
   /** Per-specifier source map (compiled body → original source), when available. */
   moduleSourceMaps: Map<string, SourceMap>;
+  /**
+   * Hoist registrations, populated as the graph's modules evaluate (`__cfReg`).
+   * Empty until `importNow` runs each module's `execute`. The engine reads it
+   * after evaluation; the PatternManager assigns `{ identity, symbol }` refs.
+   */
+  registrationSink: HoistRegistrationSink;
 }
 
 /**
@@ -346,6 +417,7 @@ export function compileSourcesToRecords(
   const records = new Map<string, VirtualModuleRecord>();
   const compiledBodies = new Map<string, string>();
   const moduleSourceMaps = new Map<string, SourceMap>();
+  const registrationSink: HoistRegistrationSink = new Map();
   for (const source of sources) {
     const specifier = specifierByPath.get(source.name)!;
     const moduleHash = identityByPath.get(source.name)!;
@@ -424,13 +496,16 @@ export function compileSourcesToRecords(
       resolutions,
       execute: (moduleExports, compartment, resolvedImports) => {
         // Evaluate the compiled CommonJS body inside the SES compartment so it
-        // runs under lockdown with confined globals.
+        // runs under lockdown with confined globals. `__cfReg` is the 4th
+        // parameter — the per-module hoist registrar — which shadows the no-op
+        // `__cfReg` compartment global inside this wrapper.
         const factory = compartment.evaluate(
-          `(function (exports, require, module) {\n${compiled}\n})\n//# sourceURL=${sourceUrl}`,
+          `(function (exports, require, module, __cfReg) {\n${compiled}\n})\n//# sourceURL=${sourceUrl}`,
         ) as (
           exports: Record<string, unknown>,
           require: (specifier: string) => Record<string, unknown>,
           module: { exports: Record<string, unknown> },
+          register: (entries: Record<string, unknown>) => void,
         ) => void;
         // The module body writes its exports into a WRITE-ONCE object rather
         // than a plain mutable one. The verifier cannot see a write smuggled
@@ -447,17 +522,31 @@ export function compileSourcesToRecords(
         // A throw inside the factory is terminal for this module: SES caches the
         // error and re-throws it on every subsequent importNow (the same
         // contract as a failed AMD factory).
+        const { register, commit } = createHoistRegistrar(
+          moduleHash,
+          registrationSink,
+        );
         populateModuleExports(
           moduleExports,
           exportNames,
           factory,
           requireShim,
+          register,
         );
+        // Reached only if the factory returned normally — commit staged hoist
+        // registrations (transactional: a throw above skips this).
+        commit();
       },
     });
   }
 
-  return { records, specifierByPath, compiledBodies, moduleSourceMaps };
+  return {
+    records,
+    specifierByPath,
+    compiledBodies,
+    moduleSourceMaps,
+    registrationSink,
+  };
 }
 
 /** A compiled module loaded from the content-addressed cache (no TS source). */
@@ -539,6 +628,7 @@ export function buildRecordsFromCompiled(
   const compiledBodies = new Map<string, string>();
   const moduleSourceMaps = new Map<string, SourceMap>();
   const specifierByPath = new Map<string, string>();
+  const registrationSink: HoistRegistrationSink = new Map();
 
   for (const m of modules) {
     const specifier = specifierOf(m.identity);
@@ -569,22 +659,40 @@ export function buildRecordsFromCompiled(
       resolutions,
       execute: (moduleExports, compartment, resolvedImports) => {
         const factory = compartment.evaluate(
-          `(function (exports, require, module) {\n${compiled}\n})\n//# sourceURL=${sourceUrl}`,
+          `(function (exports, require, module, __cfReg) {\n${compiled}\n})\n//# sourceURL=${sourceUrl}`,
         ) as (
           exports: Record<string, unknown>,
           require: (specifier: string) => Record<string, unknown>,
           module: { exports: Record<string, unknown> },
+          register: (entries: Record<string, unknown>) => void,
         ) => void;
         const requireShim = (spec: string) =>
           compartment.importNow(resolvedImports[spec] ?? spec);
-        populateModuleExports(moduleExports, exportNames, factory, requireShim);
+        const { register, commit } = createHoistRegistrar(
+          m.identity,
+          registrationSink,
+        );
+        populateModuleExports(
+          moduleExports,
+          exportNames,
+          factory,
+          requireShim,
+          register,
+        );
+        commit();
       },
     });
   }
   // Silence unused in the rare all-internal case.
   void byIdentity;
 
-  return { records, specifierByPath, compiledBodies, moduleSourceMaps };
+  return {
+    records,
+    specifierByPath,
+    compiledBodies,
+    moduleSourceMaps,
+    registrationSink,
+  };
 }
 
 /**
