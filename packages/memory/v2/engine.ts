@@ -3803,6 +3803,39 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
   }
 };
 
+// Scheduler reader-dirty propagation uses the EXACT changed leaf paths, not the
+// ancestor/parent paths that `touchedPathsForPatch` adds for add/remove/move.
+//
+// `touchedPathsForPatch` emits a patch's parent path so that whole-container
+// reads are invalidated when a key is added/removed. For the scheduler reader
+// index that parent path is both REDUNDANT and HARMFUL:
+//   - Redundant: `schedulerPathsOverlap` matches a reader of the container
+//     (e.g. read `["value"]`, deep or shallow) against the LEAF write
+//     (e.g. `["value","plusOne"]`) via its bidirectional / length+1 rules, so
+//     shape/whole-object readers are already dirtied by the leaf alone.
+//   - Harmful: the parent write (e.g. `["value"]`) ALSO prefix-matches every
+//     SIBLING reader (`["value","doubled"]`, ...), whose value did not change.
+//     Unlike the in-memory `determineTriggeredActions` (which deep-equals each
+//     read path), the server-side match is purely structural, so those siblings
+//     are marked dirty in `scheduler_action_state` even though they are
+//     unchanged. On reload they rehydrate-as-dirty and re-run — the dominant
+//     residual reload re-run for patterns whose computeds write sibling fields
+//     of a shared result cell (CT-1623).
+// Emitting only the leaf paths keeps every correct match and drops the spurious
+// sibling dirtying.
+const schedulerTouchedLeafPathsForPatch = (patch: PatchOp): string[][] => {
+  switch (patch.op) {
+    case "replace":
+    case "splice":
+      return [parsePointer(patch.path)];
+    case "add":
+    case "remove":
+      return [parsePointer(patch.path)];
+    case "move":
+      return [parsePointer(patch.from), parsePointer(patch.path)];
+  }
+};
+
 const schedulerWriteAddressesForRevisions = (
   space: string,
   revisions: readonly AppliedRevision[],
@@ -3810,7 +3843,7 @@ const schedulerWriteAddressesForRevisions = (
   const writes = new Map<string, SchedulerObservationAddress>();
   for (const revision of revisions) {
     const paths = revision.op === "patch" && revision.patches
-      ? revision.patches.flatMap(touchedPathsForPatch)
+      ? revision.patches.flatMap(schedulerTouchedLeafPathsForPatch)
       : [[]];
     for (const path of paths) {
       const write = normalizeSchedulerAddress({
