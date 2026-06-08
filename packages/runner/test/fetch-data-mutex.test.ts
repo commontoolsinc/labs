@@ -123,6 +123,40 @@ describe("fetch-data mutex mechanism", () => {
     expect(fetchCalls[0].url).toContain("/api/test");
   });
 
+  it("resolves relative fetchData URLs against the pattern API URL", async () => {
+    setPatternEnvironment({
+      apiUrl: new URL("http://mock-test-server.local/api/root/"),
+    });
+
+    const fetchData = byRef("fetchData");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchData({ url, mode: "json" }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "relative-url-test",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      { url: "data/items.json" },
+      resultCell,
+    );
+    tx.commit();
+
+    await result.pull();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await result.pull();
+
+    expect(fetchCalls.length).toBeGreaterThan(0);
+    expect(fetchCalls[0].url).toBe(
+      "http://mock-test-server.local/api/root/data/items.json",
+    );
+  });
+
   it("should enqueue fetchData work behind the post-commit outbox", async () => {
     const fetchData = byRef("fetchData");
     const testPattern = pattern<{ url: string }>(

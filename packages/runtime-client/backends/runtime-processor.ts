@@ -119,6 +119,11 @@ import type { RuntimeOptions, URI } from "@commonfabric/runner";
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
 
+function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
+  const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
+  return new URL(url, spaceBaseUrl).href;
+}
+
 export function runtimeOptionsFromInitializationData(
   data: InitializationData,
   storageManager: RuntimeOptions["storageManager"],
@@ -940,7 +945,10 @@ export class RuntimeProcessor {
     if (typeof result.id !== "string" || typeof result.url !== "string") {
       throw new Error("Blob upload returned an invalid response");
     }
-    return { id: result.id, url: result.url };
+    return {
+      id: result.id,
+      url: resolveBlobUrl(result.url, this.apiUrl, this.space),
+    };
   }
 
   async detectNonIdempotent(
