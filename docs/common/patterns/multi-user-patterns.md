@@ -247,6 +247,91 @@ visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage
 instance. When comparing object or cell identity, use `equals()` instead of
 custom `id` fields.
 
+## Presenting Identity
+
+Choosing scopes decides *where* state lives; this section decides *who* a piece of
+state belongs to and how to show them. Do not reinvent identity with dead name
+strings — resolve the real viewer and render people with the identity components
+([COMPONENTS → Identity components](../components/COMPONENTS.md#identity-components)).
+
+### Resolve the current viewer
+
+A pattern cannot ask "what is my DID" directly. Resolve the viewer's profile with
+`wish` (it reads the active user's home space):
+
+```tsx
+const profileWish = wish({ query: "#profile" });            // the viewer's profile CELL
+const profileNameWish = wish<string>({ query: "#profileName" });
+const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+const myName = computed(() => (profileNameWish.result ?? "").trim());
+const myAvatar = computed(() => (profileAvatarWish.result ?? "").trim());
+const hasProfile = computed(() => myName.get() !== "");
+```
+
+**Never** add a "type your name" field and treat that string as the current user.
+The viewer is whoever the runtime says they are; `#profile` is how you read it.
+
+### Show the viewer, then everyone else
+
+```tsx
+// the viewer — trusted badge bound to the profile CELL
+<cf-profile-badge $profile={profileWish.result} size="sm" />
+
+// everyone else — avatar + name from the snapshot they contributed
+{attendees.map((a) => <cf-avatar src={a.avatar} name={a.displayName} size="xs" />)}
+```
+
+`cf-profile-badge` is for the current viewer only (you have their profile cell).
+Render every other participant with `cf-avatar` — you hold only the snapshot they
+contributed, not a profile cell.
+
+### Build the roster by join + snapshot
+
+There is no "list everyone's profiles" primitive. Each viewer contributes their
+own identity on join: snapshot `{ displayName, avatar }` from `#profile` into the
+shared `PerSpace` roster, and keep a `PerUser` pointer that is a **cell reference**
+to their own entry (see [Shared Directories And "Me"](#shared-directories-and-me)).
+Decide "is this me?" with `equals()` on that reference — never by comparing the
+mutable, non-unique display name.
+
+### Ownership and authorship
+
+"Who created this / who wrote this" is identity too. For display, snapshot the
+actor's `{ displayName, avatar }`. For an *attested* claim the user cannot forge,
+use the CFC wrappers `AuthoredByCurrentUser<T>` / `RepresentsCurrentUser<T>` and
+render with `cf-cfc-authorship`. Read-only display works today; note that
+owner-protected profile *writes* are currently constrained (see CT-1665).
+
+### Anti-patterns (do not ship these)
+
+- A "your name" text field used as the current user's identity → resolve `#profile`.
+- Deduping a roster by normalized display name → key by cell reference / `equals()`.
+- "Is this me?" via `name === myName` → compare the `me` cell reference.
+- A person rendered as `{name}` text or a raw `<img>` → `cf-avatar`/`cf-profile-badge`.
+
+### Constraints to design within (today)
+
+- No user-space "who am I" API — identity is implicit via scope + `#profile`.
+- No list-all-profiles — build rosters by join + snapshot.
+- Cross-space profile *name* reads are blocked (CT-1667) — you cannot badge other
+  users; snapshot + `cf-avatar` instead.
+- Owner-protected profile *writes* (avatar/elements) are blocked (CT-1665) — a
+  pattern that only *displays* identity is unaffected.
+
+### What a spec should capture about identity
+
+Any multi-user spec or design should answer these before build — include them as
+an **Identity & Presentation** section in the spec:
+
+1. **Who is the current viewer**, and is it resolved via `#profile` (not typed in)?
+2. **How is each person displayed** — `cf-profile-badge` for the viewer,
+   `cf-avatar` for everyone else?
+3. **What is shared vs per-user** (`PerSpace` roster/records, `PerUser` "me"
+   pointer, `PerSession` form state)?
+4. **How is a person identified** for dedup / "is this me" — by cell reference and
+   `equals()`, not by display name?
+5. **Is any record's ownership/authorship attested** (CFC) or just snapshotted?
+
 ## UI State
 
 Default UI-local state to `PerSession<T>`:
@@ -439,6 +524,9 @@ See:
   player identity.
 - `packages/patterns/cfc-group-chat-demo/`: multi-user chat with CFC-backed
   authorship and admin-protected room creation.
+- `packages/patterns/fair-share/`: the canonical identity presentation — `#profile`
+  viewer resolution, a `cf-profile-badge` "You" card, join-by-snapshot, and
+  `cf-avatar` for other members.
 
 ## Checklist
 
@@ -451,6 +539,9 @@ See:
 - Concurrently-edited shared collections and counters use the mergeable writes
   (`push` / `addUnique` / `increment` / `removeByValue` / `elementById`), not
   read-modify-write `set`, so simultaneous edits merge instead of clobbering.
+- People are rendered with `cf-avatar` / `cf-profile-badge`, never bare name strings.
+- The current viewer is resolved via `#profile`, not a self-typed name field.
+- Rosters are built by join + snapshot; "me" is a cell reference, not a name.
 - Authorization is modeled with CFC/IFC policy, not scopes.
 - `PerAny<T>` is reserved for truly scope-polymorphic inner values.
 - Multi-user tests verify the active identity for each browser or CLI session.
