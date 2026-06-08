@@ -15,6 +15,16 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 // post-evaluation capture walk only via the export namespace, so its metadata
 // was never registered and the write was rejected with
 // "writeAuthorizedBy requires a trusted verified binding identity".
+//
+// Scope: these tests assert the writer identity is REGISTERED and RESOLVES through
+// the harness's `getVerifiedBindingMetadata` — the exact lookup the CFC verifier
+// performs at commit (`cfc/prepare.ts` writeAuthorizedByReason) — and run under
+// `observe`. That isolates the CT-1665 gap (metadata never registered for
+// non-exported bindings) precisely, white-box. A full enforce-mode, end-to-end
+// "the write is accepted" assertion additionally needs trust-snapshot +
+// owner-principal + trusted-event provenance setup, which profile-owner-cfc.test.ts
+// drives via a mocked authoring identity (a path that, pre-fix, never reached the
+// binding-identity resolution that broke here).
 
 const signer = await Identity.fromPassphrase("ct1665-repro");
 const space = signer.did();

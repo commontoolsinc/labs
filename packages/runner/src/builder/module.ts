@@ -160,11 +160,13 @@ export function createNodeFactory<T = any, R = any>(
   // CT-1665: surface the factory so the engine can register verified binding
   // metadata for non-exported lift/derive/computed bindings (see handlerInternal).
   // Only JS-function modules can be trusted-binding writers (and carry
-  // `__cfVerifiedBindingIdentity`); `type: "ref"` builtins never do. Guarding on
-  // the implementation also keeps an implementation-less builtin node factory
-  // built at module load (e.g. builtins/sqlite/query-node.ts) from touching the
-  // registrar before function-hardening.ts has initialized under a circular
-  // import.
+  // `__cfVerifiedBindingIdentity`); `type: "ref"` builtins never do — so the guard
+  // is semantically correct. It is also load-safe: an implementation-less builtin
+  // node factory is created at module-load time (e.g. builtins/sqlite/query-node.ts)
+  // and is reached via a module.ts import cycle BEFORE module.ts has evaluated its
+  // own `import` of function-hardening.ts, so calling the registrar there would hit
+  // its still-uninitialized module-scope `let` (a TDZ throw). Function modules are
+  // only ever built later, at pattern-build time, well clear of that window.
   if (typeof module.implementation === "function") {
     registerVerifiedBindingCandidate(factory);
   }
