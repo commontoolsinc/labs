@@ -120,11 +120,6 @@ class DebugStringifier {
       }
 
       case "object": {
-        // TODO(danfuzz): This case will have to get smarter once we have
-        // `FabricSpecialObject`s flowing through the system (which generally cannot
-        // be stringified with full fidelity via `JSON.stringify()`'s default
-        // behavior).
-
         if (value === null) {
           // Let `JSON.stringify()` just render it directly as `"null"`.
           return null;
