@@ -205,4 +205,28 @@ describe("map op passed by identity (esmModuleLoader)", () => {
     expect(identityMisses).toBeGreaterThan(0);
     cancelSink();
   });
+
+  it("reloads a hoisted op by identity without recompiling", async () => {
+    // A map's sub-pattern result cells carry the op's `{ identity, symbol }`,
+    // where `symbol` is a HOIST (`__cfPattern_1`), not a module export. On reload
+    // the by-identity path must resolve it from the in-memory artifact index — a
+    // cold source recompile here is the CT-1623 "compiles=0 reload" regression
+    // the shell piece test guards. (Without the fix this resolves to undefined /
+    // recompiles, because hoists aren't in `modulesByIdentity.exports`.)
+    const compiled = await runtime.patternManager.compilePattern(PROGRAM);
+    const pm = runtime.patternManager;
+    const entryRef = pm.getArtifactEntryRef(compiled);
+    expect(entryRef).toBeDefined();
+    const missesBefore = pm.getCompileCacheStats().misses;
+
+    const op = await pm.loadPatternByIdentity(
+      entryRef!.identity,
+      "__cfPattern_1",
+      space,
+    );
+
+    expect(op).toBeDefined();
+    // Resolved from the live in-memory index — no cold recompile.
+    expect(pm.getCompileCacheStats().misses).toBe(missesBefore);
+  });
 });
