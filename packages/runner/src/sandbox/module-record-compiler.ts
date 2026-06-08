@@ -507,13 +507,23 @@ export function compileSourcesToRecords(
     // rather than wrapping the whole namespace. Authored sources are ESM.
     const namespaceExports = [...exportNames, "__esModule"];
 
-    // Tag the eval with a sourceURL = the (prefixed) source path. NOTE: under
-    // SES `errorTaming` this is currently stripped from stack traces, so it
-    // does NOT yet make `fn.src` resolve — full source-location fidelity under
-    // the ESM loader (stack traces, and thus the scheduler's content-addressed
-    // implementation hash / CFC verified-source check) requires SES-isolate-
-    // level source-map integration and is tracked as the remaining item before
-    // the flag can be enabled by default. The tag is the hook for that work.
+    // Tag the eval with a sourceURL = the (prefixed) source path. Under Deno's
+    // tamed SES `errorTaming` this is stripped from `new Error().stack`, so the
+    // stack-based resolver (`resolveSourceLocationFromStack`) does not fire there
+    // — but full source-location fidelity under the ESM loader is nonetheless
+    // achieved (scheduler content-addressed implementation hash + CFC
+    // verified-source) via two mechanisms, so this is NOT a remaining blocker for
+    // enabling the flag by default:
+    //   1. Deno: the `indexOf`-into-`script` fallback in
+    //      `resolveLocationFromFunctionSource` (builder/module.ts) maps `fn.src`
+    //      to the canonical `cf:module/<hash>/<path>` form via the per-load
+    //      `sourceLocationContext` the engine pushes.
+    //   2. Browsers (which DO surface the per-module eval frame in stacks): the
+    //      engine registers a per-module source map keyed on THIS `sourceURL`
+    //      (engine.ts, near `loadSourceMap`), so the stack-based resolver
+    //      translates the eval coordinate back to the authored source.
+    // Both paths are covered: `esm-source-location.test.ts` (CFC verified-source
+    // parity, flag-on) and `action-fingerprint.test.ts` (scheduler hash).
     //
     // SECURITY: strip JS line terminators before interpolating into the
     // `//# sourceURL=` line comment. A newline (or U+2028/U+2029) in
