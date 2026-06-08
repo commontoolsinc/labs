@@ -313,6 +313,15 @@ function hoistBuilderCalls(
   // `__cfLift`) sees it declared above.
   const resultStatements: ts.Statement[] = [];
   for (const statement of sourceFile.statements) {
+    // Also register AUTHORED top-level builder artifacts (`const foo = lift(...)`,
+    // `export const bar = pattern(...)`), so `__cfReg` is the canonical place a
+    // builder artifact acquires its `{ identity, symbol }` reference — not a
+    // parallel runtime export scan. Detect on the ORIGINAL statement (the checker
+    // resolves real, not synthetic, nodes). Only a direct builder CALL counts, so
+    // an import/alias (`const x = imported`) is never mis-attributed to this
+    // module's identity. The default export is handled separately (it has no
+    // binding name); the runtime trust-filters anything non-branded.
+    collectTopLevelBuilderArtifactNames(statement, context, registeredNames);
     pendingHoists = [];
     const visitedStatement = ts.visitNode(statement, visit) as ts.Statement;
     resultStatements.push(...pendingHoists, visitedStatement);
@@ -347,4 +356,45 @@ function hoistBuilderCalls(
   }
 
   return factory.updateSourceFile(sourceFile, resultStatements);
+}
+
+/**
+ * Collect the names of top-level `const`/`let`/`var` declarations whose
+ * initializer is a direct builder CALL (`pattern(...)`, `lift(...)`,
+ * `handler(...)`, `computed(...)`, …) — i.e. authored module-scope builder
+ * artifacts. These are added to the module's `__cfReg({ … })` registration so
+ * they receive a content-addressed `{ identity, symbol }` reference (symbol = the
+ * binding name), exactly like the synthetic hoists.
+ *
+ * Requiring a builder call (via `detectCallKind`) means a re-export / alias
+ * (`const x = imported`) — whose value belongs to ANOTHER module — is never
+ * registered here, so identity is never mis-attributed. Non-artifact builders are
+ * harmlessly trust-filtered at registration time. Destructuring is skipped.
+ *
+ * EXPORTED declarations are skipped: TypeScript's CommonJS emit rewrites
+ * `export const foo = …` to `exports.foo = …` with NO local `foo` binding, so a
+ * `__cfReg({ foo })` shorthand would read `undefined`. Exported builder artifacts
+ * don't need `__cfReg` anyway — they live in the module namespace and are
+ * addressable by their export name directly. `__cfReg` covers exactly the gap:
+ * the hoisted artifacts and non-exported top-level ones, which never reach the
+ * namespace.
+ */
+function collectTopLevelBuilderArtifactNames(
+  statement: ts.Statement,
+  context: TransformationContext,
+  out: string[],
+): void {
+  if (!ts.isVariableStatement(statement)) return;
+  const isExported = statement.modifiers?.some((m) =>
+    m.kind === ts.SyntaxKind.ExportKeyword
+  );
+  if (isExported) return;
+  for (const decl of statement.declarationList.declarations) {
+    if (!ts.isIdentifier(decl.name)) continue;
+    const init = decl.initializer;
+    if (!init || !ts.isCallExpression(init)) continue;
+    if (detectCallKind(init, context.checker)?.kind === "builder") {
+      out.push(decl.name.text);
+    }
+  }
 }

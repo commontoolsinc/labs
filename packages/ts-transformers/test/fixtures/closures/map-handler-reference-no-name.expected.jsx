@@ -184,5 +184,6 @@ export default pattern((state: State) => {
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    handleClick,
     __cfPattern_1
 });

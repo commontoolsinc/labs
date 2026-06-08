@@ -67,3 +67,7 @@ export default __cfHelpers.__cf_data({ logCharmsList, getStatus });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    logCharmsList,
+    getStatus
+});

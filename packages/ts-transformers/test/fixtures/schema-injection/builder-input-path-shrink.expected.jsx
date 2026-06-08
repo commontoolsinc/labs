@@ -180,6 +180,13 @@ export default __cfHelpers.__cf_data({
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    liftOptional,
     __cfLift_1,
+    handlerObserved,
+    handlerExplicit,
+    liftInterprocedural,
+    liftWriteOnly,
+    liftExplicit,
+    actionPattern,
     __cfHandler_1
 });

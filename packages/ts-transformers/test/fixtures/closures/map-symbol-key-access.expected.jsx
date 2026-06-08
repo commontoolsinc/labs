@@ -107,5 +107,6 @@ const _p = pattern((__cf_pattern_input) => {
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    _p,
     __cfPattern_1
 });

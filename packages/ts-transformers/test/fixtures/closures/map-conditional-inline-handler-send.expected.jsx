@@ -329,6 +329,7 @@ export default pattern((state) => {
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    castVote,
     __cfLift_1,
     __cfHandler_1,
     __cfPattern_1

@@ -769,6 +769,7 @@ export default pattern((state) => {
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    selectTask,
     __cfLift_1,
     __cfLift_2,
     __cfLift_3,

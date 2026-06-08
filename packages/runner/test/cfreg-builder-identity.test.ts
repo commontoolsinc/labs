@@ -136,6 +136,44 @@ export default pattern<State>((state) => {
     }
   });
 
+  it("registers an authored non-exported top-level builder const", async () => {
+    // A module-scope `const helper = lift(...)` is not a module export, so it
+    // can only be reached via `__cfReg` (keyed by its binding name). An exported
+    // artifact, by contrast, stays addressable through the module namespace.
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern, lift } from 'commonfabric';",
+          "const helper = lift((x: number) => x + 1);",
+          "export const named = pattern<{ n: number }>(({ n }) => ({ n }));",
+          "export default pattern<{ items: number[] }>(({ items }) =>",
+          "  ({ vs: items.map((x) => helper(x)) }));",
+        ].join("\n"),
+      }],
+    };
+    const signer = await Identity.fromPassphrase("cfreg-authored-const");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: { esmModuleLoader: true },
+    });
+    try {
+      const compiled = await runtime.patternManager.compilePattern(program);
+      const pm = runtime.patternManager;
+      const { identity } = pm.getPatternEntryRef(compiled)!;
+      // Non-exported const → reachable only via __cfReg.
+      expect(pm.patternFromIdentitySync(identity, "helper")).toBeDefined();
+      // Exported pattern → reachable via the module namespace.
+      expect(pm.patternFromIdentitySync(identity, "named")).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("returns undefined for an unknown reference (caller falls back)", async () => {
     const signer = await Identity.fromPassphrase("cfreg-builder-identity-miss");
     const storageManager = StorageManager.emulate({ as: signer });

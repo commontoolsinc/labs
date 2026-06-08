@@ -196,5 +196,12 @@ export { comparable, opaqueMap, pushOnly, readOnly, readWrite, setOnly, updateOn
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    readOnly,
+    setOnly,
+    updateOnly,
+    pushOnly,
+    readWrite,
+    comparable,
+    opaqueMap,
     __cfPattern_1
 });
