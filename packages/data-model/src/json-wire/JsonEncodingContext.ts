@@ -1,25 +1,20 @@
+import { isPlainObject } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-import { type FabricInstance, type FabricValue } from "@/interface.ts";
+import { type FabricValue } from "@/interface.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 import {
-  type FabricClass,
-  RECONSTRUCT,
   type ReconstructionContext,
   type SerializationContext,
 } from "@/wire-common/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
+import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
-import type { JsonWireValue, TypeHandlerCodec } from "./interface.ts";
-import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
-import {
-  BaseFabricInstance,
-  FabricError,
-  FabricMap,
-  FabricSet,
-} from "@/fabric-instances/index.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import type { JsonWireValue } from "./interface.ts";
+import type { CodecRegistry } from "./CodecRegistry.ts";
 import { WIRE_META_TAGS } from "@/wire-common/wire-meta-tags.ts";
 
 /**
@@ -37,7 +32,7 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 /** Shared default handler registry, created once. */
-const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
+const defaultRegistry: CodecRegistry = createDefaultRegistry();
 
 /** Returns true if `v` is a single-key object whose key starts with `/` —
  * the wire form of an encoded instance (tag-wrapped value). */
@@ -88,26 +83,17 @@ function unquote(v: JsonWireValue): JsonWireValue {
  * from the formal spec (Section 5).
  *
  * Public interface: `SerializationContext<string>`
- * - `encode(value)` -- full pipeline: serialize + stringify
- * - `decode(data, runtime)` -- full pipeline: parse + deserialize
+ * - `encode(value)` -- full pipeline: tree-encode + stringify
+ * - `decode(data, context)` -- full pipeline: parse + tree-decode
  *
  * All internal machinery (tag wrapping, tree walking, byte conversion) is
- * private. Type handlers receive a narrow `TypeHandlerCodec` view of `this`
- * during tree walking.
+ * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
+ * the `CodecRegistry`.
  */
 export class JsonEncodingContext implements SerializationContext<string> {
-  /** Tag -> class registry for known types. */
-  private readonly registry = new Map<
-    string,
-    FabricClass<FabricInstance>
-  >();
-
   /** Whether failed reconstructions produce `ProblematicValue` instead of
    *  throwing. */
   readonly lenient: boolean;
-
-  /** Narrow codec view for type handlers (avoids exposing private methods). */
-  private readonly codec: TypeHandlerCodec;
 
   /**
    * Constructs an instance, optionally configured for lenient mode (which
@@ -115,24 +101,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
    */
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
-
-    // Create a codec view that delegates to our private methods.
-    this.codec = {
-      wrapTag: (tag: string, state: JsonWireValue) => this.wrapTag(tag, state),
-      getTagFor: (value: FabricInstance) =>
-        BaseFabricInstance.wireTypeTagOf(value),
-    };
-
-    // Register native wrapper classes for deserialization. Each wrapper's
-    // static `[RECONSTRUCT]` method is used by the class registry fallback
-    // path in `deserialize()`.
-    this.registry.set(WIRE_TYPE_TAGS.Error, FabricError);
-    this.registry.set(WIRE_TYPE_TAGS.Map, FabricMap);
-    this.registry.set(WIRE_TYPE_TAGS.Set, FabricSet);
   }
 
   //
-  // `SerializationContext<string>` -- public boundary interface
+  // Instance members
   //
 
   /**
@@ -140,14 +112,14 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
-    return ENCODING_PREFIX_TAG + JSON.stringify(this.serialize(value));
+    return ENCODING_PREFIX_TAG + JSON.stringify(this.#encodeValue(value));
   }
 
   /**
    * Decodes a JSON string back into a fabric value. Parses the string,
    * then deserializes tagged forms back into runtime types.
    */
-  decode(data: string, runtime: ReconstructionContext): FabricValue {
+  decode(data: string, context: ReconstructionContext): FabricValue {
     if (!JsonEncodingContext.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
@@ -157,31 +129,15 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
     const parsed = JsonEncodingContext.#parseWireText(json);
-    return this.deserialize(parsed, runtime);
+    return this.#decodeValue(parsed, context);
   }
 
-  //
-  // Static helpers
-  //
-
   /**
-   * Indicates if the given text has a "first-blush" appearance as valid JSON
-   * encoded by this class -- that is, whether it carries the encoding prefix
-   * tag.
-   */
-  static seemsLikeEncoded(value: string): boolean {
-    return value.startsWith(ENCODING_PREFIX_TAG);
-  }
-
-  //
-  // Byte-level boundary (public for now -- used by serializeToBytes tests)
-  //
-
-  /**
-   * Serializes a fabric value to UTF-8 JSON bytes.
+   * Serializes a fabric value to UTF-8 JSON bytes. (Public for now -- used by
+   * byte-level round-trip tests.)
    */
   encodeToBytes(value: FabricValue): Uint8Array {
-    return this.toBytes(this.serialize(value));
+    return this.toBytes(this.#encodeValue(value));
   }
 
   /**
@@ -189,21 +145,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
    */
   decodeFromBytes(
     bytes: Uint8Array,
-    runtime: ReconstructionContext,
+    context: ReconstructionContext,
   ): FabricValue {
     const tree = this.fromBytes(bytes);
-    return this.deserialize(tree, runtime);
-  }
-
-  //
-  // Tag wrapping/unwrapping (private)
-  //
-
-  /** Returns the class that can reconstruct instances for a given tag. */
-  private getClassFor(
-    tag: string,
-  ): FabricClass<FabricInstance> | undefined {
-    return this.registry.get(tag);
+    return this.#decodeValue(tree, context);
   }
 
   /**
@@ -225,9 +170,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   private unwrapTag(
     data: JsonWireValue,
   ): { tag: string; state: JsonWireValue } | null {
-    if (
-      data === null || typeof data !== "object" || Array.isArray(data)
-    ) {
+    if (!isPlainObject(data)) {
       return null;
     }
 
@@ -235,15 +178,14 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return null;
     }
 
-    const key = Object.keys(data)[0];
-    const tag = key.slice(1);
-    const state = (data as Record<string, JsonWireValue>)[key];
-    return { tag, state };
+    // `isEncodedInstance()` guaranteed a single-property object, so this
+    // destructures that one entry. (`isPlainObject()` is not a type guard, so
+    // narrow explicitly for the type-checker.)
+    const [[key, value]] = Object.entries(
+      data as Record<string, JsonWireValue>,
+    );
+    return { tag: key.slice(1), state: value };
   }
-
-  //
-  // Byte conversion (private)
-  //
 
   /** Converts a wire-format tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonWireValue): Uint8Array {
@@ -256,42 +198,67 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return JsonEncodingContext.#parseWireText(json);
   }
 
-  //
-  // Tree-walking serialization (private)
-  //
-
   /**
-   * Serializes a fabric value into wire format. Recursively processes nested
-   * values. See Section 4.5 of the formal spec.
+   * Encodes a fabric value into the wire-format tree. Recursively processes
+   * nested values. See Section 4.5 of the formal spec.
    */
-  private serialize(
+  #encodeValue(
     value: FabricValue,
     _seen?: Set<object>,
-    registry: TypeHandlerRegistry = defaultRegistry,
+    registry: CodecRegistry = defaultRegistry,
   ): JsonWireValue {
-    // Try type handlers first
-    const handler = registry.findSerializer(value);
-    if (handler) {
+    // Try the registry first.
+    const codec = registry.codecFromValue(value);
+    if (codec) {
       const seen = _seen ?? new Set<object>();
+      let addedToSeen = false;
 
       if (value !== null && typeof value === "object") {
         if (seen.has(value as object)) {
           throw new Error("Circular reference detected during serialization");
         }
         seen.add(value as object);
+        addedToSeen = true;
       }
 
-      const result = handler.serialize(
-        value,
-        this.codec,
-        (v: FabricValue) => this.serialize(v, seen, registry),
-      );
+      const tag = codec.wireTypeTag;
+      const unprocessedState = codec.encode(value);
+      const finalState = this.#encodeValue(unprocessedState, seen, registry);
+      const result: JsonWireValue = { [`/${tag}`]: finalState };
 
-      if (value !== null && typeof value === "object") {
+      if (addedToSeen) {
         seen.delete(value as object);
       }
 
       return result;
+    }
+
+    // `ExplicitTagValue` (`UnknownValue` / `ProblematicValue`): live-graph
+    // stand-ins for values that arrived with an unknown tag or failed to
+    // decode. They round-trip to their *preserved* tag plus raw state, so the
+    // wire form shows that original tag -- never an `ExplicitTagValue` tag.
+    // Uses `.state` directly (NOT `[DECONSTRUCT]()`, whose shape differs).
+    if (value instanceof ExplicitTagValue) {
+      const seen = _seen ?? new Set<object>();
+      if (seen.has(value)) {
+        throw new Error("Circular reference detected during serialization");
+      }
+      seen.add(value);
+      const result = this.wrapTag(
+        value.wireTypeTag,
+        this.#encodeValue(value.state, seen, registry),
+      );
+      seen.delete(value);
+      return result;
+    }
+
+    // Every other `FabricInstance` must be representable by a registered codec.
+    // An un-codec'd instance is a programming error, not something to silently
+    // encode as a plain object.
+    if (value instanceof BaseFabricInstance) {
+      throw new Error(
+        `No codec registered for fabric instance: ${value.constructor.name}`,
+      );
     }
 
     // Primitives
@@ -322,7 +289,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
           result.push(this.wrapTag(WIRE_META_TAGS.hole, count));
         } else {
           result.push(
-            this.serialize(value[i] as FabricValue, seen, registry),
+            this.#encodeValue(value[i] as FabricValue, seen, registry),
           );
           i++;
         }
@@ -330,6 +297,20 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       seen.delete(value);
       return result as JsonWireValue;
+    }
+
+    // Codec values, `ExplicitTagValue`, `FabricInstance`, primitives, and
+    // arrays were all handled above. The only legitimate remaining shape is a
+    // *plain* object. Anything else -- a non-object (e.g. an uninterned/unique
+    // `symbol`) or a non-plain object (a class instance with no codec) -- is
+    // unencodable and must fail loudly rather than be silently mis-encoded as
+    // a plain object.
+    if (!isPlainObject(value)) {
+      throw new Error(
+        `Cannot encode ${
+          toCompactDebugString(value, 50)
+        }: no applicable codec.`,
+      );
     }
 
     // Plain objects
@@ -346,7 +327,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const result: Record<string, JsonWireValue> = {};
     const valueRec = value as Record<string, FabricValue>;
     for (const key of utf8SortedKeysOf(valueRec)) {
-      result[key] = this.serialize(valueRec[key], seen, registry);
+      result[key] = this.#encodeValue(valueRec[key], seen, registry);
     }
     seen.delete(value as object);
 
@@ -370,27 +351,41 @@ export class JsonEncodingContext implements SerializationContext<string> {
     return result as JsonWireValue;
   }
 
-  //
-  // Tree-walking deserialization (private)
-  //
-
   /**
-   * Deserializes a wire-format value back into runtime types.
-   * See Section 4.5 of the formal spec.
+   * Decodes a wire-format tree back into fabric values. See Section 4.5 of
+   * the formal spec.
    *
-   * Frozen-ness contract: values returned via the type-handler dispatch arm
-   * are guaranteed deep-frozen at this boundary, so callers do not each have
-   * to freeze. The class-registry fallback arm is a separate sibling branch
-   * and is intentionally NOT covered by this contract.
+   * Frozen-ness contract: values returned via the codec dispatch arm are
+   * guaranteed deep-frozen at this boundary, so callers do not each have to
+   * freeze. The unknown-tag fallback (`UnknownValue`) is a separate arm and is
+   * intentionally NOT covered by this contract.
    */
-  private deserialize(
+  #decodeValue(
     data: JsonWireValue,
-    runtime: ReconstructionContext,
-    registry: TypeHandlerRegistry = defaultRegistry,
+    context: ReconstructionContext,
+    registry: CodecRegistry = defaultRegistry,
   ): FabricValue {
     const decoded = this.unwrapTag(data);
     if (decoded !== null) {
-      const { tag, state } = decoded;
+      const { tag, state: rawState } = decoded;
+
+      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
+      if (tag === WIRE_META_TAGS.quote) {
+        return rawState as FabricValue;
+      }
+
+      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
+      if (tag === WIRE_META_TAGS.object) {
+        const inner = rawState as Record<string, JsonWireValue>;
+        const result: Record<string, FabricValue> = {};
+        for (const [key, val] of Object.entries(inner)) {
+          result[key] = this.#decodeValue(val, context, registry);
+        }
+        return Object.freeze(result);
+      }
+
+      // Except for `/quote` and `/object`, the `state` needs to be fully decoded.
+      const state = this.#decodeValue(rawState, context, registry);
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
@@ -404,24 +399,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
         ) as unknown as FabricValue;
       }
 
-      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
-      if (tag === WIRE_META_TAGS.object) {
-        const inner = state as Record<string, JsonWireValue>;
-        const result: Record<string, FabricValue> = {};
-        for (const [key, val] of Object.entries(inner)) {
-          result[key] = this.deserialize(val, runtime, registry);
-        }
-        return Object.freeze(result);
-      }
-
-      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
-      if (tag === WIRE_META_TAGS.quote) {
-        return state as FabricValue;
-      }
-
-      // Type handler dispatch
+      // Registry-based (tag lookup) dispatch
       //
-      // `TypeHandler.deserialize()` makes a contractual guarantee that its
+      // `FabricCodec.decode()` makes a contractual guarantee that its
       // results are deep-frozen, rather than relying on every caller to
       // freeze: every return out of this arm passes through `deepFreeze()`.
       // This covers the handler's produced value (e.g. `FabricPrimitive`
@@ -429,15 +409,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
       // lenient-mode `ProblematicValue` fallback. The class-registry
       // fallback below is a separate arm and is intentionally NOT covered by
       // this contract.
-      const handler = registry.getDeserializer(tag);
-      if (handler) {
+      const codec = registry.codecFromTag(tag);
+      if (codec) {
         if (this.lenient) {
           try {
-            return deepFreeze(handler.deserialize(
-              state,
-              runtime,
-              (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-            ));
+            return deepFreeze(codec.decode(tag, state, context));
           } catch (e: unknown) {
             return deepFreeze(
               new ProblematicValue(
@@ -448,43 +424,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
             );
           }
         }
-        return deepFreeze(handler.deserialize(
-          state,
-          runtime,
-          (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-        ));
+        return deepFreeze(codec.decode(tag, state, context));
       }
 
-      // Class registry fallback
-      const cls = this.getClassFor(tag);
-      const deserializedState = this.deserialize(state, runtime, registry);
-
-      if (cls) {
-        if (this.lenient) {
-          try {
-            return cls[RECONSTRUCT](
-              deserializedState,
-              runtime,
-            ) as unknown as FabricValue;
-          } catch (e: unknown) {
-            return new ProblematicValue(
-              tag,
-              deserializedState,
-              e instanceof Error ? e.message : String(e),
-            ) as unknown as FabricValue;
-          }
-        }
-        return cls[RECONSTRUCT](
-          deserializedState,
-          runtime,
-        ) as unknown as FabricValue;
-      }
-
-      // Unknown type: preserve for round-tripping.
-      return new UnknownValue(
-        tag,
-        deserializedState,
-      ) as unknown as FabricValue;
+      // No registered codec for this tag: preserve the unknown form for
+      // round-tripping.
+      return new UnknownValue(tag, state);
     }
 
     // Primitives pass through.
@@ -514,7 +459,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
         if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
           targetIndex += entryDecoded.state as number;
         } else {
-          result[targetIndex] = this.deserialize(entry, runtime, registry);
+          result[targetIndex] = this.#decodeValue(entry, context, registry);
           targetIndex++;
         }
       }
@@ -533,9 +478,22 @@ export class JsonEncodingContext implements SerializationContext<string> {
           `object contains reserved /-prefixed key: "${key}"`,
         ) as unknown as FabricValue;
       }
-      result[key] = this.deserialize(val, runtime, registry);
+      result[key] = this.#decodeValue(val, context, registry);
     }
     return Object.freeze(result);
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Indicates if the given text has a "first-blush" appearance as valid JSON
+   * encoded by this class -- that is, whether it carries the encoding prefix
+   * tag.
+   */
+  static seemsLikeEncoded(value: string): boolean {
+    return value.startsWith(ENCODING_PREFIX_TAG);
   }
 
   /**

@@ -1,9 +1,12 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
+  CODEC,
   DECONSTRUCT,
+  type FabricCodec,
   RECONSTRUCT,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -74,5 +77,32 @@ export class FabricMap
     _context: ReconstructionContext,
   ): FabricMap {
     throw new Error("FabricMap: not yet implemented");
+  }
+
+  static #codec = Object.freeze(
+    new (class FabricMapCodec extends BaseFabricCodec {
+      constructor() {
+        super(WIRE_TYPE_TAGS.Map, FabricMap);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricMap): FabricValue {
+        return value[DECONSTRUCT]();
+      }
+
+      /** @inheritDoc */
+      decode(
+        _wireTypeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        return FabricMap[RECONSTRUCT](state, context);
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }

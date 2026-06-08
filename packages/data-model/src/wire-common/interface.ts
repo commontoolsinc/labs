@@ -1,19 +1,23 @@
+import type { Constructor } from "@commonfabric/utils/types";
+
 import type { FabricInstance, FabricValue } from "@/interface.ts";
 
 /**
- * Well-known symbol for deconstructing a fabric object into its essential
- * state. The returned value may contain nested `FabricValue`s (including
- * other fabric objects); the serialization system handles recursion.
- * See Section 2.2 of the formal spec.
+ * Well-known symbol for binding the getter `FabricClassWithCodec[CODEC]`.
  */
-export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
+export const CODEC: unique symbol = Symbol.for("data-model.codec");
 
 /**
- * Well-known symbol for reconstructing a fabric object from its essential
- * state. Static method on the class.
- * See Section 2.2 of the formal spec.
+ * Well-known symbol for binding the method
+ * `FabricDeconstructable[DECONSTRUCT]`.
  */
-export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
+export const DECONSTRUCT: unique symbol = Symbol.for("data-model.deconstruct");
+
+/**
+ * Well-known symbol for binding the method
+ * `FabricClass[RECONSTRUCT]`.
+ */
+export const RECONSTRUCT: unique symbol = Symbol.for("data-model.reconstruct");
 
 /**
  * Interface for deconstructable fabric objects, which is all of them, but
@@ -27,6 +31,69 @@ export interface FabricDeconstructable {
    * serialization system handles that.
    */
   [DECONSTRUCT](): FabricValue;
+}
+
+/**
+ * Interface for codecs (encoder-decoder objects). These are object which can
+ * extract "essential state" out of values (objects per se or otherwise) and
+ * also take such "essential state" and produce values that are equivalent (in
+ * a context-dependent sense) to the values that state was extracted from.
+ */
+export interface FabricCodec {
+  /**
+   * The unique _direct_ class of instances, if any, that is associated with the
+   * format this instance encodes. The codec system uses this to make a quick
+   * determination about value compatibility before calling {@link #canEncode}
+   * to confirm.
+   */
+  get uniqueHandledClass(): Constructor | undefined;
+
+  /**
+   * The unique preferred wire format tag that is associated with the format
+   * this instance decodes from. The codec system uses this to mark state
+   * produced by {@link #encode} on this instance and (by default) routes state
+   * so marked back to this instance (or an equivalent) for decoding.
+   */
+  get wireTypeTag(): string;
+
+  /**
+   * Returns `true` if this handler can encode the state of the given value.
+   */
+  canEncode(value: FabricValue): boolean;
+
+  /**
+   * Decodes a value from the given essential state, which is (alleged / supposed)
+   * to be a value that was produced by an earlier call to {@link #encode} on
+   * a compatible class to this one. The result is expected to be a _shallow_
+   * decoding. The codec system handles recursively converting `state` contents
+   * as necessary.
+   *
+   * The given `wireTypeTag` is what was associated with the given `state` and
+   * does not necessarily correspond to {@link #wireTypeTag} (depending on how
+   * an instance of this class got hooked up).
+   */
+  decode(
+    wireTypeTag: string,
+    state: FabricValue,
+    context: ReconstructionContext,
+  ): FabricValue;
+
+  /**
+   * Encodes the given value, returning its essential state. This is only ever
+   * called after {@link #canEncode} has confirmed that `value` is encodable by
+   * this instance. The result is expected to be a _shallow_ encoding. The codec
+   * system handles recursion as necessary.
+   */
+  encode(value: FabricValue): FabricValue;
+}
+
+/**
+ * Interface for classes that provide a `FabricCodec` which is guaranteed to
+ * operate on instances of the class.
+ */
+export interface FabricClassWithCodec {
+  /** The codec instance to use for instances of this class. */
+  get [CODEC](): FabricCodec;
 }
 
 /**
@@ -115,6 +182,6 @@ export interface SerializationContext<SerializedForm = unknown> {
   /** Decodes a serialized form back into a fabric value. */
   decode(
     data: SerializedForm,
-    runtime: ReconstructionContext,
+    context: ReconstructionContext,
   ): FabricValue;
 }
