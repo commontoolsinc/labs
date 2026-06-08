@@ -7,6 +7,7 @@ import {
   trustedFlowPrecisionSchemaForBuiltin,
 } from "../src/cfc/flow-precision.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { type Opaque } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-precision");
 const space = signer.did();
@@ -79,9 +80,24 @@ describe("CFC flow precision claims", () => {
     valuesCell.set([]);
 
     const collectionPattern = pattern<{ values: number[] }>(({ values }) => {
-      mappedRef = values.map((value: number) => value);
-      filteredRef = values.filter((_value: number) => true);
-      flattenedRef = values.flatMap((value: number) => [value]);
+      mappedRef = (values as any).mapWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((value: number) => value) as any)(element, index, array)
+        ),
+        {},
+      );
+      filteredRef = (values as any).filterWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((_value: number) => true) as any)(element, index, array)
+        ),
+        {},
+      );
+      flattenedRef = (values as any).flatMapWithPattern(
+        pattern(({ element, index, array }: Opaque<any>) =>
+          (((value: number) => [value]) as any)(element, index, array)
+        ),
+        {},
+      );
       reducedRef = values.reduce(
         (acc: number, value: number) => acc + value,
         0,

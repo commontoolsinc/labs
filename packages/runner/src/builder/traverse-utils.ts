@@ -1,5 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { isOpaqueRef, isPattern, type Opaque } from "./types.ts";
+import {
+  isOpaqueRef,
+  isPattern,
+  type Opaque,
+  unsafe_originalPattern,
+} from "./types.ts";
 import { isCell } from "../cell.ts";
 import { isCellResultForDereferencing } from "../query-result-proxy.ts";
 
@@ -34,11 +39,22 @@ export function traverseValue(
     if (Array.isArray(value)) {
       return (value as Array<any>).map((v) => traverseValue(v, fn, seen));
     } else {
-      return Object.fromEntries(
+      const copy = Object.fromEntries(
         Object.entries(value).map((
           [key, v],
         ) => [key, traverseValue(v, fn, seen)]),
       );
+      // `Object.entries` drops symbol keys, so a pattern copied here would lose
+      // its link back to the original (branded, content-addressed) factory —
+      // severing `findOriginalPattern`/`getArtifactEntryRef`, which is how a
+      // pattern passed as an `op` is later identified by `{ identity, symbol }`.
+      // Preserve that link (the deepest original) on the copy. Mirrors the same
+      // `unsafe_originalPattern` retention in `toJSONWithLegacyAliases`.
+      if (isPattern(value)) {
+        (copy as Record<symbol, unknown>)[unsafe_originalPattern] =
+          (value as Record<symbol, unknown>)[unsafe_originalPattern] ?? value;
+      }
+      return copy;
     }
   } else {
     return value;

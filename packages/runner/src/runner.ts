@@ -3529,6 +3529,50 @@ export class Runner {
     }
   }
 
+  /**
+   * CT-1623: for the list builtins (`map`/`filter`/`flatMap`), annotate the `op`
+   * input with its content-addressed `{ identity, symbol }` entry ref (when
+   * known) so the builtin can resolve the live canonical pattern by identity
+   * instead of deserializing the embedded graph. Mutates `inputBindings` in
+   * place: `op` becomes `{ $patternRef, $opFallback }`.
+   *
+   * Only the `op` key is rewritten — it is the sole pattern-valued input the
+   * builtins rehydrate (`resolveOpPattern`). Rewriting other inputs (e.g. a
+   * pattern captured in `params`) would leave an unresolved `$patternRef` object
+   * that nothing reads back.
+   *
+   * The embedded graph is retained as `$opFallback` (correctness over the
+   * bounded module cache — see `resolveOpPattern`). `inputBindings` here is the
+   * freshly bound (mutable, unfrozen) copy produced by
+   * `unwrapOneLevelAndBindtoDoc`; its pattern values still carry the in-memory
+   * `unsafe_originalPattern` backref, so `getArtifactEntryRef` can resolve the ref
+   * (assigned post-eval by `registerEvaluatedModules`). With no known ref the op
+   * is left as the embedded graph (legacy / ESM-loader-off).
+   */
+  private substituteOpPatternRefs(
+    moduleRefName: string | undefined,
+    inputBindings: FabricValue,
+  ): void {
+    if (
+      moduleRefName !== "map" && moduleRefName !== "filter" &&
+      moduleRefName !== "flatMap"
+    ) {
+      return;
+    }
+    if (!isRecord(inputBindings)) return;
+    const op = (inputBindings as Record<string, unknown>).op;
+    if (!isRecord(op)) return;
+    const ref = this.runtime.patternManager.getArtifactEntryRef(
+      op as unknown as object,
+    );
+    if (ref) {
+      (inputBindings as Record<string, unknown>).op = {
+        $patternRef: { identity: ref.identity, symbol: ref.symbol },
+        $opFallback: op,
+      };
+    }
+  }
+
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
@@ -3577,6 +3621,15 @@ export class Runner {
     // For `map` and future other node types that take closures, we need to
     // note the parent pattern on the closure patterns.
     unsafe_noteParentOnPatterns(pattern, mappedInputBindings);
+
+    // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
+    // with a compact `{ $patternRef }` sentinel when its content-addressed entry
+    // ref is known. This is the post-eval moment where the in-memory op object
+    // (reachable via `unsafe_originalPattern`, preserved through binding) carries
+    // its `{ identity, symbol }`; the sentinel then survives the immutable-cell
+    // JSON round-trip, so the builtin resolves the live canonical pattern by
+    // identity instead of deserializing the embedded graph.
+    this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
 
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,

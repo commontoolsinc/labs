@@ -899,10 +899,20 @@ export class PatternManager {
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
     }
-    if (!(symbol in main)) {
-      throw new Error(`No "${symbol}" export found in compiled pattern.`);
+    // Usually an authored export, but a map/filter/flatMap `op` reloads by a
+    // transformer HOIST symbol (`__cfReg`, e.g. `__cfPattern_1`) that is not an
+    // export — `registerEvaluatedModules` above indexed it, so resolve it there.
+    const pattern =
+      (symbol in main
+        ? main[symbol]
+        : this.addressableByIdentity.get(entryIdentity)?.get(symbol)) as
+          | Pattern
+          | undefined;
+    if (!pattern) {
+      throw new Error(
+        `No "${symbol}" export or hoist registration found in compiled pattern.`,
+      );
     }
-    const pattern = main[symbol] as Pattern;
     if (isTrustedPattern(pattern)) {
       this.valueToEntryRef.set(pattern, { identity: entryIdentity, symbol });
       if (loadId) {
@@ -1028,9 +1038,19 @@ export class PatternManager {
     symbol: string,
   ): Pattern | undefined {
     const cached = this.modulesByIdentity.get(entryIdentity);
-    if (!cached || !(symbol in cached.exports)) return undefined;
-    const pattern = cached.exports[symbol] as Pattern;
-    if (!isTrustedPattern(pattern)) return undefined;
+    if (!cached) return undefined;
+    // The symbol is usually an authored export, but a map/filter/flatMap `op`
+    // result cell references a transformer HOIST (`__cfReg`, e.g. `__cfPattern_1`)
+    // which is NOT a module export — it lives in the artifact index. Resolving it
+    // there (instead of falling through to a cold source recompile) is what keeps
+    // a reloaded op compile-free (CT-1623).
+    const pattern =
+      (symbol in cached.exports
+        ? cached.exports[symbol]
+        : this.addressableByIdentity.get(entryIdentity)?.get(symbol)) as
+          | Pattern
+          | undefined;
+    if (!pattern || !isTrustedPattern(pattern)) return undefined;
     // Refresh recency.
     this.modulesByIdentity.delete(entryIdentity);
     this.modulesByIdentity.set(entryIdentity, cached);

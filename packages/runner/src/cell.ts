@@ -25,7 +25,7 @@ import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
-import { getTopFrame, pattern } from "./builder/pattern.ts";
+import { getTopFrame } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
   type AnyCell,
@@ -155,6 +155,24 @@ export type RawCellReadOptions = IReadOptions & {
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
+
+/**
+ * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
+ * OpaqueRef/Cell. These wrapped the callback in an anonymous inline pattern,
+ * which has no stable content-addressed `{ identity, symbol }` and so cannot be
+ * passed/persisted by identity (CT-1623). Authored pattern code is always
+ * lowered by the TS transformer to the `*WithPattern(pattern(...), params)` form
+ * (with the pattern hoisted to a module export); direct builder-API callers must
+ * use the `*WithPattern` variant explicitly.
+ */
+function throwOpFunctionFormMessage(
+  method: "map" | "filter" | "flatMap",
+): string {
+  return `OpaqueRef.${method}(fn) is no longer supported: an inline pattern has ` +
+    `no stable identity. Authored \`.${method}(...)\` is lowered by the TS ` +
+    `transformer to \`.${method}WithPattern(pattern(...), { params })\`; if you ` +
+    `are calling the builder API directly, use \`.${method}WithPattern(op, params)\`.`;
+}
 
 // WeakMap to store connected nodes for each cell instance
 const cellNodes = new WeakMap<OpaqueCell<unknown>, Set<NodeRef>>();
@@ -1939,31 +1957,13 @@ export class CellImpl<T extends FabricValue>
   }
 
   map<S>(
-    fn: (
+    _fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S>,
   ): OpaqueRef<S[]> {
-    // Create the factory if it doesn't exist
-    if (!mapFactory) {
-      mapFactory = createNodeFactory({
-        type: "ref",
-        implementation: "map",
-      });
-    }
-    const op = pattern(
-      ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-    );
-    const result = mapFactory({
-      list: this as unknown as OpaqueRef<T>,
-      op,
-    });
-    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
-    return result;
+    throw new Error(throwOpFunctionFormMessage("map"));
   }
 
   /**
@@ -2051,30 +2051,13 @@ export class CellImpl<T extends FabricValue>
    * Output contains cell references to the original elements.
    */
   filter(
-    fn: (
+    _fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<boolean>,
   ): OpaqueRef<(T extends Array<infer U> ? U : T)[]> {
-    if (!filterFactory) {
-      filterFactory = createNodeFactory({
-        type: "ref",
-        implementation: "filter",
-      });
-    }
-
-    const result = filterFactory({
-      list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
-    });
-    const schema = flowPrecisionSchemaForBuiltin("filter");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
-    return result;
+    throw new Error(throwOpFunctionFormMessage("filter"));
   }
 
   /**
@@ -2111,30 +2094,13 @@ export class CellImpl<T extends FabricValue>
    * Each callback should return an array; results are concatenated one level deep.
    */
   flatMap<S>(
-    fn: (
+    _fn: (
       element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
       index: OpaqueRef<number>,
       array: OpaqueRef<T>,
     ) => Opaque<S[]>,
   ): OpaqueRef<S[]> {
-    if (!flatMapFactory) {
-      flatMapFactory = createNodeFactory({
-        type: "ref",
-        implementation: "flatMap",
-      });
-    }
-
-    const result = flatMapFactory({
-      list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
-    });
-    const schema = flowPrecisionSchemaForBuiltin("flatMap");
-    if (schema !== undefined) {
-      result.setSchema(schema);
-    }
-    return result;
+    throw new Error(throwOpFunctionFormMessage("flatMap"));
   }
 
   /**

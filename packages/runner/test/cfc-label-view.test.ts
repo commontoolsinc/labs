@@ -11,7 +11,7 @@ import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { UI } from "../src/builder/types.ts";
+import { type Opaque, UI } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 describe("CFC label view helpers", () => {
@@ -1118,14 +1118,19 @@ describe("CFC label view helpers", () => {
       const { commonfabric } = createTrustedBuilder(runtime);
       const { pattern } = commonfabric;
       const renderLabels = pattern<{ items: unknown[] }>(({ items }) => {
-        const rendered = items.map((item) => ({
-          [UI]: {
-            type: "vnode" as const,
-            name: "cf-cfc-label",
-            props: { value: item },
-            children: [],
-          },
-        }));
+        const rendered = (items as any).mapWithPattern(
+          pattern(({ element, index, array }: Opaque<any>) =>
+            (((item: any) => ({
+              [UI]: {
+                type: "vnode" as const,
+                name: "cf-cfc-label",
+                props: { value: item },
+                children: [],
+              },
+            })) as any)(element, index, array)
+          ),
+          {},
+        );
         return { rendered };
       });
 

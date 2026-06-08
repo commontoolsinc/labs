@@ -19,7 +19,7 @@ import {
   loadConversationFixture,
 } from "@commonfabric/llm/client";
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
-import type { Cell, JSONSchema } from "../src/builder/types.ts";
+import type { Cell, JSONSchema, Opaque } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
@@ -827,10 +827,15 @@ describe("generateObject with tools", () => {
           { result: Array<{ label: string; value: string }> }
         >(
           ({ items }) => {
-            const result = items.map((item) => ({
-              label: item.label,
-              value: item.value,
-            }));
+            const result = (items as any).mapWithPattern(
+              pattern(({ element, index, array }: Opaque<any>) =>
+                (((item: any) => ({
+                  label: item.label,
+                  value: item.value,
+                })) as any)(element, index, array)
+              ),
+              {},
+            );
             return { result };
           },
           { type: "object", properties: { items: { type: "array" } } },
