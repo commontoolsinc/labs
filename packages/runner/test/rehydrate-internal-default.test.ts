@@ -5,7 +5,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Cell, type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { getMetaLink, parseLink } from "../src/link-utils.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
 import { JSONValue } from "@commonfabric/runner/shared";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -91,6 +91,24 @@ describe("rehydrate internal default (CT-1666)", () => {
     return undefined;
   };
 
+  const internalLinkOf = (
+    resultCell: Cell<unknown>,
+    partialCause: JSONValue,
+  ) => {
+    const manifest = resultCell.getMetaRaw("internal");
+    expect(manifest).toBeDefined();
+    expect(Array.isArray(manifest)).toBe(true);
+    if (Array.isArray(manifest)) {
+      for (const entry of manifest) {
+        if (deepEqual(entry?.partialCause, partialCause)) {
+          expect(isPrimitiveCellLink(entry?.link)).toBe(true);
+          return parseLink(entry.link, resultCell)!;
+        }
+      }
+    }
+    throw new Error(`Missing internal manifest entry for ${partialCause}`);
+  };
+
   beforeEach(() => {
     server = new MemoryV2Server.Server({
       authorizeSessionOpen(message) {
@@ -143,6 +161,74 @@ describe("rehydrate internal default (CT-1666)", () => {
 
       const internal2 = internalCellOf(rt2, rc2, "activeTab")!;
       expect(internal2.get()).toEqual("profile");
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("materializes internal manifest cells from a cold-cache result query", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm2,
+    });
+    try {
+      const inputs = { selectedBy: "client-a" };
+      const rc1 = rt1.getCell<Record<string, never>>(
+        space,
+        "home-result-query-materialization",
+      );
+      await rt1.runSynced(rc1, trustExecutable(rt1, pattern), inputs);
+      await rc1.pull();
+
+      const internal1 = internalCellOf(rt1, rc1, "activeTab")!;
+      const tx = rt1.edit();
+      internal1.withTx(tx).set("profile");
+      await tx.commit();
+      await sm1.synced();
+
+      const internalLink = internalLinkOf(rc1, "activeTab");
+      const argumentLink = getMetaLink(rc1, "argument");
+      expect(argumentLink).toBeDefined();
+      const provider2 = sm2.open(space) as unknown as {
+        get(
+          id: string,
+          scope?: string,
+        ):
+          | { value?: unknown; argument?: unknown; internal?: unknown }
+          | undefined;
+      };
+      expect(provider2.get(internalLink.id, internalLink.scope))
+        .toBeUndefined();
+      expect(provider2.get(argumentLink!.id, argumentLink!.scope))
+        .toBeUndefined();
+
+      const rc2 = rt2.getCell<Record<string, never>>(
+        space,
+        "home-result-query-materialization",
+      );
+      await rc2.sync();
+      await sm2.synced();
+
+      const resultDoc = provider2.get(
+        rc2.getAsNormalizedFullLink().id,
+        rc2.getAsNormalizedFullLink().scope,
+      );
+      expect(resultDoc).toBeDefined();
+      expect(resultDoc?.internal).toBeDefined();
+      expect(resultDoc?.argument).toBeDefined();
+
+      const internalDoc = provider2.get(internalLink.id, internalLink.scope);
+      expect(internalDoc).toBeDefined();
+      expect(internalDoc?.value).toEqual("profile");
+
+      const argumentDoc = provider2.get(argumentLink!.id, argumentLink!.scope);
+      expect(argumentDoc).toBeDefined();
+      expect(argumentDoc?.value).toEqual(inputs);
     } finally {
       await rt2.dispose();
       await rt1.dispose();

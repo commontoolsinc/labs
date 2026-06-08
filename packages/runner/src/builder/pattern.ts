@@ -343,12 +343,12 @@ function factoryFromPattern<T, R>(
     // If we have an external id, don't bother with all this
     if (external) return undefined;
 
-    // See if we're one of the special cells (result or argument)
     const commonAliasProps = {
       path,
       ...(scope !== undefined && { scope }),
       ...(schema !== undefined && { schema }),
     };
+    // See if we're one of the special cells (result or argument)
     const cellName = cellNameForCell(cell);
     if (cellName !== undefined) {
       return { cell: cellName, ...commonAliasProps };

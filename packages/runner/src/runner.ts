@@ -1746,24 +1746,6 @@ export class Runner {
     };
   }
 
-  /**
-   * Sync docs reached through result-cell metadata links.
-   *
-   * `internal` is raw manifest metadata on the result cell, not a direct
-   * metadata link. The result cell must already be synced so link metadata is
-   * readable.
-   */
-  private async syncMetaCells(resultCell: Cell<any>): Promise<void> {
-    const promises: Promise<unknown>[] = [];
-    for (const field of ["argument"] as const) {
-      const link = getMetaLink(resultCell, field);
-      if (link === undefined) continue;
-      const maybePromise = this.runtime.getCellFromLink(link).sync();
-      if (maybePromise instanceof Promise) promises.push(maybePromise);
-    }
-    await Promise.all(promises);
-  }
-
   private async syncCellsForRunningPattern(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
@@ -1790,11 +1772,6 @@ export class Runner {
     await Promise.all(promises);
 
     await resultCell.sync();
-
-    // Also load docs reached through result-cell metadata links. `internal`
-    // itself is raw manifest metadata on the result cell, so it is covered by
-    // `resultCell.sync()` rather than by this helper.
-    await this.syncMetaCells(resultCell);
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
