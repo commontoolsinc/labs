@@ -8,6 +8,7 @@ import {
   MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { createSession, Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -323,6 +324,55 @@ serialTest("memory websocket negotiates a session", async () => {
     await server.shutdown();
   }
 });
+
+// Forward-compatibility for the staged signature wire-format migration: the
+// server must accept a session-open signature sent as a `FabricBytes` (the
+// intended long-term form), ahead of any client actually producing it. See
+// `toByteArray` in `../memory.ts`.
+serialTest(
+  "memory websocket negotiates a session with a `FabricBytes` signature",
+  async () => {
+    const identity = await Identity.fromPassphrase("memory-route-open-bytes");
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const address = new URL(
+      `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+    );
+    const space = identity.did();
+
+    try {
+      const socket = await openSocket(address);
+      socket.send(encodeMemoryBoundary(HELLO));
+      await readJsonMessage(socket);
+
+      const auth = await createSessionOpenAuth(identity, space);
+      socket.send(encodeMemoryBoundary({
+        type: "session.open",
+        requestId: "open-1",
+        space,
+        session: {},
+        ...auth,
+        authorization: {
+          ...auth.authorization,
+          signature: new FabricBytes(auth.authorization.signature),
+        },
+      }));
+
+      const opened = await readJsonMessage<{
+        type: "response";
+        requestId: string;
+        ok: { sessionId: string; serverSeq: number };
+      }>(socket);
+
+      assertEquals(opened.type, "response");
+      assertEquals(opened.requestId, "open-1");
+      assert(opened.ok.sessionId.length > 0);
+
+      socket.close();
+    } finally {
+      await server.shutdown();
+    }
+  },
+);
 
 serialTest("memory websocket rejects an unsigned session open", async () => {
   const identity = await Identity.fromPassphrase("memory-route-open-reject");
