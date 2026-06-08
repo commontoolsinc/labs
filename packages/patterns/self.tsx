@@ -13,6 +13,7 @@
 import {
   computed,
   handler,
+  ifElse,
   NAME,
   pattern,
   safeDateNow,
@@ -621,29 +622,33 @@ const Self = pattern<SelfInput, SelfOutput>(
               <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>
                 Recorded reflections
               </h3>
-              {selfModel.key("responses").map((r) => (
-                <cf-vstack
-                  gap="1"
-                  style={{
-                    padding: "8px",
-                    background: "#f9fafb",
-                    borderRadius: "6px",
-                  }}
-                >
-                  <span
+              {selfModel.key("responses").map((r) =>
+                ifElse(
+                  computed(() => r.track === "meaning"),
+                  <cf-vstack
+                    gap="1"
                     style={{
-                      fontSize: "12px",
-                      color: "#6b7280",
-                      fontStyle: "italic",
+                      padding: "8px",
+                      background: "#f9fafb",
+                      borderRadius: "6px",
                     }}
                   >
-                    {r.prompt}
-                  </span>
-                  <span style={{ fontSize: "13px", color: "#111827" }}>
-                    {r.answer}
-                  </span>
-                </cf-vstack>
-              ))}
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        color: "#6b7280",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      {r.prompt}
+                    </span>
+                    <span style={{ fontSize: "13px", color: "#111827" }}>
+                      {r.answer}
+                    </span>
+                  </cf-vstack>,
+                  null,
+                )
+              )}
             </cf-vstack>
 
             {/* -- Your values section -- */}
