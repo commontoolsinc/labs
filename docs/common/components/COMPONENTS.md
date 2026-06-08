@@ -754,3 +754,76 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 - **Data auto-detection:** Number arrays auto-index. String x-values use band scale. Date/ISO strings use time scale.
 - **Responsive width:** Chart fills its container width. Use CSS to control.
 - **Crosshair:** Enabled by default. Shows nearest data point on hover.
+
+---
+
+## Identity components
+
+**Render a person with the identity components — never a bare name string or a
+raw `<img>`.** A display name alone is forgeable, hard to recognize at a glance,
+and inaccessible. These components give consistent treatment, an accessible name,
+and (for the current viewer) a verified seal that user-space cannot forge.
+
+| You are showing… | Use | Why |
+| --- | --- | --- |
+| the **current viewer** ("You"), whose profile cell you resolved via `wish` | `cf-profile-badge` | trusted; draws name + avatar + a DID-derived verified seal |
+| **anyone else** in a roster (you only hold a name/avatar snapshot) | `cf-avatar` + their name | untrusted, safe for any value; needs no profile cell |
+
+See [multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
+for the end-to-end flow (resolve the viewer, snapshot the roster, mark "me").
+
+### cf-avatar
+
+Untrusted avatar primitive — safe for any code to render, for any person.
+
+```tsx
+<cf-avatar name="Ada Lovelace" src={person.avatar} size="sm" /> // data: URI image
+<cf-avatar name="Grace Hopper" src="🦊" />                       // emoji glyph
+<cf-avatar name="Alan Turing" />                                 // initials "AT"
+```
+
+- `src`: a `data:` URI image, an emoji/glyph, or `""`. **Only `data:` URIs render
+  as an image** — `http(s)`, `blob:`, and path URLs degrade to initials and are
+  never fetched (no tracking/exfil beacon).
+- `name`: drives the initials fallback and the accessible label — always set it.
+- `size`: `xs | sm | md | lg | xl`. `shape`: `circle | square`.
+
+Use `cf-avatar` for every participant in a shared roster; you snapshot their
+`name`/`avatar` when they join.
+
+### cf-profile-badge
+
+Trusted presentation of the **current viewer's own profile**. Bind a profile
+**cell** (not strings) via `$profile`; it renders name + avatar + a verified seal
+derived from the owner's identity that user-space cannot mint.
+
+```tsx
+const profileWish = wish({ query: "#profile" }); // resolves the viewer's profile cell
+...
+<cf-profile-badge $profile={profileWish.result} size="sm" />
+```
+
+- `$profile`: the viewer's profile **cell** — bind `wish({ query: "#profile" }).result`
+  (the `.result`, not the wish object).
+- `size`: `xs | sm | md | lg | xl`.
+- The verified seal only appears for a live, runtime-attested profile cell (it
+  will not show in stories or `--no-run` checks — that is expected, not a failure).
+- **Only the current viewer** has a reachable profile cell. You cannot render
+  `cf-profile-badge` for other participants today (no cross-space profile cell —
+  see CT-1667); use `cf-avatar` for them.
+
+---
+
+## CFC Authorship
+
+`cf-cfc-authorship` can enforce text-integrity policy for its children when
+`verifyTextIntegrity` is set. If `requiredTextIntegrity` or `requiredIntegrity`
+is provided, the renderer uses that explicit atom list.
+
+When no explicit requirement is provided and `$author`/`author` is a cell whose
+root CFC label contains `represents-principal`, the renderer infers a required
+`{ kind: "authored-by", subject }` atom from that author cell. This means a
+cell-backed author can make previously display-only text require matching
+authorship integrity. Use an explicit `requiredTextIntegrity` when a component
+needs a different policy, and avoid cell-backed `$author` for purely decorative
+author names.

@@ -240,6 +240,20 @@ Do not warn on:
 - existing, consumed natural-language agent APIs (e.g. do-list's
   `updateItemByTitle`, driven by the omnibox tools) — legacy surface with real
   callers; the rule targets NEW patterns adding parallel string identity
+### 16. Identity & Authorship (multi-user)
+
+Applies only to patterns with multiple people or a "current user" concept. **N/A for single-user patterns — do not penalize.**
+
+| Check | What to verify | Fix |
+|-------|----------------|-----|
+| people rendered as data | a person shown as `{name}` text or a raw `<img>` | render with `cf-avatar` (others) or `cf-profile-badge` (the viewer) |
+| current viewer | a "type your name" / "who am I" text field used as the viewer's identity | resolve via `wish({ query: "#profile" })` (+ `#profileName` / `#profileAvatar`) |
+| per-user isolation | stored DIDs / user-ids / name strings used to fake isolation | use `PerUser` / `PerSpace` scope; let the scope select the instance |
+| roster construction | a participant list built from typed names | join + snapshot: each viewer pushes their own `{ displayName, avatar }` from `#profile` |
+| identity comparison | dedup or "is this me?" by display-name equality | compare a cell reference with `equals()`, never the mutable name |
+| ownership / authorship | "who created / wrote this" stored as a bare name | snapshot the actor's profile, or attest with CFC `AuthoredByCurrentUser` / `RepresentsCurrentUser` |
+
+See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/common/components/COMPONENTS.md#identity-components`. Severity: a forgeable / dead-string **current-viewer** identity is MAJOR (wrong behavior across users); rendering others as name strings is MINOR–MAJOR per case.
 
 ## Output Format
 
@@ -305,4 +319,5 @@ Every non-trivial finding should include:
 - `docs/development/debugging/README.md`
 - `docs/development/debugging/gotchas/`
 - `docs/common/components/COMPONENTS.md`
+- `docs/common/patterns/multi-user-patterns.md`
 - `docs/common/capabilities/llm.md`
