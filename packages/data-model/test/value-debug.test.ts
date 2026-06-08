@@ -131,7 +131,11 @@ describe("value-debug", () => {
     });
 
     it("renders an uninterned symbol with no description", () => {
-      expect(toCompactDebugString(Symbol())).toBe('Symbol("")');
+      expect(toCompactDebugString(Symbol())).toBe("Symbol()");
+    });
+
+    it('renders an uninterned symbol with description `""` (empty string)', () => {
+      expect(toCompactDebugString(Symbol(""))).toBe('Symbol("")');
     });
 
     it("renders an uninterned symbol inside a structure", () => {

@@ -134,11 +134,18 @@ class DebugStringifier {
 
       case "symbol": {
         const key = Symbol.keyFor(value);
-        return marked(
-          (key === undefined)
-            ? `Symbol(${JSON.stringify(value.description ?? "")})`
-            : `Symbol.for(${JSON.stringify(key)})`,
-        );
+        if (key === undefined) {
+          // Uninterned ("unique") symbol.
+          const description = value.description;
+          return marked(
+            (description === undefined)
+              ? "Symbol()"
+              : `Symbol(${JSON.stringify(description)})`,
+          );
+        } else {
+          // Interned symbol.
+          return marked(`Symbol.for(${JSON.stringify(key)})`);
+        }
       }
 
       case "undefined": {
