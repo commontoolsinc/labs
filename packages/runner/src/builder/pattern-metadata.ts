@@ -150,7 +150,13 @@ export function isTrustedBuilderArtifact(value: unknown): boolean {
     }
     if (seen.has(current)) break;
     seen.add(current);
-    current = (current as Record<symbol, unknown>)[unsafe_originalPattern];
+    // Fail closed: reading the (module-private) symbol off an exotic value — e.g.
+    // a Proxy with a throwing get trap — must not abort registration/lookup.
+    try {
+      current = (current as Record<symbol, unknown>)[unsafe_originalPattern];
+    } catch {
+      return false;
+    }
   }
   return false;
 }
