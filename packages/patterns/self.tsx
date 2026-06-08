@@ -11,6 +11,7 @@
  *   const self = wish<SelfOutput>({ query: "#self-model" });
  */
 import {
+  computed,
   handler,
   NAME,
   pattern,
@@ -39,7 +40,75 @@ export interface ValueCard {
   description?: string;
   weight?: number;
   sourcePromptId?: string;
+  // CT-1674: meaning-alignment fields
+  attendingTo?: string;
+  stance?: "descriptive" | "aspirational" | "conflicted";
+  contextTags?: string[];
+  sourceTrack?: Track;
 }
+
+// ============================================================================
+// MEANING-ALIGNMENT TYPES (CT-1674)
+// ============================================================================
+
+export type Track = "open" | "scissor" | "closing";
+
+export interface ReflectivePrompt {
+  id: string;
+  text: string;
+  kind: Track;
+}
+
+export const MEANING_PROMPTS: ReflectivePrompt[] = [
+  {
+    id: "open-life",
+    kind: "open",
+    text:
+      "Tell me a bit about your life right now — whatever you'd want a thoughtful system to know about you. Start with what you do and the most important people in your life.",
+  },
+  {
+    id: "sc-conflict",
+    kind: "scissor",
+    text:
+      "Recall the last time a colleague or someone close said something that you thought was wrong, or that landed badly. What did you do with it — said something in the moment, followed up privately later, or let it go?",
+  },
+  {
+    id: "sc-waiting",
+    kind: "scissor",
+    text:
+      "Think of the most recent time you were waiting on something that mattered and couldn't speed it up. Did you move your attention away from it, stay close and hold the tension, or start preparing for both outcomes?",
+  },
+  {
+    id: "sc-rhythms",
+    kind: "scissor",
+    text:
+      "Is there a recurring shape to your weeks — a difference between some days and others, not just by schedule but by who you are in them? Is that contrast the whole shape of your life, a quiet undertone, or not really a thing for you?",
+  },
+  {
+    id: "sc-unscheduled",
+    kind: "scissor",
+    text:
+      "Recall the most recent full day with no hard commitments — genuinely yours. By the end, did it feel good, wasted, or like a work day in different clothes?",
+  },
+  {
+    id: "sc-commitment",
+    kind: "scissor",
+    text:
+      "Think back to the last time you committed to something for a friend or family member and it became clear you couldn't pull it off as promised. Did you tell them early, show up with a smaller version, or say nothing and scramble?",
+  },
+  {
+    id: "sc-narrative",
+    kind: "scissor",
+    text:
+      "Think of the phase of life you're in right now. Last time you tried to name what it's for — could you name it, are you between chapters, or do you not really think in phases-with-purposes?",
+  },
+  {
+    id: "close-navigating",
+    kind: "closing",
+    text:
+      "What are some things you're navigating right now that you'd want help with?",
+  },
+];
 
 export interface QAResponse {
   promptId: string;
@@ -282,6 +351,89 @@ export const removeNeurotypeBySystem = handler<
   selfModel.set(withoutNeurotype(selfModel.get(), system));
 });
 
+/**
+ * Record a meaning reflection from form fields (state-reading handler).
+ * Looks up the prompt in MEANING_PROMPTS by currentPromptId; if answerField
+ * is non-empty, appends a QAResponse(track:"meaning") and clears answerField.
+ */
+export const recordReflectionFromForm = handler<
+  unknown,
+  {
+    selfModel: Writable<SelfModel>;
+    currentPromptId: Writable<string>;
+    answerField: Writable<string>;
+  }
+>((_event, { selfModel, currentPromptId, answerField }) => {
+  const answer = answerField.get().trim();
+  if (!answer) return;
+  const promptId = currentPromptId.get();
+  const prompt = MEANING_PROMPTS.find((p) => p.id === promptId);
+  if (!prompt) return;
+  const response: QAResponse = {
+    promptId: prompt.id,
+    prompt: prompt.text,
+    answer,
+    track: "meaning",
+    answeredAt: safeDateNow(),
+  };
+  selfModel.set(appendResponse(selfModel.get(), response));
+  answerField.set("");
+});
+
+/**
+ * Add a value card from form fields (state-reading handler).
+ * Reads titleField, attendingToField, stanceField, contextTagsField;
+ * if title non-empty, appends a ValueCard and clears all fields.
+ */
+export const addValueCardFromForm = handler<
+  unknown,
+  {
+    selfModel: Writable<SelfModel>;
+    titleField: Writable<string>;
+    attendingToField: Writable<string>;
+    stanceField: Writable<"descriptive" | "aspirational" | "conflicted">;
+    contextTagsField: Writable<string>;
+  }
+>((
+  _event,
+  { selfModel, titleField, attendingToField, stanceField, contextTagsField },
+) => {
+  const title = titleField.get().trim();
+  if (!title) return;
+  const attendingTo = attendingToField.get().trim() || undefined;
+  const stance = stanceField.get();
+  const rawTags = contextTagsField.get();
+  const contextTags = rawTags
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  const card: ValueCard = {
+    title,
+    attendingTo,
+    stance,
+    contextTags: contextTags.length > 0 ? contextTags : undefined,
+  };
+  selfModel.set(appendValue(selfModel.get(), card));
+  titleField.set("");
+  attendingToField.set("");
+  // stanceField intentionally retains the last-selected stance (3-way enum, no neutral)
+  contextTagsField.set("");
+});
+
+/**
+ * Remove a value card by index (state-reading handler, for per-row binding).
+ */
+export const removeValueCardByIndex = handler<
+  unknown,
+  { selfModel: Writable<SelfModel>; index: number }
+>((_event, { selfModel, index }) => {
+  const current = selfModel.get();
+  selfModel.set({
+    ...current,
+    values: current.values.filter((_, i) => i !== index),
+  });
+});
+
 // ============================================================================
 // MAIN PATTERN
 // ============================================================================
@@ -295,17 +447,45 @@ const Self = pattern<SelfInput, SelfOutput>(
     const selfModel = injectedSelfModel ??
       new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel");
 
-    // Local form field cells
+    // Local form field cells — neurotype
     const systemField = new Writable<NeurotypeSystem>("mbti").for(
       "systemField",
     );
     const resultField = new Writable<string>("").for("resultField");
+
+    // Local form field cells — meaning reflections
+    const currentPromptId = new Writable<string>(MEANING_PROMPTS[0].id).for(
+      "currentPromptId",
+    );
+    const answerField = new Writable<string>("").for("answerField");
+
+    // Local form field cells — value cards
+    const titleField = new Writable<string>("").for("titleField");
+    const attendingToField = new Writable<string>("").for("attendingToField");
+    const stanceField = new Writable<
+      "descriptive" | "aspirational" | "conflicted"
+    >("descriptive").for("stanceField");
+    const contextTagsField = new Writable<string>("").for("contextTagsField");
 
     const neurotypeSystemItems: { label: string; value: NeurotypeSystem }[] = [
       { label: "MBTI", value: "mbti" },
       { label: "Enneagram", value: "enneagram" },
       { label: "Big Five", value: "big5" },
       { label: "Custom", value: "custom" },
+    ];
+
+    const promptSelectItems = MEANING_PROMPTS.map((p) => ({
+      label: p.text.slice(0, 60) + (p.text.length > 60 ? "…" : ""),
+      value: p.id,
+    }));
+
+    const stanceItems: {
+      label: string;
+      value: "descriptive" | "aspirational" | "conflicted";
+    }[] = [
+      { label: "Descriptive (how I already attend)", value: "descriptive" },
+      { label: "Aspirational (how I want to attend)", value: "aspirational" },
+      { label: "Conflicted (unclear or in tension)", value: "conflicted" },
     ];
 
     return {
@@ -319,7 +499,7 @@ const Self = pattern<SelfInput, SelfOutput>(
             Self Model
           </h2>
           <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-            Your private neurotype self-report. Never shared.
+            Your private self-model. Never shared.
           </p>
 
           <cf-vstack gap="2">
@@ -377,6 +557,170 @@ const Self = pattern<SelfInput, SelfOutput>(
                 </cf-button>
               </cf-hstack>
             ))}
+          </cf-vstack>
+
+          {
+            /* ================================================================
+              MEANING & VALUES (CT-1674)
+          ================================================================ */
+          }
+          <cf-vstack
+            gap="3"
+            style={{ borderTop: "1px solid #e5e7eb", paddingTop: "16px" }}
+          >
+            <h2
+              style={{ margin: "0 0 4px", fontSize: "16px", fontWeight: "600" }}
+            >
+              Meaning &amp; Values
+            </h2>
+            <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
+              Reflective prompts and your value cards — what you attend to that
+              matters.
+            </p>
+
+            {/* -- Reflect section -- */}
+            <cf-vstack gap="2">
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>
+                Reflect
+              </h3>
+              <cf-select
+                $value={currentPromptId}
+                items={promptSelectItems}
+                style="width: 100%;"
+              />
+              <p
+                style={{
+                  margin: "4px 0",
+                  fontSize: "13px",
+                  color: "#374151",
+                  fontStyle: "italic",
+                }}
+              >
+                {computed(() =>
+                  MEANING_PROMPTS.find((x) => x.id === currentPromptId.get())
+                    ?.text ?? ""
+                )}
+              </p>
+              <cf-textarea
+                $value={answerField}
+                placeholder="Your reflection…"
+                style="width: 100%;"
+              />
+              <cf-button
+                onClick={recordReflectionFromForm({
+                  selfModel,
+                  currentPromptId,
+                  answerField,
+                })}
+              >
+                Record reflection
+              </cf-button>
+            </cf-vstack>
+
+            <cf-vstack gap="2">
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>
+                Recorded reflections
+              </h3>
+              {selfModel.key("responses").map((r) => (
+                <cf-vstack
+                  gap="1"
+                  style={{
+                    padding: "8px",
+                    background: "#f9fafb",
+                    borderRadius: "6px",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    {r.prompt}
+                  </span>
+                  <span style={{ fontSize: "13px", color: "#111827" }}>
+                    {r.answer}
+                  </span>
+                </cf-vstack>
+              ))}
+            </cf-vstack>
+
+            {/* -- Your values section -- */}
+            <cf-vstack gap="2">
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>
+                Add a value
+              </h3>
+              <cf-input
+                $value={titleField}
+                placeholder="Title"
+                style="width: 100%;"
+              />
+              <cf-input
+                $value={attendingToField}
+                placeholder="What you attend to (e.g. a disagreement at the moment it is live)"
+                style="width: 100%;"
+              />
+              <cf-select
+                $value={stanceField}
+                items={stanceItems}
+                style="width: 100%;"
+              />
+              <cf-input
+                $value={contextTagsField}
+                placeholder="Context tags, comma-separated (e.g. work, solo)"
+                style="width: 100%;"
+              />
+              <cf-button
+                onClick={addValueCardFromForm({
+                  selfModel,
+                  titleField,
+                  attendingToField,
+                  stanceField,
+                  contextTagsField,
+                })}
+              >
+                Add value
+              </cf-button>
+            </cf-vstack>
+
+            <cf-vstack gap="2">
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>
+                Your values
+              </h3>
+              {selfModel.key("values").map((v, index) => (
+                <cf-hstack gap="2" align="start">
+                  <cf-vstack gap="1" style={{ flex: "1" }}>
+                    <span
+                      style={{ fontSize: "13px", fontWeight: "600" }}
+                    >
+                      {v.title}
+                    </span>
+                    {v.attendingTo
+                      ? (
+                        <span style={{ fontSize: "12px", color: "#374151" }}>
+                          Attending to: {v.attendingTo}
+                        </span>
+                      )
+                      : <span />}
+                    {v.stance
+                      ? (
+                        <span style={{ fontSize: "12px", color: "#6b7280" }}>
+                          {v.stance}
+                        </span>
+                      )
+                      : <span />}
+                  </cf-vstack>
+                  <cf-button
+                    size="sm"
+                    variant="ghost"
+                    onClick={removeValueCardByIndex({ selfModel, index })}
+                  >
+                    ✕
+                  </cf-button>
+                </cf-hstack>
+              ))}
+            </cf-vstack>
           </cf-vstack>
         </cf-vstack>
       ),

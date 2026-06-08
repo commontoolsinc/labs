@@ -16,14 +16,18 @@
  */
 import { computed, handler, pattern, Writable } from "commonfabric";
 import Self, {
+  addValueCardFromForm,
   appendResponse,
   appendValue,
   EMPTY_SELF_MODEL,
+  MEANING_PROMPTS,
   type Neurotype,
   type NeurotypeSystem,
   type QAResponse,
   recordNeurotypeFromForm,
+  recordReflectionFromForm,
   removeNeurotypeBySystem,
+  removeValueCardByIndex,
   type SelfModel,
   upsertNeurotype,
   type ValueCard,
@@ -140,7 +144,7 @@ export default pattern(() => {
   const assert_value_count_1 = computed(
     () => after_add_curiosity.values.length === 1,
   );
-  const assert_value_title = computed(
+  const assert_value_title_curiosity = computed(
     () => after_add_curiosity.values[0]?.title === "Curiosity",
   );
 
@@ -336,6 +340,154 @@ export default pattern(() => {
   });
 
   // =========================================================================
+  // CT-1674 Meaning & Values Tests — fresh selfModel3 to avoid state bleed
+  // =========================================================================
+
+  const selfModel3 = new Writable<SelfModel>(EMPTY_SELF_MODEL);
+
+  // Test 9: MEANING_PROMPTS sanity — 8 entries, correct kinds present
+  const assert_meaning_prompts_count = computed(
+    () => MEANING_PROMPTS.length === 8,
+  );
+  const assert_meaning_prompts_has_open = computed(
+    () => MEANING_PROMPTS.some((p) => p.kind === "open"),
+  );
+  const assert_meaning_prompts_has_scissor = computed(
+    () => MEANING_PROMPTS.some((p) => p.kind === "scissor"),
+  );
+  const assert_meaning_prompts_has_closing = computed(
+    () => MEANING_PROMPTS.some((p) => p.kind === "closing"),
+  );
+
+  // Test 10: recordReflectionFromForm appends QAResponse(track:"meaning") + clears answerField
+  const promptId10 = MEANING_PROMPTS[0].id; // "open-life"
+  const currentPromptId10 = new Writable<string>(promptId10);
+  const answerField10 = new Writable<string>(
+    "I work as a designer and live with my partner.",
+  );
+
+  const action_record_reflection = recordReflectionFromForm({
+    selfModel: selfModel3,
+    currentPromptId: currentPromptId10,
+    answerField: answerField10,
+  });
+
+  const assert_reflection_appended = computed(
+    () => selfModel3.get().responses.length === 1,
+  );
+  const assert_reflection_track_meaning = computed(
+    () => selfModel3.get().responses[0]?.track === "meaning",
+  );
+  const assert_reflection_prompt_id = computed(
+    () => selfModel3.get().responses[0]?.promptId === promptId10,
+  );
+  const assert_reflection_prompt_text = computed(
+    () => selfModel3.get().responses[0]?.prompt === MEANING_PROMPTS[0].text,
+  );
+  const assert_reflection_answer = computed(
+    () =>
+      selfModel3.get().responses[0]?.answer ===
+        "I work as a designer and live with my partner.",
+  );
+  const assert_answer_field_cleared = computed(
+    () => answerField10.get() === "",
+  );
+
+  // Test 11: addValueCardFromForm appends ValueCard with attendingTo/stance/contextTags + clears fields
+  const selfModel4 = new Writable<SelfModel>(EMPTY_SELF_MODEL);
+  const titleField11 = new Writable<string>("Direct feedback");
+  const attendingToField11 = new Writable<string>(
+    "a disagreement at the moment it is live",
+  );
+  const stanceField11 = new Writable<
+    "descriptive" | "aspirational" | "conflicted"
+  >("descriptive");
+  const contextTagsField11 = new Writable<string>("work, team");
+
+  const action_add_value_from_form = addValueCardFromForm({
+    selfModel: selfModel4,
+    titleField: titleField11,
+    attendingToField: attendingToField11,
+    stanceField: stanceField11,
+    contextTagsField: contextTagsField11,
+  });
+
+  const assert_value_appended = computed(
+    () => selfModel4.get().values.length === 1,
+  );
+  const assert_value_title = computed(
+    () => selfModel4.get().values[0]?.title === "Direct feedback",
+  );
+  const assert_value_attending_to = computed(
+    () =>
+      selfModel4.get().values[0]?.attendingTo ===
+        "a disagreement at the moment it is live",
+  );
+  const assert_value_stance = computed(
+    () => selfModel4.get().values[0]?.stance === "descriptive",
+  );
+  const assert_value_context_tags = computed(() => {
+    const tags = selfModel4.get().values[0]?.contextTags;
+    return (
+      Array.isArray(tags) &&
+      tags.length === 2 &&
+      tags[0] === "work" &&
+      tags[1] === "team"
+    );
+  });
+  const assert_title_field_cleared = computed(() => titleField11.get() === "");
+  const assert_attending_field_cleared = computed(
+    () => attendingToField11.get() === "",
+  );
+  const assert_context_tags_field_cleared = computed(
+    () => contextTagsField11.get() === "",
+  );
+
+  // Test 12: removeValueCardByIndex removes correct entry
+  const selfModel5 = new Writable<SelfModel>(EMPTY_SELF_MODEL);
+  const titleField12a = new Writable<string>("First value");
+  const attendingToField12a = new Writable<string>("");
+  const stanceField12a = new Writable<
+    "descriptive" | "aspirational" | "conflicted"
+  >("descriptive");
+  const contextTagsField12a = new Writable<string>("");
+
+  const action_add_first_value = addValueCardFromForm({
+    selfModel: selfModel5,
+    titleField: titleField12a,
+    attendingToField: attendingToField12a,
+    stanceField: stanceField12a,
+    contextTagsField: contextTagsField12a,
+  });
+
+  const titleField12b = new Writable<string>("Second value");
+  const attendingToField12b = new Writable<string>("");
+  const stanceField12b = new Writable<
+    "descriptive" | "aspirational" | "conflicted"
+  >("aspirational");
+  const contextTagsField12b = new Writable<string>("");
+
+  const action_add_second_value = addValueCardFromForm({
+    selfModel: selfModel5,
+    titleField: titleField12b,
+    attendingToField: attendingToField12b,
+    stanceField: stanceField12b,
+    contextTagsField: contextTagsField12b,
+  });
+
+  const action_remove_first_value_card = removeValueCardByIndex({
+    selfModel: selfModel5,
+    index: 0,
+  });
+
+  const assert_only_second_remains = computed(
+    () => selfModel5.get().values.length === 1,
+  );
+  const assert_second_value_title = computed(
+    () => selfModel5.get().values[0]?.title === "Second value",
+  );
+
+  // =========================================================================
   // Test Sequence
   // =========================================================================
   return {
@@ -355,7 +507,7 @@ export default pattern(() => {
 
       // === A4: appendValue — first card ===
       { assertion: assert_value_count_1 },
-      { assertion: assert_value_title },
+      { assertion: assert_value_title_curiosity },
 
       // === A5: appendValue — second card, order preserved ===
       { assertion: assert_value_count_2 },
@@ -403,6 +555,39 @@ export default pattern(() => {
       // === Test 8: removeNeurotypeBySystem removes correct entry ===
       { action: action_remove_enneagram_by_system },
       { assertion: assert_only_mbti_after_remove },
+
+      // === Test 9: MEANING_PROMPTS sanity ===
+      { assertion: assert_meaning_prompts_count },
+      { assertion: assert_meaning_prompts_has_open },
+      { assertion: assert_meaning_prompts_has_scissor },
+      { assertion: assert_meaning_prompts_has_closing },
+
+      // === Test 10: recordReflectionFromForm appends + clears ===
+      { action: action_record_reflection },
+      { assertion: assert_reflection_appended },
+      { assertion: assert_reflection_track_meaning },
+      { assertion: assert_reflection_prompt_id },
+      { assertion: assert_reflection_prompt_text },
+      { assertion: assert_reflection_answer },
+      { assertion: assert_answer_field_cleared },
+
+      // === Test 11: addValueCardFromForm appends with full fields + clears ===
+      { action: action_add_value_from_form },
+      { assertion: assert_value_appended },
+      { assertion: assert_value_title },
+      { assertion: assert_value_attending_to },
+      { assertion: assert_value_stance },
+      { assertion: assert_value_context_tags },
+      { assertion: assert_title_field_cleared },
+      { assertion: assert_attending_field_cleared },
+      { assertion: assert_context_tags_field_cleared },
+
+      // === Test 12: removeValueCardByIndex removes correct entry ===
+      { action: action_add_first_value },
+      { action: action_add_second_value },
+      { action: action_remove_first_value_card },
+      { assertion: assert_only_second_remains },
+      { assertion: assert_second_value_title },
     ],
   };
 });
