@@ -289,12 +289,12 @@ describe("Pattern Runner - Regressions", () => {
     const rawValuePattern = {
       argumentSchema: {},
       resultSchema: {},
-      initial: {
-        internal: {
-          recipe: initialRecipe as unknown,
-        },
-      },
-      derivedInternalCells: [{ partialCause: "recipe" }],
+      derivedInternalCells: [{
+        partialCause: "recipe",
+        // We have to do some type abuse to allow the initialRecipe,
+        // since it isn't JSONValue.
+        initial: initialRecipe as never,
+      }],
       result: {
         internalRecipe: {
           $alias: { partialCause: "recipe", path: [] },

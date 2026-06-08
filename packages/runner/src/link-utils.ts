@@ -37,7 +37,7 @@ import {
   parseLinkPrimitive,
   PrimitiveCellLink,
 } from "./link-types.ts";
-import { MetaField } from "@commonfabric/api";
+import { MetaLinkField } from "@commonfabric/api";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { createRef } from "./create-ref.ts";
 
@@ -760,20 +760,6 @@ export function getStableInternalPathSegment(
   return undefined;
 }
 
-export function getDerivedInternalCellManifestKey(
-  descriptor: DerivedInternalCellDescriptor,
-): string {
-  const key = getStableInternalPathSegment(descriptor.partialCause);
-  if (key === undefined) {
-    throw new Error(
-      `Derived internal cell has no manifest key: ${
-        JSON.stringify(descriptor)
-      }`,
-    );
-  }
-  return String(key);
-}
-
 function formatStableCauseSegment(cause: JSONValue): string {
   if (typeof cause === "string") return cause;
   if (
@@ -816,7 +802,7 @@ const META_READ_OPTIONS = {
  */
 export function getMetaLink(
   resultCell: Cell<unknown>,
-  field: MetaField,
+  field: MetaLinkField,
   options: unknown = META_READ_OPTIONS,
 ): NormalizedFullLink | undefined {
   const linkObj = resultCell.getMetaRaw(field, options);

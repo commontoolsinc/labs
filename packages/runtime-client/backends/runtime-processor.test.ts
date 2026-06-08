@@ -1021,7 +1021,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     expect(sourceSynced).toBe(false);
   });
 
-  it("syncs pattern, argument, and internal metadata links before reading labels", async () => {
+  it("syncs pattern and argument metadata links before reading labels", async () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-sync-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -1036,12 +1036,6 @@ describe("RuntimeProcessor CFC label IPC", () => {
     };
     const argumentRef: CellRef = {
       id: "of:cfc-label-sync-argument" as CellRef["id"],
-      space: "did:key:test" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const internalRef: CellRef = {
-      id: "of:cfc-label-sync-internal" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
       scope: "space",
       path: [],
@@ -1069,7 +1063,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const makeCell = (
       name: string,
       ref: CellRef,
-      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
     ) => {
       let synced = false;
       return {
@@ -1077,10 +1071,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
         sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
         runtime,
         getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
-          synced && links[metaField] !== undefined
+        getMetaRaw: (metaField: "pattern" | "argument") => {
+          return synced && links[metaField] !== undefined
             ? cellRefToSigilLink(links[metaField]!)
-            : undefined,
+            : undefined;
+        },
         sync: () => {
           synced = true;
           syncLog.push(name);
@@ -1093,12 +1088,10 @@ describe("RuntimeProcessor CFC label IPC", () => {
       makeCell("result", resultRef, {
         pattern: patternRef,
         argument: argumentRef,
-        internal: internalRef,
       }),
     );
     cells.set(patternRef.id, makeCell("pattern", patternRef));
     cells.set(argumentRef.id, makeCell("argument", argumentRef));
-    cells.set(internalRef.id, makeCell("internal", internalRef));
     const processor = { runtime } as unknown as RuntimeProcessor;
 
     await expect(
@@ -1120,7 +1113,6 @@ describe("RuntimeProcessor CFC label IPC", () => {
       "result",
       "pattern",
       "argument",
-      "internal",
       "result",
     ]);
   });
@@ -1149,7 +1141,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const makeCell = (
       name: string,
       ref: CellRef,
-      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+      links: Partial<Record<"pattern" | "argument", CellRef>> = {},
     ) => {
       let synced = false;
       return {
@@ -1157,10 +1149,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
         sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
         runtime,
         getAsNormalizedFullLink: () => ref,
-        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
-          synced && links[metaField] !== undefined
+        getMetaRaw: (metaField: "pattern" | "argument") => {
+          return synced && links[metaField] !== undefined
             ? cellRefToSigilLink(links[metaField]!)
-            : undefined,
+            : undefined;
+        },
         sync: () => {
           synced = true;
           syncLog.push(name);
@@ -1177,7 +1170,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     cells.set(
       patternRef.id,
       makeCell("pattern", patternRef, {
-        internal: resultRef,
+        argument: resultRef,
       }),
     );
     const processor = { runtime } as unknown as RuntimeProcessor;

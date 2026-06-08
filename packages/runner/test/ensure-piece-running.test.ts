@@ -391,11 +391,6 @@ describe("queueEvent with auto-start", () => {
           events: { type: "object" },
         },
       },
-      initial: {
-        internal: {
-          events: { $stream: true },
-        },
-      },
       derivedInternalCells: [
         { partialCause: "doubled" },
         { partialCause: "events", initial: { $stream: true } },
@@ -513,12 +508,11 @@ describe("queueEvent with auto-start", () => {
           eventCount: { type: "number" },
         },
       },
-      initial: {
-        internal: {
-          events: { $stream: true },
-          eventCount: 0,
-        },
-      },
+      derivedInternalCells: [
+        { partialCause: "doubled" },
+        { partialCause: "events", initial: { $stream: true } },
+        { partialCause: "eventCount", initial: 0 },
+      ],
       result: {
         doubled: { $alias: { partialCause: "doubled", path: [] } },
         events: { $alias: { partialCause: "events", path: [] } },
@@ -666,11 +660,10 @@ describe("queueEvent with auto-start", () => {
           events: { type: "object" },
         },
       },
-      initial: {
-        internal: {
-          events: { $stream: true },
-        },
-      },
+      derivedInternalCells: [
+        { partialCause: "doubled" },
+        { partialCause: "events", initial: { $stream: true } },
+      ],
       result: {
         doubled: { $alias: { partialCause: "doubled", path: [] } },
         events: { $alias: { partialCause: "events", path: [] } },

@@ -3,10 +3,13 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Pattern } from "../src/builder/types.ts";
+import { Cell, type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { getMetaLink } from "../src/link-utils.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
+import { JSONValue } from "@commonfabric/runner/shared";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isPrimitiveCellLink } from "../src/link-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -31,9 +34,10 @@ class SharedServerStorageManager extends EmulatedStorageManager {
 
 // Regression coverage for CT-1666.
 //
-// A pattern's internal cell carries a build-time default (in home.tsx,
+// A pattern's derived internal cell carries a build-time default (in home.tsx,
 // `const activeTab = new Writable("spaces").for("activeTab")` →
-// `pattern.initial.internal = { activeTab: "spaces" }`). After the user picks a
+// `derivedInternalCells = [{ partialCause: "activeTab", initial: "spaces" }]`).
+// After the user picks a
 // value ("profile") and it is persisted, re-running the pattern must NOT revert
 // the cell to the build-time default.
 //
@@ -58,18 +62,33 @@ describe("rehydrate internal default (CT-1666)", () => {
   const pattern: Pattern = {
     argumentSchema: {},
     resultSchema: {},
-    initial: { internal: { activeTab: "spaces" } },
+    derivedInternalCells: [{
+      partialCause: "activeTab",
+      initial: "spaces",
+    }],
     result: {},
     nodes: [],
   };
 
   const internalCellOf = (
     runtime: Runtime,
-    resultCell: { sourceURI: string },
+    resultCell: Cell<unknown>,
+    partialCause: JSONValue,
   ) => {
-    const internalLink = getMetaLink(resultCell as never, "internal");
-    expect(internalLink).toBeDefined();
-    return runtime.getCellFromLink(internalLink!);
+    const manifest = resultCell.getMetaRaw("internal");
+    expect(manifest).toBeDefined();
+    expect(Array.isArray(manifest)).toBe(true);
+    if (Array.isArray(manifest)) {
+      for (const entry of manifest) {
+        if (deepEqual(entry?.partialCause, partialCause)) {
+          if ("link" in entry && isPrimitiveCellLink(entry?.link)) {
+            const matchingCellLink = parseLink(entry.link, resultCell)!;
+            return runtime.getCellFromLink(matchingCellLink);
+          }
+        }
+      }
+    }
+    return undefined;
   };
 
   beforeEach(() => {
@@ -105,14 +124,14 @@ describe("rehydrate internal default (CT-1666)", () => {
       await rt1.runSynced(rc1, trustExecutable(rt1, pattern), {});
       await rc1.pull();
 
-      const internal1 = internalCellOf(rt1, rc1);
-      expect(internal1.key("activeTab").get()).toEqual("spaces");
+      const internal1 = internalCellOf(rt1, rc1, "activeTab")!;
+      expect(internal1.get()).toEqual("spaces");
 
       const tx = rt1.edit();
-      internal1.key("activeTab").withTx(tx).set("profile");
+      internal1.withTx(tx).set("profile");
       await tx.commit();
       await sm1.synced();
-      expect(internal1.key("activeTab").get()).toEqual("profile");
+      expect(internal1.get()).toEqual("profile");
 
       // Session 2: a fresh runtime with a COLD cache rehydrates the SAME result
       // cell and re-runs the pattern through the awaited sync gate. The persisted
@@ -122,8 +141,8 @@ describe("rehydrate internal default (CT-1666)", () => {
       await rt2.runSynced(rc2, trustExecutable(rt2, pattern), {});
       await rc2.pull();
 
-      const internal2 = internalCellOf(rt2, rc2);
-      expect(internal2.key("activeTab").get()).toEqual("profile");
+      const internal2 = internalCellOf(rt2, rc2, "activeTab")!;
+      expect(internal2.get()).toEqual("profile");
     } finally {
       await rt2.dispose();
       await rt1.dispose();

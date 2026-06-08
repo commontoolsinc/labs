@@ -1482,6 +1482,7 @@ function followPointer(
   // then the provided path from the arguments.
   return getAtPath(tx, targetDoc, path, context, selector, lastNode);
 }
+
 function trackVisitedDoc(
   tx: IExtendedStorageTransaction,
   target: IMemorySpaceAddress,
@@ -1517,30 +1518,70 @@ function trackVisitedDoc(
 }
 
 // These meta links don't have full link chains. We only follow the first link.
-export function loadMetaLinkedDoc(
+function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
-): MetaLinkedDoc | undefined {
-  if (!isRecord(valueEntry.value)) {
-    return undefined;
-  }
+): MetaLinkedDoc[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!isRecord(targetObj) || !(meta in targetObj)) return undefined;
-  const linkObj = isPrimitiveCellLink(targetObj[meta])
-    ? targetObj[meta]
-    : (meta === "cfc") // cfc links are different
-    ? cfcMetaToSigilLink(targetObj["cfc"])
-    : undefined;
-  if (linkObj === undefined) {
-    // undefined is strange, but acceptable
-    logger.warn(
-      "traverse",
-      () => ["Invalid meta link", meta, "in", valueEntry.address],
+  if (!isRecord(targetObj) || !(meta in targetObj)) return [];
+  const loaded = [];
+  // The internal meta field contains a list of objects with links instead
+  if (meta === "internal") {
+    if (!Array.isArray(targetObj["internal"])) {
+      logger.warn(
+        "traverse",
+        () => ["Invalid internal manifest in", valueEntry.address],
+      );
+      return [];
+    }
+    for (const manifestEntry of targetObj["internal"]) {
+      if ("link" in manifestEntry && isPrimitiveCellLink(manifestEntry.link)) {
+        const item = loadMetaLinkedDocFromLink(
+          tx,
+          valueEntry,
+          schemaTracker,
+          manifestEntry.link,
+        );
+        if (item !== undefined) {
+          loaded.push(item);
+        }
+      }
+    }
+  } else {
+    const linkObj = isPrimitiveCellLink(targetObj[meta])
+      ? targetObj[meta] as SigilLink
+      : (meta === "cfc") // cfc links are different
+      ? cfcMetaToSigilLink(targetObj["cfc"])
+      : undefined;
+    if (linkObj === undefined) {
+      // undefined is strange, but acceptable
+      logger.warn(
+        "traverse",
+        () => ["Invalid meta link", meta, "in", valueEntry.address],
+      );
+      return [];
+    }
+    const item = loadMetaLinkedDocFromLink(
+      tx,
+      valueEntry,
+      schemaTracker,
+      linkObj,
     );
-    return undefined;
+    if (item !== undefined) {
+      loaded.push(item);
+    }
   }
+  return loaded;
+}
+
+function loadMetaLinkedDocFromLink(
+  tx: IExtendedStorageTransaction,
+  valueEntry: IMemorySpaceAttestation,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+  linkObj: SigilLink,
+) {
   const link = parseLink(linkObj, valueEntry.address)!;
   const address = {
     space: link.space,
@@ -1640,21 +1681,23 @@ export function loadMetaLinkedDocs(
         "internal",
       ] as const
     ) {
-      const linkedDoc = loadMetaLinkedDoc(
+      const linkedDocs = loadMetaLinkedDoc(
         tx,
         currentDoc,
         meta,
         context.schemaTracker,
       );
-      // Don't recurse into invalid docs or cid docs
-      if (linkedDoc === undefined || linkedDoc.address.id.startsWith("cid:")) {
-        continue;
+      for (const linkedDoc of linkedDocs) {
+        // Don't recurse into invalid docs or cid docs
+        if (linkedDoc.address.id.startsWith("cid:")) {
+          continue;
+        }
+        const linkedDocKey = getTrackerKey(linkedDoc.address);
+        if (context.metaDocsVisited.has(linkedDocKey)) continue;
+        context.metaDocsVisited.add(linkedDocKey);
+        traverseMetaLinkedDoc(tx, linkedDoc, context);
+        pendingDocs.push(linkedDoc);
       }
-      const linkedDocKey = getTrackerKey(linkedDoc.address);
-      if (context.metaDocsVisited.has(linkedDocKey)) continue;
-      context.metaDocsVisited.add(linkedDocKey);
-      traverseMetaLinkedDoc(tx, linkedDoc, context);
-      pendingDocs.push(linkedDoc);
     }
   }
 }

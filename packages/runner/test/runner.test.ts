@@ -140,7 +140,6 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      initial: { internal: { output: 0 } },
       derivedInternalCells: [{
         partialCause: "output",
         schema: { type: "number" },
@@ -174,17 +173,16 @@ describe("runPattern", () => {
     );
 
     await resultCell.pull();
-    const internalLink = getMetaLink(resultCell, "internal");
-    expect(internalLink).toBeDefined();
+    const internalManifest = resultCell.getMetaRaw("internal");
+    expect(internalManifest).toBeDefined();
+    const rawLink = Array.isArray(internalManifest)
+      ? internalManifest.find((entry) => entry?.partialCause === "output").link
+      : undefined;
+    expect(isWriteRedirectLink(rawLink)).toBe(true);
 
-    const internalCell = runtime.getCellFromLink(internalLink!);
-    const internalRaw = internalCell.getRaw();
-    expect(typeof (internalRaw as any).output).toBe("object");
-    expect(isWriteRedirectLink((internalRaw as any).output)).toBe(true);
-
-    const derivedLink = parseLink((internalRaw as any).output, internalCell);
+    const derivedLink = parseLink(rawLink, resultCell);
     expect(derivedLink).toBeDefined();
-    expect(derivedLink!.id).not.toBe(internalLink!.id);
+    expect(derivedLink!.id).not.toBe(resultCell.getAsNormalizedFullLink().id);
     expect(derivedLink!.path).toEqual([]);
     expect(derivedLink!.schema).toEqual({ type: "number" });
 
@@ -201,13 +199,6 @@ describe("runPattern", () => {
       },
       required: ["input"],
     } as const;
-    const internalSchema = {
-      type: "object",
-      properties: {
-        output: { type: "number" },
-      },
-      required: ["output"],
-    } as const;
     const resultSchema = {
       type: "object",
       scope: "user",
@@ -218,8 +209,13 @@ describe("runPattern", () => {
     } as const;
     const pattern = {
       argumentSchema,
-      internalSchema,
       resultSchema,
+      derivedInternalCells: [
+        {
+          partialCause: "output",
+          schema: { type: "number" },
+        },
+      ],
       result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
         {
@@ -267,13 +263,13 @@ describe("runPattern", () => {
     expect(argumentCell.get()).toEqual({ input: 7 });
     const outputCell = getDerivedInternalCell(resultCell, {
       partialCause: "output",
-      schema: internalSchema.properties.output,
+      schema: pattern.derivedInternalCells![0].schema,
     });
     const outputLink = outputCell.getAsNormalizedFullLink();
     expect(outputLink.path).toEqual([]);
     expect(outputLink.space).toBe(space);
     expect(outputLink.scope).toBe("user");
-    expect(outputLink.schema).toEqual(internalSchema.properties.output);
+    expect(outputLink.schema).toEqual({ type: "number" });
     expect(getMetaLink(argumentCell, "result")).toEqual({
       ...resultCellLink,
       schema: resultSchema,
@@ -823,7 +819,7 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      initial: { internal: { counter: 0 } },
+      derivedInternalCells: [{ partialCause: "counter", initial: 0 }],
       result: {
         [NAME]: "counter",
         counter: { $alias: { partialCause: "counter", path: [] } },
@@ -869,7 +865,7 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      initial: { internal: { counter: 0 } },
+      derivedInternalCells: [{ partialCause: "counter", initial: 0 }],
       result: {
         [NAME]: "counter",
         counter: { $alias: { partialCause: "counter", path: [] } },
@@ -924,12 +920,6 @@ describe("runPattern", () => {
         type: "object",
         properties: {
           input: { type: "number" },
-        },
-      },
-      initial: {
-        internal: {
-          counter: 10,
-          nested: { value: "initial" },
         },
       },
       derivedInternalCells: [
@@ -1612,20 +1602,10 @@ describe("runner utils", () => {
             increment: { asCell: ["stream", "opaque"] },
           },
         },
-        internalSchema: {
-          type: "object",
-          properties: {
-            "stream:increment": true,
-          },
-        },
-        initial: {
-          internal: {
-            "stream:increment": { $stream: true },
-          },
-        },
         derivedInternalCells: [
           {
             partialCause: { stream: "increment" },
+            schema: true,
             scope: "space",
             initial: { $stream: true },
           },

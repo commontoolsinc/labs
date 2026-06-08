@@ -106,13 +106,10 @@ export function toJSONWithLegacyAliases(
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithLegacyAliases(
-        v,
-        resolveCellAlias,
-        ignoreSelfAliases,
-        [...path, i],
-        seen,
-      )
+      toJSONWithLegacyAliases(v, resolveCellAlias, ignoreSelfAliases, [
+        ...path,
+        i,
+      ], seen)
     );
   }
 
@@ -411,10 +408,6 @@ export function patternToJSON(pattern: Pattern) {
   return {
     argumentSchema: pattern.argumentSchema,
     resultSchema: pattern.resultSchema,
-    ...(pattern.internalSchema
-      ? { internalSchema: pattern.internalSchema }
-      : {}),
-    ...(pattern.initial ? { initial: pattern.initial } : {}),
     ...(pattern.derivedInternalCells
       ? { derivedInternalCells: pattern.derivedInternalCells }
       : {}),

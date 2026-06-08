@@ -218,12 +218,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const pattern = {
         argumentSchema: { type: "object", properties: {} } as const,
         resultSchema,
-        initial: {
-          internal: {
-            savedTitle: "",
-          },
-        },
-        derivedInternalCells: [{ partialCause: "savedTitle" }],
+        derivedInternalCells: [{ partialCause: "savedTitle", initial: "" }],
         result: {
           savedTitle: { $alias: { partialCause: "savedTitle", path: [] } },
         },
@@ -307,12 +302,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const pattern = {
         argumentSchema: { type: "object", properties: {} } as const,
         resultSchema,
-        initial: {
-          internal: {
-            savedTitle: "",
-          },
-        },
-        derivedInternalCells: [{ partialCause: "savedTitle" }],
+        derivedInternalCells: [{ partialCause: "savedTitle", initial: "" }],
         result: {
           savedTitle: { $alias: { partialCause: "savedTitle", path: [] } },
         },
@@ -332,9 +322,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
-      const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
-      expect(internalCellLink).toBeDefined();
-      expect(savedTitleLink?.id).not.toBe(internalCellLink?.id);
+      const internalManifest = resultCell.getMetaRaw("internal");
+      expect(internalManifest).toBeDefined();
       expect(savedTitleLink?.path).toEqual([]);
 
       const replica = storageManager.open(signer.did()).replica as unknown as {

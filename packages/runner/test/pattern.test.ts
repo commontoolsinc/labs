@@ -135,10 +135,19 @@ describe("pattern", () => {
     });
     expect(firstPath).toEqual([]);
     expect(secondPath).toEqual([]);
-    expect((testPattern.internalSchema as any).properties).toEqual({
-      isSelected: { type: "boolean" },
-      '{"name":"isSelected","$generated":0}': { type: "boolean" },
-    });
+    expect(testPattern.derivedInternalCells).toEqual([
+      {
+        partialCause: "isSelected",
+        schema: { type: "boolean" },
+      },
+      {
+        partialCause: {
+          name: "isSelected",
+          $generated: 0,
+        },
+        schema: { type: "boolean" },
+      },
+    ]);
   });
 
   it("complex pattern has correct schema and nodes", () => {

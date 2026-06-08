@@ -114,7 +114,7 @@ import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
-import type { RuntimeOptions, URI } from "@commonfabric/runner";
+import type { JSONValue, RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
@@ -453,12 +453,24 @@ export class RuntimeProcessor {
     let cell = getCell(this.runtime, request.cell);
     if (request.meta !== undefined) {
       const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
-      const link = getMetaLink(rootCell, request.meta);
-      if (link === undefined) return { value: undefined };
-      cell = this.runtime.getCellFromLink({
-        ...link,
-        path: [...link.path, ...request.cell.path],
-      });
+      if (
+        request.meta === "pattern" || request.meta === "argument" ||
+        request.meta === "result"
+      ) {
+        // For the meta link fields, use the meta linked cell instead
+        const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
+        const link = getMetaLink(rootCell, request.meta);
+        if (link === undefined) return { value: undefined };
+        cell = this.runtime.getCellFromLink({
+          ...link,
+          path: [...link.path, ...request.cell.path],
+        });
+      } else {
+        // For meta cells that aren't link cells, return the raw data
+        return {
+          value: rootCell.getMetaRaw(request.meta) as JSONValue | undefined,
+        };
+      }
     }
     const value = cell.get();
     const converted = convertCellsToLinks(value, {
@@ -1210,12 +1222,18 @@ async function syncMetaLinkedDocs(
   cell: Cell<any>,
   cycleCheck: Set<string> = new Set<string>(),
 ) {
+  // TODO(@ubik2): possibly this could be removed -- I removed "internal",
+  // since it's no longer a link to a cell. If I still need this function
+  // after my changes to traverse's loadMetaLinkedDocs, it should either
+  // be renamed to indicate that it only syncs the pattern and argument, or
+  // it should be expanded to also handle the embedded internal links.
+  // See also Runner.syncMetaCells
   const pendingCells = [cell];
   cycleCheck.add(cell.sourceURI);
   while (pendingCells.length > 0) {
     const currentCell = pendingCells.shift()!;
     await currentCell.sync();
-    for (const meta of ["pattern", "argument", "internal"] as const) {
+    for (const meta of ["pattern", "argument"] as const) {
       const link = getMetaLink(currentCell, meta);
       if (link === undefined) continue;
       const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);

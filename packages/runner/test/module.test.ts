@@ -196,11 +196,6 @@ describe("module", () => {
         schema: true,
         initial: { $stream: true },
       }]);
-      expect(clickPattern.initial).toEqual({
-        internal: {
-          "stream:click": { $stream: true },
-        },
-      });
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
       };
@@ -237,11 +232,6 @@ describe("module", () => {
         schema: true,
         initial: { $stream: true },
       }]);
-      expect(clickPattern.initial).toEqual({
-        internal: {
-          '{"$generated":0,"$kind":"stream"}': { $stream: true },
-        },
-      });
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
       };
@@ -272,11 +262,6 @@ describe("module", () => {
       expect(arrayCausePattern.result).toEqual({
         value: {
           $alias: { partialCause: ["a", "b"], path: [], scope: "space" },
-        },
-      });
-      expect(arrayCausePattern.initial).toEqual({
-        internal: {
-          '["a","b"]': 1,
         },
       });
     });

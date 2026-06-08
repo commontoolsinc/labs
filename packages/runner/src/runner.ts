@@ -1,6 +1,7 @@
 import {
   fabricFromNativeValue,
   type FabricValue,
+  nativeFromFabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -18,6 +19,7 @@ import {
   isPattern,
   isStreamValue,
   type JSONSchema,
+  JSONValue,
   type Module,
   NAME,
   type NodeFactory,
@@ -42,8 +44,6 @@ import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   getDerivedInternalCell,
-  getDerivedInternalCellLink,
-  getDerivedInternalCellManifestKey,
   getMetaCell,
   getMetaLink,
   isCellLink,
@@ -93,6 +93,7 @@ import {
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
+import { SigilLink } from "./sigil-types.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -121,6 +122,11 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
   "navigateTo",
   "streamData",
 ]);
+
+type InternalCellDescriptor = {
+  partialCause: JSONValue;
+  link: SigilLink;
+};
 
 function schedulerRawActionName(
   rawTargetName: string,
@@ -804,19 +810,33 @@ export class Runner {
     }
   }
 
+  /**
+   * Creates and initializes any internal cells needed for the pattern.
+   *
+   * @param tx
+   * @param pattern
+   * @param resultCell
+   * @param internal a FabricValue with the existing array of InternalCellDescriptors
+   * @returns a FabricValue with the array of InternalCellDescriptors
+   */
   private materializeDerivedInternalCells<R>(
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     resultCell: Cell<R>,
-    internalCell: Cell,
     internal: FabricValue,
   ): FabricValue {
     const descriptors = pattern.derivedInternalCells;
-    if (!descriptors?.length) return internal;
+    if (!descriptors?.length) return [];
 
-    const manifest: Record<string, FabricValue> = isRecord(internal)
-      ? { ...internal } as Record<string, FabricValue>
-      : {};
+    // Our internal meta field contains a manifest with information about all
+    // the individual internal cells.
+    const nativeInternal = nativeFromFabricValue(internal);
+    const existingManifest: InternalCellDescriptor[] =
+      Array.isArray(nativeInternal)
+        ? [...nativeInternal] as InternalCellDescriptor[]
+        : [];
+    // We'll build the updated manifest from the existing
+    const manifest: InternalCellDescriptor[] = [];
 
     for (const descriptor of descriptors) {
       const derivedCell = getDerivedInternalCell(
@@ -824,32 +844,33 @@ export class Runner {
         descriptor,
         tx,
       );
-      setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
-
-      const manifestKey = getDerivedInternalCellManifestKey(descriptor);
-      const manifestValue = manifest[manifestKey];
-      const manifestHasLink = isCellLink(manifestValue);
-      const currentDerivedValue = derivedCell.getRawUntyped({
-        meta: ignoreReadForScheduling,
-      });
-      const seedValue = manifestHasLink
-        ? descriptor.initial
-        : manifestValue ?? descriptor.initial;
-      if (seedValue !== undefined && currentDerivedValue === undefined) {
-        derivedCell.setRawUntyped(fabricFromNativeValue(seedValue));
+      const manifestMatch = existingManifest.findIndex((existingDescriptor) =>
+        deepEqual(existingDescriptor.partialCause, descriptor.partialCause)
+      );
+      if (manifestMatch === -1) {
+        // this cell isn't in our manifest yet. Create it, and add it to the manifest
+        const derivedSigilLink = derivedCell.getAsWriteRedirectLink({
+          base: resultCell,
+          includeSchema: true,
+        });
+        manifest.push({
+          partialCause: descriptor.partialCause,
+          link: derivedSigilLink,
+        });
+        setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
+      } else {
+        manifest.push(existingManifest[manifestMatch]);
       }
 
-      if (!manifestHasLink) {
-        const derivedLink = getDerivedInternalCellLink(resultCell, descriptor);
-        manifest[manifestKey] = createSigilLinkFromParsedLink(derivedLink, {
-          base: internalCell,
-          includeSchema: true,
-          overwrite: "redirect",
-        }) as FabricValue;
+      const currentValue = derivedCell.getRawUntyped({
+        meta: ignoreReadForScheduling,
+      });
+      if (currentValue === undefined && descriptor.initial !== undefined) {
+        derivedCell.setRawUntyped(fabricFromNativeValue(descriptor.initial));
       }
     }
 
-    return manifest as FabricValue;
+    return fabricFromNativeValue(manifest);
   }
 
   /**
@@ -865,55 +886,17 @@ export class Runner {
     resultCell: Cell<R>,
   ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
-    const internalLink = getMetaLink(resultCell, "internal");
     let argumentLink = getMetaLink(resultCell, "argument");
-    const internalCell = getMetaCell(
-      resultCell,
-      "internal",
-      tx,
-      pattern.internalSchema,
-    );
-    const previousInternal = internalCell.getRawUntyped({
+    const previousInternal = resultCell.getMetaRaw("internal", {
       meta: ignoreReadForScheduling,
     });
-    // `fabricFromNativeValue()` below rebuilds a fresh tree from `internal`
-    // without mutating its inputs, and `internal` isn't used after that. So the
-    // operands can be merged by reference: no defensive deep copy of `defaults`
-    // / `pattern.initial`, and no mutable (`frozen: false`) read of
-    // `previousInternal`, is needed -- `Object.assign` only reads their
-    // top-level keys.
-    const internal = Object.assign(
-      {},
-      (defaults as unknown as { internal?: FabricValue })?.internal,
-      isRecord(pattern.initial) && isRecord(pattern.initial.internal)
-        ? pattern.initial.internal
-        : {},
-      isRecord(previousInternal) ? previousInternal : {},
-    ) as FabricValue;
-    // Convert-and-freeze (default): the convert step is load-bearing -- it
-    // normalizes nested `toJSON`-bearing values (so this can't be a plain
-    // clone) -- and producing a deep-frozen result lets the storage write
-    // boundary's `cloneIfNecessary` identity-pass instead of
-    // deep-cloning-to-freeze.
     const internalManifest = this.materializeDerivedInternalCells(
       tx,
       pattern,
       resultCell,
-      internalCell,
-      internal,
+      previousInternal,
     );
-    internalCell.setRawUntyped(fabricFromNativeValue(internalManifest));
-    if (internalLink === undefined) {
-      setResultCell(internalCell, resultCell.asSchema(pattern.resultSchema));
-      const newInternalCellLink = internalCell.getAsWriteRedirectLink({
-        base: resultCell,
-        includeSchema: true,
-      });
-      resultCell.withTx(tx).setMetaRaw(
-        "internal",
-        newInternalCellLink,
-      );
-    }
+    resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
 
     let nextArgument = argument;
     // The argument meta field of the result cell should be a link to the
@@ -1776,7 +1759,12 @@ export class Runner {
    */
   private async syncMetaCells(resultCell: Cell<any>): Promise<void> {
     const promises: Promise<unknown>[] = [];
-    for (const field of ["argument", "internal"] as const) {
+    // TODO(@ubik2): possibly this could be removed -- I removed "internal",
+    // since it's no longer a link to a cell. If I still need this function
+    // after my changes to traverse's loadMetaLinkedDocs, it should either
+    // be renamed to indicate that it only syncs the argument, or it should be
+    // expanded to also handle the embedded internal links.
+    for (const field of ["argument"] as const) {
       const link = getMetaLink(resultCell, field);
       if (link === undefined) continue;
       const maybePromise = this.runtime.getCellFromLink(link).sync();

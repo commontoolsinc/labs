@@ -112,7 +112,6 @@ export default pattern(() => {
             properties: {
                 argumentSchema: true,
                 resultSchema: true,
-                internalSchema: true,
                 defaultScope: {
                     $ref: "#/$defs/CellScope"
                 }

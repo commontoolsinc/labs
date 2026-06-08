@@ -35,10 +35,8 @@ import {
   patternToJSON,
   toJSONWithLegacyAliases,
 } from "./json-utils.ts";
-import { setValueAtPath } from "../path-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
-  getDerivedInternalCellManifestKey,
   getStableInternalPathSegment,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
@@ -291,24 +289,20 @@ function factoryFromPattern<T, R>(
   // assigned to cells via .set or .push and aren't otherwise connected.
   getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
 
-  const rootAliases = new Map<unknown, "argument" | "result">();
-  const setRootAlias = (
-    cell: ICell<unknown> | OpaqueCell<any>,
-    alias: "argument" | "result",
-  ) => {
-    const { cell: root } = cell.export();
-    rootAliases.set(cell, alias);
-    rootAliases.set(root, alias);
-  };
-
   const inputCell = isCell(inputs) ? inputs : getCellOrThrow(inputs);
-  setRootAlias(inputCell, "argument");
-
-  // Add alias for self-reference if used in outputs.
   const selfRefCell = getCellOrThrow(selfRef);
-  if (allCells.has(selfRefCell)) {
-    setRootAlias(selfRefCell, "result");
-  }
+  const inputRootCell = inputCell.export().cell;
+  const selfRefRootCell = selfRefCell.export().cell;
+  const cellNameForCell = (
+    cell: ICell<unknown> | OpaqueCell<any> | OpaqueRef<any>,
+  ): "argument" | "result" | undefined => {
+    const rootCell = cell.export().cell;
+    return rootCell === inputRootCell
+      ? "argument"
+      : rootCell === selfRefRootCell
+      ? "result"
+      : undefined;
+  };
 
   const assignedInternalPartialCauses = new Map<OpaqueCell<any>, JSONValue>();
   let anonymousPartialCauseCount = 0;
@@ -316,15 +310,11 @@ function factoryFromPattern<T, R>(
     const generated = { $generated: anonymousPartialCauseCount++ };
     return isStream ? { ...generated, $kind: "stream" } : generated;
   };
-  const hasUsedInternalPartialCause = (partialCause: JSONValue): boolean =>
-    Array.from(assignedInternalPartialCauses.values()).some((used) =>
-      deepEqual(used, partialCause)
-    );
   allCells.forEach((cell) => {
     const { cell: top, path, value, name, external } = cell.export();
     if (
-      external || path.length > 0 || rootAliases.has(cell) ||
-      rootAliases.has(top) || assignedInternalPartialCauses.has(top)
+      external || path.length > 0 || cellNameForCell(cell) !== undefined ||
+      assignedInternalPartialCauses.has(top)
     ) {
       return;
     }
@@ -333,7 +323,11 @@ function factoryFromPattern<T, R>(
     let partialCause = name === undefined
       ? nextAnonymousPartialCause(isStream)
       : name as JSONValue;
-    while (hasUsedInternalPartialCause(partialCause)) {
+    while (
+      Array.from(assignedInternalPartialCauses.values()).some((used) =>
+        deepEqual(used, partialCause)
+      )
+    ) {
       const generated = nextAnonymousPartialCause(isStream);
       partialCause = name === undefined
         ? generated
@@ -350,36 +344,22 @@ function factoryFromPattern<T, R>(
     if (external) return undefined;
 
     // See if we're one of the special cells (result or argument)
-    const rootAlias = rootAliases.get(cell) ?? rootAliases.get(top);
-    if (rootAlias !== undefined) {
-      return {
-        cell: rootAlias,
-        path,
-        ...(scope !== undefined && { scope }),
-        ...(schema !== undefined && { schema }),
-      };
+    const commonAliasProps = {
+      path,
+      ...(scope !== undefined && { scope }),
+      ...(schema !== undefined && { schema }),
+    };
+    const cellName = cellNameForCell(cell);
+    if (cellName !== undefined) {
+      return { cell: cellName, ...commonAliasProps };
     }
-
     // Otherwise, we should be an internal call, and should have partialCause
-    const partialCause = assignedInternalPartialCauses.get(top) ??
-      assignedInternalPartialCauses.get(cell as OpaqueCell<any>);
+    const partialCause = assignedInternalPartialCauses.get(top);
     if (partialCause !== undefined) {
-      return {
-        path,
-        partialCause,
-        ...(scope !== undefined && { scope }),
-        ...(schema !== undefined && { schema }),
-      };
+      return { partialCause, ...commonAliasProps };
     }
   };
 
-  // Set initial values for all cells, add non-inputs defaults
-  const initial: any = {};
-  const internalSchema: Record<string, any> = {
-    type: "object",
-    properties: {},
-  };
-  let hasInternalSchema = false;
   const allCellsAndInternalRoots = new Set<ICell<unknown> | OpaqueRef<any>>(
     allCells,
   );
@@ -413,28 +393,6 @@ function factoryFromPattern<T, R>(
         ...(schema !== undefined && { schema }),
         ...(value !== undefined && { initial: value as JSONValue }),
       });
-    }
-    if (value !== undefined) {
-      const initialPath = (typeof cellReference.cell === "string")
-        ? [cellReference.cell, ...cellReference.path]
-        : [
-          "internal",
-          getDerivedInternalCellManifestKey({
-            partialCause: cellReference.partialCause!,
-          }),
-          ...cellReference.path,
-        ];
-      setValueAtPath(initial, initialPath, value);
-    }
-    if (schema !== undefined && cellReference.partialCause !== undefined) {
-      setSchemaAtPath(
-        internalSchema,
-        [getDerivedInternalCellManifestKey({
-          partialCause: cellReference.partialCause!,
-        })],
-        schema,
-      );
-      hasInternalSchema = true;
     }
   });
   const resolveCellAlias: CellAliasResolver = (
@@ -502,7 +460,7 @@ function factoryFromPattern<T, R>(
   const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
 
   const resultSchema =
-    applyArgumentIfcToResult(argumentSchema, resultSchemaArg) || {};
+    applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
     const module = toJSONWithLegacyAliases(
@@ -529,15 +487,6 @@ function factoryFromPattern<T, R>(
       keepAsCell: true,
     }),
     resultSchema: sanitizeSchemaForLinks(resultSchema, { keepStreams: true }),
-    ...(hasInternalSchema
-      ? {
-        internalSchema: sanitizeSchemaForLinks(
-          internalSchema as JSONSchema,
-          { keepStreams: true, keepAsCell: true },
-        ),
-      }
-      : {}),
-    initial,
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,
@@ -757,38 +706,6 @@ export function popFrame(frame?: Frame): void {
 export function getTopFrame(): Frame | undefined {
   return frames.length ? frames[frames.length - 1] : undefined;
 }
-
-const setSchemaAtPath = (
-  schema: Record<string, any>,
-  path: readonly PropertyKey[],
-  value: JSONSchema,
-): void => {
-  if (path.length !== 1) {
-    throw new Error(
-      `Internal cell schemas must be leaf paths, got ${path.length} segments`,
-    );
-  }
-  if (typeof path[0] === "symbol") {
-    throw new Error("Internal cell schema paths cannot use symbol keys");
-  }
-  if (schema.$ref !== undefined) {
-    throw new Error("Cannot add internal cell schemas to a $ref schema");
-  }
-  if (schema.type !== undefined && schema.type !== "object") {
-    throw new Error("Internal cell schema root must be an object schema");
-  }
-  if (schema.properties !== undefined && !isRecord(schema.properties)) {
-    throw new Error("Internal cell schema properties must be an object");
-  }
-
-  schema.type ??= "object";
-  schema.properties ??= {};
-  const segment = String(path[0]);
-  if (segment in schema.properties) {
-    throw new Error(`Duplicate internal cell schema path: ${segment}`);
-  }
-  schema.properties[segment] = value;
-};
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;

@@ -64,7 +64,6 @@ describe("utility functions", () => {
       isPattern({
         argumentSchema: {},
         resultSchema: {},
-        initial: {},
         nodes: [],
       }),
     ).toBe(true);
