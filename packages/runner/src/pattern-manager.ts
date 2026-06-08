@@ -643,6 +643,13 @@ export class PatternManager {
     let compiled;
     try {
       compiled = await harness.compileToRecordGraph!(program, {
+        // The bodies returned below come from `loadCompiledClosure`, an
+        // integrity-gated (`requiredIntegrity`, fail-closed) read of the
+        // compiled set. On a full hit the CFC integrity label is the security
+        // boundary, so skip the redundant per-module SES re-verification (threat
+        // model: docs/specs/module-loading.md). A partial/miss returns undefined
+        // below → fresh compile → bodies are SES-verified as usual.
+        trustedBodies: true,
         precompiledModulesFor: async ({ entryIdentity, identities }) => {
           // Concurrency-safe timing: explicit start (no shared timer key, which
           // parallel compiles would clobber). Same for the others below.
@@ -761,7 +768,10 @@ export class PatternManager {
       const result = await harness.evaluateCachedModules!(
         cachedModules,
         entryIdentity,
-        { sourceFiles: program.files },
+        // Bodies came from the integrity-gated compiled-set read
+        // (`loadCompiledClosure`, `requiredIntegrity`), so the CFC label is the
+        // security boundary — skip redundant SES body re-verification.
+        { sourceFiles: program.files, trustedBodies: true },
       );
       return this.patternFromEvaluation(result, program, entryIdentity);
     } catch (error) {
@@ -844,9 +854,13 @@ export class PatternManager {
 
     try {
       // Source-free: no sourceFiles. Sub-patterns fall back to identity.
+      // Bodies came from the integrity-gated compiled-set read
+      // (`loadCompiledClosure`, `requiredIntegrity`), so trust the CFC label and
+      // skip redundant SES body re-verification.
       const result = await harness.evaluateCachedModules(
         cachedModules,
         entryIdentity,
+        { trustedBodies: true },
       );
       const pattern = this.patternFromMain(result, symbol, entryIdentity);
       this.esmCacheStats.byIdentityHits++;
