@@ -26,10 +26,7 @@ import type {
   Exports,
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
-import type {
-  CachedCompiledModule,
-  HoistRegistrationSink,
-} from "./sandbox/module-record-compiler.ts";
+import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -115,12 +112,14 @@ export class PatternManager {
     object,
     { identity: string; symbol: string }
   >();
-  // In-memory reverse index for HOISTED builder artifacts (`__cfReg`): module
-  // identity -> (symbol -> live value). The forward map above answers "what is
-  // this value's ref"; this answers "what value does this ref name", which the
-  // list builtins use to resolve a map/filter/flatMap `op` synchronously. Bounded
-  // (FIFO) like `modulesByIdentity`; a miss falls back to an embedded graph.
-  private hoistsByIdentity = new Map<string, Map<string, unknown>>();
+  // THE in-memory reverse index for content-addressed builder artifacts: module
+  // identity -> (symbol -> live value). The single source for
+  // `patternFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
+  // populated by ONE path (`indexArtifact`) from BOTH a module's `__cfReg`
+  // registrations (hoists + non-exported top-level) AND its exports — so callers
+  // never look in two places. Bounded (FIFO); a miss returns undefined and
+  // callers fall back (e.g. to an embedded op graph or a source reload).
+  private addressableByIdentity = new Map<string, Map<string, unknown>>();
   private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
   private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
@@ -922,31 +921,20 @@ export class PatternManager {
     const byId = result.exportsByIdentity;
     if (byId) {
       for (const [identity, exports] of byId) {
+        // `modulesByIdentity` keeps the whole namespace for MODULE reuse on a
+        // by-identity reload (a separate concern from artifact addressing).
         // Refresh insertion order (Map is FIFO-ordered) so eviction is ~LRU.
         this.modulesByIdentity.delete(identity);
         this.modulesByIdentity.set(identity, {
           exports,
           loadId: result.loadId,
         });
-        // Give each pattern-exporting sub-module a content-addressed entry ref so
-        // its result cell reloads BY IDENTITY (and hits the in-memory module
-        // cache / cell cache) instead of falling back to a source recompile via
-        // loadPattern. Without this only the bundle entry carried a ref, so every
-        // sub-pattern cold-recompiled on reload (CT-1623). Don't overwrite an
-        // existing ref (the entry's is set authoritatively by the caller).
+        // Index each exported builder artifact for addressing by its export name.
+        // (Reload relies on this so a sub-pattern's result cell loads BY IDENTITY
+        // instead of cold-recompiling — CT-1623.)
         for (const exportName of Object.keys(exports)) {
           if (exportName === "__esModule") continue;
-          const value = exports[exportName];
-          if (
-            (typeof value === "object" || typeof value === "function") &&
-            value !== null && isTrustedPattern(value as Pattern) &&
-            !this.valueToEntryRef.has(value as Pattern)
-          ) {
-            this.valueToEntryRef.set(value as Pattern, {
-              identity,
-              symbol: exportName,
-            });
-          }
+          this.indexArtifact(identity, exportName, exports[exportName]);
         }
       }
       while (this.modulesByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
@@ -956,76 +944,74 @@ export class PatternManager {
       }
     }
 
-    this.registerHoistedValues(result.registrationsByIdentity);
+    // Index the hoisted + non-exported top-level builder artifacts the module
+    // registered via `__cfReg`, into the SAME index as the exports above.
+    const sink = result.registrationsByIdentity;
+    if (sink) {
+      for (const [identity, entries] of sink) {
+        for (const [symbol, value] of entries) {
+          this.indexArtifact(identity, symbol, value);
+        }
+      }
+    }
+
+    while (this.addressableByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+      const oldest = this.addressableByIdentity.keys().next().value;
+      if (oldest === undefined) break;
+      this.addressableByIdentity.delete(oldest);
+    }
   }
 
   /**
-   * Index the hoisted builder artifacts a module graph registered via `__cfReg`
-   * (CT-1623). Each entry is a `{ identity, symbol } -> live value` pairing: the
-   * forward `valueToEntryRef` lets the value be serialized by reference, and the
-   * reverse `hoistsByIdentity` lets it be resolved synchronously by reference
-   * (e.g. a map/filter/flatMap `op`).
+   * Index one content-addressed builder artifact `{ identity, symbol } -> value`,
+   * the single path that populates both the reverse `addressableByIdentity` and
+   * forward `valueToEntryRef` maps — whether the value came from a module's
+   * `__cfReg` registration (hoists + non-exported top-level) or its exports.
    *
    * SECURITY: only a genuine trusted builder artifact (pattern / lift / handler —
-   * `isTrustedBuilderArtifact`) is indexed. A `__cf_data`-forged plain object in
-   * the registration map carries no brand and is dropped, so it can never acquire
-   * a content-addressed reference or be handed back as a trusted value. (Cross-
-   * module forgery is independently impossible: identity is a content hash, so a
-   * module can only register under its own bytes' identity.)
+   * `isTrustedBuilderArtifact`) is indexed. A `__cf_data`-forged plain object
+   * carries no brand and is dropped, so it can never acquire a content-addressed
+   * reference or be handed back as a trusted value. (Cross-module forgery is
+   * independently impossible: identity is a content hash, so a module can only
+   * register under its own bytes' identity.)
    */
-  private registerHoistedValues(sink?: HoistRegistrationSink): void {
-    if (!sink || sink.size === 0) return;
-    for (const [identity, entries] of sink) {
-      let bucket = this.hoistsByIdentity.get(identity);
-      // Refresh recency (FIFO ~ LRU).
-      this.hoistsByIdentity.delete(identity);
-      if (!bucket) bucket = new Map<string, unknown>();
-      for (const [symbol, value] of entries) {
-        if (!isTrustedBuilderArtifact(value)) continue;
-        bucket.set(symbol, value);
-        // Don't overwrite an existing forward ref (e.g. a value that is also an
-        // authored export already keyed by the loop above).
-        if (
-          (typeof value === "object" || typeof value === "function") &&
-          value !== null && !this.valueToEntryRef.has(value as object)
-        ) {
-          this.valueToEntryRef.set(value as object, { identity, symbol });
-        }
-      }
-      if (bucket.size > 0) this.hoistsByIdentity.set(identity, bucket);
-    }
-    while (this.hoistsByIdentity.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
-      const oldest = this.hoistsByIdentity.keys().next().value;
-      if (oldest === undefined) break;
-      this.hoistsByIdentity.delete(oldest);
+  private indexArtifact(
+    identity: string,
+    symbol: string,
+    value: unknown,
+  ): void {
+    if (!isTrustedBuilderArtifact(value)) return;
+    // Reverse index, refreshing recency (FIFO ~ LRU).
+    let bucket = this.addressableByIdentity.get(identity);
+    if (bucket) this.addressableByIdentity.delete(identity);
+    else bucket = new Map<string, unknown>();
+    if (!bucket.has(symbol)) bucket.set(symbol, value);
+    this.addressableByIdentity.set(identity, bucket);
+    // Forward map — don't overwrite an existing ref (e.g. a value that is both a
+    // `__cfReg` entry and an export, or whose entry ref the caller set first).
+    if (!this.valueToEntryRef.has(value as object)) {
+      this.valueToEntryRef.set(value as object, { identity, symbol });
     }
   }
 
   /**
    * Resolve a content-addressed `{ identity, symbol }` reference to its live
-   * builder artifact, synchronously, from the in-memory caches — or `undefined`
-   * on a miss (the value was never registered, or rolled out of the bounded
-   * cache; callers fall back, e.g. to an embedded op graph). Checks hoisted
-   * artifacts (`__cfReg`) first, then authored module exports. Public so the list
-   * builtins can resolve a map/filter/flatMap `op` during a synchronous Action.
+   * builder artifact, synchronously, from the single in-memory index — or
+   * `undefined` on a miss (never registered, or rolled out of the bounded cache;
+   * callers fall back, e.g. to an embedded op graph or a source reload). Public
+   * so the list builtins can resolve a map/filter/flatMap `op` during a
+   * synchronous Action.
    */
   patternFromIdentitySync(
     identity: string,
     symbol: string,
   ): Pattern | undefined {
-    const bucket = this.hoistsByIdentity.get(identity);
-    if (bucket && bucket.has(symbol)) {
-      // Refresh recency.
-      this.hoistsByIdentity.delete(identity);
-      this.hoistsByIdentity.set(identity, bucket);
-      return bucket.get(symbol) as Pattern;
-    }
-    const mod = this.modulesByIdentity.get(identity);
-    const exported = mod?.exports?.[symbol];
-    if (exported !== undefined && isTrustedBuilderArtifact(exported)) {
-      return exported as Pattern;
-    }
-    return undefined;
+    const bucket = this.addressableByIdentity.get(identity);
+    if (!bucket || !bucket.has(symbol)) return undefined;
+    // Refresh recency.
+    this.addressableByIdentity.delete(identity);
+    this.addressableByIdentity.set(identity, bucket);
+    return bucket.get(symbol) as Pattern;
   }
 
   /**
