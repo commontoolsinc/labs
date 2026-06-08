@@ -243,6 +243,46 @@ export interface SelfOutput {
 }
 
 // ============================================================================
+// FORM HANDLERS (state-reading, for UI binding)
+// ============================================================================
+
+/**
+ * Record a neurotype entry from form fields (state-reading handler).
+ * Reads systemField + resultField from state; upserts into selfModel;
+ * clears resultField after recording.
+ */
+export const recordNeurotypeFromForm = handler<
+  unknown,
+  {
+    selfModel: Writable<SelfModel>;
+    systemField: Writable<NeurotypeSystem>;
+    resultField: Writable<string>;
+  }
+>((_event, { selfModel, systemField, resultField }) => {
+  const result = resultField.get().trim();
+  if (!result) return;
+  const system = systemField.get();
+  const entry: Neurotype = {
+    system,
+    result,
+    source: "self-reported",
+    recordedAt: safeDateNow(),
+  };
+  selfModel.set(upsertNeurotype(selfModel.get(), entry));
+  resultField.set("");
+});
+
+/**
+ * Remove a neurotype by system (state-reading handler, for per-row binding).
+ */
+export const removeNeurotypeBySystem = handler<
+  unknown,
+  { selfModel: Writable<SelfModel>; system: NeurotypeSystem }
+>((_event, { selfModel, system }) => {
+  selfModel.set(withoutNeurotype(selfModel.get(), system));
+});
+
+// ============================================================================
 // MAIN PATTERN
 // ============================================================================
 
@@ -255,21 +295,90 @@ const Self = pattern<SelfInput, SelfOutput>(
     const selfModel = injectedSelfModel ??
       new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel");
 
+    // Local form field cells
+    const systemField = new Writable<NeurotypeSystem>("mbti").for(
+      "systemField",
+    );
+    const resultField = new Writable<string>("").for("resultField");
+
+    const neurotypeSystemItems: { label: string; value: NeurotypeSystem }[] = [
+      { label: "MBTI", value: "mbti" },
+      { label: "Enneagram", value: "enneagram" },
+      { label: "Big Five", value: "big5" },
+      { label: "Custom", value: "custom" },
+    ];
+
     return {
       [NAME]: "My Self",
       // [UI] must be a static VNode — not wrapped in computed().
       [UI]: (
-        <div style={{ padding: "16px", fontFamily: "sans-serif" }}>
+        <cf-vstack gap="4" style={{ padding: "16px" }}>
           <h2
-            style={{ margin: "0 0 8px", fontSize: "16px", fontWeight: "600" }}
+            style={{ margin: "0 0 4px", fontSize: "16px", fontWeight: "600" }}
           >
             Self Model
           </h2>
           <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-            Your private values, neurotype, and reflective answers. Never
-            shared.
+            Your private neurotype self-report. Never shared.
           </p>
-        </div>
+
+          <cf-vstack gap="2">
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>
+              Record Neurotype
+            </h3>
+            <cf-hstack gap="2" align="end">
+              <cf-select
+                $value={systemField}
+                items={neurotypeSystemItems}
+                style="min-width: 130px;"
+              />
+              <cf-input
+                $value={resultField}
+                placeholder="e.g. INTJ, 5w4…"
+                style="flex: 1;"
+              />
+              <cf-button
+                onClick={recordNeurotypeFromForm({
+                  selfModel,
+                  systemField,
+                  resultField,
+                })}
+              >
+                Record
+              </cf-button>
+            </cf-hstack>
+          </cf-vstack>
+
+          <cf-vstack gap="2">
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>
+              Neurotypes
+            </h3>
+            {selfModel.key("neurotypes").map((n) => (
+              <cf-hstack gap="2" align="center">
+                <span
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    minWidth: "90px",
+                  }}
+                >
+                  {n.system}
+                </span>
+                <span style={{ fontSize: "13px", flex: "1" }}>{n.result}</span>
+                <cf-button
+                  size="sm"
+                  variant="ghost"
+                  onClick={removeNeurotypeBySystem({
+                    selfModel,
+                    system: n.system,
+                  })}
+                >
+                  ✕
+                </cf-button>
+              </cf-hstack>
+            ))}
+          </cf-vstack>
+        </cf-vstack>
       ),
       selfModel,
       // Bind each handler to this instance's selfModel cell.
