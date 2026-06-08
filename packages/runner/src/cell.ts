@@ -1582,7 +1582,9 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       this.synced,
       undefined,
-      mergeCfcLabelViews([this._cfcLabelView, dereferenceView]),
+      mergeCfcLabelViews([this._cfcLabelView, dereferenceView], {
+        integrity: "intersection",
+      }),
     );
   }
 

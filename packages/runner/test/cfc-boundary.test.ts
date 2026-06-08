@@ -1731,7 +1731,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcEnforcementMode("observe");
       const schema = flowPrecisionSchemaForBuiltin("map");
       const cell = runtime.getCell(
         signer.did(),
@@ -1742,6 +1742,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       cell.set([1, 2, 3]);
       runtime.prepareTxForCommit(tx);
       expect((await tx.commit()).ok).toBeDefined();
+      expect(tx.getCfcState().diagnostics).toContain(
+        "unsupported trust-sensitive claim flowPrecisionClaim at /",
+      );
 
       const link = cell.getAsNormalizedFullLink();
       const verify = runtime.edit();
@@ -1751,6 +1754,31 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(stored.cfc).toBeUndefined();
       expect(storedCfcMetadataAppliesToPath(verify, link)).toBe(false);
       verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("fails closed on flow-precision claims in enforcing modes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const schema = flowPrecisionSchemaForBuiltin("map");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-flow-precision-enforce-fail-closed",
+        schema,
+        tx,
+      );
+      cell.set([1, 2, 3]);
+
+      runtime.prepareTxForCommit(tx);
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "unsupported trust-sensitive claim flowPrecisionClaim",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -2154,7 +2182,16 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const source = runtime.getCell(
         signer.did(),
         "cfc-link-carried-only-source",
-        undefined,
+        {
+          type: "object",
+          ifc: {
+            confidentiality: ["source-confidentiality"],
+            integrity: ["source-integrity"],
+          },
+          properties: {
+            title: { type: "string" },
+          },
+        },
         seed,
       );
       source.set({ title: "plain source" });
@@ -2201,7 +2238,16 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         expect.arrayContaining([
           expect.objectContaining({
             path: [],
-            label: { integrity: ["selected-by-alice"] },
+            label: expect.objectContaining({
+              confidentiality: ["source-confidentiality"],
+              integrity: expect.arrayContaining([
+                "source-integrity",
+                "selected-by-alice",
+                expect.objectContaining({
+                  type: "https://commonfabric.org/cfc/atom/LinkReference",
+                }),
+              ]),
+            }),
           }),
           expect.objectContaining({
             path: ["title"],
@@ -4776,6 +4822,44 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const cell = runtime.getCell(
         signer.did(),
         "cfc-unsupported-trust-claim",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { writeAuthorizedBy: ["trusted-handler"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "secret" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy requires a trusted builtin identity",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not let a trust snapshot alone authorize writeAuthorizedBy", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-without-implementation",
+        actingPrincipal: signer.did(),
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-trust-snapshot-without-implementation",
         {
           type: "object",
           properties: {

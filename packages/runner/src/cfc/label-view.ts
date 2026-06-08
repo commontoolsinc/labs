@@ -120,5 +120,5 @@ export const cfcLabelViewForCell = (
     metadataView,
     linkedValueView,
     getCarriedCfcLabelView(cell),
-  ]);
+  ], { integrity: "intersection" });
 };

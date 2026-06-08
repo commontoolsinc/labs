@@ -1,4 +1,5 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { uniqueCfcAtoms } from "./observation.ts";
 
 export type IFCLabel = {
@@ -68,28 +69,61 @@ const sortEntries = (entries: CfcLabelViewEntry[]): CfcLabelViewEntry[] =>
 export const mergeLabel = (
   left: IFCLabel | undefined,
   right: IFCLabel,
+  options: MergeCfcLabelViewsOptions,
 ): IFCLabel => {
   const merged: IFCLabel = {};
-  for (const key of LABEL_KEYS) {
-    const values = [
-      ...(Array.isArray(left?.[key]) ? left[key] : []),
-      ...(Array.isArray(right[key]) ? right[key] : []),
-    ];
-    // Dedup structurally via `uniqueCfcAtoms()` rather than by reference
-    // (`new Set()`). Atoms can be fabric-converted clones (each call to
-    // `cloneIfNecessary()` produces a fresh frozen object), so two
-    // logically-identical caveats may not share a JS reference. The
-    // reference-keyed approach would leave duplicates that callers
-    // observe as both `confidentiality` bloat and -- since downstream
-    // entry-merging compares labels structurally -- as label entries
-    // failing to coalesce at the right path.
-    const unique = uniqueCfcAtoms(values);
-    if (unique.length > 0) {
-      merged[key] = unique;
-    }
+  const confidentiality = uniqueCfcAtoms([
+    ...(Array.isArray(left?.confidentiality) ? left.confidentiality : []),
+    ...(Array.isArray(right.confidentiality) ? right.confidentiality : []),
+  ]);
+  if (confidentiality.length > 0) {
+    merged.confidentiality = confidentiality;
+  }
+
+  const integrity = options.integrity === "intersection" && left !== undefined
+    ? intersectCfcAtoms(left.integrity, right.integrity)
+    : uniqueCfcAtoms([
+      ...(Array.isArray(left?.integrity) ? left.integrity : []),
+      ...(Array.isArray(right.integrity) ? right.integrity : []),
+    ]);
+  if (integrity.length > 0) {
+    merged.integrity = integrity;
   }
   return merged;
 };
+
+const intersectCfcAtoms = (
+  left: readonly unknown[] | undefined,
+  right: readonly unknown[] | undefined,
+): unknown[] => {
+  if (!Array.isArray(left) || !Array.isArray(right)) {
+    return [];
+  }
+  const uniqueLeft = uniqueCfcAtoms(left);
+  const common = uniqueLeft.filter((atom) =>
+    right.some((candidate) => deepEqual(candidate, atom))
+  );
+  return uniqueCfcAtoms(common);
+};
+
+export type MergeCfcLabelViewsOptions = {
+  /**
+   * Integrity is unioned when reconciling labels for the same value, but
+   * intersected when combining distinct contributing values per CFC 8.6/8.9.
+   */
+  integrity?: "union" | "intersection";
+};
+
+const DEFAULT_MERGE_OPTIONS: Required<MergeCfcLabelViewsOptions> = {
+  integrity: "union",
+};
+
+const normalizeMergeOptions = (
+  options?: MergeCfcLabelViewsOptions,
+): Required<MergeCfcLabelViewsOptions> => ({
+  ...DEFAULT_MERGE_OPTIONS,
+  ...options,
+});
 
 export const cloneCfcLabelView = (
   view: CfcLabelView | undefined,
@@ -108,7 +142,9 @@ export const cloneCfcLabelView = (
 
 export const mergeCfcLabelViews = (
   views: Array<CfcLabelView | undefined>,
+  options?: MergeCfcLabelViewsOptions,
 ): CfcLabelView | undefined => {
+  const mergeOptions = normalizeMergeOptions(options);
   const byPath = new Map<string, CfcLabelViewEntry>();
   for (const view of views) {
     if (!view) {
@@ -120,7 +156,7 @@ export const mergeCfcLabelViews = (
       const existing = byPath.get(key);
       byPath.set(key, {
         path,
-        label: mergeLabel(existing?.label, entry.label),
+        label: mergeLabel(existing?.label, entry.label, mergeOptions),
       });
     }
   }
