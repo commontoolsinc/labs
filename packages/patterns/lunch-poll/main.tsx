@@ -216,6 +216,24 @@ const VOTE_SWATCH: Record<VoteColor, string> = {
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 
+// Normalize a human-entered link to a safe http(s) URL (auto-prefixing
+// `https://` when the scheme is missing). Returns "" for anything that isn't
+// http/https — this is what keeps a pasted `javascript:`/`data:` override from
+// ever reaching an `href`. Also used defensively at render time.
+const safeHttpUrl = (raw: string | undefined): string => {
+  const s = (raw ?? "").trim();
+  if (!s) return "";
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s) ? s : `https://${s}`;
+  try {
+    const u = new URL(withScheme);
+    return (u.protocol === "http:" || u.protocol === "https:")
+      ? u.toString()
+      : "";
+  } catch {
+    return "";
+  }
+};
+
 const newOptionId = () =>
   `o_${safeDateNow().toString(36)}_${
     Math.floor(nonPrivateRandom() * 1e6).toString(36)
@@ -481,8 +499,13 @@ const setOptionUrl = handler<SetOptionUrlEvent, {
   const cur = options.get();
   const idx = cur.findIndex((o) => o.id === optionId);
   if (idx < 0) return;
-  const next = trimmedName(url ?? linkDraft.get());
-  options.key(idx).key("homePageUrlOverride").set(next);
+  const raw = trimmedName(url ?? linkDraft.get());
+  // Empty clears the override; otherwise only accept a safe http(s) URL. A
+  // non-empty value that isn't http(s) (e.g. `javascript:`) is rejected — leave
+  // the existing override and the edit field open so it can be corrected.
+  const safe = raw === "" ? "" : safeHttpUrl(raw);
+  if (raw !== "" && safe === "") return;
+  options.key(idx).key("homePageUrlOverride").set(safe);
   linkDraft.set("");
   linkEditTarget.set(null);
 });

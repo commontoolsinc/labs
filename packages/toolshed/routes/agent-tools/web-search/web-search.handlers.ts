@@ -126,6 +126,44 @@ async function resolveGroundingUrl(
   }
 }
 
+/**
+ * Best-effort plain-text extraction of a page, for `include_content` requests.
+ * Not a full reader (that's the webreader route's job) — crude tag-strip with a
+ * length cap; returns "" on any error or non-text response.
+ */
+async function fetchPageText(url: string): Promise<string> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "User-Agent": RESOLVE_UA },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const contentType = res.headers.get("content-type") ?? "";
+    if (
+      !res.ok ||
+      (!contentType.includes("text/html") &&
+        !contentType.includes("text/plain"))
+    ) {
+      await res.body?.cancel();
+      return "";
+    }
+    const html = await res.text();
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 4000);
+  } catch {
+    return "";
+  }
+}
+
 async function isValidCache(path: string): Promise<boolean> {
   try {
     const stat = await Deno.stat(path);
@@ -238,27 +276,47 @@ export const webSearch: AppRouteHandler<WebSearchRoute> = async (c) => {
       );
     }
 
-    // Resolve each chunk's redirect to its real URL (dedup by host, validate),
-    // stopping once we have max_results reachable sources.
+    // Resolve chunk redirects to their real URLs CONCURRENTLY — each call has
+    // its own timeout, so wall-time is the slowest single resolution rather
+    // than serial (8s × N). Cap how many we resolve so a pathological grounding
+    // response can't fan out unbounded.
+    const RESOLVE_CAP = Math.max(max_results * 3, 8);
+    const resolved = await Promise.all(
+      chunks.slice(0, RESOLVE_CAP).map(async (chunk) => {
+        const redirect = chunk?.web?.uri;
+        if (typeof redirect !== "string" || !redirect) return null;
+        const url = await resolveGroundingUrl(redirect);
+        if (!url) return null;
+        const title =
+          typeof chunk.web?.title === "string" && chunk.web.title.trim()
+            ? chunk.web.title.trim()
+            : new URL(url).host.toLowerCase();
+        return { url, title };
+      }),
+    );
+
+    // Pick in original (relevance) order, de-duped by host, up to max_results.
     const seenHosts = new Set<string>();
-    const results: Array<
-      { title: string; url: string; description: string; content: string }
-    > = [];
-    for (const chunk of chunks) {
-      if (results.length >= max_results) break;
-      const redirect = chunk?.web?.uri;
-      if (typeof redirect !== "string" || !redirect) continue;
-      const url = await resolveGroundingUrl(redirect);
-      if (!url) continue;
-      const host = new URL(url).host.toLowerCase();
+    const picked: Array<{ url: string; title: string }> = [];
+    for (const r of resolved) {
+      if (!r || picked.length >= max_results) continue;
+      const host = new URL(r.url).host.toLowerCase();
       if (seenHosts.has(host)) continue;
       seenHosts.add(host);
-      const title =
-        typeof chunk.web?.title === "string" && chunk.web.title.trim()
-          ? chunk.web.title.trim()
-          : host;
-      results.push({ title, url, description: "", content: "" });
+      picked.push(r);
     }
+
+    // Honor `include_content` (best-effort page text), also concurrently.
+    const contents = include_content
+      ? await Promise.all(picked.map((p) => fetchPageText(p.url)))
+      : picked.map(() => "");
+
+    const results = picked.map((p, i) => ({
+      title: p.title,
+      url: p.url,
+      description: "",
+      content: contents[i],
+    }));
 
     const transformedResult = {
       query,

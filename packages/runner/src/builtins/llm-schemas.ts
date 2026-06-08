@@ -301,17 +301,8 @@ export const GenerateObjectResultSchema = internSchema(
       error: {},
       partial: { type: "string" },
       requestHash: { type: "string" },
-      groundingSources: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            url: { type: "string" },
-            title: { type: "string" },
-            snippet: { type: "string" },
-          },
-        },
-      },
+      // No `groundingSources` here — generateObject's JSON-mode path returns
+      // only the object, not the grounded response. Use generateText for sources.
     },
     required: ["pending"],
   } as const,

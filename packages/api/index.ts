@@ -1775,8 +1775,10 @@ export interface BuiltInLLMGenerateObjectState<T> {
   partial?: string;
   error?: unknown;
   cancelGeneration: Stream<void>;
-  /** Web sources from native search grounding, when `search`/`google_search` was requested. */
-  groundingSources?: readonly BuiltInLLMGroundingSource[];
+  // NOTE: `generateObject` accepts `search`/`nativeModelToolIds` (grounding can
+  // improve the structured result), but does NOT surface `groundingSources` —
+  // its JSON-mode path returns only the object, not the grounded response. Use
+  // `generateText` when you need the source URLs.
 }
 
 export interface BuiltInLLMDialogState {
