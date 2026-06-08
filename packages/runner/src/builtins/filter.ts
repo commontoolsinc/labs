@@ -25,6 +25,7 @@ import {
   outputSpotFromBinding,
   scopedCell,
 } from "./scope-policy.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
 
 /**
  * Implementation of built-in filter module. Like map, this is called once at
@@ -77,7 +78,7 @@ export function filter(
     const { list, op } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
       .withTx(tx).get();
 
-    const opPattern = op.getRaw();
+    const opPattern = resolveOpPattern(runtime, op.getRaw(), "filter");
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),

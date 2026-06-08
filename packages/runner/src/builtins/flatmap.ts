@@ -25,6 +25,7 @@ import {
   outputSpotFromBinding,
   scopedCell,
 } from "./scope-policy.ts";
+import { resolveOpPattern } from "./op-pattern-ref.ts";
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -79,7 +80,7 @@ export function flatMap(
     const { list, op } = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA)
       .withTx(tx).get();
 
-    const opPattern = op.getRaw();
+    const opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     const outputScope = narrowestCellScope(runtime, tx, [
       inputsCell.key("list"),
