@@ -48,13 +48,10 @@ const createSessionOpenAuth = async (
   }
   return {
     invocation,
-    // Mirror the production producer: send the signature as an explicit number
-    // array (a plain `FabricValue`), not a raw `Uint8Array` that only survives
-    // the wire boundary via the encoder's lenient structural fallback.
-    // TODO(danfuzz): When the producer flips to sending a `FabricBytes`, update
-    // this helper to match.
+    // Mirror the production producer (`v2-remote-session.ts`): send the
+    // signature as a `FabricBytes`.
     authorization: {
-      signature: Array.from(signature.ok),
+      signature: new FabricBytes(signature.ok),
     },
   };
 };
@@ -330,14 +327,15 @@ serialTest("memory websocket negotiates a session", async () => {
   }
 });
 
-// Forward-compatibility for the staged signature wire-format migration: the
-// server must accept a session-open signature sent as a `FabricBytes` (the
-// intended long-term form), ahead of any client actually producing it. See
-// `toByteArray` in `../memory.ts`.
+// Backward-compatibility for the staged signature wire-format migration: the
+// current client emits a `FabricBytes` signature (exercised by the other
+// session tests via `createSessionOpenAuth`), but the server must still accept
+// the legacy number-array form that not-yet-upgraded clients send, until that
+// form is retired. See `toByteArray` in `../memory.ts`.
 serialTest(
-  "memory websocket negotiates a session with a `FabricBytes` signature",
+  "memory websocket negotiates a session with a legacy number-array signature",
   async () => {
-    const identity = await Identity.fromPassphrase("memory-route-open-bytes");
+    const identity = await Identity.fromPassphrase("memory-route-open-legacy");
     const server = Deno.serve({ port: 0 }, app.fetch);
     const address = new URL(
       `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
@@ -358,9 +356,8 @@ serialTest(
         ...auth,
         authorization: {
           ...auth.authorization,
-          signature: new FabricBytes(
-            Uint8Array.from(auth.authorization.signature),
-          ),
+          // Legacy form: a plain number array rather than a `FabricBytes`.
+          signature: [...auth.authorization.signature.slice()],
         },
       }));
 
