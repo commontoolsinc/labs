@@ -921,11 +921,8 @@ describe("Cell Static Methods", () => {
     });
 
     it("should round-trip a FabricEpochNsec timestamp value", () => {
-      // A native `Date` is NOT a supported cell value: the write path doesn't
-      // normalize it to a `FabricValue`, so it's lost (flattened to `{}` or
-      // promoted to a bogus link) and the codec rejects it outright. The fabric
-      // representation of a timestamp is `FabricEpochNsec`, which round-trips
-      // faithfully.
+      // `FabricEpochNsec` is the fabric representation of a timestamp; it
+      // round-trips faithfully as an atomic leaf.
       withinHandlerContext(runtime, space, tx, () => {
         const epoch = new FabricEpochNsec(
           BigInt(Date.parse("2024-01-01T00:00:00Z")) * 1_000_000n,
@@ -936,6 +933,71 @@ describe("Cell Static Methods", () => {
         expect(got.wireTypeTag).toBe("EpochNsec@1");
       });
     });
+
+    // A native `Date` written via `set()` is normalized to a `FabricEpochNsec`
+    // (top-level and nested alike). These use a self-contained runtime that
+    // drains the storage sync before dispose: the shared `afterEach` disposes
+    // without awaiting the sync a commit triggers, which races for writes that
+    // persist (a latent harness fragility unrelated to this behavior).
+    const DATE_ISO = "2024-01-01T00:00:00Z";
+    const DATE_NS = BigInt(Date.parse(DATE_ISO)) * 1_000_000n;
+    const assertEpochNsec = (got: unknown) => {
+      const v = got as { value?: bigint; wireTypeTag?: string };
+      expect(v?.wireTypeTag).toBe("EpochNsec@1");
+      expect(v?.value).toBe(DATE_NS);
+    };
+    const inFreshRuntime = async (
+      fn: (
+        cellApi: typeof Cell,
+        rt: Runtime,
+        localTx: IExtendedStorageTransaction,
+      ) => void,
+    ) => {
+      const sm = StorageManager.emulate({ as: signer });
+      const rt = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+      });
+      const localTx = rt.edit();
+      const cellApi = createTrustedBuilder(rt).commonfabric.Cell;
+      try {
+        withinHandlerContext(
+          rt,
+          space,
+          localTx,
+          () => fn(cellApi, rt, localTx),
+        );
+        await localTx.commit();
+        await sm.synced();
+      } finally {
+        await rt.dispose().catch(() => {});
+        await sm.close().catch(() => {});
+      }
+    };
+
+    it("normalizes a top-level Date to FabricEpochNsec (set)", async () => {
+      await inFreshRuntime((Cell) => {
+        const cell = Cell.of<unknown>(0);
+        cell.set(new Date(DATE_ISO));
+        assertEpochNsec(cell.get());
+      });
+    });
+
+    it("normalizes a nested Date to FabricEpochNsec (set)", async () => {
+      await inFreshRuntime((Cell) => {
+        const cell = Cell.of<unknown>(0);
+        cell.set([new Date(DATE_ISO)]);
+        assertEpochNsec((cell.get() as unknown[])[0]);
+      });
+    });
+
+    // TODO(danfuzz): the `Cell.of(new Date(...))` cases (top-level and nested)
+    // are intentionally absent: unlike `set()`, the `Cell.of` initial-value path
+    // doesn't normalize native values (see the TODO in `createWithDefault` in
+    // `cell.ts`), so the raw `Date` reaches encode and throws under the strict
+    // codec. `get()` *appears* to convert (read-side projection), but the
+    // committed form is still raw. Add `... (Cell.of)` cases once that path
+    // normalizes its initial value the way `set()` does.
 
     it("should handle creating cell with mixed type array", () => {
       withinHandlerContext(runtime, space, tx, () => {
