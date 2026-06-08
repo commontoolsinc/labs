@@ -256,7 +256,7 @@ describe("Engine.compileToRecordGraph", () => {
       // verifier is skipped, so the graph assembles despite the disallowed body.
       const trusted = await engine.compileToRecordGraph(MULTI, {
         trustedBodies: true,
-        precompiledModulesFor: async () => tampered,
+        precompiledModulesFor: () => Promise.resolve(tampered),
       });
       expect(trusted.graph.compiledBodies.size).toBeGreaterThan(0);
     });
