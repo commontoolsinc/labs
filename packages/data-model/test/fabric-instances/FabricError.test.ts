@@ -7,7 +7,9 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC, DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {
@@ -358,6 +360,183 @@ describe("FabricError", () => {
         const result = FabricError[RECONSTRUCT](state, dummyContext);
         expect(result.cause).toBe("something went wrong");
         expect(result.getExtra("code")).toBe(404);
+      });
+    });
+
+    describe("[CODEC]", () => {
+      const codec = FabricError[CODEC];
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+      it("has the `Error` wire type tag", () => {
+        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Error);
+      });
+
+      it("encodes a basic `FabricError` to its `{ type, name, message }` state", () => {
+        const se = FabricError.fromNativeError(new Error("test"));
+        const state = codec.encode(se as FabricValue) as Record<
+          string,
+          unknown
+        >;
+        expect(state.type).toBe("Error");
+        expect(state.name).toBe(null); // null = same as type (common case)
+        expect(state.message).toBe("test");
+      });
+
+      it("encodes `name: null` when `name` matches `type` (`TypeError`)", () => {
+        // TypeError: name === constructor.name === "TypeError".
+        const se = FabricError.fromNativeError(new TypeError("type check"));
+        const state = codec.encode(se as FabricValue) as Record<
+          string,
+          unknown
+        >;
+        expect(state.type).toBe("TypeError");
+        expect(state.name).toBe(null); // null = same as type
+        expect(state.message).toBe("type check");
+      });
+
+      it("encodes an explicit `name` when `name` differs from `type`", () => {
+        const err = new Error("custom");
+        err.name = "MyCustomError";
+        const se = FabricError.fromNativeError(err);
+        const state = codec.encode(se as FabricValue) as Record<
+          string,
+          unknown
+        >;
+        expect(state.type).toBe("Error");
+        expect(state.name).toBe("MyCustomError");
+        expect(state.message).toBe("custom");
+      });
+
+      it("round-trips a basic `Error`", () => {
+        const se = FabricError.fromNativeError(new Error("hello"));
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(se as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded).toBeInstanceOf(FabricError);
+        expect(decoded.toNativeValue(true)).toBeInstanceOf(Error);
+        expect(decoded.name).toBe("Error");
+        expect(decoded.message).toBe("hello");
+      });
+
+      it("round-trips a `TypeError`", () => {
+        const se = FabricError.fromNativeError(new TypeError("bad type"));
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(se as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded).toBeInstanceOf(FabricError);
+        expect(decoded.toNativeValue(true)).toBeInstanceOf(TypeError);
+        expect(decoded.name).toBe("TypeError");
+        expect(decoded.message).toBe("bad type");
+      });
+
+      it("round-trips a `RangeError`", () => {
+        const se = FabricError.fromNativeError(new RangeError("out of range"));
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(se as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded).toBeInstanceOf(FabricError);
+        expect(decoded.toNativeValue(true)).toBeInstanceOf(RangeError);
+        expect(decoded.name).toBe("RangeError");
+      });
+
+      it("round-trips an `Error` with a (pre-converted) cause", () => {
+        const inner = FabricError.fromNativeError(new Error("inner"));
+        const outer = FabricError.fromNativeError(
+          new Error("outer", { cause: inner }),
+        );
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(outer as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded.message).toBe("outer");
+        // The cause is a FabricError (the inner wrapper) after round-trip.
+        expect(decoded.cause).toBeInstanceOf(FabricError);
+        expect((decoded.cause as FabricError).message).toBe("inner");
+      });
+
+      it("round-trips an `Error` whose cause is itself a `FabricError`", () => {
+        // Simulates what `fabricFromNativeValue` produces: a FabricError
+        // wrapping an Error whose cause is itself a FabricError (not a raw
+        // Error). Encoding's recurse on `[DECONSTRUCT]` output must find a
+        // FabricValue, not a raw Error.
+        const innerSe = FabricError.fromNativeError(new Error("inner"));
+        const outerErr = new Error("outer");
+        outerErr.cause = innerSe;
+        const outerSe = FabricError.fromNativeError(outerErr);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(outerSe as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded.message).toBe("outer");
+        expect(decoded.cause).toBeInstanceOf(FabricError);
+        expect((decoded.cause as FabricError).message).toBe("inner");
+      });
+
+      it("round-trips an `Error` with custom properties", () => {
+        const err = new Error("oops");
+        (err as unknown as Record<string, unknown>).code = 42;
+        (err as unknown as Record<string, unknown>).detail = "more info";
+        const se = FabricError.fromNativeError(err);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(se as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded.message).toBe("oops");
+        const native = decoded.toNativeValue(true) as unknown as Record<
+          string,
+          unknown
+        >;
+        expect(native.code).toBe(42);
+        expect(native.detail).toBe("more info");
+      });
+
+      it("round-trips an `Error` with a custom `name`", () => {
+        const err = new Error("custom");
+        err.name = "MyCustomError";
+        const se = FabricError.fromNativeError(err);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(se as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded.name).toBe("MyCustomError");
+        expect(decoded.message).toBe("custom");
+      });
+
+      it("round-trips a `TypeError` preserving `name === type` identity", () => {
+        const se = FabricError.fromNativeError(new TypeError("rt"));
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(se as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded.toNativeValue(true)).toBeInstanceOf(TypeError);
+        expect(decoded.name).toBe("TypeError");
+        expect(decoded.toNativeValue(true).constructor.name).toBe("TypeError");
+      });
+
+      it("round-trips an `Error` with mismatched `name` and `type`", () => {
+        // Error constructor is "Error" but name is overridden.
+        const err = new Error("mismatch");
+        err.name = "CustomName";
+        const se = FabricError.fromNativeError(err);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(se as FabricValue),
+          context,
+        ) as unknown as FabricError;
+        expect(decoded.toNativeValue(true)).toBeInstanceOf(Error);
+        expect(decoded.name).toBe("CustomName");
+        expect(decoded.toNativeValue(true).constructor.name).toBe("Error");
       });
     });
   });

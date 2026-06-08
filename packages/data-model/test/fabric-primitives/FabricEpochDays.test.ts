@@ -3,7 +3,11 @@ import { expect } from "@std/expect";
 
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
+import { CODEC } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 
 describe("FabricEpochDays", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -40,6 +44,58 @@ describe("FabricEpochDays", () => {
       it("wraps negative values (pre-epoch)", () => {
         const sd = new FabricEpochDays(-365n);
         expect(sd.value).toBe(-365n);
+      });
+    });
+  });
+
+  describe("static members", () => {
+    describe("[CODEC]", () => {
+      const codec = FabricEpochDays[CODEC];
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+      it("has the `EpochDays` wire type tag", () => {
+        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.EpochDays);
+      });
+
+      it("encodes to a flat base64 string (epoch zero)", () => {
+        const sd = new FabricEpochDays(0n);
+        // Flat format: base64 string directly, not nested {"/BigInt@1": ...}.
+        expect(codec.encode(sd as FabricValue)).toBe("AA");
+      });
+
+      it("round-trips at top level (epoch zero)", () => {
+        const sd = new FabricEpochDays(0n);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(sd as FabricValue),
+          context,
+        ) as unknown as FabricEpochDays;
+        expect(decoded).toBeInstanceOf(FabricEpochDays);
+        expect(decoded.value).toBe(0n);
+      });
+
+      it("round-trips positive day count", () => {
+        const days = 19723n; // ~2024-01-01
+        const sd = new FabricEpochDays(days);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(sd as FabricValue),
+          context,
+        ) as unknown as FabricEpochDays;
+        expect(decoded).toBeInstanceOf(FabricEpochDays);
+        expect(decoded.value).toBe(days);
+      });
+
+      it("round-trips negative day count (pre-epoch)", () => {
+        const days = -365n;
+        const sd = new FabricEpochDays(days);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(sd as FabricValue),
+          context,
+        ) as unknown as FabricEpochDays;
+        expect(decoded).toBeInstanceOf(FabricEpochDays);
+        expect(decoded.value).toBe(days);
       });
     });
   });

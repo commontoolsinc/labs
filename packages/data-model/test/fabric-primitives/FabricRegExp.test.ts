@@ -2,7 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { CODEC } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   isFabricCompatible,
@@ -115,6 +120,60 @@ describe("FabricRegExp", () => {
       it("throws for a non-`es2025` flavor (no native representation yet)", () => {
         const re = new FabricRegExp("pcre2", "abc", "g");
         expect(() => re.value).toThrow("pcre2");
+      });
+    });
+  });
+
+  describe("static members", () => {
+    describe("[CODEC]", () => {
+      const codec = FabricRegExp[CODEC];
+      const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+      it("has the `RegExp` wire type tag", () => {
+        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.RegExp);
+      });
+
+      it("encodes to a `{ source, flags, flavor }` object", () => {
+        const re = new FabricRegExp(/ab+c/gi);
+        expect(codec.encode(re as FabricValue)).toEqual({
+          flags: "gi",
+          flavor: "es2025",
+          source: "ab+c",
+        });
+      });
+
+      it("round-trips a regex (source, flags, flavor)", () => {
+        const re = new FabricRegExp(/ab+c/gi);
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(re as FabricValue),
+          context,
+        ) as unknown as FabricRegExp;
+        expect(decoded).toBeInstanceOf(FabricRegExp);
+        expect(decoded.source).toBe("ab+c");
+        expect(decoded.flags).toBe("gi");
+        expect(decoded.flavor).toBe("es2025");
+      });
+
+      it("round-trips a flagless regex", () => {
+        const re = new FabricRegExp("es2025", "^x*$", "");
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          codec.encode(re as FabricValue),
+          context,
+        ) as unknown as FabricRegExp;
+        expect(decoded).toBeInstanceOf(FabricRegExp);
+        expect(decoded.source).toBe("^x*$");
+        expect(decoded.flags).toBe("");
+      });
+
+      it("decodes non-object state to `ProblematicValue`", () => {
+        const decoded = codec.decode(
+          codec.wireTypeTag,
+          "nope" as unknown as FabricValue,
+          context,
+        );
+        expect(decoded).toBeInstanceOf(ProblematicValue);
       });
     });
   });

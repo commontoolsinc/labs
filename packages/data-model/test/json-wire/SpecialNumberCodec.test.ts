@@ -1,0 +1,113 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import type { FabricValue } from "@/interface.ts";
+import { SpecialNumberCodec } from "@/json-wire/SpecialNumberCodec.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+
+describe("SpecialNumberCodec", () => {
+  describe("[CODEC]", () => {
+    const codec = new SpecialNumberCodec();
+    const context = EMPTY_RECONSTRUCTION_CONTEXT;
+
+    it("has the `SpecialNumber` wire type tag", () => {
+      expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.SpecialNumber);
+    });
+
+    it('encodes `-0` to the literal `"-0"`', () => {
+      expect(codec.encode(-0)).toBe("-0");
+    });
+
+    it('encodes `NaN` to the literal `"NaN"`', () => {
+      expect(codec.encode(NaN)).toBe("NaN");
+    });
+
+    it('encodes `+Infinity` to the literal `"+Infinity"`', () => {
+      expect(codec.encode(Infinity)).toBe("+Infinity");
+    });
+
+    it('encodes `-Infinity` to the literal `"-Infinity"`', () => {
+      expect(codec.encode(-Infinity)).toBe("-Infinity");
+    });
+
+    it("does not intercept `+0` (`canEncode()` is `false`)", () => {
+      expect(codec.canEncode(0)).toBe(false);
+    });
+
+    it("claims the four special numeric values via `canEncode()`", () => {
+      expect(codec.canEncode(-0)).toBe(true);
+      expect(codec.canEncode(NaN)).toBe(true);
+      expect(codec.canEncode(Infinity)).toBe(true);
+      expect(codec.canEncode(-Infinity)).toBe(true);
+      // Ordinary finite numbers are not claimed.
+      expect(codec.canEncode(42)).toBe(false);
+    });
+
+    it("round-trips `-0` (preserves sign of zero)", () => {
+      const result = codec.decode(codec.wireTypeTag, codec.encode(-0), context);
+      expect(Object.is(result, -0)).toBe(true);
+    });
+
+    it("round-trips `NaN`", () => {
+      const result = codec.decode(
+        codec.wireTypeTag,
+        codec.encode(NaN),
+        context,
+      );
+      expect(Number.isNaN(result)).toBe(true);
+    });
+
+    it("round-trips `+Infinity`", () => {
+      const result = codec.decode(
+        codec.wireTypeTag,
+        codec.encode(Infinity),
+        context,
+      );
+      expect(result).toBe(Infinity);
+    });
+
+    it("round-trips `-Infinity`", () => {
+      const result = codec.decode(
+        codec.wireTypeTag,
+        codec.encode(-Infinity),
+        context,
+      );
+      expect(result).toBe(-Infinity);
+    });
+
+    it('any `NaN` bit pattern encodes as the literal `"NaN"`', () => {
+      const view = new DataView(new ArrayBuffer(8));
+      view.setBigUint64(0, 0x7ff8000000000001n, false);
+      const nonCanonicalNaN = view.getFloat64(0, false);
+      expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
+      expect(codec.encode(nonCanonicalNaN)).toBe("NaN");
+    });
+
+    it("decodes non-string state to `ProblematicValue`", () => {
+      const result = codec.decode(
+        codec.wireTypeTag,
+        0 as unknown as FabricValue,
+        context,
+      );
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+        "SpecialNumber@1",
+      );
+    });
+
+    it("decodes an unknown literal to `ProblematicValue`", () => {
+      // "Infinity" (missing leading +) is not a recognized literal.
+      const result = codec.decode(
+        codec.wireTypeTag,
+        "Infinity",
+        context,
+      );
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+        "SpecialNumber@1",
+      );
+    });
+  });
+});
