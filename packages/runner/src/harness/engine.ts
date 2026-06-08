@@ -405,9 +405,25 @@ export class Engine extends EventTarget implements Harness {
         graph.records.set(spec, record as VirtualModuleRecord);
       }
 
-      // Security-verify every authored module body before it can execute.
-      for (const [specifier, body] of graph.compiledBodies) {
-        verifyCompiledModuleBody(body, specifier);
+      // Security-verify every authored module body before it can execute —
+      // EXCEPT a trusted, integrity-gated full hit. The CFC integrity label is
+      // the security boundary for cache hits, so re-running the SES body verifier
+      // on integrity-gated bytes is redundant per-load work (threat model:
+      // `docs/specs/module-loading.md`, "the persistent compilation cache").
+      // Trust is gated on PROVENANCE, not just the opt-in flag: the bodies must
+      // have arrived via the lazy `precompiledModulesFor` channel (the cache
+      // callback, which reads the compiled set with `requiredIntegrity`,
+      // fail-closed) — NOT a direct, caller-supplied `precompiledModules` map,
+      // which is untrusted injection. Freshly compiled bodies (miss / partial)
+      // are likewise always verified.
+      const trustBodies = fullHit &&
+        options.trustedBodies === true &&
+        options.precompiledModules === undefined &&
+        options.precompiledModulesFor !== undefined;
+      if (!trustBodies) {
+        for (const [specifier, body] of graph.compiledBodies) {
+          verifyCompiledModuleBody(body, specifier);
+        }
       }
 
       const mainSpecifier = graph.specifierByPath.get(mappedProgram.main);
@@ -742,10 +758,20 @@ export class Engine extends EventTarget implements Harness {
       // for sub-pattern resolution.
       const exportMap: Record<string, Exports> = {};
       const exportsByValue = new Map<unknown, RuntimeProgram>();
+      // Per-module namespaces keyed by content identity (stripped from the
+      // `cf:module/<identity>` specifier) for the in-memory identity cache.
+      const exportsByIdentity = new Map<string, Exports>();
+      const MODULE_SPECIFIER_PREFIX = "cf:module/";
       for (const [path, specifier] of graph.specifierByPath) {
         const namespace = loaded.importNow(specifier) as Exports;
         const fileName = ctx.fileNameForPath(path);
         exportMap[fileName] = namespace;
+        if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
+          exportsByIdentity.set(
+            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
+            namespace,
+          );
+        }
         for (const [exportName, value] of Object.entries(namespace)) {
           // Only object/function exports are sub-pattern candidates. Skip the
           // `__esModule` flag and primitives, which would otherwise collide in
@@ -767,7 +793,7 @@ export class Engine extends EventTarget implements Harness {
       this.executableRegistry.captureVerifiedValue(loadId, exportMap);
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
-      return { main, exportMap, loadId };
+      return { main, exportMap, loadId, exportsByIdentity };
     } finally {
       logger.timeEnd("evaluateRecordGraph");
     }
@@ -786,7 +812,7 @@ export class Engine extends EventTarget implements Harness {
   async evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
-    options: { sourceFiles?: Source[] } = {},
+    options: { sourceFiles?: Source[]; trustedBodies?: boolean } = {},
   ): Promise<EvaluateResult> {
     await this.getRuntimeInternals();
     const { runtimeExports } = await this.getRuntimeInternals();
@@ -816,11 +842,17 @@ export class Engine extends EventTarget implements Harness {
       graph.records.set(spec, record as VirtualModuleRecord);
     }
 
-    // Security-verify every cached body + the whole graph before executing —
-    // the cache's integrity label is still only client-asserted, so cached
-    // bytes are not trusted unverified (mirrors the compile path).
-    for (const [specifier, body] of graph.compiledBodies) {
-      verifyCompiledModuleBody(body, specifier);
+    // Security-verify every cached body before executing — EXCEPT a trusted
+    // warm hit. These bodies always come from the integrity-gated compiled set
+    // (`loadCompiledClosure` reads with `requiredIntegrity`, fail-closed), so
+    // with `trustedBodies` the CFC integrity label is the security boundary and
+    // re-running the SES body verifier is redundant per-load work (threat model:
+    // `docs/specs/module-loading.md`, "the persistent compilation cache"). The
+    // structural graph verify below always runs.
+    if (options.trustedBodies !== true) {
+      for (const [specifier, body] of graph.compiledBodies) {
+        verifyCompiledModuleBody(body, specifier);
+      }
     }
     const mainSpecifier = `cf:module/${entryIdentity}`;
     if (!graph.records.has(mainSpecifier)) {

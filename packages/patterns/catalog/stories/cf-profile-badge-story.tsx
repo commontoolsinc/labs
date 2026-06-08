@@ -87,8 +87,10 @@ export default pattern<ProfileBadgeStoryInput, ProfileBadgeStoryOutput>(() => {
           style={{ fontSize: "0.875rem", color: "#6b7280", maxWidth: "40ch" }}
         >
           The shield is the system seal. Avatar paths shown: image (Ada), emoji
-          (Grace), initials (Alan). Verification + the unspoofable seal effects
-          are a deferred pass — v1 renders the “presented” state.
+          (Grace), initials (Alan). The verified seal — a DID-derived aura —
+          only renders for a runtime-attested profile (a “represents-principal”
+          CFC label), which this story can’t mint, so these badges stay in the
+          plain “presented” state.
         </span>
       </div>
     ),

@@ -43,7 +43,7 @@ const resolveCommitSessionKey = (
 ): string =>
   principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
 
-const resolveScopeKey = (
+export const resolveScopeKey = (
   scope: CellScope | undefined,
   options: { principal?: string; sessionId?: SessionId },
 ): string => {

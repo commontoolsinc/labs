@@ -586,296 +586,296 @@ export const styles = css`
     -ms-filter: "progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678)";
     filter: progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678,
       M12=0.70710678, M21=-0.70710678, M22=0.70710678);
+  }
+
+  .leaflet-oldie .leaflet-control-zoom,
+  .leaflet-oldie .leaflet-control-layers,
+  .leaflet-oldie .leaflet-popup-content-wrapper,
+  .leaflet-oldie .leaflet-popup-tip {
+    border: 1px solid #999;
+  }
+
+  /* div icon */
+
+  .leaflet-div-icon {
+    background: #fff;
+    border: 1px solid #666;
+  }
+
+  /* Tooltip */
+  /* Base styles for the element that has a tooltip */
+  .leaflet-tooltip {
+    position: absolute;
+    padding: 6px;
+    background-color: #fff;
+    border: 1px solid #fff;
+    border-radius: 3px;
+    color: #222;
+    white-space: nowrap;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    pointer-events: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+  .leaflet-tooltip.leaflet-interactive {
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .leaflet-tooltip-top:before,
+  .leaflet-tooltip-bottom:before,
+  .leaflet-tooltip-left:before,
+  .leaflet-tooltip-right:before {
+    position: absolute;
+    pointer-events: none;
+    border: 6px solid transparent;
+    background: transparent;
+    content: "";
+  }
+
+  /* Directions */
+
+  .leaflet-tooltip-bottom {
+    margin-top: 6px;
+  }
+  .leaflet-tooltip-top {
+    margin-top: -6px;
+  }
+  .leaflet-tooltip-bottom:before,
+  .leaflet-tooltip-top:before {
+    left: 50%;
+    margin-left: -6px;
+  }
+  .leaflet-tooltip-top:before {
+    bottom: 0;
+    margin-bottom: -12px;
+    border-top-color: #fff;
+  }
+  .leaflet-tooltip-bottom:before {
+    top: 0;
+    margin-top: -12px;
+    margin-left: -6px;
+    border-bottom-color: #fff;
+  }
+  .leaflet-tooltip-left {
+    margin-left: -6px;
+  }
+  .leaflet-tooltip-right {
+    margin-left: 6px;
+  }
+  .leaflet-tooltip-left:before,
+  .leaflet-tooltip-right:before {
+    top: 50%;
+    margin-top: -6px;
+  }
+  .leaflet-tooltip-left:before {
+    right: 0;
+    margin-right: -12px;
+    border-left-color: #fff;
+  }
+  .leaflet-tooltip-right:before {
+    left: 0;
+    margin-left: -12px;
+    border-right-color: #fff;
+  }
+
+  /* Printing */
+
+  @media print {
+    /* Prevent printers from removing background-images of controls. */
+    .leaflet-control {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
+  }
 
-    .leaflet-oldie .leaflet-control-zoom,
-    .leaflet-oldie .leaflet-control-layers,
-    .leaflet-oldie .leaflet-popup-content-wrapper,
-    .leaflet-oldie .leaflet-popup-tip {
-      border: 1px solid #999;
-    }
+  /* ================================================
+  * cf-map Component Styles
+  * Theme-integrated styles for the map container
+  * ================================================ */
 
-    /* div icon */
+  :host {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+    position: relative;
+    isolation: isolate;
 
-    .leaflet-div-icon {
-      background: #fff;
-      border: 1px solid #666;
-    }
+    /* Default color values if not provided */
+    --background: #ffffff;
+    --foreground: var(--cf-colors-gray-900, #16181d);
+    --border: var(--cf-colors-gray-300, #d5d7dd);
+    --primary: var(--cf-colors-primary-500, #4979fa);
+    --ring: var(--cf-colors-primary-500, #4979fa);
+  }
 
-    /* Tooltip */
-    /* Base styles for the element that has a tooltip */
-    .leaflet-tooltip {
-      position: absolute;
-      padding: 6px;
-      background-color: #fff;
-      border: 1px solid #fff;
-      border-radius: 3px;
-      color: #222;
-      white-space: nowrap;
-      -webkit-user-select: none;
-      -moz-user-select: none;
-      -ms-user-select: none;
-      user-select: none;
-      pointer-events: none;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-    }
-    .leaflet-tooltip.leaflet-interactive {
-      cursor: pointer;
-      pointer-events: auto;
-    }
-    .leaflet-tooltip-top:before,
-    .leaflet-tooltip-bottom:before,
-    .leaflet-tooltip-left:before,
-    .leaflet-tooltip-right:before {
-      position: absolute;
-      pointer-events: none;
-      border: 6px solid transparent;
-      background: transparent;
-      content: "";
-    }
+  .map-container {
+    width: 100%;
+    height: 100%;
+    min-height: inherit;
+    border-radius: var(--cf-border-radius-md, 0.375rem);
+    overflow: hidden;
+    position: relative;
+  }
 
-    /* Directions */
+  /* Override Leaflet container background with theme */
+  .map-container .leaflet-container {
+    width: 100%;
+    height: 100%;
+    background: var(--cf-colors-gray-100, #f2f3f6);
+    font-family: var(--cf-font-family, inherit);
+  }
 
-    .leaflet-tooltip-bottom {
-      margin-top: 6px;
-    }
-    .leaflet-tooltip-top {
-      margin-top: -6px;
-    }
-    .leaflet-tooltip-bottom:before,
-    .leaflet-tooltip-top:before {
-      left: 50%;
-      margin-left: -6px;
-    }
-    .leaflet-tooltip-top:before {
-      bottom: 0;
-      margin-bottom: -12px;
-      border-top-color: #fff;
-    }
-    .leaflet-tooltip-bottom:before {
-      top: 0;
-      margin-top: -12px;
-      margin-left: -6px;
-      border-bottom-color: #fff;
-    }
-    .leaflet-tooltip-left {
-      margin-left: -6px;
-    }
-    .leaflet-tooltip-right {
-      margin-left: 6px;
-    }
-    .leaflet-tooltip-left:before,
-    .leaflet-tooltip-right:before {
-      top: 50%;
-      margin-top: -6px;
-    }
-    .leaflet-tooltip-left:before {
-      right: 0;
-      margin-right: -12px;
-      border-left-color: #fff;
-    }
-    .leaflet-tooltip-right:before {
-      left: 0;
-      margin-left: -12px;
-      border-right-color: #fff;
-    }
+  /* ================================================
+  * Popup Theme Integration
+  * Override Leaflet popup styles with cf-* theme
+  * ================================================ */
 
-    /* Printing */
+  .leaflet-popup-content-wrapper,
+  .leaflet-popup-tip {
+    background: var(--background, #ffffff);
+    color: var(--foreground, #0f172a);
+    box-shadow: var(
+      --cf-shadow-md,
+      0 4px 6px -1px rgba(0, 0, 0, 0.1),
+      0 2px 4px -1px rgba(0, 0, 0, 0.06)
+    );
+    border: 1px solid var(--border, #e2e8f0);
+  }
 
-    @media print {
-      /* Prevent printers from removing background-images of controls. */
-      .leaflet-control {
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-    }
+  .leaflet-popup-content-wrapper {
+    border-radius: var(--cf-border-radius-lg, 0.5rem);
+    padding: 0;
+  }
 
-    /* ================================================
-    * cf-map Component Styles
-    * Theme-integrated styles for the map container
-    * ================================================ */
+  .leaflet-popup-content {
+    margin: var(--cf-spacing-3, 0.75rem) var(--cf-spacing-4, 1rem);
+    font-size: var(--cf-font-size-sm, 0.875rem);
+    line-height: var(--cf-line-height-normal, 1.5);
+    font-family: var(--cf-font-family, inherit);
+  }
 
-    :host {
-      display: block;
-      width: 100%;
-      height: 100%;
-      min-height: 300px;
-      position: relative;
-      isolation: isolate;
+  /* Simple popup styling */
+  .popup-simple {
+    padding: var(--cf-spacing-2, 0.5rem) 0;
+  }
 
-      /* Default color values if not provided */
-      --background: #ffffff;
-      --foreground: var(--cf-colors-gray-900, #16181d);
-      --border: var(--cf-colors-gray-300, #d5d7dd);
-      --primary: var(--cf-colors-primary-500, #4979fa);
-      --ring: var(--cf-colors-primary-500, #4979fa);
-    }
+  .popup-icon {
+    font-size: var(--cf-font-size-2xl, 1.5rem);
+    margin-bottom: var(--cf-spacing-2, 0.5rem);
+    text-align: center;
+  }
 
-    .map-container {
-      width: 100%;
-      height: 100%;
-      min-height: inherit;
-      border-radius: var(--cf-border-radius-md, 0.375rem);
-      overflow: hidden;
-      position: relative;
-    }
+  .popup-title {
+    font-weight: var(--cf-font-weight-semibold, 600);
+    color: var(--foreground, #0f172a);
+    margin-bottom: var(--cf-spacing-1, 0.25rem);
+    font-size: var(--cf-font-size-base, 1rem);
+  }
 
-    /* Override Leaflet container background with theme */
-    .map-container .leaflet-container {
-      width: 100%;
-      height: 100%;
-      background: var(--cf-colors-gray-100, #f2f3f6);
-      font-family: var(--cf-font-family, inherit);
-    }
+  .popup-description {
+    color: var(--cf-colors-gray-600, #5b5f65);
+    font-size: var(--cf-font-size-sm, 0.875rem);
+    margin: 0;
+  }
 
-    /* ================================================
-    * Popup Theme Integration
-    * Override Leaflet popup styles with cf-* theme
-    * ================================================ */
+  /* Close button theming */
+  .leaflet-container a.leaflet-popup-close-button {
+    color: var(--cf-colors-gray-500, #5b5f65);
+    width: 28px;
+    height: 28px;
+    font-size: 18px;
+    line-height: 28px;
+    top: var(--cf-spacing-2, 0.5rem);
+    right: var(--cf-spacing-2, 0.5rem);
+    border-radius: var(--cf-border-radius-sm, 0.25rem);
+    transition: all var(--cf-theme-animation-duration, 150ms)
+      var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
+  }
 
-    .leaflet-popup-content-wrapper,
-    .leaflet-popup-tip {
-      background: var(--background, #ffffff);
-      color: var(--foreground, #0f172a);
-      box-shadow: var(
-        --cf-shadow-md,
-        0 4px 6px -1px rgba(0, 0, 0, 0.1),
-        0 2px 4px -1px rgba(0, 0, 0, 0.06)
-      );
-      border: 1px solid var(--border, #e2e8f0);
-    }
+  .leaflet-container a.leaflet-popup-close-button:hover,
+  .leaflet-container a.leaflet-popup-close-button:focus {
+    color: var(--foreground, #0f172a);
+    background: var(--cf-colors-gray-100, #f2f3f6);
+  }
 
-    .leaflet-popup-content-wrapper {
-      border-radius: var(--cf-border-radius-lg, 0.5rem);
-      padding: 0;
-    }
+  /* Control theming */
+  .leaflet-bar {
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: var(
+      --cf-shadow-sm,
+      0 1px 2px 0 rgba(0, 0, 0, 0.05)
+    );
+    border-radius: var(--cf-border-radius-md, 0.375rem);
+  }
 
-    .leaflet-popup-content {
-      margin: var(--cf-spacing-3, 0.75rem) var(--cf-spacing-4, 1rem);
-      font-size: var(--cf-font-size-sm, 0.875rem);
-      line-height: var(--cf-line-height-normal, 1.5);
-      font-family: var(--cf-font-family, inherit);
-    }
+  .leaflet-bar a {
+    background-color: var(--background, #ffffff);
+    color: var(--foreground, #0f172a);
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    transition: all var(--cf-theme-animation-duration, 150ms)
+      var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
+  }
 
-    /* Simple popup styling */
-    .popup-simple {
-      padding: var(--cf-spacing-2, 0.5rem) 0;
-    }
+  .leaflet-bar a:hover {
+    background-color: var(--cf-colors-gray-100, #f2f3f6);
+  }
 
-    .popup-icon {
-      font-size: var(--cf-font-size-2xl, 1.5rem);
-      margin-bottom: var(--cf-spacing-2, 0.5rem);
-      text-align: center;
-    }
+  .leaflet-bar a:first-child {
+    border-top-left-radius: var(--cf-border-radius-md, 0.375rem);
+    border-top-right-radius: var(--cf-border-radius-md, 0.375rem);
+  }
 
-    .popup-title {
-      font-weight: var(--cf-font-weight-semibold, 600);
-      color: var(--foreground, #0f172a);
-      margin-bottom: var(--cf-spacing-1, 0.25rem);
-      font-size: var(--cf-font-size-base, 1rem);
-    }
+  .leaflet-bar a:last-child {
+    border-bottom-left-radius: var(--cf-border-radius-md, 0.375rem);
+    border-bottom-right-radius: var(--cf-border-radius-md, 0.375rem);
+  }
 
-    .popup-description {
-      color: var(--cf-colors-gray-600, #5b5f65);
-      font-size: var(--cf-font-size-sm, 0.875rem);
-      margin: 0;
-    }
+  /* Attribution theming */
+  .leaflet-container .leaflet-control-attribution {
+    background: var(--background, rgba(255, 255, 255, 0.9));
+    color: var(--cf-colors-gray-600, #5b5f65);
+    font-size: var(--cf-font-size-xs, 0.75rem);
+    border-top: 1px solid var(--border, #e2e8f0);
+  }
 
-    /* Close button theming */
-    .leaflet-container a.leaflet-popup-close-button {
-      color: var(--cf-colors-gray-500, #5b5f65);
-      width: 28px;
-      height: 28px;
-      font-size: 18px;
-      line-height: 28px;
-      top: var(--cf-spacing-2, 0.5rem);
-      right: var(--cf-spacing-2, 0.5rem);
-      border-radius: var(--cf-border-radius-sm, 0.25rem);
-      transition: all var(--cf-theme-animation-duration, 150ms)
-        var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
-      }
+  .leaflet-control-attribution a {
+    color: var(--primary, #3b82f6);
+  }
 
-      .leaflet-container a.leaflet-popup-close-button:hover,
-      .leaflet-container a.leaflet-popup-close-button:focus {
-        color: var(--foreground, #0f172a);
-        background: var(--cf-colors-gray-100, #f2f3f6);
-      }
+  /* Focus state */
+  .leaflet-container:focus {
+    outline: 2px solid var(--ring, #3b82f6);
+    outline-offset: 2px;
+  }
 
-      /* Control theming */
-      .leaflet-bar {
-        border: 1px solid var(--border, #e2e8f0);
-        box-shadow: var(
-          --cf-shadow-sm,
-          0 1px 2px 0 rgba(0, 0, 0, 0.05)
-        );
-        border-radius: var(--cf-border-radius-md, 0.375rem);
-      }
+  /* ================================================
+  * Custom Marker Icon Styles
+  * Styles for divIcon-based markers (emoji and default)
+  * ================================================ */
 
-      .leaflet-bar a {
-        background-color: var(--background, #ffffff);
-        color: var(--foreground, #0f172a);
-        border-bottom: 1px solid var(--border, #e2e8f0);
-        transition: all var(--cf-theme-animation-duration, 150ms)
-          var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1));
-        }
+  /* Default marker icon (SVG pin) */
+  .cf-map-default-marker {
+    background: transparent !important;
+    border: none !important;
+  }
 
-        .leaflet-bar a:hover {
-          background-color: var(--cf-colors-gray-100, #f2f3f6);
-        }
+  .cf-map-default-marker svg {
+    display: block;
+    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+  }
 
-        .leaflet-bar a:first-child {
-          border-top-left-radius: var(--cf-border-radius-md, 0.375rem);
-          border-top-right-radius: var(--cf-border-radius-md, 0.375rem);
-        }
+  /* Emoji marker icon */
+  .cf-map-emoji-marker {
+    background: transparent !important;
+    border: none !important;
+  }
 
-        .leaflet-bar a:last-child {
-          border-bottom-left-radius: var(--cf-border-radius-md, 0.375rem);
-          border-bottom-right-radius: var(--cf-border-radius-md, 0.375rem);
-        }
-
-        /* Attribution theming */
-        .leaflet-container .leaflet-control-attribution {
-          background: var(--background, rgba(255, 255, 255, 0.9));
-          color: var(--cf-colors-gray-600, #5b5f65);
-          font-size: var(--cf-font-size-xs, 0.75rem);
-          border-top: 1px solid var(--border, #e2e8f0);
-        }
-
-        .leaflet-control-attribution a {
-          color: var(--primary, #3b82f6);
-        }
-
-        /* Focus state */
-        .leaflet-container:focus {
-          outline: 2px solid var(--ring, #3b82f6);
-          outline-offset: 2px;
-        }
-
-        /* ================================================
-        * Custom Marker Icon Styles
-        * Styles for divIcon-based markers (emoji and default)
-        * ================================================ */
-
-        /* Default marker icon (SVG pin) */
-        .cf-map-default-marker {
-          background: transparent !important;
-          border: none !important;
-        }
-
-        .cf-map-default-marker svg {
-          display: block;
-          filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
-        }
-
-        /* Emoji marker icon */
-        .cf-map-emoji-marker {
-          background: transparent !important;
-          border: none !important;
-        }
-
-        .cf-map-emoji-marker .emoji-marker {
-          font-size: 24px;
-          line-height: 1;
-          filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
-        }
-      `;
+  .cf-map-emoji-marker .emoji-marker {
+    font-size: 24px;
+    line-height: 1;
+    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+  }
+`;

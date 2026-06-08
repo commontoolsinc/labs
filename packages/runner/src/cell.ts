@@ -21,6 +21,9 @@ import type { SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
+import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
+import { cfcLabelViewForCell } from "./cfc/label-view.ts";
+import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
 import { getTopFrame, pattern } from "./builder/pattern.ts";
 import { createNodeFactory, lift } from "./builder/module.ts";
 import {
@@ -832,6 +835,31 @@ export class CellImpl<T extends FabricValue>
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
+
+    // Per-transaction read cache: within one ready transaction, repeatedly
+    // reading the same cell with no intervening write recomputes an identical
+    // result -- same value, the same reactive reads already registered on the
+    // tx, and the same CFC state. Reuse the prior result when the tx supports
+    // caching (the non-reactive sample() wrapper does not) and is still open.
+    // The tx clears this cache on any write, so a hit only happens when nothing
+    // has changed since the last read. Keyed on the cell's link identity, which
+    // is stable per cell; `variant` separates reads that differ in options.
+    const tx = this.tx;
+    const cacheable = tx !== undefined &&
+      tx.getCachedReadResult !== undefined &&
+      tx.status().status === "ready" &&
+      // Once CFC is prepared, the real read path's `read-after-prepare`
+      // invalidation is load-bearing: bypass the cache so a post-prepare read
+      // still goes through readOrThrow() and invalidates the prepared digest.
+      tx.getCfcState().prepare.status !== "prepared";
+    const variant = `${options?.traverseCells ?? false}|${this.synced}`;
+    if (cacheable) {
+      const cached = tx.getCachedReadResult!(this._link, variant);
+      if (cached !== undefined) {
+        return cached.value as Readonly<StripDefaultBrand<T>>;
+      }
+    }
+
     logger.timeStart("cell", "get");
     const value = validateAndTransform(
       this.runtime,
@@ -847,6 +875,12 @@ export class CellImpl<T extends FabricValue>
         `get() took ${Math.floor(elapsed)}ms`,
         this.link,
       );
+    }
+    if (cacheable) {
+      // Re-read this._link: validateAndTransform (via viewRef -> link) may have
+      // run ensureLink() and replaced it with the completed link object, which
+      // is the identity subsequent get()s will key on.
+      tx.setCachedReadResult!(this._link, variant, value);
     }
     return value;
   }
@@ -972,18 +1006,39 @@ export class CellImpl<T extends FabricValue>
     // resolved (a handler-delivered handle may sit behind a link at its target) —
     // getRaw's default `"top"` would stop at the link object and miss `id`.
     const handle = this.getRaw({ lastNode: "value" }) as
-      | { id?: unknown; tables?: unknown }
+      | { id?: unknown; tables?: unknown; scope?: unknown }
       | undefined;
     if (!handle || typeof handle.id !== "string") {
       throw new TypeError(
         ".exec() is only available on a SqliteDb cell (invalid database handle)",
       );
     }
+    // CFC write-ceiling (Phase 2): a value bound to a labeled column must fit the
+    // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
+    // or any carried-label value); fail closed when a labeled value's target
+    // column can't be determined. No-op until a column declares `ifc`.
+    const ceilingViolation = checkSqliteWriteCeiling(
+      sql,
+      params,
+      handle.tables as Parameters<typeof checkSqliteWriteCeiling>[2],
+      (value) => {
+        const view = cfcLabelViewForCell(value);
+        return view
+          ? cfcConfidentialityForObservationNode({ labelView: view })
+          : [];
+      },
+    );
+    if (ceilingViolation) throw new TypeError(ceilingViolation);
+
     this.tx.recordSqliteWrite(this.space, {
       op: "sqlite",
       db: {
         id: handle.id,
         tables: handle.tables as Record<string, unknown> | undefined,
+        // Carry the db's declared scope so the write lands in the same per-user
+        // / per-session on-disk file the read path resolves (stamped by
+        // sqliteDatabase onto the handle value).
+        scope: isCellScope(handle.scope) ? handle.scope : undefined,
       },
       sql,
       params: encodeSqliteParams(sql, params),

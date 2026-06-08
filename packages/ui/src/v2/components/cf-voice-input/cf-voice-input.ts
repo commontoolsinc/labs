@@ -321,8 +321,8 @@ export class CFVoiceInput extends BaseElement {
   private audioChunks: Blob[] = [];
   private startTime?: number;
   private stream?: MediaStream;
-  private timerInterval?: number;
-  private maxDurationTimeout?: number;
+  private timerInterval?: ReturnType<typeof setInterval>;
+  private maxDurationTimeout?: ReturnType<typeof setTimeout>;
   private visualizerRef: Ref<CFAudioVisualizer> = createRef();
 
   private _generateId(): string {

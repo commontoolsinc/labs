@@ -38,7 +38,7 @@ export interface InputTimingOptions {
 export class InputTimingController implements ReactiveController {
   private host: ReactiveControllerHost;
   private options: Required<InputTimingOptions>;
-  private timeoutId: number | null = null;
+  private timeoutId: ReturnType<typeof setTimeout> | null = null;
   private lastCallTime = 0;
   private pendingCallback: (() => void) | null = null;
   private hasFocus = false;

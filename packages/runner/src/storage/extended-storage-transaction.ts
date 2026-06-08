@@ -18,10 +18,7 @@ import type {
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
   MemorySpace,
-  ReaderError,
   ReadError,
   Result,
   StorageTransactionFailed,
@@ -106,6 +103,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
+  // Per-transaction cache of `Cell.get()` results, keyed by cell link identity.
+  // Replaced wholesale on any write (see `invalidateReadResultCache`), so a hit
+  // is only ever served when nothing has been written since the cached read.
+  private readResultCache = new WeakMap<
+    object,
+    Map<string, { value: unknown }>
+  >();
 
   constructor(
     public tx: IStorageTransaction,
@@ -164,6 +168,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (scopeRank(scope) > scopeRank(this.narrowestReadScope)) {
       this.narrowestReadScope = scope;
     }
+  }
+
+  getCachedReadResult(
+    keyObject: object,
+    variant: string,
+  ): { value: unknown } | undefined {
+    return this.readResultCache.get(keyObject)?.get(variant);
+  }
+
+  setCachedReadResult(
+    keyObject: object,
+    variant: string,
+    value: unknown,
+  ): void {
+    let byVariant = this.readResultCache.get(keyObject);
+    if (byVariant === undefined) {
+      byVariant = new Map();
+      this.readResultCache.set(keyObject, byVariant);
+    }
+    byVariant.set(variant, { value });
+  }
+
+  private invalidateReadResultCache(): void {
+    // A write may have changed any value a cached read depends on. Drop the
+    // whole cache by replacing the map (WeakMap has no clear()); this enforces
+    // the "no writes between the last read and this one" invariant the cache
+    // relies on.
+    this.readResultCache = new WeakMap();
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
@@ -374,10 +406,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.status();
   }
 
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return this.tx.reader(space);
-  }
-
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
@@ -419,11 +447,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.readOrThrow(toMemorySpaceAddress(address), options);
   }
 
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    this.assertWritable("writer()");
-    return this.tx.writer(space);
-  }
-
   write(
     address: IMemorySpaceAddress,
     value: FabricValue,
@@ -432,6 +455,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
+    this.invalidateReadResultCache();
     return this.tx.write(address, value);
   }
 
@@ -443,6 +467,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
     }
+    this.invalidateReadResultCache();
     const writeResult = this.tx.write(address, value);
     if (
       writeResult.error &&
@@ -523,6 +548,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     writes: Iterable<{ address: NormalizedFullLink; value: FabricValue }>,
   ): void {
     this.assertWritable("writeValuesOrThrow()");
+    this.invalidateReadResultCache();
     if (this.tx.writeBatch) {
       const result = this.tx.writeBatch(
         (function* () {
@@ -859,10 +885,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.status();
   }
 
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return this.wrapped.reader(space);
-  }
-
   private transformReadOptions(options?: IReadOptions): IReadOptions {
     if (!this.options.nonReactive) {
       return options ?? {};
@@ -898,10 +920,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
       address,
       this.transformReadOptions(options),
     );
-  }
-
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    return this.wrapped.writer(space);
   }
 
   write(

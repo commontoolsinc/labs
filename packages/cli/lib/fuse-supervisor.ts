@@ -196,7 +196,7 @@ export async function cleanupFuseChild(
   if (!child.status) return;
 
   const timedOut = Symbol("timedOut");
-  let timeoutId: number | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const result = await Promise.race<Deno.CommandStatus | typeof timedOut>([
     child.status,
     new Promise<typeof timedOut>((resolve) => {

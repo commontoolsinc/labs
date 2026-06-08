@@ -176,7 +176,7 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
 
     const postRenderStableMs = await new Promise<number>((resolve) => {
       let settled = false;
-      let quietTimer: number | undefined;
+      let quietTimer: ReturnType<typeof setTimeout> | undefined;
       const done = () => {
         if (settled) return;
         settled = true;

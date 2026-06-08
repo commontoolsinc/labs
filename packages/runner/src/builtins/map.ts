@@ -24,6 +24,8 @@ import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { outputSpotFromBinding } from "./scope-policy.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
@@ -70,6 +72,7 @@ export function map(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
+  outputBinding?: NormalizedFullLink,
 ): Action {
   let result: Cell<any[]> | undefined;
 
@@ -119,14 +122,13 @@ export function map(
         opPattern.resultSchema,
       );
       // CT-1623: identify the result container by the reserved output spot —
-      // the fully-resolved write-redirect target the runner supplies in `cause`.
-      // It is a stable, position-derived, program-independent identity, unlike
-      // the serialized `op` / `cause.inputs`, both of which drag in the
+      // the fully-resolved write-redirect target the runner supplies as the
+      // `outputBinding`. It is a stable, position-derived, program-independent
+      // identity, unlike the serialized `op` / inputs, both of which drag in the
       // session-varying `program` and force the container id (and every per-row
       // id derived from it) to churn across reloads. A `map` node always writes
       // through a write redirect, so the absence of an output spot is a bug.
-      const outputSpot = (cause as { outputSpot?: unknown } | undefined)
-        ?.outputSpot;
+      const outputSpot = outputSpotFromBinding(outputBinding);
       if (!outputSpot) {
         throw new Error(
           "map: result container requires a write-redirect output binding",

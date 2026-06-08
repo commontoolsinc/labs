@@ -1702,6 +1702,28 @@ export class Runner {
     };
   }
 
+  /**
+   * Sync the result cell's `internal` and `argument` meta-linked docs.
+   *
+   * They are separate content-addressed docs reached only via the result
+   * cell's meta links, so they are not loaded by syncing the result cell or the
+   * pattern's node inputs/outputs. `applySetupState` reads the persisted
+   * `internal` synchronously; awaiting these here keeps a build-time default
+   * from transiently clobbering a persisted value on a cold read (CT-1666).
+   *
+   * The result cell must already be synced so its meta links are readable.
+   */
+  private async syncMetaCells(resultCell: Cell<any>): Promise<void> {
+    const promises: Promise<unknown>[] = [];
+    for (const field of ["argument", "internal"] as const) {
+      const link = getMetaLink(resultCell, field);
+      if (link === undefined) continue;
+      const maybePromise = this.runtime.getCellFromLink(link).sync();
+      if (maybePromise instanceof Promise) promises.push(maybePromise);
+    }
+    await Promise.all(promises);
+  }
+
   private async syncCellsForRunningPattern(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
@@ -1728,6 +1750,16 @@ export class Runner {
     await Promise.all(promises);
 
     await resultCell.sync();
+
+    // Also load the `internal` and `argument` meta-linked docs. These live in
+    // separate content-addressed docs reached only via the result cell's meta
+    // links -- not through the schema/value graph synced above -- so they are
+    // not covered by `resultCell.sync()` or the node input/output sync below.
+    // `applySetupState` reads the persisted `internal` synchronously and merges
+    // the pattern's build-time defaults UNDER it (persisted wins). Without this
+    // awaited load that read races storage and can see `undefined`, letting a
+    // build-time default transiently clobber the persisted value (CT-1666).
+    await this.syncMetaCells(resultCell);
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -1939,11 +1971,16 @@ export class Runner {
       switch (module.type) {
         case "ref": {
           const refName = module.implementation as string;
+          const resolved = this.runtime.moduleRegistry.getModule(refName);
+          // `.asScope(scope)` records its scope on the *ref* module (the node's
+          // module), but resolving the ref swaps in the registry's module — so
+          // carry the declared default scope across, or it is silently dropped
+          // and the node falls back to "space".
           this.instantiateNode(
             tx,
-            this.runtime.moduleRegistry.getModule(
-              refName,
-            ),
+            module.defaultScope !== undefined
+              ? { ...resolved, defaultScope: module.defaultScope }
+              : resolved,
             inputBindings,
             outputBindings,
             resultCell,
@@ -3572,6 +3609,20 @@ export class Runner {
       processCell,
     );
 
+    // The output spot's *declared* scope is not inherently on the resolved link
+    // (`.asScope("user")` lands on `module.defaultScope`, and a `PerUser<>`
+    // annotation on `module.resultSchema.scope`), so fold both in here and hand
+    // the builtin a fully-normalized output link carrying that scope + schema.
+    // Scope-aware builtins (sqliteDatabase) mint their result container at this
+    // scope; the rest ignore the extra argument.
+    const outputBinding = resolvedOutputSpot
+      ? {
+        ...resolvedOutputSpot,
+        scope: schemaCellScope(module.resultSchema) ??
+          module.defaultScope ?? resolvedOutputSpot.scope,
+      }
+      : undefined;
+
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
@@ -3636,6 +3687,7 @@ export class Runner {
         },
         processCell,
         this.runtime,
+        outputBinding,
       );
     } finally {
       popFrame(builtinFrame);

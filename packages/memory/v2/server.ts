@@ -5,6 +5,7 @@ import {
   type CellScope,
   type ClientCommit,
   type ClientMessage,
+  columnDeclaresIfc,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
@@ -31,6 +32,7 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceRequest,
   type SqliteRegisterDiskSourceResult,
+  type SqliteResultColumn,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -51,6 +53,7 @@ import { assertReadOnly } from "./sqlite/guard.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import { ensureColumnOriginAvailable } from "./sqlite/column-origin.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -223,6 +226,23 @@ function missingTableName(error: unknown): string | undefined {
  *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
  *  `ü` as distinct tables, so folding them together here would mask a genuine
  *  "no such table" error as an empty result. */
+/** Whether any column of any declared table carries a non-empty `ifc` (so a
+ *  read of this db needs sound column provenance for CFC labeling). */
+function declaresColumnIfc(
+  tables: Record<string, unknown> | undefined,
+): boolean {
+  if (tables === undefined) return false;
+  for (const table of Object.values(tables)) {
+    const props = (table as { properties?: Record<string, unknown> })
+      ?.properties;
+    if (!props) continue;
+    for (const col of Object.values(props)) {
+      if (columnDeclaresIfc((col as { ifc?: unknown })?.ifc)) return true;
+    }
+  }
+  return false;
+}
+
 function isDeclaredTable(
   tables: Record<string, unknown> | undefined,
   name: string,
@@ -714,15 +734,17 @@ export class Server {
     space: string,
     db: SqliteDbRef,
     sql: string,
-    params?: SqliteParamsWire,
-  ): Promise<unknown[]> {
+    params: SqliteParamsWire | undefined,
+    scopeKey: string,
+    wantColumns: boolean,
+  ): Promise<{ rows: unknown[]; columns?: SqliteResultColumn[] }> {
     // Apply the statement guard BEFORE the file-existence short-circuit, so a
     // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
     // multi-statement) is refused even against a never-written cell-db rather
     // than silently returning [].
     assertReadOnly(sql);
     const engine = await this.openEngine(space);
-    const path = this.#cellDbPath(engine, space, db.id);
+    const path = this.#cellDbPath(engine, space, db.id, scopeKey);
     // A never-written cell-db has no file yet (its schema is created on the
     // first write, via the attach path). Treat a missing file as an empty
     // result — but ONLY a genuinely-absent file: any other stat failure
@@ -730,11 +752,13 @@ export class Server {
     try {
       Deno.statSync(path);
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return [];
+      if (error instanceof Deno.errors.NotFound) return { rows: [] };
       throw error;
     }
     try {
-      return this.#readPool.query(path, sql, params);
+      return wantColumns
+        ? this.#readPool.queryWithOrigins(path, sql, params)
+        : { rows: this.#readPool.query(path, sql, params) };
     } catch (error) {
       // The file exists (written at least once, so ensureTables created every
       // table declared at that write). A "no such table" therefore means either:
@@ -751,7 +775,7 @@ export class Server {
       // write yet succeed after (SQLite case-folds), flipping the contract.
       const missing = missingTableName(error);
       if (missing !== undefined && isDeclaredTable(db.tables, missing)) {
-        return [];
+        return { rows: [] };
       }
       throw error;
     }
@@ -833,9 +857,13 @@ export class Server {
     engine: Engine.Engine,
     space: string,
     operations: readonly Operation[],
+    scopeContext: { principal?: string; sessionId: string },
   ): Map<string, string> {
     const map = new Map<string, string>();
     const tablesById = new Map<string, Record<string, unknown> | undefined>();
+    // The db's scope qualifies its on-disk file the same way the read path does
+    // (so a write and a read of a user/session-scoped db hit the same file).
+    const scopeKeyById = new Map<string, string>();
     for (const op of operations) {
       if (op.op !== "sqlite") continue;
       const id = op.db.id;
@@ -862,7 +890,31 @@ export class Server {
           "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
         );
       }
-      if (map.has(id)) continue;
+      // Validate the declared scope on the WRITE path too. `sqlite.query`
+      // validates scope at parse time, but a folded op rides the loosely-parsed
+      // `transact` commit — an invalid value must fail loudly here, not silently
+      // degrade to space scoping (which would mis-place the file).
+      if (
+        op.db.scope !== undefined && op.db.scope !== "space" &&
+        op.db.scope !== "user" && op.db.scope !== "session"
+      ) {
+        throw new Engine.ProtocolError("sqlite op declares an invalid scope");
+      }
+      const scopeKey = Engine.resolveScopeKey(op.db.scope, {
+        principal: scopeContext.principal,
+        sessionId: scopeContext.sessionId,
+      });
+      if (map.has(id)) {
+        // Same db id appears twice in one commit: it must resolve to the same
+        // scoped file. A differing scope key would mean the second op silently
+        // writes into the first op's (different user/session) file — reject it.
+        if (scopeKeyById.get(id) !== scopeKey) {
+          throw new Engine.ProtocolError(
+            "conflicting scope for the same sqlite database in one commit",
+          );
+        }
+        continue;
+      }
       if (map.size >= 1) {
         throw new Engine.ProtocolError(
           "a commit may write to at most one sqlite database",
@@ -870,6 +922,7 @@ export class Server {
       }
       map.set(id, aliasForDbId(id));
       tablesById.set(id, op.db.tables);
+      scopeKeyById.set(id, scopeKey);
     }
     // Attach + create tables. If `ensureTables` throws (e.g. a malformed/hostile
     // `db.tables` payload — DDL validation rejects it), DETACH everything
@@ -880,17 +933,21 @@ export class Server {
     const attached: string[] = [];
     try {
       for (const [id, alias] of map) {
+        const scopeKey = scopeKeyById.get(id) ?? "space";
         attachDatabase(
           engine.database,
           alias,
-          this.#cellDbPath(engine, space, id),
+          this.#cellDbPath(engine, space, id, scopeKey),
         );
         attached.push(alias);
         const tables = tablesById.get(id);
         if (tables) {
-          // Run ensureTables only the first time this (space, id, schema) is
-          // seen; record AFTER it succeeds so a throw re-ensures next time.
-          const key = `${space}\0${id}\0${JSON.stringify(tables)}`;
+          // Run ensureTables only the first time this (space, id, scope, schema)
+          // is seen; record AFTER it succeeds so a throw re-ensures next time.
+          // The scope key is part of the identity: a user/session-scoped db has
+          // a distinct file per principal/session, so each needs its own DDL run
+          // even though (space, id, schema) match.
+          const key = `${space}\0${id}\0${scopeKey}\0${JSON.stringify(tables)}`;
           if (!this.#ensuredSchemas.has(key)) {
             ensureTables(
               engine.database,
@@ -915,9 +972,20 @@ export class Server {
   /** Path for a cell-derived db file. Sibling of the space db for file stores;
    *  a deterministic temp file for in-memory stores (so it survives the
    *  connection, unlike an `:memory:` attach). The space + id are hashed into
-   *  the filename so distinct (space, id) pairs never collide. */
-  #cellDbPath(engine: Engine.Engine, space: string, id: string): string {
-    const tag = `${hashToken(space)}-${hashToken(id)}`;
+   *  the filename so distinct (space, id) pairs never collide.
+   *
+   *  `scopeKey` is the resolved scope key (`Engine.resolveScopeKey`): `space`
+   *  for the default scope (left out of the name, so existing space-scoped files
+   *  keep their path — no migration), or `user:<did>` / `session:<did>:<sid>`
+   *  for a scoped db, hashed in so each user/session gets its own file. */
+  #cellDbPath(
+    engine: Engine.Engine,
+    space: string,
+    id: string,
+    scopeKey: string = "space",
+  ): string {
+    const scopeTag = scopeKey === "space" ? "" : `-${hashToken(scopeKey)}`;
+    const tag = `${hashToken(space)}-${hashToken(id)}${scopeTag}`;
     if (engine.url.protocol === "file:") {
       const dir = Path.dirname(Path.fromFileUrl(engine.url));
       return Path.join(dir, `cell-${tag}.sqlite`);
@@ -928,7 +996,8 @@ export class Server {
   async sqliteQuery(
     message: SqliteQueryRequest,
   ): Promise<ResponseMessage<SqliteQueryResult>> {
-    if (this.#sessions.get(message.space, message.sessionId) === null) {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
       return respondTypedError<SqliteQueryResult>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
@@ -938,17 +1007,48 @@ export class Server {
       // All reads run unattached on a pooled read-only connection (no ATTACH,
       // real read-only, each file its own `main` namespace). The only
       // per-source difference is path resolution: an injected on-disk source's
-      // registered path, else the cell-derived path.
+      // registered path, else the cell-derived path (which the db's scope
+      // qualifies, per the session's principal / id).
+      //
+      // Capture per-column origin ONLY when the db declares per-column `ifc`
+      // (CFC read-labeling needs sound provenance). Unlabeled dbs — the common
+      // case, and all injected on-disk sources — pay nothing.
+      const wantColumns = declaresColumnIfc(message.db.tables);
+      // Bind @db/sqlite's column-origin symbols before a labeled read; fail
+      // loudly if they can't be bound rather than mislabeling the result.
+      if (wantColumns && !(await ensureColumnOriginAvailable())) {
+        throw new Error(
+          "sqlite: CFC read labeling needs SQLite column-metadata FFI, but " +
+            "@db/sqlite's column-origin symbols could not be bound",
+        );
+      }
       const disk = this.#diskSources.get(message.space, message.db.id);
-      const rows = disk
-        ? this.#readPool.query(disk.path, message.sql, message.params)
+      const result = disk
+        ? (wantColumns
+          ? this.#readPool.queryWithOrigins(
+            disk.path,
+            message.sql,
+            message.params,
+          )
+          : {
+            rows: this.#readPool.query(disk.path, message.sql, message.params),
+          })
         : await this.#readCellDb(
           message.space,
           message.db,
           message.sql,
           message.params,
+          Engine.resolveScopeKey(message.db.scope, {
+            principal: session.principal,
+            sessionId: message.sessionId,
+          }),
+          wantColumns,
         );
-      return { type: "response", requestId: message.requestId, ok: { rows } };
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: { rows: result.rows, columns: result.columns },
+      };
     } catch (error) {
       return respondTypedError<SqliteQueryResult>(
         message.requestId,
@@ -1130,6 +1230,7 @@ export class Server {
         engine,
         message.space,
         commitPayload.operations,
+        { principal: session.principal, sessionId: message.sessionId },
       );
       let commit: Engine.AppliedCommit;
       try {
@@ -2170,11 +2271,14 @@ export const parseClientMessage = (
     parsed.db.id.length > 0 && parsed.db.id.length <= 256 &&
     (parsed.db.tables === undefined ||
       (isRecord(parsed.db.tables) &&
-        Object.keys(parsed.db.tables).length <= 256))
+        Object.keys(parsed.db.tables).length <= 256)) &&
+    (parsed.db.scope === undefined || parsed.db.scope === "space" ||
+      parsed.db.scope === "user" || parsed.db.scope === "session")
   ) {
     const db = {
       id: parsed.db.id,
       tables: isRecord(parsed.db.tables) ? parsed.db.tables : undefined,
+      scope: parsed.db.scope as CellScope | undefined,
     };
     const params = Array.isArray(parsed.params) || isRecord(parsed.params)
       ? parsed.params as SqliteParamsWire

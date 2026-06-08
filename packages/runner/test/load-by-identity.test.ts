@@ -148,4 +148,37 @@ describe("load by module identity (warm + version-bump recovery)", () => {
       result: 10,
     });
   });
+
+  it("trusts integrity-gated cached bodies and skips body re-verification", async () => {
+    // Spec (module-loading.md, threat model): a warm hit loaded from the
+    // integrity-gated compiled set trusts the CFC label, so `trustedBodies`
+    // skips the per-module SES verifier. Tamper the entry body with a
+    // verify-rejectable but eval-safe top-level statement (a bare call
+    // expression — rejected by classification, harmless to execute) appended
+    // after the module's exports so `default` still resolves.
+    const { modules, entryIdentity } = await engine.compileToRecordGraph(
+      PROGRAM,
+    );
+    const tamperedCached = toCached(modules).map((m) =>
+      m.identity === entryIdentity
+        ? { ...m, code: `${m.code}\nObject.keys({});\n` }
+        : m
+    );
+    // Untrusted: the SES body verifier rejects the tampered body before eval.
+    await expect(
+      engine.evaluateCachedModules(tamperedCached, entryIdentity, {
+        sourceFiles: PROGRAM.files,
+      }),
+    ).rejects.toThrow();
+    // Trusted (integrity-gated warm hit): body verification is skipped, so the
+    // graph evaluates and the pattern runs correctly.
+    const trusted = await engine.evaluateCachedModules(
+      tamperedCached,
+      entryIdentity,
+      { sourceFiles: PROGRAM.files, trustedBodies: true },
+    );
+    expect(await runPattern(trusted.main, 3, "trusted cached run")).toEqual({
+      result: 6,
+    });
+  });
 });

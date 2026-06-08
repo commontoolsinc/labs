@@ -15,12 +15,14 @@ import type { Action } from "../scheduler.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
   cellIdentityKey,
   narrowestCellScope,
+  outputSpotFromBinding,
   scopedCell,
 } from "./scope-policy.ts";
 
@@ -53,6 +55,7 @@ export function filter(
   cause: any,
   parentCell: Cell<any>,
   runtime: Runtime,
+  outputBinding?: NormalizedFullLink,
 ): Action {
   let result: Cell<any[]> | undefined;
 
@@ -90,8 +93,7 @@ export function filter(
       );
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
-      const outputSpot = (cause as { outputSpot?: unknown } | undefined)
-        ?.outputSpot;
+      const outputSpot = outputSpotFromBinding(outputBinding);
       if (!outputSpot) {
         throw new Error(
           "filter: result container requires a write-redirect output binding",
