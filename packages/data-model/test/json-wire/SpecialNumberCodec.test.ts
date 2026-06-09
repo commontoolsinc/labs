@@ -57,42 +57,6 @@ describe("SpecialNumberCodec", () => {
     });
 
     describe("decode()", () => {
-      it("round-trips `-0` (preserves sign of zero)", () => {
-        const result = codec.decode(
-          expectedTag,
-          codec.encode(-0),
-          context,
-        );
-        expect(Object.is(result, -0)).toBe(true);
-      });
-
-      it("round-trips `NaN`", () => {
-        const result = codec.decode(
-          expectedTag,
-          codec.encode(NaN),
-          context,
-        );
-        expect(Number.isNaN(result)).toBe(true);
-      });
-
-      it("round-trips `+Infinity`", () => {
-        const result = codec.decode(
-          expectedTag,
-          codec.encode(Infinity),
-          context,
-        );
-        expect(result).toBe(Infinity);
-      });
-
-      it("round-trips `-Infinity`", () => {
-        const result = codec.decode(
-          expectedTag,
-          codec.encode(-Infinity),
-          context,
-        );
-        expect(result).toBe(-Infinity);
-      });
-
       it("decodes non-string state to `ProblematicValue`", () => {
         const result = codec.decode(
           expectedTag,
@@ -112,6 +76,36 @@ describe("SpecialNumberCodec", () => {
         expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
           "SpecialNumber@1",
         );
+      });
+    });
+
+    describe("round trip encode-decode", () => {
+      it("round-trips `-0` (preserves sign of zero)", () => {
+        const result = codec.decode(expectedTag, codec.encode(-0), context);
+        expect(Object.is(result, -0)).toBe(true);
+      });
+
+      it("round-trips `NaN`", () => {
+        const result = codec.decode(expectedTag, codec.encode(NaN), context);
+        expect(Number.isNaN(result)).toBe(true);
+      });
+
+      it("round-trips `+Infinity`", () => {
+        const result = codec.decode(
+          expectedTag,
+          codec.encode(Infinity),
+          context,
+        );
+        expect(result).toBe(Infinity);
+      });
+
+      it("round-trips `-Infinity`", () => {
+        const result = codec.decode(
+          expectedTag,
+          codec.encode(-Infinity),
+          context,
+        );
+        expect(result).toBe(-Infinity);
       });
     });
   });

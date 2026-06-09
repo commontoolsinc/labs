@@ -40,6 +40,20 @@ describe("SymbolCodec", () => {
     });
 
     describe("decode()", () => {
+      it("decodes non-string state to `ProblematicValue`", () => {
+        const result = codec.decode(
+          expectedTag,
+          42,
+          context,
+        );
+        expect(result).toBeInstanceOf(ProblematicValue);
+        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+          "Symbol@1",
+        );
+      });
+    });
+
+    describe("round trip encode-decode", () => {
       it("round-trips an interned symbol to the same registry instance", () => {
         const result = codec.decode(
           expectedTag,
@@ -58,18 +72,6 @@ describe("SymbolCodec", () => {
           context,
         );
         expect(result).toBe(Symbol.for(key));
-      });
-
-      it("decodes non-string state to `ProblematicValue`", () => {
-        const result = codec.decode(
-          expectedTag,
-          42,
-          context,
-        );
-        expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
-          "Symbol@1",
-        );
       });
     });
   });

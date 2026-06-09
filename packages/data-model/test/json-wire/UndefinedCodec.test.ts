@@ -39,6 +39,14 @@ describe("UndefinedCodec", () => {
         expect(decoded).toBe(undefined);
       });
 
+      it("throws when decoding non-`null` state", () => {
+        expect(() => codec.decode(expectedTag, 42, context)).toThrow(
+          "expected `null` state",
+        );
+      });
+    });
+
+    describe("round trip encode-decode", () => {
       it("round-trips `undefined` via encode -> decode", () => {
         const decoded = codec.decode(
           expectedTag,
@@ -46,12 +54,6 @@ describe("UndefinedCodec", () => {
           context,
         );
         expect(decoded).toBe(undefined);
-      });
-
-      it("throws when decoding non-`null` state", () => {
-        expect(() => codec.decode(expectedTag, 42, context)).toThrow(
-          "expected `null` state",
-        );
       });
     });
   });

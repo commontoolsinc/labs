@@ -293,107 +293,6 @@ describe("FabricError", () => {
   });
 
   describe("static members", () => {
-    // Decoding hand-built state (not via `encode()`): exercises name/type
-    // handling and back-compat that the round-trip `decode()` tests don't.
-    describe("[CODEC].decode() of explicit state", () => {
-      it("creates a `FabricError` from state (null `name` = same as `type`)", () => {
-        const state = {
-          type: "Error",
-          name: null,
-          message: "hello",
-        };
-        const result = FabricError[CODEC].decode(
-          WIRE_TYPE_TAGS.Error,
-          state,
-          dummyContext,
-        ) as unknown as FabricError;
-        expect(result).toBeInstanceOf(FabricError);
-        expect(result.toNativeValue(true)).toBeInstanceOf(Error);
-        expect(result.name).toBe("Error");
-        expect(result.message).toBe("hello");
-      });
-
-      it("creates the correct `Error` subclass from `type` (null `name`)", () => {
-        const cases: [string, ErrorConstructor][] = [
-          ["TypeError", TypeError],
-          ["RangeError", RangeError],
-          ["SyntaxError", SyntaxError],
-          ["ReferenceError", ReferenceError],
-          ["URIError", URIError],
-          ["EvalError", EvalError],
-        ];
-        for (const [type, cls] of cases) {
-          const state = { type, name: null, message: "test" };
-          const result = FabricError[CODEC].decode(
-            WIRE_TYPE_TAGS.Error,
-            state,
-            dummyContext,
-          ) as unknown as FabricError;
-          expect(result.toNativeValue(true)).toBeInstanceOf(cls);
-          expect(result.name).toBe(type);
-        }
-      });
-
-      it("handles `type != name` (e.g. `TypeError` with custom `name`)", () => {
-        const state = {
-          type: "TypeError",
-          name: "CustomTypeName",
-          message: "mismatch",
-        };
-        const result = FabricError[CODEC].decode(
-          WIRE_TYPE_TAGS.Error,
-          state,
-          dummyContext,
-        ) as unknown as FabricError;
-        expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
-        expect(result.name).toBe("CustomTypeName");
-      });
-
-      it("falls back to `name` when `type` is absent (back-compat)", () => {
-        const state = {
-          name: "TypeError",
-          message: "old format",
-        };
-        const result = FabricError[CODEC].decode(
-          WIRE_TYPE_TAGS.Error,
-          state,
-          dummyContext,
-        ) as unknown as FabricError;
-        expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
-      });
-
-      it("handles a custom `name`", () => {
-        const state = {
-          type: "Error",
-          name: "MyCustomError",
-          message: "custom",
-        };
-        const result = FabricError[CODEC].decode(
-          WIRE_TYPE_TAGS.Error,
-          state,
-          dummyContext,
-        ) as unknown as FabricError;
-        expect(result.name).toBe("MyCustomError");
-      });
-
-      it("restores cause and custom properties", () => {
-        const state = {
-          type: "Error",
-          name: null,
-          message: "with extras",
-          cause: "something went wrong",
-          code: 404,
-        };
-        const result = FabricError[CODEC].decode(
-          WIRE_TYPE_TAGS.Error,
-          state,
-          dummyContext,
-        ) as unknown as FabricError;
-        expect(result.cause).toBe("something went wrong");
-        expect(result.getExtra("code")).toBe(404);
-      });
-    });
-
     describe("[CODEC]", () => {
       const codec = FabricError[CODEC];
       const expectedTag = WIRE_TYPE_TAGS.Error;
@@ -442,7 +341,97 @@ describe("FabricError", () => {
         });
       });
 
+      // Decoding hand-built state (not via `encode()`): exercises name/type
+      // handling and back-compat that the round-trip tests don't.
       describe("decode()", () => {
+        it("creates a `FabricError` from state (null `name` = same as `type`)", () => {
+          const state = { type: "Error", name: null, message: "hello" };
+          const result = codec.decode(
+            expectedTag,
+            state,
+            context,
+          ) as unknown as FabricError;
+          expect(result).toBeInstanceOf(FabricError);
+          expect(result.toNativeValue(true)).toBeInstanceOf(Error);
+          expect(result.name).toBe("Error");
+          expect(result.message).toBe("hello");
+        });
+
+        it("creates the correct `Error` subclass from `type` (null `name`)", () => {
+          const cases: [string, ErrorConstructor][] = [
+            ["TypeError", TypeError],
+            ["RangeError", RangeError],
+            ["SyntaxError", SyntaxError],
+            ["ReferenceError", ReferenceError],
+            ["URIError", URIError],
+            ["EvalError", EvalError],
+          ];
+          for (const [type, cls] of cases) {
+            const state = { type, name: null, message: "test" };
+            const result = codec.decode(
+              expectedTag,
+              state,
+              context,
+            ) as unknown as FabricError;
+            expect(result.toNativeValue(true)).toBeInstanceOf(cls);
+            expect(result.name).toBe(type);
+          }
+        });
+
+        it("handles `type != name` (e.g. `TypeError` with custom `name`)", () => {
+          const state = {
+            type: "TypeError",
+            name: "CustomTypeName",
+            message: "mismatch",
+          };
+          const result = codec.decode(
+            expectedTag,
+            state,
+            context,
+          ) as unknown as FabricError;
+          expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
+          expect(result.name).toBe("CustomTypeName");
+        });
+
+        it("falls back to `name` when `type` is absent (back-compat)", () => {
+          const state = { name: "TypeError", message: "old format" };
+          const result = codec.decode(
+            expectedTag,
+            state,
+            context,
+          ) as unknown as FabricError;
+          expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
+        });
+
+        it("handles a custom `name`", () => {
+          const state = { type: "Error", name: "MyCustomError", message: "x" };
+          const result = codec.decode(
+            expectedTag,
+            state,
+            context,
+          ) as unknown as FabricError;
+          expect(result.name).toBe("MyCustomError");
+        });
+
+        it("restores cause and custom properties", () => {
+          const state = {
+            type: "Error",
+            name: null,
+            message: "with extras",
+            cause: "something went wrong",
+            code: 404,
+          };
+          const result = codec.decode(
+            expectedTag,
+            state,
+            context,
+          ) as unknown as FabricError;
+          expect(result.cause).toBe("something went wrong");
+          expect(result.getExtra("code")).toBe(404);
+        });
+      });
+
+      describe("round trip encode-decode", () => {
         it("round-trips a basic `Error`", () => {
           const se = FabricError.fromNativeError(new Error("hello"));
           const decoded = codec.decode(
