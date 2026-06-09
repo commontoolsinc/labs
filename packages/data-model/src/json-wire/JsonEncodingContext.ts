@@ -252,6 +252,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return value as JsonWireValue;
     }
 
+    // Past this point, `typeof value === "object"`.
+
     // Arrays
     if (Array.isArray(value)) {
       const seen = _seen ?? new Set<object>();
@@ -282,12 +284,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result as JsonWireValue;
     }
 
-    // Codec values (including `UnknownValue` / `ProblematicValue`),
-    // `FabricInstance`, primitives, and arrays were all handled above. The only
-    // legitimate remaining shape is a *plain* object. Anything else -- a
-    // non-object (e.g. an uninterned/unique `symbol`) or a non-plain object (a
-    // class instance with no codec) -- is unencodable and must fail loudly
-    // rather than be silently mis-encoded as a plain object.
+    // The only legit object we can have at this point is a plain object. (The
+    // other `FabricValue` object cases were handled above. So, if we find
+    // ourselves looking at a non-plain object at this point, it's always an
+    // error (and probably a case that can be tracked down to a typesystem lie
+    // of some sort).
     if (!isPlainObject(value)) {
       throw new Error(
         `Cannot encode ${
