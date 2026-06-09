@@ -13,14 +13,14 @@ import {
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from "@/wire-common/interface.ts";
+} from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
@@ -50,7 +50,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   static #codec = Object.freeze(
     new (class EpochNsecCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.EpochNsec, FabricEpochNsec);
+        super(CODEC_TYPE_TAGS.EpochNsec, FabricEpochNsec);
       }
 
       /** @inheritDoc */

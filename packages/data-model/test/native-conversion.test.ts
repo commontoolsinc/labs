@@ -7,8 +7,8 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { CODEC } from "@/codec-common/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
@@ -386,13 +386,13 @@ describe("native-conversion", () => {
         message: "boom",
       } as unknown as FabricValue;
       const frozen = FabricError[CODEC].decode(
-        WIRE_TYPE_TAGS.Error,
+        CODEC_TYPE_TAGS.Error,
         state,
         frozenCtx,
       );
       expect(isDeepFrozen(frozen)).toBe(true);
       const mutable = FabricError[CODEC].decode(
-        WIRE_TYPE_TAGS.Error,
+        CODEC_TYPE_TAGS.Error,
         state,
         mutableCtx,
       );

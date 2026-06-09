@@ -6,13 +6,13 @@ import {
 import { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import {
   CODEC,
   FabricCodec,
   ReconstructionContext,
-} from "@/wire-common/interface.ts";
+} from "@/codec-common/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -96,7 +96,7 @@ export class FabricBytes extends BaseFabricPrimitive {
   static #codec = Object.freeze(
     new (class BytesCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.Bytes, FabricBytes);
+        super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
       }
 
       /** @inheritDoc */

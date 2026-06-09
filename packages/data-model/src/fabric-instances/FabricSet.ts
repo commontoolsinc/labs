@@ -3,9 +3,9 @@ import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from "@/wire-common/interface.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+} from "@/codec-common/interface.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
@@ -63,7 +63,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   static #codec = Object.freeze(
     new (class FabricSetCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.Set, FabricSet);
+        super(CODEC_TYPE_TAGS.Set, FabricSet);
       }
 
       /**

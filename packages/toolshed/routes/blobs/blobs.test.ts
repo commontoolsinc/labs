@@ -8,7 +8,7 @@ import env from "@/env.ts";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonEncodingContext } from "@commonfabric/data-model/json-wire";
+import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";

@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricSpecialObject } from "@/interface.ts";
-import { CODEC, codecOf } from "@/wire-common/index.ts";
+import { CODEC, codecOf } from "@/codec-common/index.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 

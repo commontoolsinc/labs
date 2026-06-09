@@ -2,8 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
 
 /**
  * Minimal concrete `BaseFabricCodec` for exercising the base class's own

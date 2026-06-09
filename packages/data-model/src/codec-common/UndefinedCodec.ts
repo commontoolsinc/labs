@@ -1,7 +1,7 @@
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 
 /**
  * Codec for `undefined`. Encodes to the `Undefined@1` tag with `null` state.
@@ -10,7 +10,7 @@ import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
  */
 export class UndefinedCodec extends BaseFabricCodec {
   constructor() {
-    super(WIRE_TYPE_TAGS.Undefined, undefined);
+    super(CODEC_TYPE_TAGS.Undefined, undefined);
   }
 
   /** @inheritDoc */

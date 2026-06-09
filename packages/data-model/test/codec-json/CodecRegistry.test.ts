@@ -4,9 +4,9 @@ import { expect } from "@std/expect";
 import type { Constructor } from "@commonfabric/utils/types";
 
 import { toCompactDebugString } from "@/value-debug.ts";
-import { CodecRegistry, SELF_REP } from "@/json-wire/CodecRegistry.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
+import { CodecRegistry, SELF_REP } from "@/codec-json/CodecRegistry.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { type FabricValue } from "@/interface.ts";

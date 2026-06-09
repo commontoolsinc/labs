@@ -1,5 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import type { FabricCodec } from "@/wire-common/interface.ts";
+import type { FabricCodec } from "@/codec-common/interface.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**
