@@ -38,11 +38,6 @@ export class FabricEpochNsec extends BaseFabricPrimitive
     Object.freeze(this);
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.EpochNsec;
-  }
-
   /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
   get value(): bigint {
     return this.#value;
@@ -65,13 +60,13 @@ export class FabricEpochNsec extends BaseFabricPrimitive
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
         if (typeof state !== "string") {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `EpochNsec: expected string state, got ${typeof state}`,
           );
@@ -82,7 +77,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
           );
         } catch {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `EpochNsec: invalid base64: ${state}`,
           );

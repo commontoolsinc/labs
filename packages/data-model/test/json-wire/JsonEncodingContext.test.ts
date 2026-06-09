@@ -16,7 +16,6 @@ import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
-import { DECONSTRUCT } from "@/wire-common/interface.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
 
@@ -40,10 +39,6 @@ class TestReconstructionContext extends BaseReconstructionContext {
  * mandate guard (every wire form must be explicitly represented).
  */
 class UnregisteredInstance extends BaseFabricInstance {
-  [DECONSTRUCT](): FabricValue {
-    return {};
-  }
-
   get wireTypeTag(): string {
     return "Unregistered@1";
   }

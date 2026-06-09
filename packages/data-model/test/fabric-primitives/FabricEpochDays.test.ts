@@ -17,7 +17,7 @@ describe("FabricEpochDays", () => {
     );
   });
 
-  it("is not a `FabricInstance` (no [DECONSTRUCT])", () => {
+  it("is not a `FabricInstance` (it's a `FabricPrimitive`)", () => {
     const sd = new FabricEpochDays(0n);
     expect(sd instanceof FabricInstance).toBe(false);
   });
@@ -53,9 +53,9 @@ describe("FabricEpochDays", () => {
       const expectedTag = WIRE_TYPE_TAGS.EpochDays;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `EpochDays` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

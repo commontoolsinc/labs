@@ -7,7 +7,7 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
@@ -19,10 +19,9 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 describe("FabricMap", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (they don't fit a single member, aren't construction mechanics).
-  it("implements `FabricInstance` with expected `.wireTypeTag`", () => {
+  it("implements `FabricInstance`", () => {
     const sm = new FabricMap(new Map());
     expect(sm instanceof FabricInstance).toBe(true);
-    expect(sm.wireTypeTag).toBe("Map@1");
   });
 
   it("is an instance of `FabricNativeWrapper`", () => {
@@ -31,13 +30,6 @@ describe("FabricMap", () => {
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
-      it("throws (stub)", () => {
-        const sm = new FabricMap(new Map());
-        expect(() => sm[DECONSTRUCT]()).toThrow("not yet implemented");
-      });
-    });
-
     describe("toNativeValue()", () => {
       it("returns a `FrozenMap` when `frozen` is `true`", () => {
         const map = new Map<FabricValue, FabricValue>([["a", 1]]);
@@ -124,9 +116,9 @@ describe("FabricMap", () => {
       const expectedTag = WIRE_TYPE_TAGS.Map;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `Map` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

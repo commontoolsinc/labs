@@ -73,8 +73,8 @@ export class CodecRegistry {
   readonly #selfRepTypes = new Set<PrimitiveTypeName>();
 
   /**
-   * Registers a codec, indexing it by its `wireTypeTag` (for decode) and its
-   * `uniqueHandledClass` (for encode dispatch). Either may be `undefined`,
+   * Registers a codec, indexing it by its `recognizedTypeTag` (for decode) and
+   * its `uniqueHandledClass` (for encode dispatch). Either may be `undefined`,
    * in which case the codec is left unindexed for the corresponding lookup;
    * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
    */
@@ -84,7 +84,7 @@ export class CodecRegistry {
       this.#classMap.set(uniqueClass, codec);
     }
 
-    const tag = codec.wireTypeTag;
+    const tag = codec.recognizedTypeTag;
     if (tag !== undefined) {
       this.#tagMap.set(tag, codec);
     }
@@ -92,13 +92,13 @@ export class CodecRegistry {
 
   /**
    * Registers a codec for a primitive `type` (see {@link PrimitiveTypeName}).
-   * Indexes the codec by its `wireTypeTag` (for decode) and by `type` (for O(1)
-   * encode dispatch on primitives).
+   * Indexes the codec by its `recognizedTypeTag` (for decode) and by `type`
+   * (for O(1) encode dispatch on primitives).
    */
   registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
     this.#primitiveCodecs.set(type, codec);
 
-    const tag = codec.wireTypeTag;
+    const tag = codec.recognizedTypeTag;
     if (tag !== undefined) {
       this.#tagMap.set(tag, codec);
     }
@@ -177,7 +177,7 @@ export class CodecRegistry {
   }
 
   /** Looks up a codec by tag for decoding. */
-  codecFromTag(wireTypeTag: string): FabricCodec | undefined {
-    return this.#tagMap.get(wireTypeTag);
+  codecFromTag(typeTag: string): FabricCodec | undefined {
+    return this.#tagMap.get(typeTag);
   }
 }

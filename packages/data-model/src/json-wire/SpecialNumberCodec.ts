@@ -42,13 +42,13 @@ export class SpecialNumberCodec extends BaseFabricCodec {
 
   /** @inheritDoc */
   decode(
-    wireTypeTag: string,
+    typeTag: string,
     state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        wireTypeTag,
+        typeTag,
         state,
         `SpecialNumber: expected string state, got ${typeof state}`,
       );
@@ -64,7 +64,7 @@ export class SpecialNumberCodec extends BaseFabricCodec {
         return NaN;
       default:
         return new ProblematicValue(
-          wireTypeTag,
+          typeTag,
           state,
           `SpecialNumber: unknown literal ${JSON.stringify(state)}`,
         );

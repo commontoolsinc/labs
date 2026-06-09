@@ -7,7 +7,7 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
@@ -18,20 +18,12 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 describe("FabricSet", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the
   // rule (doesn't fit a single member, isn't construction mechanics).
-  it("implements `FabricInstance` with the expected `.wireTypeTag`", () => {
+  it("implements `FabricInstance`", () => {
     const ss = new FabricSet(new Set());
     expect(ss instanceof FabricInstance).toBe(true);
-    expect(ss.wireTypeTag).toBe("Set@1");
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
-      it("throws (stub)", () => {
-        const ss = new FabricSet(new Set());
-        expect(() => ss[DECONSTRUCT]()).toThrow("not yet implemented");
-      });
-    });
-
     describe("toNativeValue()", () => {
       it("returns a `FrozenSet` when `frozen` is `true`", () => {
         const set = new Set<FabricValue>([1, 2]);
@@ -108,9 +100,9 @@ describe("FabricSet", () => {
       const expectedTag = WIRE_TYPE_TAGS.Set;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `Set` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

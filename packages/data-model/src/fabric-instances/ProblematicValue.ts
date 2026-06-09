@@ -1,7 +1,6 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   CODEC,
-  DECONSTRUCT,
   type FabricCodec,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
@@ -33,17 +32,6 @@ export class ProblematicValue extends ExplicitTagValue {
   /** Description of what went wrong. */
   get error(): string {
     return this.#error;
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Returns the `{ type, state, error }` envelope (preserved tag, raw state,
-   * and failure description). This is the protocol/hashing form; the wire form
-   * (via `[CODEC]`) is the bare `state`, with the tag carried separately.
-   */
-  [DECONSTRUCT](): FabricValue {
-    return { type: this.wireTypeTag, state: this.state, error: this.error };
   }
 
   /**
@@ -95,11 +83,11 @@ export class ProblematicValue extends ExplicitTagValue {
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         context: ReconstructionContext,
       ): FabricValue {
-        const result = new ProblematicValue(wireTypeTag, state, "");
+        const result = new ProblematicValue(typeTag, state, "");
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
         return context.shouldDeepFreeze ? deepFreeze(result) : result;

@@ -44,13 +44,13 @@ export class BigIntCodec extends BaseFabricCodec {
 
   /** @inheritDoc */
   decode(
-    wireTypeTag: string,
+    typeTag: string,
     state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        wireTypeTag,
+        typeTag,
         state,
         `bigint: expected string state, got ${typeof state}`,
       );
@@ -59,7 +59,7 @@ export class BigIntCodec extends BaseFabricCodec {
       return bigintFromMinimalTwosComplement(fromBase64url(state));
     } catch {
       return new ProblematicValue(
-        wireTypeTag,
+        typeTag,
         state,
         `bigint: invalid base64: ${state}`,
       );

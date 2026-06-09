@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
-import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
@@ -26,17 +26,6 @@ describe("ProblematicValue", () => {
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
-      it("returns the type-tagged `state` and `error`", () => {
-        const ps = new ProblematicValue("T@1", "s", "e");
-        expect(ps[DECONSTRUCT]()).toEqual({
-          type: "T@1",
-          state: "s",
-          error: "e",
-        });
-      });
-    });
-
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
       it("via dispatch: recurses state, freezes in place", () => {
         const child = { x: 1 };
@@ -74,6 +63,13 @@ describe("ProblematicValue", () => {
         it("returns the value's own (per-instance) wire type tag", () => {
           const pv = new ProblematicValue("Weird@7", "s", "oops");
           expect(ProblematicValue[CODEC].tagForValue(pv)).toBe("Weird@7");
+        });
+      });
+
+      describe("encode()", () => {
+        it("returns the bare `state` (the tag is carried separately)", () => {
+          const pv = new ProblematicValue("Weird@7", { x: 1 }, "oops");
+          expect(ProblematicValue[CODEC].encode(pv)).toEqual({ x: 1 });
         });
       });
     });

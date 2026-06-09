@@ -1,7 +1,6 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   CODEC,
-  DECONSTRUCT,
   type FabricCodec,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
@@ -12,29 +11,13 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
  * Wrapper for `Map` instances. Stub -- the static `[CODEC]` (the source of
- * truth) throws until `Map` support is fully implemented, and the
- * `[DECONSTRUCT]` protocol member delegates to it. Extra properties beyond the
- * wrapped collection are not supported on non-`Error` wrappers.
+ * truth) throws until `Map` support is fully implemented. Extra properties
+ * beyond the wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
-  }
-
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Map;
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Delegates to this class's `[CODEC]` (the source of truth), which throws
-   * until `Map` support is implemented.
-   */
-  [DECONSTRUCT](): FabricValue {
-    return FabricMap[CODEC].encode(this);
   }
 
   /**
@@ -99,7 +82,7 @@ export class FabricMap
        * Stub -- throws until `Map` support is implemented.
        */
       decode(
-        _wireTypeTag: string,
+        _typeTag: string,
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {

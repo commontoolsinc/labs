@@ -15,7 +15,7 @@ class TestCodec extends BaseFabricCodec {
   }
 
   decode(
-    _wireTypeTag: string,
+    _typeTag: string,
     _state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {
@@ -25,26 +25,30 @@ class TestCodec extends BaseFabricCodec {
 
 describe("BaseFabricCodec", () => {
   describe("instance members", () => {
-    describe("wireTypeTag", () => {
+    describe("recognizedTypeTag", () => {
       it("returns the tag passed to the constructor", () => {
-        expect(new TestCodec("Foo@1", undefined).wireTypeTag).toBe("Foo@1");
+        expect(new TestCodec("Foo@1", undefined).recognizedTypeTag).toBe(
+          "Foo@1",
+        );
       });
 
-      it("is `undefined` when constructed with no preferred tag", () => {
-        expect(new TestCodec(undefined, undefined).wireTypeTag).toBe(undefined);
+      it("is `undefined` when constructed with no recognized tag", () => {
+        expect(new TestCodec(undefined, undefined).recognizedTypeTag).toBe(
+          undefined,
+        );
       });
     });
 
     describe("tagForValue()", () => {
-      it("returns the codec's preferred `wireTypeTag`", () => {
+      it("returns the codec's `recognizedTypeTag`", () => {
         const codec = new TestCodec("Foo@1", undefined);
         expect(codec.tagForValue("anything" as FabricValue)).toBe("Foo@1");
       });
 
-      it("throws when the codec has no preferred tag (must be overridden)", () => {
+      it("throws when the codec has no recognized tag (must be overridden)", () => {
         const codec = new TestCodec(undefined, undefined);
         expect(() => codec.tagForValue("anything" as FabricValue)).toThrow(
-          "no preferred tag",
+          "no recognized tag",
         );
       });
     });

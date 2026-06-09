@@ -39,13 +39,13 @@ export class SymbolCodec extends BaseFabricCodec {
 
   /** @inheritDoc */
   decode(
-    wireTypeTag: string,
+    typeTag: string,
     state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {
       return new ProblematicValue(
-        wireTypeTag,
+        typeTag,
         state,
         `Symbol: expected string state, got ${typeof state}`,
       );

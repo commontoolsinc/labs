@@ -36,7 +36,13 @@ export abstract class ExplicitTagValue extends BaseFabricInstance {
     return this.#state;
   }
 
-  /** @inheritDoc */
+  /**
+   * The wire type tag preserved for this instance. Unlike other fabric types
+   * -- whose tag is a per-class constant carried by the class's `[CODEC]` --
+   * an `ExplicitTagValue` carries a per-instance tag (the original tag of a
+   * value that couldn't be recognized or reconstructed), which its codec's
+   * `tagForValue()` reads back.
+   */
   get wireTypeTag(): string {
     return this.#wireTypeTag;
   }

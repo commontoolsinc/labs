@@ -22,11 +22,11 @@ class TestCodec extends BaseFabricCodec {
   readonly #accept: FabricValue | undefined;
 
   constructor(
-    wireTypeTag: string,
+    recognizedTypeTag: string,
     uniqueHandledClass: Constructor | undefined,
     accept?: FabricValue,
   ) {
-    super(wireTypeTag, uniqueHandledClass);
+    super(recognizedTypeTag, uniqueHandledClass);
     this.#accept = accept;
   }
 
@@ -40,7 +40,7 @@ class TestCodec extends BaseFabricCodec {
   }
 
   decode(
-    _wireTypeTag: string,
+    _typeTag: string,
     _state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {

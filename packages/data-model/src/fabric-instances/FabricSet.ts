@@ -1,7 +1,6 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   CODEC,
-  DECONSTRUCT,
   type FabricCodec,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
@@ -12,28 +11,12 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
  * Wrapper for `Set` instances. Stub -- the static `[CODEC]` (the source of
- * truth) throws until `Set` support is fully implemented, and the
- * `[DECONSTRUCT]` protocol member delegates to it. Extra properties beyond the
- * wrapped collection are not supported on non-`Error` wrappers.
+ * truth) throws until `Set` support is fully implemented. Extra properties
+ * beyond the wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   constructor(readonly set: Set<FabricValue>) {
     super();
-  }
-
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Set;
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Delegates to this class's `[CODEC]` (the source of truth), which throws
-   * until `Set` support is implemented.
-   */
-  [DECONSTRUCT](): FabricValue {
-    return FabricSet[CODEC].encode(this);
   }
 
   /**
@@ -98,7 +81,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
        * Stub -- throws until `Set` support is implemented.
        */
       decode(
-        _wireTypeTag: string,
+        _typeTag: string,
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {

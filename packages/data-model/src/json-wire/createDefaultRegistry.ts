@@ -24,7 +24,7 @@ import { UndefinedCodec } from "./UndefinedCodec.ts";
  * the serializer after no codec matches.
  *
  * `UnknownValue` / `ProblematicValue` are registered (via `instanceCodecClasses`)
- * but their codecs declare no preferred wire tag: the encode path resolves each
+ * but their codecs recognize no single wire tag: the encode path resolves each
  * instance's tag with `tagForValue()`, and an unrecognized tag on decode is
  * wrapped in an `UnknownValue` by the encoding context rather than tag-routed.
  */
