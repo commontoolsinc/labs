@@ -1,7 +1,7 @@
 import { isPlainObject } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-import { type FabricValue } from "@/interface.ts";
+import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
   type ReconstructionContext,
@@ -235,14 +235,13 @@ export class JsonEncodingContext implements SerializationContext<string> {
       }
 
       return result;
-    }
-
-    // Every `FabricInstance` must be representable by a registered codec. An
-    // un-codec'd instance is a programming error, not something to silently
-    // encode as a plain object.
-    if (value instanceof BaseFabricInstance) {
+    } else if (value instanceof FabricSpecialObject) {
+      // Every `FabricSpecialObject` (that is, all objects that are
+      // `FabricValue`s other than plain objects and plain arrays must be
+      // recognized by a registered codec. Complain here since we didn't find a
+      // `codec` above.
       throw new Error(
-        `No codec registered for fabric instance: ${value.constructor.name}`,
+        `No codec registered for fabric object class: ${value.constructor.name}`,
       );
     }
 
