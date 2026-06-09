@@ -13,7 +13,6 @@
  *   they exist so benchmarks can attribute wins (e.g. anyOfBranches -80%).
  */
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import type { JSONObject } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { SchemaPathSelector } from "../../src/storage/interface.ts";
 import {
@@ -31,6 +30,7 @@ import {
 } from "../../src/traverse.ts";
 import { ContextualFlowControl } from "../../src/cfc.ts";
 import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
+import { load as loadDataURI } from "../../src/storage/transaction/attestation.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -99,9 +99,9 @@ export type ReplayResult = {
 
 /**
  * ObjectStorageManager over a fixture's doc corpus. Space/scope-aware
- * (ManagedStorageTransaction passes the full space address through), and
- * decodes `data:application/json` ids inline, mirroring how captured server
- * datasets carry undecoded data links.
+ * (ManagedStorageTransaction passes the full space address through);
+ * `data:` ids resolve through the canonical attestation loader instead of
+ * the corpus, exactly as live storage does.
  */
 export class FixtureObjectManager implements ObjectStorageManager {
   private attestations = new Map<string, IAttestation>();
@@ -109,13 +109,11 @@ export class FixtureObjectManager implements ObjectStorageManager {
   constructor(private docs: Record<string, FabricValue>) {}
 
   load(address: BaseMemoryAddress): IAttestation | null {
-    if (address.id.startsWith("data:application/json")) {
-      const [_prefix, encoded] = address.id.split(",", 2);
-      const value = JSON.parse(decodeURIComponent(encoded));
-      return {
-        address: { ...address, path: ["value"] },
-        value: value as JSONObject | undefined,
-      };
+    if (address.id.startsWith("data:")) {
+      // Use the canonical data-URI attestation loader so replay matches live
+      // semantics (decoded JSON rooted at path [], LRU-cached).
+      const { ok } = loadDataURI(address);
+      return ok ?? null;
     }
     const key = fixtureDocKey(
       address as BaseMemoryAddress & { space: string },

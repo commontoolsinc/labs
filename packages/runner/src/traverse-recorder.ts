@@ -1,4 +1,5 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import type { SchemaPathSelector } from "@commonfabric/memory/interface";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { getLogger } from "../../utils/src/logger.ts";
@@ -108,8 +109,11 @@ class TraverseCaptureRecorder {
     let index = this.selectorIndex.get(key);
     if (index === undefined) {
       index = this.selectors.length;
-      // Snapshot: selectors can be frozen in place or rebuilt later.
-      this.selectors.push(structuredClone(selector) as SchemaPathSelector);
+      // Snapshot via deep-frozen clone (identity-passes already-frozen
+      // selectors): callers may mutate or intern them later.
+      this.selectors.push(
+        cloneIfNecessary(selector as FabricValue) as SchemaPathSelector,
+      );
       this.selectorIndex.set(key, index);
     }
     return index;
@@ -120,7 +124,11 @@ class TraverseCaptureRecorder {
     let index = this.linkIndex.get(key);
     if (index === undefined) {
       index = this.links.length;
-      this.links.push(structuredClone(link) as NormalizedFullLink);
+      this.links.push(
+        cloneIfNecessary(
+          link as unknown as FabricValue,
+        ) as unknown as NormalizedFullLink,
+      );
       this.linkIndex.set(key, index);
     }
     return index;
@@ -190,7 +198,10 @@ class TraverseCaptureRecorder {
       { meta: ignoreReadForScheduling },
     );
     if (ok !== undefined && ok.value !== undefined) {
-      this.docs.set(key, structuredClone(ok.value) as FabricValue);
+      this.docs.set(
+        key,
+        cloneIfNecessary(ok.value as FabricValue) as FabricValue,
+      );
     }
   }
 
