@@ -12,7 +12,6 @@
  * - **metrics**: aggregated traverser counters. These are *not* asserted —
  *   they exist so benchmarks can attribute wins (e.g. anyOfBranches -80%).
  */
-import { gunzipSync } from "node:zlib";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { JSONObject } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -41,6 +40,7 @@ import {
   fixtureDocKey,
   type TraverseFixture,
 } from "../../src/traverse-recorder.ts";
+import { readMaybeGzippedText } from "./gzip.ts";
 import type { Immutable } from "../../../utils/src/types.ts";
 
 export type ReplayInvocationOracle = {
@@ -172,9 +172,12 @@ function makeContext(includeMeta: boolean): TraversalContext {
 
 export function replayFixture(
   fixture: TraverseFixture,
-  options: { collectOracle?: boolean } = {},
+  options: { collectOracle?: boolean; limit?: number } = {},
 ): ReplayResult {
   const collectOracle = options.collectOracle ?? false;
+  const invocations = options.limit !== undefined
+    ? fixture.invocations.slice(0, options.limit)
+    : fixture.invocations;
 
   const manager = new FixtureObjectManager(fixture.docs);
   const managedTx = new ManagedStorageTransaction(manager);
@@ -189,7 +192,7 @@ export function replayFixture(
 
   const invocationOracles: ReplayInvocationOracle[] = [];
   const metrics: ReplayMetrics = {
-    invocations: fixture.invocations.length,
+    invocations: invocations.length,
     docs: Object.keys(fixture.docs).length,
     traverseWithSchemaCalls: 0,
     traversePointerCalls: 0,
@@ -204,7 +207,7 @@ export function replayFixture(
     reads: 0,
   };
 
-  for (const invocation of fixture.invocations) {
+  for (const invocation of invocations) {
     let context = contexts.get(invocation.context);
     if (context === undefined) {
       context = makeContext(invocation.includeMeta);
@@ -300,12 +303,6 @@ export function replayFixture(
   return { oracle, metrics };
 }
 
-export function loadFixture(path: string): TraverseFixture {
-  if (path.endsWith(".gz")) {
-    const compressed = Deno.readFileSync(path);
-    return JSON.parse(
-      new TextDecoder().decode(gunzipSync(compressed)),
-    ) as TraverseFixture;
-  }
-  return JSON.parse(Deno.readTextFileSync(path)) as TraverseFixture;
+export async function loadFixture(path: string): Promise<TraverseFixture> {
+  return JSON.parse(await readMaybeGzippedText(path)) as TraverseFixture;
 }

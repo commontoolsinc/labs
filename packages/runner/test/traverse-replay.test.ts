@@ -9,21 +9,25 @@
  * PR.
  */
 import { assert } from "@std/assert";
-import { diffOracles, listFixturePaths, loadGolden } from "./traverse-replay/goldens.ts";
+import {
+  diffOracles,
+  listFixturePaths,
+  loadGolden,
+} from "./traverse-replay/goldens.ts";
 import { loadFixture, replayFixture } from "./traverse-replay/replay.ts";
 
 Deno.test("traverse replay matches golden oracles", async (t) => {
   const fixtures = listFixturePaths();
   assert(fixtures.length > 0, "no fixtures found");
   for (const { name, path } of fixtures) {
-    await t.step(name, () => {
-      const golden = loadGolden(name);
+    await t.step(name, async () => {
+      const golden = await loadGolden(name);
       assert(
         golden !== undefined,
         `missing golden for fixture "${name}" - run ` +
           `test/traverse-replay/regen-goldens.ts and review the diff`,
       );
-      const fixture = loadFixture(path);
+      const fixture = await loadFixture(path);
       const { oracle } = replayFixture(fixture, { collectOracle: true });
       const problems = diffOracles(golden, oracle!);
       assert(

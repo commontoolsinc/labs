@@ -10,7 +10,7 @@
  * (and the regenerated golden diff is the review artifact justifying the
  * change).
  */
-import { gunzipSync, gzipSync } from "node:zlib";
+import { readMaybeGzippedText, writeGzippedText } from "./gzip.ts";
 import type { ReplayOracle } from "./replay.ts";
 
 const fixturesDir = new URL("./fixtures/", import.meta.url);
@@ -34,24 +34,24 @@ export function goldenPath(name: string): string {
   return new URL(`${name}.golden.json.gz`, goldensDir).pathname;
 }
 
-export function loadGolden(name: string): ReplayOracle | undefined {
-  let bytes: Uint8Array;
+export async function loadGolden(
+  name: string,
+): Promise<ReplayOracle | undefined> {
+  const path = goldenPath(name);
   try {
-    bytes = Deno.readFileSync(goldenPath(name));
+    Deno.statSync(path);
   } catch {
     return undefined;
   }
-  return JSON.parse(
-    new TextDecoder().decode(gunzipSync(bytes)),
-  ) as ReplayOracle;
+  return JSON.parse(await readMaybeGzippedText(path)) as ReplayOracle;
 }
 
-export function writeGolden(name: string, oracle: ReplayOracle): void {
+export async function writeGolden(
+  name: string,
+  oracle: ReplayOracle,
+): Promise<void> {
   Deno.mkdirSync(goldensDir, { recursive: true });
-  Deno.writeFileSync(
-    goldenPath(name),
-    gzipSync(new TextEncoder().encode(JSON.stringify(oracle)), { level: 9 }),
-  );
+  await writeGzippedText(goldenPath(name), JSON.stringify(oracle));
 }
 
 /** Human-oriented diff; empty array means the oracles match. */

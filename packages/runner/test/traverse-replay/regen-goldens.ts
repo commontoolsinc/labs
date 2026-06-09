@@ -11,11 +11,11 @@ import { listFixturePaths, writeGolden } from "./goldens.ts";
 import { loadFixture, replayFixture } from "./replay.ts";
 
 for (const { name, path } of listFixturePaths()) {
-  const fixture = loadFixture(path);
+  const fixture = await loadFixture(path);
   const t0 = performance.now();
   const { oracle, metrics } = replayFixture(fixture, { collectOracle: true });
   const elapsed = performance.now() - t0;
-  writeGolden(name, oracle!);
+  await writeGolden(name, oracle!);
   console.log(
     `${name}: ${fixture.invocations.length} invocations replayed in ` +
       `${elapsed.toFixed(0)}ms ` +

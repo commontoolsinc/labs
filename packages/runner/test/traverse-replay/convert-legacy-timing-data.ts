@@ -7,8 +7,8 @@
  *   deno run --allow-read --allow-write \
  *     test/traverse-replay/convert-legacy-timing-data.ts
  */
-import { gzipSync } from "node:zlib";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { writeGzippedText } from "./gzip.ts";
 import {
   fixtureDocKey,
   type TraverseFixture,
@@ -18,7 +18,8 @@ import {
 // space explicitly, so the corpus must be keyed by it (the original timing
 // test used a space-agnostic store keyed by id only).
 const SPACE = "did:key:z6MkkGMscCkDFETV5efoTSEybcVfo8muPQUp7qMa3mUGC4mF";
-const ROOT_ID = "of:baedreibl64qzbhgkvpuxbfc657ugjeyidc62hixjybt5dpci2ddkkhs26m";
+const ROOT_ID =
+  "of:baedreibl64qzbhgkvpuxbfc657ugjeyidc62hixjybt5dpci2ddkkhs26m";
 
 // The selector the original capture was queried with. The dataset predates
 // the charm→piece rename, so the property names keep the old "charm" form
@@ -92,10 +93,7 @@ const fixture: TraverseFixture = {
 };
 
 Deno.mkdirSync(new URL("./fixtures/", import.meta.url), { recursive: true });
-Deno.writeFileSync(
-  outPath,
-  gzipSync(new TextEncoder().encode(JSON.stringify(fixture)), { level: 9 }),
-);
+await writeGzippedText(outPath.pathname, JSON.stringify(fixture));
 console.log(
   `wrote ${outPath.pathname}: ${Object.keys(docs).length} docs, ` +
     `${fixture.invocations.length} invocations`,
