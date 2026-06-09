@@ -387,11 +387,11 @@ function factoryFromPattern<T, R>(
       cellReference.path.length === 0
     ) {
       const partialCause = cellReference.partialCause!;
+      const descriptorSchema = schemaWithDefault(schema, value);
       derivedInternalPartialCausesByRoot.set(top, partialCause);
       derivedInternalCells.push({
         partialCause,
-        ...(schema !== undefined && { schema }),
-        ...(value !== undefined && { initial: value as JSONValue }),
+        ...(descriptorSchema !== undefined && { schema: descriptorSchema }),
       });
     }
   });
@@ -709,3 +709,22 @@ export function getTopFrame(): Frame | undefined {
 
 /** The full type of the `pattern` function including all overloads. */
 export type PatternBuilder = typeof pattern;
+
+function schemaWithDefault(
+  schema: JSONSchema | undefined,
+  value: unknown,
+): JSONSchema | undefined {
+  if (value === undefined) return schema;
+  if (schema === true || schema === undefined) {
+    return { default: value as JSONValue };
+  }
+  if (schema === false) {
+    return { not: true, default: value as JSONValue };
+  }
+  if (isRecord(schema)) {
+    return schema.default === undefined
+      ? { ...schema, default: value as JSONValue }
+      : schema;
+  }
+  return schema;
+}

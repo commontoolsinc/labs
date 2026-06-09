@@ -36,7 +36,7 @@ class SharedServerStorageManager extends EmulatedStorageManager {
 //
 // A pattern's derived internal cell carries a build-time default (in home.tsx,
 // `const activeTab = new Writable("spaces").for("activeTab")` →
-// `derivedInternalCells = [{ partialCause: "activeTab", initial: "spaces" }]`).
+// `derivedInternalCells = [{ partialCause: "activeTab", schema: { default: "spaces" } }]`).
 // After the user picks a
 // value ("profile") and it is persisted, re-running the pattern must NOT revert
 // the cell to the build-time default.
@@ -64,7 +64,7 @@ describe("rehydrate internal default (CT-1666)", () => {
     resultSchema: {},
     derivedInternalCells: [{
       partialCause: "activeTab",
-      initial: "spaces",
+      schema: { default: "spaces" },
     }],
     result: {},
     nodes: [],

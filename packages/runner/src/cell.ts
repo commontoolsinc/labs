@@ -359,9 +359,6 @@ declare module "@commonfabric/api" {
     path: readonly PropertyKey[];
     copyTrap: boolean;
 
-    // TODO(seefeld): Remove once default schemas are properly propagated
-    setInitialValue(value: T): void;
-
     /** Set the self-reference for SELF symbol support in patterns */
     setSelfRef(selfRef: OpaqueRef<any>): void;
   }
@@ -426,7 +423,6 @@ const cellMethods = new Set<
   "connect",
   "export",
   "getAsOpaqueRefProxy",
-  "setInitialValue",
   "setSelfRef",
   "exec",
   "query",
@@ -1729,12 +1725,6 @@ export class CellImpl<T extends FabricValue>
     cellNodes.get(top)!.add(node);
   }
 
-  // TODO(seefeld): Remove once default schemas are properly propagated
-  private _initialValue?: T;
-  setInitialValue(value: T): void {
-    this._initialValue = value;
-  }
-
   /**
    * Export cell metadata for introspection, similar to OpaqueRef's export method.
    * If the cell has a link, it's included as 'external'.
@@ -1763,7 +1753,7 @@ export class CellImpl<T extends FabricValue>
       // Cast needed: stream sentinel marker isn't actually of type T
       value: this._kind === "stream"
         ? { $stream: true } as unknown as T
-        : this._initialValue,
+        : undefined,
       name: this._causeContainer.cause,
       external: this._link.id
         ? this.getAsWriteRedirectLink({
@@ -2822,11 +2812,6 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         false,
         kind,
       );
-
-      // Set the initial value only if value is defined
-      if (value !== undefined) {
-        cell.setInitialValue(value);
-      }
 
       return cell;
     };
