@@ -14,42 +14,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const authorizationError = (message: string): Error =>
   Object.assign(new Error(message), { name: "AuthorizationError" });
 
-const toByteArray = (value: unknown): Uint8Array | null => {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-  // A `FabricBytes` is the long-term wire form for the signature, and the
-  // current client (`v2-remote-session.ts`) emits it.
-  if (value instanceof FabricBytes) {
-    return value.slice();
-  }
-  // TODO(danfuzz): the array / numeric-keyed-object branches below are legacy
-  // forms emitted by older clients (pre-`FabricBytes`). Retire them once every
-  // client emitting them has propagated out.
-  if (Array.isArray(value) && value.every((item) => Number.isInteger(item))) {
-    return Uint8Array.from(value);
-  }
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const entries = Object.entries(value)
-    .map(([key, item]) => [Number(key), item] as const)
-    .filter(([index, item]) =>
-      Number.isInteger(index) && index >= 0 && Number.isInteger(item)
-    )
-    .toSorted(([left], [right]) => left - right);
-
-  if (
-    entries.length === 0 ||
-    entries.some(([index], position) => index !== position)
-  ) {
-    return null;
-  }
-
-  return Uint8Array.from(entries.map(([, item]) => item as number));
-};
-
 const sameSessionDescriptor = (
   left: Record<string, unknown>,
   right: { sessionId?: string; seenSeq?: number },
@@ -67,16 +31,16 @@ const authorizeSessionOpen = async (
     authorization?: unknown;
   },
 ): Promise<string> => {
-  const signature = toByteArray(
-    isRecord(message.authorization)
-      ? message.authorization.signature
-      : undefined,
-  );
-  if (
-    !isRecord(message.invocation) ||
-    !isRecord(message.authorization) ||
-    signature === null
-  ) {
+  // The session signature travels as a `FabricBytes` (emitted by the client in
+  // `v2-remote-session.ts`), which decodes to one here. A non-null `signature`
+  // implies a well-formed `authorization`, so it needn't be checked separately.
+  const rawSignature = isRecord(message.authorization)
+    ? message.authorization.signature
+    : undefined;
+  const signature = rawSignature instanceof FabricBytes
+    ? rawSignature.slice()
+    : null;
+  if (!isRecord(message.invocation) || signature === null) {
     throw authorizationError("memory session.open requires authorization");
   }
 

@@ -154,9 +154,7 @@ export class RemoteSessionFactory implements SessionFactory {
         // The signature travels as a `FabricBytes` -- the proper fabric form
         // for a byte sequence, which serializes to a compact `/Bytes@1` wire
         // form and round-trips faithfully. The server's `toByteArray` accepts
-        // it. (It still also accepts the older number-array form for now, so
-        // that legacy handling can be retired only once every client emitting
-        // it has been replaced by this one -- see the TODO in `toByteArray`.)
+        // it.
         signature: new FabricBytes(signature.ok),
       },
     };
