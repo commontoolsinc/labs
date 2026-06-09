@@ -47,7 +47,7 @@ export type ReplayInvocationOracle = {
   ok: boolean;
   /** TraverseFailure code when ok is false. */
   code?: string;
-  /** Structural hash of the returned value ("undefined" sentinel if so). */
+  /** Truncated structural hash of the returned value ("undefined" if so). */
   hash: string;
 };
 
@@ -55,9 +55,26 @@ export type ReplayOracle = {
   invocations: ReplayInvocationOracle[];
   /** Sorted unique read descriptors: `space|scope|id|<json path>|flags`. */
   readSet: string[];
-  /** Per shared-context id: sorted `trackerKey::selectorHash` entries. */
+  /**
+   * Per context id: sorted `trackerKey::selectorHash` entries. Only contexts
+   * shared by multiple invocations or with includeMeta (the server query
+   * path, where tracker contents drive subscriptions) are dumped — fresh
+   * per-call client contexts would only mirror the read set.
+   */
   schemaTrackers: Record<string, string[]>;
 };
+
+/** 96 bits of a structural hash: ample for regression detection. */
+const truncatedHash = (value: unknown): string =>
+  hashStringOf(value).slice(0, 16);
+
+/**
+ * Compact long ids (`data:application/json,...` URIs embed entire documents)
+ * to a recognizable prefix plus a structural hash, so oracle entries stay
+ * cheap without losing discriminating power.
+ */
+const compactId = (id: string): string =>
+  id.length <= 80 ? id : `${id.slice(0, 24)}#${truncatedHash(id)}`;
 
 export type ReplayMetrics = {
   invocations: number;
@@ -129,9 +146,9 @@ function wrapTxWithReadLog(
             options?.trackReadWithoutLoad ? "t" : ""
           }${options?.meta !== undefined ? "m" : ""}`;
           log.add(
-            `${address.space}|${address.scope ?? "space"}|${address.id}|${
-              JSON.stringify(address.path)
-            }|${flags}`,
+            `${address.space}|${address.scope ?? "space"}|${
+              compactId(address.id)
+            }|${JSON.stringify(address.path)}|${flags}`,
           );
           // deno-lint-ignore no-explicit-any
           return (target as any)[prop](address, options);
@@ -166,6 +183,8 @@ export function replayFixture(
   const tx = collectOracle ? wrapTxWithReadLog(rawTx, readLog) : rawTx;
 
   const contexts = new Map<number, TraversalContext>();
+  const contextUses = new Map<number, number>();
+  const contextIncludesMeta = new Map<number, boolean>();
   const memos = new Map<number, ReturnType<typeof createSchemaMemo>>();
 
   const invocationOracles: ReplayInvocationOracle[] = [];
@@ -190,6 +209,13 @@ export function replayFixture(
     if (context === undefined) {
       context = makeContext(invocation.includeMeta);
       contexts.set(invocation.context, context);
+    }
+    contextUses.set(
+      invocation.context,
+      (contextUses.get(invocation.context) ?? 0) + 1,
+    );
+    if (invocation.includeMeta) {
+      contextIncludesMeta.set(invocation.context, true);
     }
     let memo = undefined;
     if (invocation.memo !== undefined) {
@@ -242,7 +268,7 @@ export function replayFixture(
       invocationOracles.push({
         ok: rv.error === undefined,
         ...(rv.error !== undefined && { code: rv.error.code }),
-        hash: rv.ok === undefined ? "undefined" : hashStringOf(rv.ok),
+        hash: rv.ok === undefined ? "undefined" : truncatedHash(rv.ok),
       });
     }
   }
@@ -253,10 +279,13 @@ export function replayFixture(
   if (collectOracle) {
     const schemaTrackers: Record<string, string[]> = {};
     for (const [contextId, context] of contexts) {
+      const shared = (contextUses.get(contextId) ?? 0) > 1;
+      const includesMeta = contextIncludesMeta.get(contextId) ?? false;
+      if (!shared && !includesMeta) continue;
       const entries: string[] = [];
       for (const [key, selectors] of context.schemaTracker) {
         for (const selector of selectors) {
-          entries.push(`${key}::${hashStringOf(selector)}`);
+          entries.push(`${compactId(key)}::${truncatedHash(selector)}`);
         }
       }
       schemaTrackers[String(contextId)] = entries.sort();
