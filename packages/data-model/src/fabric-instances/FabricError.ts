@@ -1,7 +1,6 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   CODEC,
-  DECONSTRUCT,
   type FabricCodec,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
@@ -39,7 +38,7 @@ export type FabricErrorState = {
   /**
    * The `.name` property. Pass `null` (or omit) to mean "same as `type`"; the
    * resulting instance's `.name` is always a concrete string (`null` is a
-   * wire-level optimization at the `[DECONSTRUCT]` boundary, not part of the
+   * wire-level optimization at the `[CODEC]` encode boundary, not part of the
    * public API).
    */
   readonly name?: string | null | undefined;
@@ -76,8 +75,7 @@ export type FabricErrorState = {
  * `Object.freeze`'d (strict-mode non-writable-property semantics). The
  * extras bag mirrors this by gating `setExtra` / `deleteExtra` on the
  * frozen state. The serialization layer handles `FabricError` via its static
- * `[CODEC]`, which is the source of truth for the encoded form; the
- * `[DECONSTRUCT]` protocol member delegates to it.
+ * `[CODEC]`, which is the source of truth for the encoded form.
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
@@ -221,17 +219,6 @@ export class FabricError extends FabricNativeWrapper<Error> {
   /** Returns the `[key, value]` entries in the extras bag. */
   extraEntries(): IterableIterator<[string, FabricValue]> {
     return this.#extras.entries();
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Delegates to this class's `[CODEC]`, which is the source of truth for the
-   * encoded form. `[DECONSTRUCT]` remains the protocol entry point relied on by
-   * hashing and `[ID]` assignment.
-   */
-  [DECONSTRUCT](): FabricValue {
-    return FabricError[CODEC].encode(this);
   }
 
   /**

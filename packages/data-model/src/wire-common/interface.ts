@@ -8,26 +8,6 @@ import type { FabricInstance, FabricValue } from "@/interface.ts";
 export const CODEC: unique symbol = Symbol.for("data-model.codec");
 
 /**
- * Well-known symbol for binding the method
- * `FabricDeconstructable[DECONSTRUCT]`.
- */
-export const DECONSTRUCT: unique symbol = Symbol.for("data-model.deconstruct");
-
-/**
- * Interface for deconstructable fabric objects, which is all of them, but
- * TypeScript doesn't let us say that given how the class/interface hierarchy
- * under `FabricSpecialObject` is set up.
- */
-export interface FabricDeconstructable {
-  /**
-   * Returns the essential state of this instance as a `FabricValue`.
-   * Implementations must _not_ recursively deconstruct nested values; the
-   * serialization system handles that.
-   */
-  [DECONSTRUCT](): FabricValue;
-}
-
-/**
  * Interface for codecs (encoder-decoder objects). These are object which can
  * extract "essential state" out of values (objects per se or otherwise) and
  * also take such "essential state" and produce values that are equivalent (in

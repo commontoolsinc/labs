@@ -1,5 +1,4 @@
-import { FabricInstance, type FabricValue } from "@/interface.ts";
-import { DECONSTRUCT, FabricDeconstructable } from "@/wire-common/interface.ts";
+import { FabricInstance } from "@/interface.ts";
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
@@ -13,14 +12,10 @@ import { DECONSTRUCT, FabricDeconstructable } from "@/wire-common/interface.ts";
  * `shallowClone()`/`shallowUnfrozenClone()` template-method split), at which
  * point individual subclasses stop implementing `deepClone()` directly.
  */
-export abstract class BaseFabricInstance extends FabricInstance
-  implements FabricDeconstructable {
+export abstract class BaseFabricInstance extends FabricInstance {
   //
   // Instance members
   //
-
-  /** @inheritDoc */
-  abstract [DECONSTRUCT](): FabricValue;
 
   /**
    * The type tag to use for this instance to identify it in wire protocols.

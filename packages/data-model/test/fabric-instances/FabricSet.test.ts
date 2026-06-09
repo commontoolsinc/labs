@@ -7,7 +7,7 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
@@ -25,13 +25,6 @@ describe("FabricSet", () => {
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
-      it("throws (stub)", () => {
-        const ss = new FabricSet(new Set());
-        expect(() => ss[DECONSTRUCT]()).toThrow("not yet implemented");
-      });
-    });
-
     describe("toNativeValue()", () => {
       it("returns a `FrozenSet` when `frozen` is `true`", () => {
         const set = new Set<FabricValue>([1, 2]);

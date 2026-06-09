@@ -7,7 +7,7 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
@@ -348,9 +348,6 @@ describe("native-conversion", () => {
           return "Custom@914";
         }
 
-        [DECONSTRUCT](): FabricValue {
-          return { value: 42 };
-        }
         [DEEP_FREEZE](
           _subFreeze: (value: FabricValue) => FabricValue,
         ): FabricValue {

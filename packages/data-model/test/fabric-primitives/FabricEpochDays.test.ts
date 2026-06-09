@@ -17,7 +17,7 @@ describe("FabricEpochDays", () => {
     );
   });
 
-  it("is not a `FabricInstance` (no [DECONSTRUCT])", () => {
+  it("is not a `FabricInstance` (it's a `FabricPrimitive`)", () => {
     const sd = new FabricEpochDays(0n);
     expect(sd instanceof FabricInstance).toBe(false);
   });

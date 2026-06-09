@@ -7,7 +7,7 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
@@ -31,13 +31,6 @@ describe("FabricMap", () => {
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
-      it("throws (stub)", () => {
-        const sm = new FabricMap(new Map());
-        expect(() => sm[DECONSTRUCT]()).toThrow("not yet implemented");
-      });
-    });
-
     describe("toNativeValue()", () => {
       it("returns a `FrozenMap` when `frozen` is `true`", () => {
         const map = new Map<FabricValue, FabricValue>([["a", 1]]);

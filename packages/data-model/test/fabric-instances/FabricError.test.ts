@@ -7,7 +7,7 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -73,10 +73,13 @@ describe("FabricError", () => {
   });
 
   describe("instance members", () => {
-    describe("[DECONSTRUCT]", () => {
+    describe("`[CODEC]` `encode()` state", () => {
       it("returns `type`, `name=null` (common case), `message`, `stack`", () => {
         const se = FabricError.fromNativeError(new Error("hello"));
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect(state.type).toBe("Error");
         expect(state.name).toBe(null);
         expect(state.message).toBe("hello");
@@ -85,7 +88,10 @@ describe("FabricError", () => {
 
       it("sets `name` to `null` when `type === name` (`TypeError`)", () => {
         const se = FabricError.fromNativeError(new TypeError("bad"));
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect(state.type).toBe("TypeError");
         expect(state.name).toBe(null);
       });
@@ -94,7 +100,10 @@ describe("FabricError", () => {
         const err = new TypeError("bad");
         err.name = "CustomName";
         const se = FabricError.fromNativeError(err);
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect(state.type).toBe("TypeError");
         expect(state.name).toBe("CustomName");
       });
@@ -104,7 +113,10 @@ describe("FabricError", () => {
         const outer = FabricError.fromNativeError(
           new Error("outer", { cause: inner }),
         );
-        const state = outer[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(outer) as Record<
+          string,
+          FabricValue
+        >;
         expect(state.cause).toBe(inner);
       });
 
@@ -113,7 +125,10 @@ describe("FabricError", () => {
         (err as unknown as Record<string, unknown>).code = 42;
         (err as unknown as Record<string, unknown>).detail = "more info";
         const se = FabricError.fromNativeError(err);
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect(state.code).toBe(42);
         expect(state.detail).toBe("more info");
       });
@@ -125,7 +140,10 @@ describe("FabricError", () => {
           enumerable: true,
         });
         const se = FabricError.fromNativeError(err);
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect("__proto__" in state).toBe(false);
       });
 
@@ -138,7 +156,10 @@ describe("FabricError", () => {
         });
         (err as unknown as Record<string, unknown>).name = "Error";
         const se = FabricError.fromNativeError(err);
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect(state.message).toBe("original");
       });
 
@@ -146,17 +167,20 @@ describe("FabricError", () => {
         const err = new Error("no stack");
         err.stack = undefined;
         const se = FabricError.fromNativeError(err);
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect("stack" in state).toBe(false);
       });
 
-      it("round-trips through `[DECONSTRUCT]` and `[CODEC].decode()`", () => {
+      it("round-trips through `[CODEC]` `encode()` and `decode()`", () => {
         const original = new Error("round trip");
         original.name = "CustomError";
         (original as unknown as Record<string, unknown>).code = 42;
         const se = FabricError.fromNativeError(original);
 
-        const state = se[DECONSTRUCT]();
+        const state = FabricError[CODEC].encode(se);
         const restored = FabricError[CODEC].decode(
           WIRE_TYPE_TAGS.Error,
           state,
@@ -173,7 +197,10 @@ describe("FabricError", () => {
         original.name = "SpecialType";
         const se = FabricError.fromNativeError(original);
 
-        const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
+        const state = FabricError[CODEC].encode(se) as Record<
+          string,
+          FabricValue
+        >;
         expect(state.type).toBe("TypeError");
         expect(state.name).toBe("SpecialType");
 
@@ -491,8 +518,8 @@ describe("FabricError", () => {
         it("round-trips an `Error` whose cause is itself a `FabricError`", () => {
           // Simulates what `fabricFromNativeValue` produces: a FabricError
           // wrapping an Error whose cause is itself a FabricError (not a raw
-          // Error). Encoding's recurse on `[DECONSTRUCT]` output must find a
-          // FabricValue, not a raw Error.
+          // Error). Encoding's recurse on `[CODEC]` `encode()` output must find
+          // a FabricValue, not a raw Error.
           const innerSe = FabricError.fromNativeError(new Error("inner"));
           const outerErr = new Error("outer");
           outerErr.cause = innerSe;

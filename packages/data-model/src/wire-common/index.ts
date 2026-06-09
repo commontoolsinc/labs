@@ -1,9 +1,7 @@
 export {
   CODEC,
-  DECONSTRUCT,
   type FabricClassWithCodec,
   type FabricCodec,
-  type FabricDeconstructable,
   type ReconstructionContext,
   type SerializationContext,
 } from "./interface.ts";

@@ -1,7 +1,6 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
   CODEC,
-  DECONSTRUCT,
   type FabricCodec,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
@@ -18,17 +17,6 @@ import { deepFreeze } from "@/deep-freeze.ts";
 export class UnknownValue extends ExplicitTagValue {
   constructor(wireTypeTag: string, state: FabricValue) {
     super(wireTypeTag, state);
-  }
-
-  /**
-   * @inheritDoc
-   *
-   * Returns the `{ type, state }` envelope (preserved tag and raw state). This
-   * is the protocol/hashing form; the wire form (via `[CODEC]`) is the bare
-   * `state`, with the tag carried separately.
-   */
-  [DECONSTRUCT](): FabricValue {
-    return { type: this.wireTypeTag, state: this.state };
   }
 
   /**

@@ -17,7 +17,7 @@ describe("FabricEpochNsec", () => {
     );
   });
 
-  it("is not a `FabricInstance` (no [DECONSTRUCT])", () => {
+  it("is not a `FabricInstance` (it's a `FabricPrimitive`)", () => {
     const sn = new FabricEpochNsec(0n);
     expect(sn instanceof FabricInstance).toBe(false);
   });
