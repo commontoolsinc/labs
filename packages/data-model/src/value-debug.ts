@@ -9,6 +9,7 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
 } from "./interface.ts";
+import { codecOf } from "@/wire-common/index.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
@@ -142,10 +143,15 @@ class DebugStringifier {
         if (value instanceof FabricSpecialObject) {
           // The slash here is to suggest that what we're rendering is a known
           // encodable type, and not just an instance of some random class.
-          // TODO(danfuzz): This should get fancier/smarter once the new "codec"
-          // work lands in `data-model`.
-          const fullTag = (value as { wireTypeTag?: string }).wireTypeTag ??
-            className;
+          // TODO(danfuzz): This should get fancier/smarter, e.g. by rendering
+          // some of the instance's actual state instead of an opaque `(...)`.
+          let fullTag;
+          try {
+            fullTag = codecOf(value).tagForValue(value);
+          } catch {
+            // Never let the debug formatter throw; fall back to the class name.
+            fullTag = className;
+          }
           const tag = fullTag.replace(/@.*$/, "");
           return marked(`/${tag}(...)`);
         } else {
