@@ -18,7 +18,7 @@ The home space provides a persistent, user-owned storage location for:
 
 - **Favorites** - A singleton list of favorited pieces that works across all
   spaces
-- **Profile** - A link to the user's shared profile default pattern
+- **Profile** - A list of the user's shared profiles, plus the chosen default
 - **Spaces** - A managed list of spaces the user has created or bookmarked
 - **Settings** - User-level preferences including `defaultAppUrl`
 
@@ -64,23 +64,30 @@ const favoritesCell = getHomeFavorites(runtime);
 
 ## Profile
 
-The home default pattern links to the user's shared profile through
-`homeSpaceCell.defaultPattern.profile`. The value is a cell link to the profile
-default pattern, not a root-level `profileSpace` field.
+A user can have **multiple** shared profiles (e.g. Work / Personal / Family).
+The home default pattern stores them as a list, plus a chosen default and a
+most-recently-used (MRU) ordering:
 
-If the link is missing, the system home pattern renders a profile-name input.
-Submitting a name starts `/api/patterns/system/profile-home.tsx` in a new
-profile space with `PatternFactory.inSpace(name)` and stores the resulting
-profile default-pattern link at `defaultPattern.profile`.
-The requested name is also mirrored into `defaultPattern.profileName` so
-viewer-specific `#profileName` wishes can update immediately while the linked
-profile default pattern finishes materializing.
+- `homeSpaceCell.defaultPattern.profiles` — the list of profile links (each a
+  cross-space link to a `profile-home.tsx` default pattern in its own space).
+- `homeSpaceCell.defaultPattern.defaultProfile` — the profile `#profile`
+  resolves to in headless mode and that the picker selects by default.
+- `homeSpaceCell.defaultPattern.mru` — recency-ordered links; drives ordering
+  after the default.
 
-The `defaultPattern.profile` link is CFC-protected profile-link data. It must be
-created by the home default pattern's trusted profile creation flow; direct
-untrusted writes to the link are rejected. The inline `#profile` wish UI uses a
-trusted profile-create pattern surface for the same creation event and does not
-navigate away from the current view.
+Each profile lives in its own space, created with `PatternFactory.inSpace(name)`
+running `/api/patterns/system/profile-home.tsx`; the link is appended to
+`profiles`. The home Profile tab renders the **profile picker**
+(`profile-picker.tsx`): it lists profiles, lets the user create more inline, pick
+the default, and stamp MRU. There is no `profileName` mirror field anymore.
+
+`profiles`/`defaultProfile`/`mru` are CFC-protected profile-link data, created
+through the trusted profile-create / picker surfaces. Untrusted writes are
+rejected: adding/replacing a link fails the element contract, and structural
+changes (truncation/removal/reorder) fail the array's container
+`writeAuthorizedBy`. The inline `#profile` wish UI uses the trusted
+profile-create surface for the same creation event and does not navigate away
+from the current view.
 
 Patterns can discover profile data from any space:
 

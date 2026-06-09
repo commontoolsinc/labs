@@ -495,10 +495,13 @@ function resolveInSpaceTargetSpace(
   frame: Frame | undefined,
 ): MemorySpace | undefined {
   if (typeof space === "string" && /^did:[^:]+:.+/.test(space)) {
-    return space as MemorySpace;
+    return optIntoInSpaceMultiSpaceCommit(frame, space as MemorySpace);
   }
   if (isCell(space)) {
-    return space.getAsNormalizedFullLink().space;
+    return optIntoInSpaceMultiSpaceCommit(
+      frame,
+      space.getAsNormalizedFullLink().space,
+    );
   }
   const runtime = frame?.runtime;
   if (!runtime) return undefined;
@@ -506,9 +509,40 @@ function resolveInSpaceTargetSpace(
     ? space
     : anonymousSpaceName(frame!);
   const resolved = runtime.resolveSpaceNameSync(name);
-  if (resolved !== undefined) return resolved;
+  if (resolved !== undefined) {
+    return optIntoInSpaceMultiSpaceCommit(frame, resolved);
+  }
   (frame!.pendingSpaceNames ??= new Set<string>()).add(name);
   return undefined;
+}
+
+/**
+ * Using `.inSpace(...)` is the opt-in for cross-space writes: a handler/action
+ * that materializes a child in another space must be allowed to commit that
+ * child's space alongside the space it's writing into (e.g. appending a profile
+ * link to the home `profiles` list, where each profile lives in its own space).
+ *
+ * We enable the multi-space commit the moment the target space resolves — during
+ * the handler body, before the cross-space write executes — so the write
+ * isolation guard doesn't reject it. We opt in even when the space DID is already
+ * cached (the post-retry success run), and accumulate every distinct child space
+ * (ordered before the parent) so an array that already holds cross-space links
+ * can grow by another element.
+ */
+function optIntoInSpaceMultiSpaceCommit(
+  frame: Frame | undefined,
+  targetSpace: MemorySpace,
+): MemorySpace {
+  const tx = frame?.tx;
+  const parentSpace = frame?.space;
+  if (tx && parentSpace && targetSpace !== parentSpace) {
+    frame?.runtime?.runner.enableCrossSpaceChildCommit(
+      tx,
+      targetSpace,
+      parentSpace,
+    );
+  }
+  return targetSpace;
 }
 
 /**

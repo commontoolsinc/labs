@@ -35,6 +35,8 @@ const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
 const PROFILE_CREATE_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/profile-create.tsx";
+const PROFILE_PICKER_TSX_PATH = getPatternEnvironment().apiUrl +
+  "api/patterns/system/profile-picker.tsx";
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
   level: "warn",
@@ -70,6 +72,28 @@ const profileElementListSchema = internSchema(
         source: { type: "string" },
       },
     },
+  },
+);
+
+// Schema for a list of profile links (the home `profiles` and `mru` lists). Each
+// element is read as a cell *reference* (`asCell`), NOT its inlined value, so the
+// list can be enumerated without deep-resolving every profile's own space. A
+// plain `.get()` inlines each element and returns `undefined` for the whole list
+// whenever any element is a link into a space not yet loaded in the reading
+// context — e.g. a shared piece resolving `#profile` right after a profile was
+// created in its own (`inSpace`) space. That collapsed the list to length 0 and
+// hid the just-created profile behind the "No profile" / create surface.
+//
+// The item type is `unknown` (not `object`) on purpose: with `asCell`, an
+// `object` item schema would trigger a *deep* sync of each linked profile —
+// fetching its entire object graph and everything it transitively links, across
+// space boundaries — just to count the list. `unknown` keeps the sync shallow
+// (we only need the links here). The default profile's name is loaded lazily and
+// targeted via `subscribeProfileName` once a candidate is selected.
+const profileLinkListSchema = internSchema(
+  {
+    type: "array",
+    items: { type: "unknown", asCell: ["cell"] },
   },
 );
 
@@ -266,50 +290,123 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
 }
 
 /**
- * Resolves the cell backing the user's profile default pattern, reached through
- * `homeSpaceCell.defaultPattern.profile`.
- *
- * The profile link is owner-protected and created through a writeonly
- * (`WriteAuthorizedBy`) binding that stores a direct cross-space link to the
- * profile pattern. A valid profile link therefore resolves to a cell in another
- * space (the profile space) with an empty path; if it is unset or still points
- * into the home space, the profile does not exist yet and we throw so callers
- * can fall back to the create surface.
+ * A profile link is valid when it resolves to a cell in another space (the
+ * profile's own `inSpace` space) with an empty path. An unset link, or one that
+ * still points into the home space, means the profile does not exist yet.
  */
-function getProfileDefaultCell(ctx: WishContext): Cell<unknown> {
-  const homeSpaceCell = getHomeSpaceCell(ctx);
-  const profileField = homeSpaceCell.key("defaultPattern").key(
-    "profile",
-  );
-  const profileDefault = profileField.resolveAsCell();
-  const profileLink = profileDefault.getAsNormalizedFullLink();
-  if (
-    profileField.getRaw() === undefined ||
-    profileLink.space === homeSpaceCell.space ||
-    profileLink.path.length > 0
-  ) {
-    throw new WishError("homeSpaceCell.defaultPattern.profile is not set");
-  }
-  void profileDefault.pull().catch((error) => {
+function profileCellIsValid(
+  cell: Cell<unknown>,
+  rawIsSet: boolean,
+  homeSpace: Cell<unknown>["space"],
+): boolean {
+  if (!rawIsSet) return false;
+  const link = cell.getAsNormalizedFullLink();
+  return link.space !== homeSpace && link.path.length === 0;
+}
+
+/**
+ * Subscribe to a profile cell's live name so the wish re-runs once a
+ * freshly-created profile's name materializes across the space boundary.
+ */
+function subscribeProfileName(cell: Cell<unknown>): void {
+  void cell.pull().catch((error) => {
     wishFlowLogger.warn("profile-pull", () => [
-      "Failed to pull profile default pattern",
+      "Failed to pull profile pattern",
       error,
     ]);
   });
-  void profileDefault.key("initialNameApplied").pull().catch((error) => {
+  void cell.key("initialNameApplied").pull().catch((error) => {
     wishFlowLogger.warn("profile-name-pull", () => [
-      "Failed to pull profile default name",
+      "Failed to pull profile name",
       error,
     ]);
   });
-  // Read initialNameApplied so this wish subscribes to it and re-runs once the
-  // freshly-created profile's name materializes across the space boundary.
-  profileDefault.key("initialNameApplied").get();
-  return profileDefault;
+  cell.key("initialNameApplied").get();
+}
+
+/**
+ * Enumerate the user's profile candidate cells from the home `profiles` list,
+ * ordered: default first, then by most-recently-used (MRU), then remaining list
+ * order. Identity is by link equality (`Cell.equals`); there is no synthetic
+ * key. Returns [] when no valid profile exists yet.
+ */
+function getProfileCandidateCells(ctx: WishContext): Cell<unknown>[] {
+  const homeSpaceCell = getHomeSpaceCell(ctx);
+  const defaultPattern = homeSpaceCell.key("defaultPattern").resolveAsCell();
+  const profilesCell = defaultPattern.key("profiles");
+  // Read the list as cell references so a freshly-created profile (a link into
+  // its own space, not yet loaded here) is still counted rather than collapsing
+  // the whole list to `undefined`. See profileLinkListSchema.
+  const rawList = profilesCell.asSchema(profileLinkListSchema).get();
+  const length = Array.isArray(rawList) ? rawList.length : 0;
+
+  const candidates: Cell<unknown>[] = [];
+  for (let i = 0; i < length; i++) {
+    const entry = profilesCell.key(i);
+    const cell = entry.resolveAsCell();
+    if (
+      !profileCellIsValid(
+        cell,
+        entry.getRaw() !== undefined,
+        homeSpaceCell.space,
+      )
+    ) {
+      continue;
+    }
+    subscribeProfileName(cell);
+    candidates.push(cell);
+  }
+  if (candidates.length === 0) return [];
+
+  // Ordering inputs: the default link and the MRU list.
+  const defaultEntry = defaultPattern.key("defaultProfile");
+  const defaultCell = defaultEntry.resolveAsCell();
+  const defaultValid = profileCellIsValid(
+    defaultCell,
+    defaultEntry.getRaw() !== undefined,
+    homeSpaceCell.space,
+  );
+
+  const mruCell = defaultPattern.key("mru");
+  const mruRaw = mruCell.asSchema(profileLinkListSchema).get();
+  const mruLength = Array.isArray(mruRaw) ? mruRaw.length : 0;
+  const mruCells: Cell<unknown>[] = [];
+  for (let j = 0; j < mruLength; j++) {
+    mruCells.push(mruCell.key(j).resolveAsCell());
+  }
+  const mruRank = (cell: Cell<unknown>): number => {
+    const idx = mruCells.findIndex((m) => m.equals(cell));
+    return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+  };
+
+  const ordered = [...candidates];
+  ordered.sort((a, b) => {
+    if (defaultValid) {
+      const aDef = defaultCell.equals(a);
+      const bDef = defaultCell.equals(b);
+      if (aDef && !bDef) return -1;
+      if (bDef && !aDef) return 1;
+    }
+    return mruRank(a) - mruRank(b);
+  });
+  return ordered;
+}
+
+/**
+ * The user's default profile cell: the first ordered candidate (default link
+ * when valid, else the most-recently-used / first profile). Throws when no
+ * profile exists yet so callers can fall back to the create surface.
+ */
+function getDefaultProfileCell(ctx: WishContext): Cell<unknown> {
+  const candidates = getProfileCandidateCells(ctx);
+  if (candidates.length === 0) {
+    throw new WishError("No profile exists yet");
+  }
+  return candidates[0];
 }
 
 function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
-  const profileDefaultCell = getProfileDefaultCell(ctx);
+  const profileDefaultCell = getDefaultProfileCell(ctx);
   const { space } = profileDefaultCell.getAsNormalizedFullLink();
   return getSpaceCellForDID(ctx.runtime, space, ctx.tx);
 }
@@ -488,7 +585,7 @@ function searchProfileForHashtag(
     "profile-elements-cell",
     queryKey,
     () =>
-      getProfileDefaultCell(ctx)
+      getDefaultProfileCell(ctx)
         .key("elements")
         .asSchema(profileElementListSchema),
   );
@@ -719,48 +816,27 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
       }
-      return [{
-        cell: getProfileDefaultCell(ctx),
-        pathPrefix: [],
-      }];
+      const candidates = getProfileCandidateCells(ctx);
+      if (candidates.length === 0) {
+        // No profile yet — throw so the #profile error path falls back to the
+        // create surface (see profileCreateUI).
+        throw new WishError("No profile exists yet");
+      }
+      // Ordered default-first, then by MRU. Headless / single-result callers
+      // take the first (the default); multiple candidates drive the picker.
+      return candidates.map((cell) => ({ cell, pathPrefix: [] }));
     }
 
     case "#profileName": {
-      // Prefer the LIVE profile name (`initialNameApplied` tracks edits made via
-      // the profile's setName handler). The home `profileName` creation mirror
-      // is used only while the profile link is still resolving (so the name
-      // shows immediately during creation latency); it is not updated on later
-      // edits, so it must not take precedence.
-      const mirror = () =>
-        getHomeSpaceCell(ctx).key("defaultPattern").resolveAsCell().key(
-          "profileName",
-        );
-      try {
-        const profileDefault = getProfileDefaultCell(ctx);
-        const liveName = profileDefault.key("initialNameApplied")
-          .get() as unknown;
-        if (typeof liveName === "string" && liveName.length > 0) {
-          return [{ cell: profileDefault, pathPrefix: ["initialNameApplied"] }];
-        }
-        // Profile resolved but no name yet — use the mirror.
-        return [{ cell: mirror(), pathPrefix: [] }];
-      } catch (error) {
-        // The profile link is unresolved. If the creation mirror has a value the
-        // profile is mid-creation, so show it; otherwise there is genuinely no
-        // profile, so re-surface the error as an error state (a consumer test
-        // asserts a missing profile space errors rather than silently resolving).
-        const mirrorCell = mirror();
-        const mirrorValue = mirrorCell.get() as unknown;
-        if (typeof mirrorValue === "string" && mirrorValue.length > 0) {
-          return [{ cell: mirrorCell, pathPrefix: [] }];
-        }
-        throw error;
-      }
+      // The live name (`initialNameApplied`) of the default profile. Tracks
+      // edits made via the profile's setName handler.
+      const profileDefault = getDefaultProfileCell(ctx);
+      return [{ cell: profileDefault, pathPrefix: ["initialNameApplied"] }];
     }
 
     case "#profileAvatar": {
       return [{
-        cell: getProfileDefaultCell(ctx),
+        cell: getDefaultProfileCell(ctx),
         pathPrefix: ["avatar"],
       }];
     }
@@ -1056,6 +1132,8 @@ let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let suggestionPattern: Pattern | undefined;
 let profileCreatePatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let profileCreatePattern: Pattern | undefined;
+let profilePickerPatternFetchPromise: Promise<Pattern | undefined> | undefined;
+let profilePickerPattern: Pattern | undefined;
 
 async function fetchSuggestionPattern(
   runtime: Runtime,
@@ -1105,6 +1183,28 @@ async function fetchProfileCreatePattern(
     return pattern;
   } catch (e) {
     console.error("Can't load profile-create.tsx", e);
+    return undefined;
+  }
+}
+
+async function fetchProfilePickerPattern(
+  runtime: Runtime,
+): Promise<Pattern | undefined> {
+  try {
+    const program = await runtime.harness.resolve(
+      new HttpProgramResolver(PROFILE_PICKER_TSX_PATH),
+    );
+
+    if (!program) {
+      throw new WishError("Can't load profile-picker.tsx");
+    }
+    const pattern = await runtime.patternManager.compilePattern(program);
+
+    if (!pattern) throw new WishError("Can't compile profile-picker.tsx");
+
+    return pattern;
+  } catch (e) {
+    console.error("Can't load profile-picker.tsx", e);
     return undefined;
   }
 }
@@ -1282,14 +1382,21 @@ export function wish(
   let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
   let profileCreatePatternInput:
     | {
-      profile: unknown;
-      profileName: unknown;
+      profiles: unknown;
       inputId: string;
       buttonId: string;
     }
     | undefined;
   let profileCreatePatternResultCell: Cell<any> | undefined;
   let profileCreatePatternReadyCell: Cell<boolean> | undefined;
+  let profilePickerPatternInput:
+    | {
+      profiles: unknown;
+      defaultProfile: unknown;
+      mru: unknown;
+    }
+    | undefined;
+  let profilePickerPatternResultCell: Cell<any> | undefined;
 
   addCancel(() => {
     cancelled = true;
@@ -1299,6 +1406,9 @@ export function wish(
     }
     if (profileCreatePatternResultCell) {
       runtime.runner.stop(profileCreatePatternResultCell);
+    }
+    if (profilePickerPatternResultCell) {
+      runtime.runner.stop(profilePickerPatternResultCell);
     }
   });
 
@@ -1428,6 +1538,31 @@ export function wish(
     errorTx.commit();
   }
 
+  // Run a just-fetched sidecar pattern (profile create / picker) into its result
+  // cell on its own committed transaction, surfacing any commit failure as an
+  // error UI in that cell. Shared by launchProfileCreatePattern and
+  // launchProfilePickerPattern so the commit/error lifecycle lives in one place.
+  function runSidecarInOwnTx(
+    resultCell: Cell<any>,
+    pattern: Pattern,
+    inputForTx: (tx: IExtendedStorageTransaction) => unknown,
+  ): void {
+    try {
+      const runTx = runtime.edit();
+      runtime.run(runTx, pattern, inputForTx(runTx), resultCell.withTx(runTx));
+      runtime.prepareTxForCommit(runTx);
+      runTx.commit().then(({ error }) => {
+        if (error) {
+          commitPatternErrorUI(resultCell, toCompactDebugString(error));
+        }
+      }).catch((error) => {
+        commitPatternErrorUI(resultCell, errorMessage(error));
+      });
+    } catch (error) {
+      commitPatternErrorUI(resultCell, errorMessage(error));
+    }
+  }
+
   function launchProfileCreatePattern(
     ctx: WishContext,
     providedTx?: IExtendedStorageTransaction,
@@ -1435,11 +1570,8 @@ export function wish(
     const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
       .resolveAsCell();
     profileCreatePatternInput = {
-      profile: createSigilLinkFromParsedLink(
-        homeDefaultPattern.key("profile").getAsNormalizedFullLink(),
-      ),
-      profileName: createSigilLinkFromParsedLink(
-        homeDefaultPattern.key("profileName").getAsNormalizedFullLink(),
+      profiles: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
       ),
       inputId: "wish-profile-name-input",
       buttonId: "wish-profile-create-button",
@@ -1481,8 +1613,7 @@ export function wish(
           : cell;
       return profileCreatePatternInput && {
         ...profileCreatePatternInput,
-        profile: bindInputCell(profileCreatePatternInput.profile),
-        profileName: bindInputCell(profileCreatePatternInput.profileName),
+        profiles: bindInputCell(profileCreatePatternInput.profiles),
       };
     };
 
@@ -1505,26 +1636,11 @@ export function wish(
       }
       void profileCreatePatternFetchPromise.then((pattern) => {
         if (!cancelled && pattern && profileCreatePatternResultCell) {
-          const resultCell = profileCreatePatternResultCell;
-          try {
-            const runTx = runtime.edit();
-            runtime.run(
-              runTx,
-              pattern,
-              profileCreateInputForTx(runTx),
-              resultCell.withTx(runTx),
-            );
-            runtime.prepareTxForCommit(runTx);
-            runTx.commit().then(({ error }) => {
-              if (error) {
-                commitPatternErrorUI(resultCell, toCompactDebugString(error));
-              }
-            }).catch((error) => {
-              commitPatternErrorUI(resultCell, errorMessage(error));
-            });
-          } catch (error) {
-            commitPatternErrorUI(resultCell, errorMessage(error));
-          }
+          runSidecarInOwnTx(
+            profileCreatePatternResultCell,
+            pattern,
+            profileCreateInputForTx,
+          );
         }
       });
     } else if (!cancelled && profileCreatePatternResultCell) {
@@ -1549,6 +1665,93 @@ export function wish(
       "data-profile-create-ui": "wish",
       $cell: launchProfileCreatePattern(ctx, ctx.tx),
     });
+  }
+
+  // Launch the profile picker for #profile wishes with multiple profiles. Feeds
+  // the home `profiles`/`defaultProfile`/`mru` cells (as sigil links) so the
+  // picker can render natively, select (stamp MRU), set the default, and create
+  // another — all as trusted picker-surface writes. Mirrors
+  // launchProfileCreatePattern's deferred-fetch/run handling.
+  function launchProfilePickerPattern(
+    ctx: WishContext,
+    providedTx?: IExtendedStorageTransaction,
+  ): Cell<any> {
+    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
+      .resolveAsCell();
+    profilePickerPatternInput = {
+      profiles: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
+      ),
+      defaultProfile: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("defaultProfile").getAsNormalizedFullLink(),
+      ),
+      mru: createSigilLinkFromParsedLink(
+        homeDefaultPattern.key("mru").getAsNormalizedFullLink(),
+      ),
+    };
+    const tx = providedTx || runtime.edit();
+
+    if (!profilePickerPatternResultCell) {
+      profilePickerPatternResultCell = runtime.getCell(
+        parentCell.space,
+        {
+          wish: {
+            profilePickerPattern: cause,
+            user: runtime.userIdentityDID,
+          },
+        },
+        undefined,
+        tx,
+      );
+    }
+
+    const pickerInputForTx = (tx: IExtendedStorageTransaction) => {
+      const bindInputCell = (cell: unknown) =>
+        cell && typeof (cell as { withTx?: unknown }).withTx === "function"
+          ? (cell as Cell<unknown>).withTx(tx)
+          : cell;
+      return profilePickerPatternInput && {
+        profiles: bindInputCell(profilePickerPatternInput.profiles),
+        defaultProfile: bindInputCell(profilePickerPatternInput.defaultProfile),
+        mru: bindInputCell(profilePickerPatternInput.mru),
+      };
+    };
+
+    if (!profilePickerPattern) {
+      if (!profilePickerPatternFetchPromise) {
+        profilePickerPatternFetchPromise = fetchProfilePickerPattern(runtime)
+          .then((pattern) => {
+            profilePickerPattern = pattern;
+            if (!pattern) {
+              profilePickerPatternFetchPromise = undefined;
+            }
+            return pattern;
+          });
+      }
+      void profilePickerPatternFetchPromise.then((pattern) => {
+        if (!cancelled && pattern && profilePickerPatternResultCell) {
+          runSidecarInOwnTx(
+            profilePickerPatternResultCell,
+            pattern,
+            pickerInputForTx,
+          );
+        }
+      });
+    } else if (!cancelled && profilePickerPatternResultCell) {
+      runtime.run(
+        tx,
+        profilePickerPattern,
+        pickerInputForTx(tx),
+        profilePickerPatternResultCell.withTx(tx),
+      );
+    }
+
+    if (!providedTx) {
+      runtime.prepareTxForCommit(tx);
+      tx.commit();
+    }
+
+    return profilePickerPatternResultCell;
   }
 
   // Wish action, reactive to changes in inputsCell and any cell we read during
@@ -1711,6 +1914,27 @@ export function wish(
               "resolve",
               queryKey,
             );
+
+            // #profile with multiple profiles → launch the dedicated profile
+            // picker (native name/avatar/link rows, inline create, MRU/default
+            // writes). Headless / single-profile callers fall through to the
+            // fast path below and get the default profile directly.
+            if (
+              isProfilePersonaTarget(activeParsed) &&
+              !headless &&
+              uniqueResultCells.length > 1
+            ) {
+              measureWishPhase(
+                "send-profile-picker",
+                queryKey,
+                () =>
+                  sendResult(
+                    tx,
+                    launchProfilePickerPattern(ctx, tx),
+                  ),
+              );
+              return;
+            }
 
             // Unified shape: always return { result, candidates, [UI] }
             // For single result, use fast path (no picker needed)

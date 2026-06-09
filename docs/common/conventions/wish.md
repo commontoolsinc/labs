@@ -97,24 +97,27 @@ wish({ query: "#portfolio", scope: ["profile"] })
 
 ### Well-Known Profile Targets
 
-Profiles are linked from the user's home default pattern at
-`homeSpaceCell.defaultPattern.profile`. These well-known wishes resolve from
-that link:
+A user may have multiple profiles, stored on the home default pattern at
+`homeSpaceCell.defaultPattern.profiles` (a list), with `defaultProfile` and a
+recency-ordered `mru`. The well-known wishes enumerate that list and resolve,
+ordered **default first, then by MRU**:
 
 ```tsx
-wish({ query: "#profile" }) // profile default pattern
-wish({ query: "#profileName" }) // home profileName projection, then profile initialNameApplied
-wish({ query: "#profileAvatar" }) // profile.avatar
-wish({ query: "#profileSpace" }) // profile space cell
+wish({ query: "#profile" }) // the default profile (headless); see [UI] below
+wish({ query: "#profileName" }) // default profile's initialNameApplied
+wish({ query: "#profileAvatar" }) // default profile's avatar
+wish({ query: "#profileSpace" }) // default profile's space cell
 ```
 
-The optional `[UI]` for `wish({ query: "#profile" })` renders a link to the
-profile default pattern when the profile exists. If the viewer has not created a
-profile yet, it renders the same profile-name input used by the home profile tab
-through the trusted profile-create pattern surface. Submitting a name creates
-the viewer's profile through the home default pattern and leaves the current
-view in place; the wish UI reacts into the profile link once the profile link
-exists.
+Headless / single-profile callers get the default profile. The optional `[UI]`
+for `wish({ query: "#profile" })`:
+
+- **0 profiles:** the trusted profile-create surface (same input as the home
+  Profile tab). Submitting a name creates the viewer's first profile and leaves
+  the current view in place; the wish reacts once the link exists.
+- **1 profile:** a link to that profile.
+- **2+ profiles:** the **profile picker** (`profile-picker.tsx`) — lists
+  profiles, selects the default, stamps MRU, and creates more inline.
 
 When rendering profile data from a shared piece, use a user-scoped result schema
 for the rendered output so each viewer sees their own home profile projection.

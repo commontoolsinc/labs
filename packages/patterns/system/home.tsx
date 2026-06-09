@@ -2,7 +2,6 @@ import {
   computed,
   equals,
   handler,
-  ifElse,
   NAME,
   pattern,
   Stream,
@@ -10,11 +9,15 @@ import {
   Writable,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
-import ProfileCreate, {
+import {
   type CreateProfileEvent,
   submitProfileCreation,
-  type TrustedProfileLink,
+  type TrustedDefaultProfile,
+  type TrustedProfileList,
+  type TrustedProfileMru,
 } from "./profile-create.tsx";
+import ProfilePicker from "./profile-picker.tsx";
+import type { ProfileHomeOutput } from "./profile-home.tsx";
 import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
 // Types from favorites-manager.tsx
@@ -50,7 +53,9 @@ type HomeOutput = {
   learned: Writable<LearnedSection>;
   spaces: Writable<SpaceEntry[]>;
   defaultAppUrl: Writable<string>;
-  profile?: TrustedProfileLink;
+  profiles: TrustedProfileList;
+  defaultProfile: TrustedDefaultProfile;
+  mru: TrustedProfileMru;
   createProfile: Stream<CreateProfileEvent>;
 };
 
@@ -129,52 +134,32 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
-  // NOTE(CT-1628): the `as any` casts on `profile` passed to
-  // `submitProfileCreation` / `ProfileCreate` below are required because the CFC
-  // wrapper type (TrustedProfileLink = Cfc<…>) doesn't compose with those
-  // handlers' `Writable<ProfileHomeOutput>` input. Tracked for a proper type
-  // fix. (The `$profile` / `$cell` view bindings need no cast — those props
-  // accept a `CellLike`.)
-  const profile = new Writable<TrustedProfileLink>(undefined).for("profile");
-  const profileName = new Writable("").for("profileName");
+  // NOTE(CT-1628): the `as any` casts around the profile cells below are
+  // required because the CFC wrapper types (TrustedProfile*) don't yet compose
+  // with Writable/the pattern factory output type. Tracked for a proper type
+  // fix.
+  //
+  // Multi-profile model: a user has many profiles, each in its own `inSpace`
+  // space. `profiles` is the durable list (appended on create). `defaultProfile`
+  // is the one `#profile` resolves to in headless mode and orders first in the
+  // picker; `mru` is the recency-ordered list driving the rest of the ordering.
+  const profiles = new Writable<ProfileHomeOutput[]>([]).for("profiles");
+  const defaultProfile = new Writable<ProfileHomeOutput | undefined>(undefined)
+    .for("defaultProfile");
+  const mru = new Writable<ProfileHomeOutput[]>([]).for("mru");
+  // Untrusted-write regression surface: this stream is exported so tests can
+  // verify that sending it from outside the trusted create surface does NOT
+  // create a profile. The actual create UI lives in the profile picker below.
   const createProfileStream = submitProfileCreation({
-    profile: profile as any,
-    profileName,
+    profiles: profiles as any,
   });
-  // Pass the owner-protected `profile` cell (TrustedProfileLink IFC schema)
-  // through unchanged. Creating a profile into a fresh home works: the runner's
-  // post-run cross-space-child handling commits the new profile space before the
-  // home link. The fix here is purely on the display side (below) — the create
-  // surface is only shown when no profile exists, so a created/existing profile
-  // is never re-submitted (re-creating over an existing link is a separate,
-  // not-yet-handled cross-space case). See docs/specs/shared-profile-space.md.
-  const profileCreate = ProfileCreate({
-    profile: profile as any,
-    profileName,
-    inputId: "home-profile-name-input",
-    buttonId: "home-profile-create-button",
+  // The home Profile tab IS the profile picker: it lists profiles natively,
+  // sets the default, stamps MRU on selection, and creates more inline.
+  const profilePicker = ProfilePicker({
+    profiles: profiles as any,
+    defaultProfile: defaultProfile as any,
+    mru: mru as any,
   });
-  // Existence is keyed off the durable profile *link* (`profile`), which is the
-  // source of truth; `profileName` is only a creation-latency fallback. The link
-  // points cross-space (into the name-derived profile space), so on the first
-  // render right after creation `profile.get()` is still `undefined` until that
-  // space loads — but the home-space `profileName` mirror, written alongside the
-  // link, reads immediately and covers that window. Keying primarily off the
-  // link means a home whose link is populated but whose `profileName` mirror is
-  // empty (e.g. a migrated/partially-populated home) still reports a profile and
-  // does not re-show the create form (which would let it overwrite a valid
-  // link). The `cf-render` below resolves and loads the cross-space profile for
-  // display.
-  // `profile` is a Cell whose value is itself a Cell (TrustedProfileLink wraps
-  // Cell<ProfileHomeOutput>), so `profile.get()` returns the inner cell HANDLE,
-  // which is always non-undefined. Read one level deeper — `profile.get()?.get()`
-  // — to test whether the inner cell actually holds a value (i.e. a profile
-  // exists). Using `profile.get() !== undefined` here is always true and would
-  // permanently hide the create surface.
-  const hasProfile = computed(() =>
-    profile.get()?.get() !== undefined ||
-    (profileName.get() ?? "").trim().length > 0
-  );
 
   // Child components
   const favoritesComponent = FavoritesManager({});
@@ -199,28 +184,7 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>
 
-              {ifElse(
-                hasProfile,
-                (
-                  <cf-vstack gap="2">
-                    <cf-hstack id="home-profile-summary" gap="2" align="center">
-                      {
-                        /*
-                        The trusted <cf-profile-badge> resolves the cross-space
-                        profile cell and renders its avatar + name as official
-                        system chrome. The `profileName` mirror is kept alongside
-                        it as a light-DOM label (the badge renders its name in
-                        shadow DOM; integration tests assert on this text).
-                      */
-                      }
-                      <cf-profile-badge $profile={profile} />
-                      <strong>{profileName}</strong>
-                    </cf-hstack>
-                    <cf-render $cell={profile} />
-                  </cf-vstack>
-                ),
-                profileCreate,
-              )}
+              <div id="home-profile-summary">{profilePicker}</div>
 
               {
                 /*
@@ -343,11 +307,9 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     learned,
     spaces,
     defaultAppUrl,
-    profile,
-    // Exposed so #profileName can fall back to the name typed at creation while
-    // the owner-protected profile link is still resolving (creation latency);
-    // the live name comes from the profile's own `initialNameApplied`.
-    profileName,
+    profiles: profiles as any,
+    defaultProfile: defaultProfile as any,
+    mru: mru as any,
 
     // Exported handlers
     addFavorite: addFavorite({ favorites }),
