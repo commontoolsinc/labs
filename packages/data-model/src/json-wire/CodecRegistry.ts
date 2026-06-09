@@ -130,10 +130,34 @@ export class CodecRegistry {
   codecFromValue(
     value: FabricValue,
   ): FabricCodec | typeof SELF_REP | undefined {
-    // Fast path: primitive-type dispatch. (`typeof` can't yield `"function"`
-    // for a `FabricValue`, but the guard narrows the type for the lookups.)
-    const type = (value === null) ? "null" : typeof value;
-    if (type !== "object" && type !== "function") {
+    // Primitive fast path: dispatch on the value's primitive `type` key (its
+    // `typeof`, or `"null"`). The type's codec is tried first, then
+    // self-representation.
+    let type: PrimitiveTypeName | undefined;
+    const valueType = typeof value;
+    switch (valueType) {
+      case "bigint":
+      case "boolean":
+      case "number":
+      case "string":
+      case "symbol":
+      case "undefined": {
+        type = valueType;
+        break;
+      }
+      case "object": {
+        if (value === null) {
+          type = "null";
+        }
+        break;
+      }
+      case "function": {
+        // Not a `FabricValue`; nothing can encode it.
+        return undefined;
+      }
+    }
+
+    if (type !== undefined) {
       const codec = this.#primitiveCodecs.get(type);
       if (codec && codec.canEncode(value)) {
         return codec;
@@ -141,6 +165,8 @@ export class CodecRegistry {
       if (this.#selfRepTypes.has(type)) {
         return SELF_REP;
       }
+      // No primitive match -- fall through to the class/scan below (retained
+      // for now; primitives in the default registry never reach it).
     }
 
     // Class fast-path, then linear scan.
