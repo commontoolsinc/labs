@@ -34,8 +34,9 @@ const authorizeSessionOpen = async (
   // The session signature travels as a `FabricBytes` (emitted by the client in
   // `v2-remote-session.ts`), which decodes to one here. A non-null `signature`
   // implies a well-formed `authorization`, so it needn't be checked separately.
-  const rawSignature =
-    (message.authorization as { signature?: unknown } | undefined)?.signature;
+  const rawSignature = isRecord(message.authorization)
+    ? message.authorization.signature
+    : undefined;
   const signature = rawSignature instanceof FabricBytes
     ? rawSignature.slice()
     : null;
