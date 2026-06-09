@@ -421,7 +421,7 @@ describe("pattern-binding", () => {
       expect(links[0].space).toBe(space);
     });
 
-    it("should find nested legacy alias bindings", () => {
+    it("records redirects in the binding but does not follow them into targets", () => {
       const testCell = runtime.getCell<{ a: Record<string, any> }>(
         space,
         "nested legacy",
@@ -430,7 +430,10 @@ describe("pattern-binding", () => {
       );
       testCell.set({ a: { b: { c: 42 } } });
       const binding = { $alias: { path: ["a"] } };
-      // Add a nested alias inside the value at path 'a'
+      // The value AT path 'a' contains a nested write-redirect (`inner`).
+      // findAllWriteRedirectCells records the redirects that appear directly in
+      // the binding, but intentionally does NOT follow a redirect into its
+      // target document — so the nested ["b","c"] alias is not discovered.
       testCell.key("a").set({
         b: { c: 42 },
         inner: { $alias: { path: ["b", "c"] } },
@@ -440,10 +443,8 @@ describe("pattern-binding", () => {
         [binding, nestedBinding],
         testCell,
       );
-      expect(links.length).toBe(3);
-      expect(links[0].path).toEqual(["a"]);
-      expect(links[1].path).toEqual(["b", "c"]);
-      expect(links[2].path).toEqual(["a", "inner"]);
+      expect(links.length).toBe(2);
+      expect(links.map((l) => l.path)).toEqual([["a"], ["a", "inner"]]);
     });
 
     it("should find all write redirect links in an array", () => {
