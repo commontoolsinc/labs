@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
+import { SpecialNumberCodec } from "@/codec-common/SpecialNumberCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";

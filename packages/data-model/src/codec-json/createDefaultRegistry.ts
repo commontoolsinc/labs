@@ -1,12 +1,12 @@
 import { CODEC } from "@/codec-common/interface.ts";
+import { BigIntCodec } from "@/codec-common/BigIntCodec.ts";
+import { SpecialNumberCodec } from "@/codec-common/SpecialNumberCodec.ts";
+import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
+import { UndefinedCodec } from "@/codec-common/UndefinedCodec.ts";
 import { codecClasses as primitiveCodecClasses } from "@/fabric-primitives/index.ts";
 import { codecClasses as instanceCodecClasses } from "@/fabric-instances/index.ts";
 
 import { CodecRegistry } from "./CodecRegistry.ts";
-import { BigIntCodec } from "./BigIntCodec.ts";
-import { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
-import { SymbolCodec } from "./SymbolCodec.ts";
-import { UndefinedCodec } from "./UndefinedCodec.ts";
 
 /**
  * Creates a registry with the built-in codecs. Fabric classes whose instances
