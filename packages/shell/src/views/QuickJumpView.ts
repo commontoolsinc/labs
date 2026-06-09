@@ -171,7 +171,10 @@ export class XQuickJumpView extends BaseView {
   }
 
   private score(item: PieceItem, q: string): number {
-    if (!q) return 0;
+    // Caller must pass a non-empty query.
+    if (!q) {
+      throw new Error("score requires a non-empty query");
+    }
     const n = item.name.toLowerCase();
     const i = item.id.toLowerCase();
     const ql = q.toLowerCase();

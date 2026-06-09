@@ -14,7 +14,10 @@ export function encodePath(path: readonly string[]): string {
  * Decodes a serialized path key produced by {@link encodePath}.
  */
 export function decodePath(path: string): readonly string[] {
-  if (!path) return [];
+  // Caller must pass a non-empty encoded path (the output of encodePath).
+  if (!path) {
+    throw new Error("decodePath requires a non-empty encoded path");
+  }
   const parsed = JSON.parse(path);
   if (isStringArray(parsed)) {
     return parsed;

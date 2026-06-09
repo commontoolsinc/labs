@@ -59,9 +59,12 @@ export const getBindingPropName = (key: string): string => {
   return key.startsWith("$") ? key.slice(1) : key;
 };
 
+// key must be an event property (one that starts with "on"; can be checked with isEventProp).
 export const cleanEventProp = (key: string) => {
   if (!key.startsWith("on")) {
-    return null;
+    throw new Error(
+      'cleanEventProp requires an event prop key (starts with "on")',
+    );
   }
   return key.slice(2).toLowerCase();
 };

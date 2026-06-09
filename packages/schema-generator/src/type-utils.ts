@@ -806,8 +806,9 @@ function followAliasToWrapperNode(
   kind: NodeWrapperKind;
   node: ts.TypeReferenceNode;
 } | undefined {
+  // Caller must ensure typeNode.typeName is an Identifier.
   if (!ts.isIdentifier(typeNode.typeName)) {
-    return undefined;
+    throw new Error("followAliasToWrapperNode requires an Identifier typeName");
   }
 
   const typeName = typeNode.typeName.text;

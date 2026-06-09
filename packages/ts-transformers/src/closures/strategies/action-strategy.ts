@@ -45,12 +45,15 @@ export class ActionStrategy implements ClosureTransformationStrategy {
     return ts.isCallExpression(node) && isActionCall(node, context);
   }
 
+  // Caller must pass a call expression.
   transform(
     node: ts.Node,
     context: TransformationContext,
     visitor: ts.Visitor,
   ): ts.Node | undefined {
-    if (!ts.isCallExpression(node)) return undefined;
+    if (!ts.isCallExpression(node)) {
+      throw new Error("ActionStrategy.transform requires a call expression");
+    }
     return transformActionCall(node, context, visitor);
   }
 }
