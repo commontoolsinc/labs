@@ -1,10 +1,83 @@
 # SQLite builtin: `db.exec` fails on a _deployed_ piece — bug report
 
-**Status:** OPEN. **Dates:** found 2026-06-04, re-verified 2026-06-05.
-**Context:** First dogfood of the SQLite pattern builtins (`sqliteDatabase` /
-`db.query` / `db.exec`, PRs #3776 / #3848) on `lunch-poll`. The migration is
-complete and **green in `cf test`**, but cannot deploy live because of this bug.
-**For:** review with the sqlite-builtin owner (Berni).
+**Status:** OPEN, **trigger isolated 2026-06-09.** Dates: found 06-04,
+re-verified 06-05 and 06-09. **For:** the sqlite-builtin owner (Berni).
+
+## ⭐ Update 2026-06-09 — isolated the trigger (post Berni's #3896 fix)
+
+**Two facts, both verified against a server running Berni's scope fix (#3896,
+`a6b6e14a8`):**
+
+1. **#3896 fixes the minimal case but NOT the full pattern.** A _minimal_
+   `PerUser`+`PerSpace` pattern with `db.query` + `db.exec` now works end-to-end
+   on a deployed piece (write lands, `reactOn: db` re-queries). ✅ The full
+   lunch-poll still fails: every `db.exec` (even an unrelated `clearHistory`
+   doing a plain `DELETE`) throws `invalid database handle`. ❌
+2. **The remaining trigger is EMERGENT — `db.query` count × pattern bulk — not
+   any single SQL construct.** This is the honest, hard-won conclusion (I twice
+   over-narrowed to a single cause and was wrong; the data below is what
+   actually holds).
+
+### The data (single-variable tests on the fixed #3896 server)
+
+Two axes, neither sufficient alone:
+
+**(A) Minimal build-up — add features to a tiny pattern: ALL pass.** P1–P8 each
+WORK: `reactOn:<counter>`, cf-link col + `users.key()` bind, 2 tables, **4
+db.query incl. a GROUP BY JOIN (P4)**, async `fetchData` handler, ~13 bound
+handlers + big output contract, 11 `perSession` cells, many nodes between `db`
+and its consumers. So no individual feature — _including 4 queries with a JOIN_
+— triggers it on a minimal skeleton.
+
+**(B) Strip-down from the real (failing) lunch-poll skeleton (`lph-*`):**
+
+| Variant (on the full lunch-poll body, UI stripped)                            | `db.exec` on deploy |
+| ----------------------------------------------------------------------------- | ------------------- |
+| `lph-b` — only the `recentVisits` query (1 query)                             | ✅ works            |
+| `lph-e` — `recentVisits` + a `count(*)` JOIN (2 queries)                      | ✅ works            |
+| `lph-d` — `recentVisits` + the full aggregate `placeStats` (2 queries)        | ❌ fails            |
+| `lph-k` — `recentVisits` + 3 more **plain** queries (4 queries, NO aggregate) | ❌ fails            |
+
+**The contradiction that pins it down:** P4 (4 queries incl. JOIN) on a
+_minimal_ skeleton WORKS, but `lph-k` (4 plain queries) on the _full lunch-poll_
+skeleton FAILS. And `lph-b` (full skeleton, 1 query) WORKS. So it is the
+**combination of (several `db.query` calls) × (the full pattern's bulk)** that
+trips it — not the query count alone, not the pattern bulk alone, and not the
+complex aggregate alone (`lph-d` shows the aggregate _can_ trip it at just 2
+queries, but `lph-k` shows plain queries also trip it at 4 — so the aggregate is
+an aggravating factor, not THE cause).
+
+### Why a _read_ query breaks the _write_ handle (hypothesis for Berni)
+
+Symptom is on `db.exec` (cell.ts:977 — the delivered `SqliteDb` handle's
+`{id,tables}` value is absent on the deployed path), but the trigger is the
+presence of _enough_ `db.query` nodes in a bulky pattern. Each `db.query` builds
+a `sqliteQuery` node sharing the one `db` handle cell; their request-hashing /
+`rowSchema` lowering / scope-stamping appears to perturb that shared handle so
+its ref isn't stamped on the deployed path — only server-side, never in the
+emulated `cf test` runner. Possibly a cause-identity / output-spot collision
+among multiple query nodes + the write op that scales with pattern size.
+(Speculative — Berni knows the internals; the `lph-*` table is the ground
+truth.)
+
+### Reproduce
+
+`packages/patterns/lunch-poll/main.tsx` on this branch, deployed via
+`cf piece
+new` against a local toolshed **running #3896**, then
+`cf piece call … clearHistory` (or `logVisit`) → throws. Reducing to a single
+`db.query` makes all `db.exec` work. The `lph-b`/`lph-e`/`lph-d`/`lph-k`
+skeletons above bracket the trigger.
+
+### ⚠️ No clean pattern-side workaround found yet
+
+Replacing the aggregate `placeStats` with JS aggregation did NOT unblock it
+(that still leaves 4 `db.query` calls → `lph-k` shows that fails). A real
+unblock needs either Berni's fix, or collapsing lunch-poll down to ~1 `db.query`
+(possible but loses the separate count/stats reads). **Live cutover stays on
+hold.**
+
+---
 
 ## Update 2026-06-05 — reconciling with Berni's diagnosis
 
