@@ -3,7 +3,6 @@ import {
   CODEC,
   DECONSTRUCT,
   type FabricCodec,
-  RECONSTRUCT,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
 import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
@@ -74,22 +73,6 @@ export class ProblematicValue extends ExplicitTagValue {
 
   protected shallowUnfrozenClone(): ProblematicValue {
     return new ProblematicValue(this.wireTypeTag, this.state, this.error);
-  }
-
-  /**
-   * Reconstructs a `ProblematicValue` from its `[DECONSTRUCT]` envelope.
-   * Forwards to `[CODEC].decode` with the preserved tag and bare state; the
-   * envelope's `error` is dropped, since it is not part of the codec form.
-   */
-  static [RECONSTRUCT](
-    state: { type: string; state: FabricValue; error: string },
-    context: ReconstructionContext,
-  ): ProblematicValue {
-    return ProblematicValue[CODEC].decode(
-      state.type,
-      state.state,
-      context,
-    ) as ProblematicValue;
   }
 
   static #codec = Object.freeze(

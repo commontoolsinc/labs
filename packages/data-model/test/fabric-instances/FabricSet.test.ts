@@ -101,8 +101,8 @@ describe("FabricSet", () => {
 
   describe("static members", () => {
     // Nominal coverage: the codec exists and reports its wire tag and claims
-    // its instances, but `encode()`/`decode()` are still stubs that delegate
-    // to the not-yet-implemented `[DECONSTRUCT]`/`[RECONSTRUCT]` protocol.
+    // its instances, but `encode()` / `decode()` are throwing stubs until
+    // `Set` support is implemented.
     describe("[CODEC]", () => {
       const codec = FabricSet[CODEC];
       const expectedTag = WIRE_TYPE_TAGS.Set;
@@ -122,7 +122,7 @@ describe("FabricSet", () => {
       });
 
       describe("encode()", () => {
-        it("throws (stub, via `[DECONSTRUCT]`)", () => {
+        it("throws (stub)", () => {
           expect(() => codec.encode(new FabricSet(new Set()))).toThrow(
             "not yet implemented",
           );
@@ -130,7 +130,7 @@ describe("FabricSet", () => {
       });
 
       describe("decode()", () => {
-        it("throws (stub, via `[RECONSTRUCT]`)", () => {
+        it("throws (stub)", () => {
           expect(() => codec.decode(expectedTag, null, context)).toThrow(
             "not yet implemented",
           );

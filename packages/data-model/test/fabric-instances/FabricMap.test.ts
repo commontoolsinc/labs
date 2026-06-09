@@ -7,14 +7,14 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC, DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
 import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
-import { dummyContext, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
+import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricMap", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -116,17 +116,9 @@ describe("FabricMap", () => {
   });
 
   describe("static members", () => {
-    describe("[RECONSTRUCT]", () => {
-      it("throws (stub)", () => {
-        expect(() => FabricMap[RECONSTRUCT](null, dummyContext)).toThrow(
-          "not yet implemented",
-        );
-      });
-    });
-
     // Nominal coverage: the codec exists and reports its wire tag and claims
-    // its instances, but `encode()`/`decode()` are still stubs that delegate
-    // to the not-yet-implemented `[DECONSTRUCT]`/`[RECONSTRUCT]` protocol.
+    // its instances, but `encode()` / `decode()` are throwing stubs until
+    // `Map` support is implemented.
     describe("[CODEC]", () => {
       const codec = FabricMap[CODEC];
       const expectedTag = WIRE_TYPE_TAGS.Map;
@@ -146,7 +138,7 @@ describe("FabricMap", () => {
       });
 
       describe("encode()", () => {
-        it("throws (stub, via `[DECONSTRUCT]`)", () => {
+        it("throws (stub)", () => {
           expect(() => codec.encode(new FabricMap(new Map()))).toThrow(
             "not yet implemented",
           );
@@ -154,7 +146,7 @@ describe("FabricMap", () => {
       });
 
       describe("decode()", () => {
-        it("throws (stub, via `[RECONSTRUCT]`)", () => {
+        it("throws (stub)", () => {
           expect(() => codec.decode(expectedTag, null, context)).toThrow(
             "not yet implemented",
           );

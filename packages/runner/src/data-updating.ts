@@ -852,8 +852,7 @@ export function normalizeAndDiff(
   // primitive whose state is private, flatten it to `{}`), which
   // is meaningless at the change-emission level. Emit a single change at
   // this link with the value as-is — the storage layer's JSON encoding handles
-  // serialization (via `[DECONSTRUCT]`/`[RECONSTRUCT]` for instances, the codec
-  // for primitives). Placed after the write-redirect
+  // serialization (via each type's `[CODEC]`). Placed after the write-redirect
   // resolution above so writes through a redirect land on the target,
   // not on the redirect itself.
   if (newValue instanceof FabricSpecialObject) {

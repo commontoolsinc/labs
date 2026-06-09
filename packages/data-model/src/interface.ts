@@ -16,7 +16,7 @@
 
 /**
  * Abstract base class for all fabric-system value types. This is the common
- * superclass of `FabricInstance` (protocol types with `[DECONSTRUCT]`/`[RECONSTRUCT]`)
+ * superclass of `FabricInstance` (protocol types with `[DECONSTRUCT]`)
  * and `FabricPrimitive` (immutable special primitives). It enables a single
  * `instanceof FabricSpecialObject` check wherever code needs to recognize any
  * fabric-system value without caring which branch of the hierarchy it
@@ -72,8 +72,7 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  *
  * Subclasses must implement `[DECONSTRUCT]()`, `[DEEP_FREEZE]()`,
  * `[IS_DEEP_FROZEN]()`, `deepClone()`, and `shallowClone()` (the latter is
- * normally inherited from `BaseFabricInstance`). Subclasses must also
- * define a static member `[RECONSTRUCT]()`.
+ * normally inherited from `BaseFabricInstance`).
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**

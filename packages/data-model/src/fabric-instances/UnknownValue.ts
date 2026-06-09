@@ -3,7 +3,6 @@ import {
   CODEC,
   DECONSTRUCT,
   type FabricCodec,
-  RECONSTRUCT,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
 import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
@@ -59,21 +58,6 @@ export class UnknownValue extends ExplicitTagValue {
 
   protected shallowUnfrozenClone(): UnknownValue {
     return new UnknownValue(this.wireTypeTag, this.state);
-  }
-
-  /**
-   * Reconstructs an `UnknownValue` from its `[DECONSTRUCT]` envelope. Forwards
-   * to `[CODEC].decode` with the preserved tag and bare state.
-   */
-  static [RECONSTRUCT](
-    state: { type: string; state: FabricValue },
-    context: ReconstructionContext,
-  ): UnknownValue {
-    return UnknownValue[CODEC].decode(
-      state.type,
-      state.state,
-      context,
-    ) as UnknownValue;
   }
 
   static #codec = Object.freeze(

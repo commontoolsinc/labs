@@ -1016,7 +1016,7 @@ describe("JsonEncodingContext", () => {
       const context = new JsonEncodingContext({ lenient: true });
       const runtime = new TestReconstructionContext();
 
-      // Map@1 always throws on RECONSTRUCT ("not yet implemented"),
+      // Map@1's codec always throws on decode ("not yet implemented"),
       // triggering lenient wrapping.
       const data = {
         "/Map@1": [["key", "value"]],

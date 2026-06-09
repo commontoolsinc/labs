@@ -3,7 +3,6 @@ import {
   CODEC,
   DECONSTRUCT,
   type FabricCodec,
-  RECONSTRUCT,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
 import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
@@ -78,7 +77,7 @@ export type FabricErrorState = {
  * extras bag mirrors this by gating `setExtra` / `deleteExtra` on the
  * frozen state. The serialization layer handles `FabricError` via its static
  * `[CODEC]`, which is the source of truth for the encoded form; the
- * `[DECONSTRUCT]` / `[RECONSTRUCT]` protocol members delegate to it.
+ * `[DECONSTRUCT]` protocol member delegates to it.
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
@@ -349,21 +348,6 @@ export class FabricError extends FabricNativeWrapper<Error> {
       reconstructContext,
     ) as FabricError;
     return frozen ? deepFreeze(result) : result;
-  }
-
-  /**
-   * Reconstructs a `FabricError` from its essential state (flat record).
-   * Delegates to this class's `[CODEC]`, the source of truth for decoding.
-   */
-  static [RECONSTRUCT](
-    state: FabricValue,
-    context: ReconstructionContext,
-  ): FabricError {
-    return FabricError[CODEC].decode(
-      WIRE_TYPE_TAGS.Error,
-      state,
-      context,
-    ) as FabricError;
   }
 
   static #codec = Object.freeze(
