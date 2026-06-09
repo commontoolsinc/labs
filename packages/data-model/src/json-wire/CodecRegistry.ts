@@ -25,8 +25,8 @@ export type PrimitiveTypeName =
   | "symbol";
 
 /**
- * Gets the constructor function ("class") of the given value, if any, for the
- * purposes of fast-path lookup.
+ * Gets the constructor function ("class") of the given value, if any, for
+ * class-based codec lookup.
  */
 function constructorOf(
   value: FabricValue,
@@ -52,21 +52,18 @@ function constructorOf(
 }
 
 /**
- * Registry of `FabricCodec`s. Provides tag-based lookup for decoding and
- * class-fast-path / linear-scan matching for encoding.
+ * Registry of `FabricCodec`s. Provides tag-based lookup for decoding, and
+ * primitive-type and class matching for encoding.
  */
 export class CodecRegistry {
-  /** Ordered list of codecs, scanned for encode matching. */
-  readonly #codecs: FabricCodec[] = [];
-
   /** Tag -> codec map for O(1) decode dispatch. */
   readonly #tagMap = new Map<string, FabricCodec>();
 
-  /** Class -> codec map for the O(1) encode fast path. */
+  /** Class -> codec map for O(1) encode dispatch on object values. */
   readonly #classMap = new Map<Constructor, FabricCodec>();
 
   /**
-   * Primitive `type` -> codec map for the O(1) encode fast path on primitives.
+   * Primitive `type` -> codec map for O(1) encode dispatch on primitives.
    */
   readonly #primitiveCodecs = new Map<PrimitiveTypeName, FabricCodec>();
 
@@ -77,10 +74,9 @@ export class CodecRegistry {
 
   /**
    * Registers a codec, indexing it by its `wireTypeTag` (for decode) and its
-   * `uniqueHandledClass` (for encode). If either is `undefined`, then the codec
-   * is left unregistered with the corresponding index. And whether or not it
-   * has something `undefined`, it is added to the ordered list used by the
-   * encode linear scan.
+   * `uniqueHandledClass` (for encode dispatch). Either may be `undefined`,
+   * in which case the codec is left unindexed for the corresponding lookup;
+   * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
    */
   register(codec: FabricCodec): void {
     const uniqueClass = codec.uniqueHandledClass;
@@ -92,13 +88,12 @@ export class CodecRegistry {
     if (tag !== undefined) {
       this.#tagMap.set(tag, codec);
     }
-    this.#codecs.push(codec);
   }
 
   /**
    * Registers a codec for a primitive `type` (see {@link PrimitiveTypeName}).
-   * Indexes the codec by its `wireTypeTag` (for decode) and by `type` (for the
-   * O(1) encode fast path on primitives).
+   * Indexes the codec by its `wireTypeTag` (for decode) and by `type` (for O(1)
+   * encode dispatch on primitives).
    */
   registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
     this.#primitiveCodecs.set(type, codec);
@@ -130,9 +125,8 @@ export class CodecRegistry {
   codecFromValue(
     value: FabricValue,
   ): FabricCodec | typeof SELF_REP | undefined {
-    // Primitive fast path: dispatch on the value's primitive `type` key (its
-    // `typeof`, or `"null"`). The type's codec is tried first, then
-    // self-representation.
+    // Primitive dispatch on the value's primitive `type` key (its `typeof`, or
+    // `"null"`). The type's codec is tried first, then self-representation.
     let type: PrimitiveTypeName | undefined;
     const valueType = typeof value;
     switch (valueType) {
@@ -165,21 +159,14 @@ export class CodecRegistry {
       if (this.#selfRepTypes.has(type)) {
         return SELF_REP;
       }
-      // No primitive match -- fall through to the class/scan below (retained
-      // for now; primitives in the default registry never reach it).
+      // No primitive match -- fall through to the class lookup below.
     }
 
-    // Class fast-path, then linear scan.
+    // Match by the value's exact constructor.
     const constructorFn = constructorOf(value);
     if (constructorFn) {
       const codec = this.#classMap.get(constructorFn);
       if (codec && codec.canEncode(value)) {
-        return codec;
-      }
-    }
-
-    for (const codec of this.#codecs) {
-      if (codec.canEncode(value)) {
         return codec;
       }
     }

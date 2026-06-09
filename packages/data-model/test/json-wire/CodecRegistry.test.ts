@@ -9,7 +9,7 @@ import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { FabricInstance, type FabricValue } from "@/interface.ts";
+import { type FabricValue } from "@/interface.ts";
 
 /**
  * Test codec that matches a single pre-set value (by `===`) and records
@@ -69,44 +69,25 @@ function buildRegistry(
 describe("CodecRegistry", () => {
   describe("codecFromValue()", () => {
     for (
-      const { fastPath, classSource, example, counter } of [
+      const { classSource, example, counter } of [
+        { classSource: Boolean, example: false, counter: [1, 2, 3] },
+        { classSource: BigInt, example: 914n, counter: true },
+        { classSource: Number, example: 123, counter: "florp" },
+        { classSource: String, example: "blorp", counter: null },
         {
-          fastPath: true,
-          classSource: Boolean,
-          example: false,
-          counter: [1, 2, 3],
-        },
-        { fastPath: true, classSource: BigInt, example: 914n, counter: true },
-        { fastPath: true, classSource: Number, example: 123, counter: "florp" },
-        {
-          fastPath: true,
-          classSource: String,
-          example: "blorp",
-          counter: null,
-        },
-        {
-          fastPath: true,
           classSource: Symbol,
           example: Symbol.for("bleep"),
           counter: undefined,
         },
         {
-          fastPath: true,
           classSource: FabricRegExp, // a `FabricPrimitive`
           example: new FabricRegExp(/123/),
           counter: { a: "boop" },
         },
         {
-          fastPath: true,
           classSource: UnknownValue, // a `FabricInstance`
           example: new UnknownValue("Unk@12", { muffin: "corn" }),
           counter: 123n,
-        },
-        {
-          fastPath: false, // registered under a base class, so misses classMap
-          classSource: FabricInstance,
-          example: new UnknownValue("Unk@34", { biscuit: "butter" }),
-          counter: null,
         },
       ] as const
     ) {
@@ -115,29 +96,17 @@ describe("CodecRegistry", () => {
       const counterStr = toCompactDebugString(counter);
       const cls = classSource as unknown as Constructor;
 
-      if (fastPath) {
-        it(`given ${exampleStr}, finds the ${sourceName} codec via the fast path`, () => {
-          const { first, handler, last, registry } = buildRegistry(
-            cls,
-            example as FabricValue,
-          );
-          expect(registry.codecFromValue(example as FabricValue)).toBe(handler);
-          expect(first.canEncodeCalled).toBe(false);
-          expect(handler.canEncodeCalled).toBe(true);
-          expect(last.canEncodeCalled).toBe(false);
-        });
-      } else {
-        it(`given ${exampleStr}, finds the ${sourceName} codec via the slow path`, () => {
-          const { first, handler, last, registry } = buildRegistry(
-            cls,
-            example as FabricValue,
-          );
-          expect(registry.codecFromValue(example as FabricValue)).toBe(handler);
-          expect(first.canEncodeCalled).toBe(true);
-          expect(handler.canEncodeCalled).toBe(true);
-          expect(last.canEncodeCalled).toBe(false);
-        });
-      }
+      it(`given ${exampleStr}, finds the ${sourceName} codec by class`, () => {
+        const { first, handler, last, registry } = buildRegistry(
+          cls,
+          example as FabricValue,
+        );
+        expect(registry.codecFromValue(example as FabricValue)).toBe(handler);
+        // Only the class-matched codec is consulted -- there is no linear scan.
+        expect(first.canEncodeCalled).toBe(false);
+        expect(handler.canEncodeCalled).toBe(true);
+        expect(last.canEncodeCalled).toBe(false);
+      });
 
       it(`returns undefined for ${counterStr} (no ${sourceName} match)`, () => {
         const { first, handler, last, registry } = buildRegistry(
@@ -145,9 +114,10 @@ describe("CodecRegistry", () => {
           example as FabricValue,
         );
         expect(registry.codecFromValue(counter as FabricValue)).toBeUndefined();
-        expect(first.canEncodeCalled).toBe(true);
-        expect(handler.canEncodeCalled).toBe(true);
-        expect(last.canEncodeCalled).toBe(true);
+        // A class miss consults no codec (no linear scan).
+        expect(first.canEncodeCalled).toBe(false);
+        expect(handler.canEncodeCalled).toBe(false);
+        expect(last.canEncodeCalled).toBe(false);
       });
     }
   });
