@@ -21,6 +21,14 @@
  *    `equals()` on the reference, never name equality.
  * 4. Other attendees render with <cf-avatar> + a plain name (snapshot only — no
  *    cell, no attestation reachable). <cf-profile-badge> is used ONLY for "You".
+ * 5. UI structure: every `$`-bidirectional binding (the `$profile` badges and
+ *    the `$value` form inputs) sits at a STATIC `[UI]` position. The two views
+ *    (create-form / event-view) are pre-built static subtrees switched with
+ *    `ifElse(eventCreated, eventView, createForm)` as a child of a static
+ *    wrapper. A `$`-binding regenerated inside a `computed(() => …)` body throws
+ *    "Bidirectionally bound property … is not reactive" and blanks the whole
+ *    render (h.ts:72-92); only `$`-free derived content (roster, headcount) is
+ *    computed here. See main.test.tsx's render smoke test, which guards this.
  *
  * Scope:
  * - `event` + `attendees` (with their RSVPs) are PerSpace — the shared invite
@@ -41,6 +49,7 @@ import {
   Default,
   equals,
   handler,
+  ifElse,
   NAME,
   pattern,
   type PerSpace,
@@ -339,324 +348,351 @@ export default pattern<EventRsvpInput, EventRsvpOutput>(
       })).filter((g) => g.people.length > 0)
     );
 
-    return {
-      [NAME]: "Event RSVP",
-      [UI]: (
-        <cf-vstack gap="4" style={{ padding: "1rem", maxWidth: "640px" }}>
-          {/* ===== Event header / create ===== */}
-          {computed(() =>
-            eventCreated
-              ? (
-                <cf-card>
+    // ========================================================================
+    // STATIC [UI] subtrees.
+    //
+    // CRITICAL RULE (packages/html/src/h.ts:72-92): every `$`-bidirectional
+    // binding (`$value`, `$profile`, …) must sit at a STATIC position in the
+    // `[UI]` tree — i.e. its enclosing `h()` call runs ONCE at pattern-build
+    // time, NOT inside a `computed(() => …)` body. At a static position the cell
+    // / `wish.result` is still a live Cell, so `h()` passes. Inside a computed
+    // the runtime has auto-unwrapped it to a plain value, so `h()` throws
+    // "Bidirectionally bound property … is not reactive" and BLANKS the whole
+    // render. So we build the create-form and the event-view as static subtrees
+    // (their `$`-bound controls constructed once) and switch between them with
+    // `ifElse(...)` as a CHILD of a static wrapper. Reactive lists / derived
+    // content (roster `.map`, headcount, status grouping) stay in `computed()`,
+    // but NONE of those computeds wraps a `$`-bound control. See
+    // packages/patterns/fair-share/main.tsx (badge at a static position) and
+    // packages/patterns/scope-bug-computed-vnode-blank/main.tsx (the repro).
+    // ========================================================================
+
+    // ----- Create form (shown before the event exists). All `$value` inputs
+    // and the "Hosting as" <cf-profile-badge> are STATIC here. -----
+    const createForm = (
+      <cf-card>
+        <cf-vstack gap="3">
+          <cf-heading level={3}>Create your event</cf-heading>
+          <cf-vstack gap="1">
+            <cf-label>Title</cf-label>
+            <cf-input
+              id="event-title-input"
+              $value={titleDraft}
+              placeholder="Game night"
+            />
+          </cf-vstack>
+          <cf-hstack gap="3" wrap>
+            <cf-vstack gap="1" style={{ flex: 1 }}>
+              <cf-label>When</cf-label>
+              <cf-input
+                id="event-when-input"
+                $value={dateTimeDraft}
+                placeholder="Fri 7pm"
+              />
+            </cf-vstack>
+            <cf-vstack gap="1" style={{ flex: 1 }}>
+              <cf-label>Where</cf-label>
+              <cf-input
+                id="event-where-input"
+                $value={locationDraft}
+                placeholder="My place"
+              />
+            </cf-vstack>
+          </cf-hstack>
+          {
+            /* The organizer snapshot is taken from #profile on create; show who
+              that will be via the trusted badge. STATIC position — `$profile`
+              must never be regenerated inside a computed. */
+          }
+          <cf-hstack gap="2" align="center" wrap>
+            <cf-text variant="caption" tone="muted">
+              Hosting as
+            </cf-text>
+            <cf-profile-badge
+              id="hosting-as-badge"
+              $profile={profileWish.result}
+              size="sm"
+            />
+          </cf-hstack>
+          <cf-button
+            color="primary"
+            variant="solid"
+            disabled={computed(() => !hasProfile)}
+            onClick={() => {
+              boundCreate.send({
+                title: titleDraft.get(),
+                dateTime: dateTimeDraft.get(),
+                location: locationDraft.get(),
+              });
+              titleDraft.set("");
+              dateTimeDraft.set("");
+              locationDraft.set("");
+            }}
+          >
+            Create event
+          </cf-button>
+        </cf-vstack>
+      </cf-card>
+    );
+
+    // ----- Event view (shown once the event exists). The "You are"
+    // <cf-profile-badge> and the note <cf-input $value> are STATIC here; only
+    // their reactive siblings (join button, status buttons, guest counter,
+    // headcount, roster) live in computed()/ifElse subtrees. -----
+    const eventView = (
+      <cf-vstack gap="4">
+        {/* ===== Event header ===== */}
+        <cf-card>
+          <cf-vstack gap="2">
+            <cf-heading level={2}>{event.title}</cf-heading>
+            <cf-text tone="muted">
+              {computed(() => {
+                const when = trimmed(event.dateTime);
+                const where = trimmed(event.location);
+                return [when, where].filter((s) => s !== "").join(" · ");
+              })}
+            </cf-text>
+            {
+              /* Organizer = the profile SNAPSHOT of the creator. Shown with
+                cf-avatar (snapshot only) — never cf-profile-badge, which is
+                reserved for the current viewer. cf-avatar takes no `$`-binding,
+                so reactive reads of event.organizer are fine here. */
+            }
+            <cf-hstack gap="2" align="center">
+              <cf-text variant="caption" tone="muted">
+                Hosted by
+              </cf-text>
+              <cf-avatar
+                src={event.organizer.avatar}
+                name={event.organizer.displayName}
+                size="xs"
+              />
+              <cf-text variant="caption">
+                {event.organizer.displayName}
+              </cf-text>
+            </cf-hstack>
+          </cf-vstack>
+        </cf-card>
+
+        {/* ===== You (identity) ===== */}
+        <cf-card>
+          <cf-vstack gap="3">
+            {
+              /* The trusted badge shows WHO YOU ARE (live profile cell). STATIC
+                position — `$profile` bound to the live wish result. The join
+                button is a reactive sibling (no `$`-binding), so gating it in a
+                computed is safe. */
+            }
+            <cf-hstack gap="3" align="center" wrap>
+              <cf-label>You are</cf-label>
+              <cf-profile-badge
+                id="you-are-badge"
+                $profile={profileWish.result}
+                size="sm"
+              />
+              {computed(() =>
+                isJoined ? null : (
+                  <cf-button
+                    color="primary"
+                    variant="solid"
+                    disabled={computed(() => !hasProfile)}
+                    onClick={boundJoin}
+                  >
+                    RSVP with your profile
+                  </cf-button>
+                )
+              )}
+            </cf-hstack>
+
+            {
+              /* My RSVP status + guests — no `$`-bindings, so these may live in
+                a computed gated on isJoined. They edit MY attendee row through
+                the `me` reference. */
+            }
+            {computed(() =>
+              isJoined
+                ? (
                   <cf-vstack gap="2">
-                    <cf-heading level={2}>{event.title}</cf-heading>
-                    <cf-text tone="muted">
-                      {computed(() => {
-                        const when = trimmed(event.dateTime);
-                        const where = trimmed(event.location);
-                        return [when, where].filter((s) => s !== "").join(
-                          " · ",
-                        );
-                      })}
-                    </cf-text>
-                    {
-                      /* Organizer = the profile SNAPSHOT of the creator. Shown
-                        with cf-avatar (snapshot only) — never cf-profile-badge,
-                        which is reserved for the current viewer. */
-                    }
-                    <cf-hstack gap="2" align="center">
-                      <cf-text variant="caption" tone="muted">
-                        Hosted by
+                    <cf-hstack gap="2" wrap align="center">
+                      <cf-label>Your RSVP</cf-label>
+                      {STATUS_ORDER.map((status) => (
+                        <cf-button
+                          variant={computed(() =>
+                            me.attendee?.status === status ? "solid" : "ghost"
+                          )}
+                          color={status === "notgoing" ? "danger" : "primary"}
+                          onClick={() => boundSetRsvp.send({ status })}
+                        >
+                          {STATUS_LABEL[status]}
+                        </cf-button>
+                      ))}
+                    </cf-hstack>
+
+                    <cf-hstack gap="2" align="center" wrap>
+                      <cf-label>Extra guests</cf-label>
+                      <cf-button
+                        variant="ghost"
+                        onClick={() =>
+                          boundSetGuests.send({
+                            guestCount: (me.attendee?.guestCount ?? 0) - 1,
+                          })}
+                      >
+                        −
+                      </cf-button>
+                      <cf-text>
+                        {computed(() => me.attendee?.guestCount ?? 0)}
                       </cf-text>
+                      <cf-button
+                        variant="ghost"
+                        onClick={() =>
+                          boundSetGuests.send({
+                            guestCount: (me.attendee?.guestCount ?? 0) + 1,
+                          })}
+                      >
+                        +
+                      </cf-button>
+                    </cf-hstack>
+                  </cf-vstack>
+                )
+                : null
+            )}
+
+            {
+              /* A note (optional) — the `$value` input is STATIC: it is rendered
+                once and never regenerated inside a computed. Before joining it
+                is disabled (reactive `disabled=` on a sibling prop is allowed),
+                so the bidirectional binding stays at a fixed [UI] position
+                regardless of join state. */
+            }
+            <cf-vstack gap="1">
+              <cf-label>A note (optional)</cf-label>
+              <cf-hstack gap="2" align="center">
+                <cf-input
+                  id="note-input"
+                  $value={messageDraft}
+                  placeholder="Bringing dessert!"
+                  disabled={computed(() => !isJoined)}
+                  style={{ flex: 1 }}
+                />
+                <cf-button
+                  variant="solid"
+                  disabled={computed(() => !isJoined)}
+                  onClick={() => {
+                    boundSetMessage.send({ message: messageDraft.get() });
+                    messageDraft.set("");
+                  }}
+                >
+                  Save note
+                </cf-button>
+              </cf-hstack>
+              {computed(() =>
+                isJoined ? null : (
+                  <cf-text variant="caption" tone="muted">
+                    RSVP above to add a note.
+                  </cf-text>
+                )
+              )}
+            </cf-vstack>
+          </cf-vstack>
+        </cf-card>
+
+        {/* ===== Headcount (no `$`-bindings → computed content is fine) ===== */}
+        <cf-card>
+          <cf-hstack gap="3" align="center">
+            <cf-badge color="accent">
+              {computed(() => `${headcount} attending`)}
+            </cf-badge>
+            <cf-text tone="muted">
+              {computed(() =>
+                `${goingCount} ${goingCount === 1 ? "person" : "people"} going`
+              )}
+            </cf-text>
+          </cf-hstack>
+        </cf-card>
+
+        {/* ===== Roster grouped by status (no `$`-bindings) ===== */}
+        <cf-card>
+          <cf-vstack gap="3">
+            <cf-heading level={4}>Who's coming</cf-heading>
+            {
+              /* Derived array → wrap the .map in computed. Each group is a status
+                section; OTHER attendees use cf-avatar + plain name. The viewer's
+                own row is marked via the `me` reference using equals(), NOT name
+                equality. None of these nodes carries a `$`-binding. */
+            }
+            {computed(() =>
+              grouped.map((group) => (
+                <cf-vstack gap="1">
+                  <cf-text variant="caption" tone="muted">
+                    {computed(() => `${group.label} (${group.people.length})`)}
+                  </cf-text>
+                  {group.people.map((a: Attendee) => (
+                    <cf-hstack gap="2" align="center">
                       <cf-avatar
-                        src={event.organizer.avatar}
-                        name={event.organizer.displayName}
+                        src={a.avatar}
+                        name={a.displayName}
                         size="xs"
                       />
-                      <cf-text variant="caption">
-                        {event.organizer.displayName}
-                      </cf-text>
-                    </cf-hstack>
-                  </cf-vstack>
-                </cf-card>
-              )
-              : (
-                <cf-card>
-                  <cf-vstack gap="3">
-                    <cf-heading level={3}>Create your event</cf-heading>
-                    <cf-vstack gap="1">
-                      <cf-label>Title</cf-label>
-                      <cf-input
-                        $value={titleDraft}
-                        placeholder="Game night"
-                      />
-                    </cf-vstack>
-                    <cf-hstack gap="3" wrap>
-                      <cf-vstack gap="1" style={{ flex: 1 }}>
-                        <cf-label>When</cf-label>
-                        <cf-input
-                          $value={dateTimeDraft}
-                          placeholder="Fri 7pm"
-                        />
-                      </cf-vstack>
-                      <cf-vstack gap="1" style={{ flex: 1 }}>
-                        <cf-label>Where</cf-label>
-                        <cf-input
-                          $value={locationDraft}
-                          placeholder="My place"
-                        />
-                      </cf-vstack>
-                    </cf-hstack>
-                    {
-                      /* The organizer snapshot is taken from #profile on create;
-                        show who that will be via the trusted badge. */
-                    }
-                    <cf-hstack gap="2" align="center" wrap>
-                      <cf-text variant="caption" tone="muted">
-                        Hosting as
-                      </cf-text>
-                      <cf-profile-badge
-                        $profile={profileWish.result}
-                        size="sm"
-                      />
-                    </cf-hstack>
-                    <cf-button
-                      color="primary"
-                      variant="solid"
-                      disabled={computed(() => !hasProfile)}
-                      onClick={() => {
-                        boundCreate.send({
-                          title: titleDraft.get(),
-                          dateTime: dateTimeDraft.get(),
-                          location: locationDraft.get(),
-                        });
-                        titleDraft.set("");
-                        dateTimeDraft.set("");
-                        locationDraft.set("");
-                      }}
-                    >
-                      Create event
-                    </cf-button>
-                  </cf-vstack>
-                </cf-card>
-              )
-          )}
-
-          {/* ===== You (identity) ===== */}
-          {computed(() =>
-            eventCreated
-              ? (
-                <cf-card>
-                  <cf-vstack gap="3">
-                    {
-                      /* The trusted badge shows WHO YOU ARE (live profile cell).
-                        Bind .result, gate on hasProfile. */
-                    }
-                    <cf-hstack gap="3" align="center" wrap>
-                      <cf-label>You are</cf-label>
-                      <cf-profile-badge
-                        $profile={profileWish.result}
-                        size="sm"
-                      />
+                      <span
+                        style={{
+                          fontWeight: computed(() =>
+                            equals(me.attendee, a) ? "700" : "400"
+                          ),
+                        }}
+                      >
+                        {computed(() =>
+                          equals(me.attendee, a)
+                            ? `${a.displayName} (you)`
+                            : a.displayName
+                        )}
+                      </span>
                       {computed(() =>
-                        isJoined ? null : (
-                          <cf-button
-                            color="primary"
-                            variant="solid"
-                            disabled={computed(() => !hasProfile)}
-                            onClick={boundJoin}
-                          >
-                            RSVP with your profile
-                          </cf-button>
-                        )
+                        (a.guestCount || 0) > 0
+                          ? (
+                            <cf-badge color="neutral">
+                              {`+${a.guestCount}`}
+                            </cf-badge>
+                          )
+                          : null
+                      )}
+                      {computed(() =>
+                        trimmed(a.message) !== ""
+                          ? (
+                            <cf-text variant="caption" tone="muted">
+                              {`“${a.message}”`}
+                            </cf-text>
+                          )
+                          : null
                       )}
                     </cf-hstack>
+                  ))}
+                </cf-vstack>
+              ))
+            )}
+            {computed(() =>
+              attendees.length === 0
+                ? (
+                  <cf-text tone="muted">
+                    No RSVPs yet — be the first!
+                  </cf-text>
+                )
+                : null
+            )}
+          </cf-vstack>
+        </cf-card>
+      </cf-vstack>
+    );
 
-                    {
-                      /* My RSVP controls — only after I've joined. These edit MY
-                        attendee row through the `me` reference. */
-                    }
-                    {computed(() =>
-                      isJoined
-                        ? (
-                          <cf-vstack gap="2">
-                            <cf-hstack gap="2" wrap align="center">
-                              <cf-label>Your RSVP</cf-label>
-                              {STATUS_ORDER.map((status) => (
-                                <cf-button
-                                  variant={computed(() =>
-                                    me.attendee?.status === status
-                                      ? "solid"
-                                      : "ghost"
-                                  )}
-                                  color={status === "notgoing"
-                                    ? "danger"
-                                    : "primary"}
-                                  onClick={() => boundSetRsvp.send({ status })}
-                                >
-                                  {STATUS_LABEL[status]}
-                                </cf-button>
-                              ))}
-                            </cf-hstack>
-
-                            <cf-hstack gap="2" align="center" wrap>
-                              <cf-label>Extra guests</cf-label>
-                              <cf-button
-                                variant="ghost"
-                                onClick={() =>
-                                  boundSetGuests.send({
-                                    guestCount: (me.attendee?.guestCount ?? 0) -
-                                      1,
-                                  })}
-                              >
-                                −
-                              </cf-button>
-                              <cf-text>
-                                {computed(() => me.attendee?.guestCount ?? 0)}
-                              </cf-text>
-                              <cf-button
-                                variant="ghost"
-                                onClick={() =>
-                                  boundSetGuests.send({
-                                    guestCount: (me.attendee?.guestCount ?? 0) +
-                                      1,
-                                  })}
-                              >
-                                +
-                              </cf-button>
-                            </cf-hstack>
-
-                            <cf-vstack gap="1">
-                              <cf-label>A note (optional)</cf-label>
-                              <cf-hstack gap="2" align="center">
-                                <cf-input
-                                  $value={messageDraft}
-                                  placeholder="Bringing dessert!"
-                                  style={{ flex: 1 }}
-                                />
-                                <cf-button
-                                  variant="solid"
-                                  onClick={() => {
-                                    boundSetMessage.send({
-                                      message: messageDraft.get(),
-                                    });
-                                    messageDraft.set("");
-                                  }}
-                                >
-                                  Save note
-                                </cf-button>
-                              </cf-hstack>
-                            </cf-vstack>
-                          </cf-vstack>
-                        )
-                        : null
-                    )}
-                  </cf-vstack>
-                </cf-card>
-              )
-              : null
-          )}
-
-          {/* ===== Headcount ===== */}
-          {computed(() =>
-            eventCreated
-              ? (
-                <cf-card>
-                  <cf-hstack gap="3" align="center">
-                    <cf-badge color="accent">
-                      {computed(() => `${headcount} attending`)}
-                    </cf-badge>
-                    <cf-text tone="muted">
-                      {computed(() =>
-                        `${goingCount} ${
-                          goingCount === 1 ? "person" : "people"
-                        } going`
-                      )}
-                    </cf-text>
-                  </cf-hstack>
-                </cf-card>
-              )
-              : null
-          )}
-
-          {/* ===== Roster grouped by status ===== */}
-          {computed(() =>
-            eventCreated
-              ? (
-                <cf-card>
-                  <cf-vstack gap="3">
-                    <cf-heading level={4}>Who's coming</cf-heading>
-                    {
-                      /* Derived array → wrap the .map in computed. Each group is
-                        a status section; OTHER attendees use cf-avatar + plain
-                        name. The viewer's own row is marked via the `me`
-                        reference using equals(), NOT name equality. */
-                    }
-                    {computed(() =>
-                      grouped.map((group) => (
-                        <cf-vstack gap="1">
-                          <cf-text variant="caption" tone="muted">
-                            {computed(() =>
-                              `${group.label} (${group.people.length})`
-                            )}
-                          </cf-text>
-                          {group.people.map((a: Attendee) => (
-                            <cf-hstack gap="2" align="center">
-                              <cf-avatar
-                                src={a.avatar}
-                                name={a.displayName}
-                                size="xs"
-                              />
-                              <span
-                                style={{
-                                  fontWeight: computed(() =>
-                                    equals(me.attendee, a) ? "700" : "400"
-                                  ),
-                                }}
-                              >
-                                {computed(() =>
-                                  equals(me.attendee, a)
-                                    ? `${a.displayName} (you)`
-                                    : a.displayName
-                                )}
-                              </span>
-                              {computed(() =>
-                                (a.guestCount || 0) > 0
-                                  ? (
-                                    <cf-badge color="neutral">
-                                      {`+${a.guestCount}`}
-                                    </cf-badge>
-                                  )
-                                  : null
-                              )}
-                              {computed(() =>
-                                trimmed(a.message) !== ""
-                                  ? (
-                                    <cf-text variant="caption" tone="muted">
-                                      {`“${a.message}”`}
-                                    </cf-text>
-                                  )
-                                  : null
-                              )}
-                            </cf-hstack>
-                          ))}
-                        </cf-vstack>
-                      ))
-                    )}
-                    {computed(() =>
-                      attendees.length === 0
-                        ? (
-                          <cf-text tone="muted">
-                            No RSVPs yet — be the first!
-                          </cf-text>
-                        )
-                        : null
-                    )}
-                  </cf-vstack>
-                </cf-card>
-              )
-              : null
-          )}
+    return {
+      [NAME]: "Event RSVP",
+      // `[UI]` is a STATIC <cf-vstack>. The create/view switch is `ifElse(...)`
+      // as a CHILD of that static wrapper (never the `[UI]` value itself, and
+      // never a `computed(() => …)` that regenerates a `$`-bound control). Both
+      // branches are pre-built static subtrees, so every `$value` / `$profile`
+      // binding inside them was constructed once at build time.
+      [UI]: (
+        <cf-vstack gap="4" style={{ padding: "1rem", maxWidth: "640px" }}>
+          {ifElse(eventCreated, eventView, createForm)}
         </cf-vstack>
       ),
 

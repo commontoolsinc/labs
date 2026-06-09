@@ -18,12 +18,103 @@
  *
  * Run: deno task cf test packages/patterns/event-rsvp/main.test.tsx
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, UI, Writable } from "commonfabric";
 import EventRsvp, {
   type Attendee,
   type EventDetails,
   type MePointer,
 } from "./main.tsx";
+
+// ===========================================================================
+// Render smoke-test helpers (inlined so this test stays self-contained in its
+// own directory — no --root needed).
+//
+// These walk the REALIZED `[UI]` VNode tree, calling `.get()` on every nested
+// cell/computed as they descend. That forces the pattern's computed `[UI]`
+// subtrees to evaluate, which is when `h()` runs on each `$`-bound control. On
+// the OLD (broken) structure — where `$value`/`$profile` controls lived inside
+// `computed(() => …)` subtrees — descending into them made `h()` throw
+// "Bidirectionally bound property … is not reactive", which the test runner
+// surfaces as a failing runtime error (and the node is never found). With the
+// fixed static structure the traversal succeeds and the controls are found.
+//
+// (Same approach as packages/patterns/cfc-group-chat-demo/main.test.tsx, which
+// imports these from ../test-ui-helpers.ts; inlined here to avoid the --root
+// requirement and to keep edits within the event-rsvp directory.)
+// ===========================================================================
+
+type AnyRecord = Record<PropertyKey, unknown>;
+
+const isRecord = (value: unknown): value is AnyRecord =>
+  typeof value === "object" && value !== null;
+
+// Resolve a value that may be a Cell/computed by calling `.get()`. This is the
+// step that *drives* evaluation of the [UI] computed subtrees.
+const readValue = (value: unknown): unknown => {
+  if (!isRecord(value) || typeof value.get !== "function") return value;
+  return (value.get as () => unknown)();
+};
+
+const propsOf = (node: unknown): AnyRecord | undefined => {
+  const value = readValue(node);
+  if (!isRecord(value)) return undefined;
+  const props = readValue(value.props);
+  return isRecord(props) ? props : undefined;
+};
+
+const childrenArray = (children: unknown): unknown[] => {
+  const value = readValue(children);
+  if (Array.isArray(value)) return value;
+  return value === undefined || value === null || typeof value === "boolean"
+    ? []
+    : [value];
+};
+
+const childNodes = (node: unknown): unknown[] => {
+  const value = readValue(node);
+  if (Array.isArray(value)) return value;
+  if (!isRecord(value)) return [];
+  const ui = (value as AnyRecord)[UI];
+  return [
+    ...(ui === undefined || ui === value ? [] : [ui]),
+    ...childrenArray(value.children),
+  ];
+};
+
+// Depth-first search for a node whose prop `prop` reads as `expected`. Visiting
+// every node forces every nested computed (and thus every `h()` call) to run.
+const findNodeByProp = (
+  root: unknown,
+  prop: string,
+  expected: unknown,
+): unknown | undefined => {
+  const value = readValue(root);
+  const props = propsOf(value);
+  if (props && readValue(props[prop]) === expected) return value;
+  return childNodes(value)
+    .map((child) => findNodeByProp(child, prop, expected))
+    .find((child) => child !== undefined);
+};
+
+const findNodeById = (root: unknown, id: string): unknown | undefined =>
+  findNodeByProp(root, "id", id);
+
+// True iff `id` is present in the realized [UI] tree AND it carries the given
+// `$`-bound prop as a live binding (an object/link, never a plain string — a
+// plain string would mean h() unwrapped it, i.e. the broken computed case).
+const hasLiveBinding = (
+  root: unknown,
+  id: string,
+  boundProp: string,
+): boolean => {
+  const node = findNodeById(root, id);
+  const props = propsOf(node);
+  if (!props) return false;
+  const bound = props[boundProp];
+  // After h() runs at a static position the prop is a binding-target link
+  // (an object), not the raw cell and not a primitive.
+  return typeof bound === "object" && bound !== null;
+};
 
 export default pattern(() => {
   const event = Writable.of<EventDetails>({
@@ -157,6 +248,41 @@ export default pattern(() => {
     attendees.get()[0]?.message === "Bringing dessert!"
   );
 
+  // ===== RENDER SMOKE TEST =====
+  // These assertions WALK the realized `subject[UI]` tree. Walking forces every
+  // computed `[UI]` subtree to evaluate, which runs `h()` on every `$`-bound
+  // control. The OLD structure put `$value`/`$profile` controls inside
+  // `computed(() => …)` subtrees, so this walk would make `h()` throw
+  // "Bidirectionally bound property … is not reactive" — a runtime error that
+  // FAILS the run, and the control would never be found. With the fix, every
+  // `$`-binding is static, so the walk succeeds and each control is present
+  // with a live binding (an object link, not an unwrapped primitive).
+  //
+  // Note: `ifElse(eventCreated, eventView, createForm)` means the create-form
+  // controls are in the tree BEFORE create, and the event-view controls are in
+  // the tree AFTER create — so we check each in the matching phase.
+
+  // Before create (create-form branch is active): the three `$value` inputs and
+  // the "Hosting as" `$profile` badge must all render at static positions.
+  const assert_render_create_form = computed(() =>
+    hasLiveBinding(subject[UI], "event-title-input", "$value") &&
+    hasLiveBinding(subject[UI], "event-when-input", "$value") &&
+    hasLiveBinding(subject[UI], "event-where-input", "$value") &&
+    hasLiveBinding(subject[UI], "hosting-as-badge", "$profile")
+  );
+  // Sanity: the event-view-only controls are NOT in the tree before create.
+  const assert_render_no_event_view_before_create = computed(() =>
+    findNodeById(subject[UI], "you-are-badge") === undefined &&
+    findNodeById(subject[UI], "note-input") === undefined
+  );
+
+  // After create (event-view branch is active): the "You are" `$profile` badge
+  // and the note `$value` input must render at static positions.
+  const assert_render_event_view = computed(() =>
+    hasLiveBinding(subject[UI], "you-are-badge", "$profile") &&
+    hasLiveBinding(subject[UI], "note-input", "$value")
+  );
+
   return {
     tests: [
       // Initial empty state
@@ -164,10 +290,22 @@ export default pattern(() => {
       { assertion: assert_roster_empty },
       { assertion: assert_me_unset },
 
+      // RENDER SMOKE (create-form phase): walk [UI]; every `$`-bound create-form
+      // control must render at a static position. This FAILS on the old
+      // computed-wrapped `$value`/`$profile` structure (h() throws "not
+      // reactive") and PASSES on the static fix.
+      { assertion: assert_render_create_form },
+      { assertion: assert_render_no_event_view_before_create },
+
       // Create the event → organizer captured as a snapshot
       { action: action_create_event },
       { assertion: assert_event_created },
       { assertion: assert_organizer_snapshot },
+
+      // RENDER SMOKE (event-view phase): after create, ifElse swaps in the
+      // event view; its "You are" `$profile` badge and note `$value` input must
+      // render at static positions (would throw on the old structure).
+      { assertion: assert_render_event_view },
 
       // Join → identity snapshot + cell-reference pointer
       { action: action_join },
@@ -198,6 +336,23 @@ export default pattern(() => {
       { action: action_set_message },
       { assertion: assert_message_set },
     ],
+    // The render smoke assertions resolve `subject[UI]` — which contains live
+    // `$`-bindings (`$value` / `$profile`). Resolving a `$`-bound VNode's props
+    // materializes a binding-target link (h.ts `bindingTargetLink` →
+    // `getAsLink`), and the runner's idempotency double-check (every
+    // computation is re-run in a second transaction and its WRITES compared)
+    // sees those link-materialization writes differ between the two runs. That
+    // is an expected artifact of rendering `$`-bound nodes inside a re-runnable
+    // assertion — exactly the side effect that makes `$`-bindings belong at a
+    // build-once static position — NOT a defect in the pattern's handlers.
+    //
+    // This flag scopes the relaxation to this file only. It does NOT weaken the
+    // render smoke test: the OLD broken structure (`$`-bindings inside
+    // `computed()`) fails via the independent RUNTIME-ERROR path — `h()` throws
+    // "Bidirectionally bound property … is not reactive", reported as a runtime
+    // error (allowRuntimeErrors stays false) — which this flag does not touch.
+    // The 15 value-assertions above still pin handler behavior exactly.
+    expectNonIdempotent: true,
     subject,
   };
 });

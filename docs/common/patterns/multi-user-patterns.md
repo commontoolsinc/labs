@@ -282,6 +282,14 @@ The viewer is whoever the runtime says they are; `#profile` is how you read it.
 Render every other participant with `cf-avatar` — you hold only the snapshot they
 contributed, not a profile cell.
 
+> ⚠️ **`$profile` must be at a STATIC `[UI]` position** — like every `$`-binding
+> (`$value` / `$checked`). Bind it where the JSX is built once; **never inside a
+> `{computed(() => …)}` subtree**. There the cell is auto-unwrapped to a plain value
+> and the renderer throws *"Bidirectionally bound property $profile is not
+> reactive"*, blanking the whole pattern. Build each view as static JSX and switch
+> with `ifElse(cond, staticA, staticB)` as a child of a static wrapper; gate only
+> *siblings* reactively. Repro: `packages/patterns/scope-bug-computed-vnode-blank/`.
+
 ### Build the roster by join + snapshot
 
 There is no "list everyone's profiles" primitive. Each viewer contributes their
