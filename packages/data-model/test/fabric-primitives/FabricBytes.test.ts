@@ -122,6 +122,22 @@ describe("FabricBytes", () => {
       });
 
       describe("decode()", () => {
+        it("decodes non-string state to a `ProblematicValue`", () => {
+          const decoded = codec.decode(expectedTag, 42, context);
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+
+        it("decodes malformed base64 to a `ProblematicValue`", () => {
+          const decoded = codec.decode(
+            expectedTag,
+            "not valid base64!!",
+            context,
+          );
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+      });
+
+      describe("round trip encode-decode", () => {
         it("round-trips via encode -> decode", () => {
           const fb = new FabricBytes(new Uint8Array([10, 20, 30, 40]));
           const decoded = codec.decode(
@@ -142,20 +158,6 @@ describe("FabricBytes", () => {
           ) as unknown as FabricBytes;
           expect(decoded).toBeInstanceOf(FabricBytes);
           expect(decoded.length).toBe(0);
-        });
-
-        it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, 42, context);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
-        });
-
-        it("decodes malformed base64 to a `ProblematicValue`", () => {
-          const decoded = codec.decode(
-            expectedTag,
-            "not valid base64!!",
-            context,
-          );
-          expect(decoded).toBeInstanceOf(ProblematicValue);
         });
       });
     });

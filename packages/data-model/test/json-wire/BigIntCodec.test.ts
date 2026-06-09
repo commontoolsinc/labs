@@ -62,107 +62,6 @@ describe("BigIntCodec", () => {
     });
 
     describe("decode()", () => {
-      it("round-trips at top level", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(42n),
-          context,
-        );
-        expect(decoded).toBe(42n);
-      });
-
-      it("round-trips negative bigint", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(-999n),
-          context,
-        );
-        expect(decoded).toBe(-999n);
-      });
-
-      it("round-trips zero bigint", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(0n),
-          context,
-        );
-        expect(decoded).toBe(0n);
-      });
-
-      it("round-trips `1n`", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(1n),
-          context,
-        );
-        expect(decoded).toBe(1n);
-      });
-
-      it("round-trips `-1n`", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(-1n),
-          context,
-        );
-        expect(decoded).toBe(-1n);
-      });
-
-      it("round-trips large bigint", () => {
-        const big = 2n ** 64n;
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(big),
-          context,
-        );
-        expect(decoded).toBe(big);
-      });
-
-      it("round-trips large negative bigint", () => {
-        const big = -(2n ** 64n);
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(big),
-          context,
-        );
-        expect(decoded).toBe(big);
-      });
-
-      it("round-trips boundary value `127n`", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(127n),
-          context,
-        );
-        expect(decoded).toBe(127n);
-      });
-
-      it("round-trips boundary value `128n`", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(128n),
-          context,
-        );
-        expect(decoded).toBe(128n);
-      });
-
-      it("round-trips boundary value `-128n`", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(-128n),
-          context,
-        );
-        expect(decoded).toBe(-128n);
-      });
-
-      it("round-trips boundary value `-129n`", () => {
-        const decoded = codec.decode(
-          expectedTag,
-          codec.encode(-129n),
-          context,
-        );
-        expect(decoded).toBe(-129n);
-      });
-
       it("accepts unpadded base64url input", () => {
         // "Kg" is the standard unpadded base64url encoding of 42n.
         const result = codec.decode(expectedTag, "Kg", context);
@@ -207,6 +106,65 @@ describe("BigIntCodec", () => {
         expect(result).toBeInstanceOf(ProblematicValue);
         const prob = result as unknown as ProblematicValue;
         expect(prob.wireTypeTag).toBe("BigInt@1");
+      });
+    });
+
+    describe("round trip encode-decode", () => {
+      it("round-trips at top level", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(42n), context);
+        expect(decoded).toBe(42n);
+      });
+
+      it("round-trips negative bigint", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(-999n), context);
+        expect(decoded).toBe(-999n);
+      });
+
+      it("round-trips zero bigint", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(0n), context);
+        expect(decoded).toBe(0n);
+      });
+
+      it("round-trips `1n`", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(1n), context);
+        expect(decoded).toBe(1n);
+      });
+
+      it("round-trips `-1n`", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(-1n), context);
+        expect(decoded).toBe(-1n);
+      });
+
+      it("round-trips large bigint", () => {
+        const big = 2n ** 64n;
+        const decoded = codec.decode(expectedTag, codec.encode(big), context);
+        expect(decoded).toBe(big);
+      });
+
+      it("round-trips large negative bigint", () => {
+        const big = -(2n ** 64n);
+        const decoded = codec.decode(expectedTag, codec.encode(big), context);
+        expect(decoded).toBe(big);
+      });
+
+      it("round-trips boundary value `127n`", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(127n), context);
+        expect(decoded).toBe(127n);
+      });
+
+      it("round-trips boundary value `128n`", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(128n), context);
+        expect(decoded).toBe(128n);
+      });
+
+      it("round-trips boundary value `-128n`", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(-128n), context);
+        expect(decoded).toBe(-128n);
+      });
+
+      it("round-trips boundary value `-129n`", () => {
+        const decoded = codec.decode(expectedTag, codec.encode(-129n), context);
+        expect(decoded).toBe(-129n);
       });
     });
   });

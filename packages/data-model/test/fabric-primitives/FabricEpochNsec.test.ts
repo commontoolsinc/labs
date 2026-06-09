@@ -81,6 +81,18 @@ describe("FabricEpochNsec", () => {
       });
 
       describe("decode()", () => {
+        it("decodes a flat base64 string (epoch zero)", () => {
+          const decoded = codec.decode(
+            expectedTag,
+            "AA",
+            context,
+          ) as unknown as FabricEpochNsec;
+          expect(decoded).toBeInstanceOf(FabricEpochNsec);
+          expect(decoded.value).toBe(0n);
+        });
+      });
+
+      describe("round trip encode-decode", () => {
         it("round-trips at top level (epoch zero)", () => {
           const sn = new FabricEpochNsec(0n);
           const decoded = codec.decode(

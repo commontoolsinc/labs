@@ -195,18 +195,6 @@ describe("FabricHash", () => {
           );
         });
 
-        it("round-trips via encode -> decode (non-`fid1` tag)", () => {
-          const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
-          const decoded = codec.decode(
-            expectedTag,
-            codec.encode(cid),
-            context,
-          );
-          expect(decoded).toBeInstanceOf(FabricHash);
-          expect((decoded as FabricHash).tag).toBe("sha3");
-          expect((decoded as FabricHash).bytes).toEqual(cid.bytes);
-        });
-
         it("decodes non-object state to a `ProblematicValue`", () => {
           const decoded = codec.decode(expectedTag, 123, context);
           expect(decoded).toBeInstanceOf(ProblematicValue);
@@ -228,6 +216,20 @@ describe("FabricHash", () => {
             context,
           );
           expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+      });
+
+      describe("round trip encode-decode", () => {
+        it("round-trips via encode -> decode (non-`fid1` tag)", () => {
+          const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
+          const decoded = codec.decode(
+            expectedTag,
+            codec.encode(cid),
+            context,
+          );
+          expect(decoded).toBeInstanceOf(FabricHash);
+          expect((decoded as FabricHash).tag).toBe("sha3");
+          expect((decoded as FabricHash).bytes).toEqual(cid.bytes);
         });
       });
     });

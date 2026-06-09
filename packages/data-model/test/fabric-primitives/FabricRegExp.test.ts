@@ -154,6 +154,13 @@ describe("FabricRegExp", () => {
       });
 
       describe("decode()", () => {
+        it("decodes non-object state to `ProblematicValue`", () => {
+          const decoded = codec.decode(expectedTag, "nope", context);
+          expect(decoded).toBeInstanceOf(ProblematicValue);
+        });
+      });
+
+      describe("round trip encode-decode", () => {
         it("round-trips a regex (source, flags, flavor)", () => {
           const re = new FabricRegExp(/ab+c/gi);
           const decoded = codec.decode(
@@ -177,11 +184,6 @@ describe("FabricRegExp", () => {
           expect(decoded).toBeInstanceOf(FabricRegExp);
           expect(decoded.source).toBe("^x*$");
           expect(decoded.flags).toBe("");
-        });
-
-        it("decodes non-object state to `ProblematicValue`", () => {
-          const decoded = codec.decode(expectedTag, "nope", context);
-          expect(decoded).toBeInstanceOf(ProblematicValue);
         });
       });
     });
