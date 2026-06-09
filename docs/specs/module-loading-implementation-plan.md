@@ -15,9 +15,9 @@ steps with the files each touches, exit criteria, and validation commands.
 | 0 — Loader shape confirmation | Done | SES `importNow` + virtual (third-party) module records load synchronously, incl. cycles. `ModuleSource`/`StaticModuleRecord` are not exposed by this `ses` build, so the loader uses `{ imports, exports, execute }` records. |
 | 1 — Decouple identity | Done (merged) | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
 | 2 — ESM emission + SES module loading | Done (behind `CF_ESM_MODULE_LOADER`, default off) | `compileToRecordGraph` + `evaluateRecordGraph` (`engine.ts`) run the full `CommonFabricTransformerPipeline` (not bare `transpileModule`), assemble content-addressed records, register per-load/per-module source maps, and load multi-module programs end-to-end. Engine integration, `export *` re-exports, live module-namespace bindings (#3797), and CFC verified-source location resolution (#3785, #3787) are all wired. The flag is now also plumbed to the browser client (#3796). |
-| 3 — Verifier port | Classification ported + wired; corpus parity oracle pending | The deep SES_SANDBOXING module-item classification (`verifyCompiledModuleBody`, reusing the shared `classifyModuleItems` core) runs **per module** in the ESM compile path (`engine.ts`). `verifyModuleGraph` validates graph shape/wiring. Additional hardening landed beyond the original plan: import-edge target validation (#3778), pattern provenance brand (#3779), frozen exported patterns (#3777). **Remaining (release gate):** the full-corpus differential parity oracle — `esm-verifier-parity.test.ts` currently covers crafted CF-shaped fixtures only, not every pattern-corpus verdict. |
+| 3 — Verifier port | Classification ported + wired; **corpus parity oracle landed** | The deep SES_SANDBOXING module-item classification (`verifyCompiledModuleBody`, reusing the shared `classifyModuleItems` core) runs **per module** in the ESM compile path (`engine.ts`). `verifyModuleGraph` validates graph shape/wiring. Additional hardening landed beyond the original plan: import-edge target validation (#3778), pattern provenance brand (#3779), frozen exported patterns (#3777). The full-corpus differential parity oracle now exists — `esm-verifier-differential.test.ts` compiles the SAME authored source through BOTH real paths (`Engine.compile` AMD vs `Engine.compileToRecordGraph` ESM, verify-only, no eval) and asserts identical accept/reject verdicts, with the AMD verifier as the trusted oracle: synthetic fixtures cover the reject surface, and the entire top-level `packages/patterns` corpus (the `all.test.ts` set) covers accept parity. `esm-verifier-parity.test.ts` (crafted compiled bodies) remains the unit-level companion. |
 | 4 — Per-module compilation cache | Done (behind `CF_ESM_MODULE_LOADER`, default off) | Content-addressed cell cache built and wired into the ESM `PatternManager` load path (`compilation-cache/cell-cache.ts`, `pattern-manager.ts`). Per space: source set `pattern:<identity>` (self-verifying via Merkle recompute) + compiled set `compileCache:<runtimeVersion>/<identity>` (CFC `addIntegrity` on write, fail-closed on read). A warm full hit feeds cached bodies back through `compileToRecordGraph` and skips the TypeScript compile / transformer pipeline; a miss compiles and writes both sets back on a fresh transaction. Gated on `cfcEnforcementMode !== "disabled"`. **Divergence from the original design:** the plan assumed the per-module `cf:module/<hash>` identity was already entry-point independent, but the ESM compile path resolved a `/<computeId>/`-prefixed program, leaking the whole-program prefix into the identity — so cross-program dedup and the spec's entry-point-independence guarantee did not actually hold. Step 5a (`computeModuleIdentities` in `module-record-compiler.ts`) strips the prefix for identity computation only, making identities prefix-free/dedupable while leaving source maps + `fn.src` resolution on the prefixed path untouched. Full runner suite green flag-on and flag-off. |
-| 5 — Default-on + AMD removal | Not started (intentionally) | Gated on the Phase 3 corpus parity oracle + a green full-suite flag-on sweep + benchmarks. The canary PR (#3782) is the standing CI signal for flag-on. The flag stays **off** by default. |
+| 5 — Default-on + AMD removal | Not started (intentionally) | Phase 3 corpus parity oracle is now ✅ landed (`esm-verifier-differential.test.ts`); remaining gates are a green full-suite flag-on sweep + benchmarks. The canary PR (#3782) is the standing CI signal for flag-on. The flag stays **off** by default. |
 
 Phases 0–1 merged earlier. Phases 2–4 mechanism merged behind the default-off
 flag (#3763), then substantially completed by follow-up work: ESM source-location
@@ -267,12 +267,16 @@ path); behavior parity with AMD.
 
 ## Phase 3 — Verifier port (gates default-on for untrusted code)
 
-> **Status: Classification ported and wired; corpus parity oracle pending.**
+> **Status: Classification ported and wired; corpus parity oracle landed.**
 > `verifyCompiledModuleBody` (reusing the shared `classifyModuleItems` core) runs
 > per module in the ESM compile path (`engine.ts`), and `verifyModuleGraph`
-> checks graph shape/wiring. The remaining release gate is the full-corpus
-> differential parity oracle — `packages/runner/test/esm-verifier-parity.test.ts`
-> exists but covers crafted CF-shaped fixtures, not every pattern-corpus verdict.
+> checks graph shape/wiring. The full-corpus differential parity oracle now
+> exists — `packages/runner/test/esm-verifier-differential.test.ts` runs the same
+> authored source through both compile paths (verify-only, no eval) and asserts
+> the AMD and ESM verifiers reach the same verdict, across synthetic reject
+> fixtures and the entire top-level `packages/patterns` corpus.
+> `esm-verifier-parity.test.ts` (crafted compiled bodies fed straight to the ESM
+> body verifier) remains as the unit-level companion.
 
 The bundle verifier currently parses AMD `define()` calls and must verify
 `ModuleSource` records before ESM can run untrusted patterns by default.
@@ -286,12 +290,14 @@ The bundle verifier currently parses AMD `define()` calls and must verify
   the parser feeding them changes.
 - **Parity harness:** for the full pattern corpus, assert every verdict the AMD
   verifier produces is reproduced by the `ModuleSource` verifier. Treat any
-  divergence as a release blocker.
+  divergence as a release blocker. **Landed** as
+  `packages/runner/test/esm-verifier-differential.test.ts` (synthetic reject
+  fixtures + the full top-level `packages/patterns` corpus; AMD as the oracle).
 
-**Files:** the three verifier files above; new parity test under
-`packages/runner/test/`.
-**Exit:** verifier parity green across the corpus; ESM path is now safe for
-untrusted execution.
+**Files:** the three verifier files above; parity test
+`packages/runner/test/esm-verifier-differential.test.ts`.
+**Exit:** verifier parity green across the corpus (✅ — full top-level corpus +
+reject fixtures pass); ESM path is now safe for untrusted execution.
 
 ---
 
@@ -489,7 +495,8 @@ compilation-cache tests pass under both loaders; no correctness regression.
 
 ## Phase 5 — Default-on and cleanup
 
-> **Status: Not started.** Gated on the Phase 3 corpus parity oracle, a green
+> **Status: Not started.** The Phase 3 corpus parity oracle is now landed
+> (`esm-verifier-differential.test.ts`); remaining gates are a green
 > full-suite flag-on sweep (`CF_ESM_MODULE_LOADER=1 deno task test` +
 > `deno task integration` from the repo root), and benchmarks. The canary
 > PR (#3782) is the standing flag-on CI signal.
