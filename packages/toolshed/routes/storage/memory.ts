@@ -14,18 +14,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const authorizationError = (message: string): Error =>
   Object.assign(new Error(message), { name: "AuthorizationError" });
 
-const toByteArray = (value: unknown): Uint8Array | null => {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-  // The session signature travels as a `FabricBytes` (emitted by the client in
-  // `v2-remote-session.ts`), which decodes to one here.
-  if (value instanceof FabricBytes) {
-    return value.slice();
-  }
-  return null;
-};
-
 const sameSessionDescriptor = (
   left: Record<string, unknown>,
   right: { sessionId?: string; seenSeq?: number },
@@ -43,16 +31,15 @@ const authorizeSessionOpen = async (
     authorization?: unknown;
   },
 ): Promise<string> => {
-  const signature = toByteArray(
-    isRecord(message.authorization)
-      ? message.authorization.signature
-      : undefined,
-  );
-  if (
-    !isRecord(message.invocation) ||
-    !isRecord(message.authorization) ||
-    signature === null
-  ) {
+  // The session signature travels as a `FabricBytes` (emitted by the client in
+  // `v2-remote-session.ts`), which decodes to one here. A non-null `signature`
+  // implies a well-formed `authorization`, so it needn't be checked separately.
+  const rawSignature =
+    (message.authorization as { signature?: unknown } | undefined)?.signature;
+  const signature = rawSignature instanceof FabricBytes
+    ? rawSignature.slice()
+    : null;
+  if (!isRecord(message.invocation) || signature === null) {
     throw authorizationError("memory session.open requires authorization");
   }
 
