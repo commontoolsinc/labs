@@ -205,13 +205,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
     _seen?: Set<object>,
     registry: CodecRegistry = defaultRegistry,
   ): JsonWireValue {
-    // Try the registry first.
     const codec = registry.codecFromValue(value);
+
     if (codec === SELF_REP) {
       // A self-representing primitive is its own wire form.
       return value as JsonWireValue;
-    }
-    if (codec) {
+    } if (codec) {
       const seen = _seen ?? new Set<object>();
       let addedToSeen = false;
 
@@ -248,9 +247,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
       );
     }
 
-    // Self-representing primitives (`null`, `boolean`, finite `number`,
-    // `string`) returned `SELF_REP` above. Past this point, `value` is an
-    // `object` -- an array or a plain object.
+    // Self-representing primitives returned `SELF_REP` above. Past this point,
+    // `value` is an `object`.
 
     // Arrays
     if (Array.isArray(value)) {
