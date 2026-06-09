@@ -12,6 +12,7 @@
  * - **metrics**: aggregated traverser counters. These are *not* asserted —
  *   they exist so benchmarks can attribute wins (e.g. anyOfBranches -80%).
  */
+import { gunzipSync } from "node:zlib";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { JSONObject } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -271,5 +272,11 @@ export function replayFixture(
 }
 
 export function loadFixture(path: string): TraverseFixture {
+  if (path.endsWith(".gz")) {
+    const compressed = Deno.readFileSync(path);
+    return JSON.parse(
+      new TextDecoder().decode(gunzipSync(compressed)),
+    ) as TraverseFixture;
+  }
   return JSON.parse(Deno.readTextFileSync(path)) as TraverseFixture;
 }

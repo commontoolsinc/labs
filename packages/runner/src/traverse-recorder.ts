@@ -234,8 +234,11 @@ class TraverseCaptureRecorder {
     };
   }
 
+  // Writes plain JSON (this module is bundled for browsers, so no node:zlib
+  // here); gzip the output afterwards to check it in as a fixture.
   flush(path: string): void {
-    const name = path.split("/").pop()?.replace(/\.json$/, "") ?? "capture";
+    const name = path.split("/").pop()?.replace(/\.json(\.gz)?$/, "") ??
+      "capture";
     const fixture = this.toFixture(name, `CF_TRAVERSE_CAPTURE=${path}`);
     Deno.writeTextFileSync(path, JSON.stringify(fixture));
     logger.info("capture", () => [

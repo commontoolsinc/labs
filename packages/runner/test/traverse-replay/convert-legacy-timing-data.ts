@@ -7,6 +7,7 @@
  *   deno run --allow-read --allow-write \
  *     test/traverse-replay/convert-legacy-timing-data.ts
  */
+import { gzipSync } from "node:zlib";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   fixtureDocKey,
@@ -44,7 +45,10 @@ const sourcePath = new URL(
   "../../integration/traverse_timing_test_data.json",
   import.meta.url,
 );
-const outPath = new URL("./fixtures/piece-query-legacy.json", import.meta.url);
+const outPath = new URL(
+  "./fixtures/piece-query-legacy.json.gz",
+  import.meta.url,
+);
 
 const data = JSON.parse(Deno.readTextFileSync(sourcePath)) as Record<
   string,
@@ -88,7 +92,10 @@ const fixture: TraverseFixture = {
 };
 
 Deno.mkdirSync(new URL("./fixtures/", import.meta.url), { recursive: true });
-Deno.writeTextFileSync(outPath, JSON.stringify(fixture));
+Deno.writeFileSync(
+  outPath,
+  gzipSync(new TextEncoder().encode(JSON.stringify(fixture)), { level: 9 }),
+);
 console.log(
   `wrote ${outPath.pathname}: ${Object.keys(docs).length} docs, ` +
     `${fixture.invocations.length} invocations`,
