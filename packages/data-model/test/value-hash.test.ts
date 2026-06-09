@@ -466,7 +466,7 @@ describe("value-hash", () => {
         expect(hex(hashBytesOf(nsec))).not.toBe(hex(hashBytesOf(days)));
       });
     });
-    describe("FabricError (FabricInstance via DECONSTRUCT)", () => {
+    describe("FabricError (FabricInstance via [CODEC])", () => {
       it("matches a byte stream built from `[DECONSTRUCT]` output for `FabricError`", () => {
         // Build the expected byte stream programmatically because the
         // deconstructed state includes `stack` which is environment-dependent.

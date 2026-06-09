@@ -6,10 +6,8 @@ import {
 } from "./interface.ts";
 
 /**
- * Gets the `[CODEC]` for the given value's class. Analogous to
- * `BaseFabricInstance.wireTypeTagOf()` (which returns the wire type tag), but
- * returns the codec instead. Throws a "shouldn't happen" error if the value's
- * class has no `[CODEC]`.
+ * Gets the `[CODEC]` for the given value's class. Throws a "shouldn't happen"
+ * error if the value's class has no `[CODEC]`.
  */
 export function codecOf(value: FabricSpecialObject): FabricCodec {
   const codec =
