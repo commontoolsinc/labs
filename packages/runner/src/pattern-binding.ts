@@ -374,15 +374,27 @@ export function findAllWriteRedirectCells<T>(
       // Numbered docs are yet to be unwrapped nested patterns. Ignore them.
       return;
     } else if (isWriteRedirectLink(binding)) {
-      // Record the direct write-redirect link found in this binding. We do NOT
-      // follow it into its target document. (Previously this recursed via
-      // `find(linkCell.getRaw(...))`, computing the transitive closure of write
-      // redirects across documents — resolving a cell + walking its whole value
-      // per link, the dominant reload instantiation cost. The scheduler only
-      // needs the redirects present in this binding.)
+      // Follow a *chain* of write redirects: record this redirect, then if its
+      // target value is ITSELF a write redirect, follow that too (one string of
+      // redirects). We stop as soon as the target is a non-redirect value — we
+      // do NOT recurse into it looking for further nested redirects.
+      //
+      // (Previously this recursed via `find(linkCell.getRaw(...))`, which walked
+      // the whole target value structurally — the transitive closure across
+      // documents — and was the dominant reload instantiation cost: resolving a
+      // cell + walking its entire value per link. Following only direct redirect
+      // chains keeps the cases that matter without the deep dive.)
       const link = parseLink(binding, baseCell);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
+      const linkCell = baseCell.runtime.getCellFromLink(
+        link,
+        undefined,
+        baseCell.tx,
+      );
+      if (!linkCell) throw new Error("Link cell not found");
+      const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
+      if (isWriteRedirectLink(target)) find(target, baseCell);
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;

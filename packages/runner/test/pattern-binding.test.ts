@@ -421,30 +421,53 @@ describe("pattern-binding", () => {
       expect(links[0].space).toBe(space);
     });
 
-    it("records redirects in the binding but does not follow them into targets", () => {
-      const testCell = runtime.getCell<{ a: Record<string, any> }>(
+    it("follows a chain of write redirects (redirect -> redirect)", () => {
+      const testCell = runtime.getCell<Record<string, unknown>>(
         space,
-        "nested legacy",
+        "redirect chain",
         undefined,
         tx,
       );
-      testCell.set({ a: { b: { c: 42 } } });
-      const binding = { $alias: { path: ["a"] } };
-      // The value AT path 'a' contains a nested write-redirect (`inner`).
-      // findAllWriteRedirectCells records the redirects that appear directly in
-      // the binding, but intentionally does NOT follow a redirect into its
-      // target document — so the nested ["b","c"] alias is not discovered.
-      testCell.key("a").set({
-        b: { c: 42 },
-        inner: { $alias: { path: ["b", "c"] } },
-      });
-      const nestedBinding = { $alias: { path: ["a", "inner"] } };
-      const links = findAllWriteRedirectCells(
-        [binding, nestedBinding],
-        testCell,
+      // Build p -> q -> r, where each of p and q HOLDS a write-redirect (a
+      // redirect whose target value is itself a redirect), and r is a plain
+      // value. A literal `$alias` in a set() value is resolved on write, so we
+      // store real sigil write-redirects via getAsWriteRedirectLink.
+      testCell.set({ r: 99 });
+      testCell.key("q").set(
+        testCell.key("r").getAsWriteRedirectLink({ base: testCell }),
       );
-      expect(links.length).toBe(2);
-      expect(links.map((l) => l.path)).toEqual([["a"], ["a", "inner"]]);
+      testCell.key("p").set(
+        testCell.key("q").getAsWriteRedirectLink({ base: testCell }),
+      );
+      // The binding redirects to p; the chain p -> q -> r is followed, stopping
+      // at the non-redirect value 99.
+      const binding = testCell.key("p").getAsWriteRedirectLink({
+        base: testCell,
+      });
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.map((l) => l.path)).toEqual([["p"], ["q"], ["r"]]);
+    });
+
+    it("does not dive into a non-redirect target to find nested redirects", () => {
+      const testCell = runtime.getCell<Record<string, unknown>>(
+        space,
+        "nested non-redirect target",
+        undefined,
+        tx,
+      );
+      testCell.set({ x: 7 });
+      // 'a' holds an OBJECT (a non-redirect) that CONTAINS a nested write
+      // redirect. Following the `a` redirect stops at that object — we do NOT
+      // walk into it, so the nested `inner` redirect is never discovered.
+      testCell.key("a").set({
+        inner: testCell.key("x").getAsWriteRedirectLink({ base: testCell }),
+        plain: 1,
+      });
+      const binding = testCell.key("a").getAsWriteRedirectLink({
+        base: testCell,
+      });
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.map((l) => l.path)).toEqual([["a"]]);
     });
 
     it("should find all write redirect links in an array", () => {
