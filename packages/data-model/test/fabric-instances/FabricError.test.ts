@@ -320,9 +320,9 @@ describe("FabricError", () => {
       const expectedTag = WIRE_TYPE_TAGS.Error;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `Error` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

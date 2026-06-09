@@ -82,7 +82,7 @@ export class FabricMap
        * Stub -- throws until `Map` support is implemented.
        */
       decode(
-        _wireTypeTag: string,
+        _typeTag: string,
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {

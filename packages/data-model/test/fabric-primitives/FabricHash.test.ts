@@ -156,9 +156,9 @@ describe("FabricHash", () => {
       const expectedTag = WIRE_TYPE_TAGS.Hash;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `Hash` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

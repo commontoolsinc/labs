@@ -359,7 +359,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
 
       /** @inheritDoc */
       decode(
-        _wireTypeTag: string,
+        _typeTag: string,
         state: FabricValue,
         context: ReconstructionContext,
       ): FabricValue {

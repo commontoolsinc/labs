@@ -53,9 +53,9 @@ describe("FabricEpochDays", () => {
       const expectedTag = WIRE_TYPE_TAGS.EpochDays;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `EpochDays` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

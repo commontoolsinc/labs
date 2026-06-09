@@ -100,9 +100,9 @@ describe("FabricSet", () => {
       const expectedTag = WIRE_TYPE_TAGS.Set;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `Set` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

@@ -83,11 +83,11 @@ export class ProblematicValue extends ExplicitTagValue {
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         context: ReconstructionContext,
       ): FabricValue {
-        const result = new ProblematicValue(wireTypeTag, state, "");
+        const result = new ProblematicValue(typeTag, state, "");
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
         return context.shouldDeepFreeze ? deepFreeze(result) : result;

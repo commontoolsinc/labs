@@ -60,13 +60,13 @@ export class FabricEpochDays extends BaseFabricPrimitive
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
         if (typeof state !== "string") {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `EpochDays: expected string state, got ${typeof state}`,
           );
@@ -77,7 +77,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
           );
         } catch {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `EpochDays: invalid base64: ${state}`,
           );

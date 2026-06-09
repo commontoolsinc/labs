@@ -160,13 +160,13 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `Hash: expected object state, got ${typeof state}`,
           );
@@ -174,7 +174,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
         const { tag, hash } = state as Record<string, unknown>;
         if (typeof tag !== "string" || typeof hash !== "string") {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             "Hash: expected string `tag` and `hash`",
           );
@@ -183,7 +183,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
           return new FabricHash(fromBase64url(hash), tag);
         } catch (e) {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `Hash: ${e instanceof Error ? e.message : String(e)}`,
           );

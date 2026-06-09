@@ -6,7 +6,7 @@ import type { FabricCodec, ReconstructionContext } from "./interface.ts";
  * Base class for `FabricCodec` which provides commonly-needed functionality.
  */
 export abstract class BaseFabricCodec implements FabricCodec {
-  #wireTypeTag: string | undefined;
+  #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
   /**
@@ -14,17 +14,17 @@ export abstract class BaseFabricCodec implements FabricCodec {
    */
   constructor(
     /**
-     * The preferred wire type tag, or `undefined` for a codec with no single
-     * preferred tag.
+     * The wire type tag this codec recognizes, or `undefined` for a codec with
+     * no single tag.
      */
-    wireTypeTag: string | undefined,
+    recognizedTypeTag: string | undefined,
     /**
      * The unique class (constructor function), if any, whose _direct_ instances
      * this instance handles.
      */
     uniqueHandledClass: Constructor | undefined,
   ) {
-    this.#wireTypeTag = wireTypeTag;
+    this.#recognizedTypeTag = recognizedTypeTag;
     this.#uniqueHandledClass = uniqueHandledClass;
   }
 
@@ -34,8 +34,8 @@ export abstract class BaseFabricCodec implements FabricCodec {
   }
 
   /** @inheritDoc */
-  get wireTypeTag(): string | undefined {
-    return this.#wireTypeTag;
+  get recognizedTypeTag(): string | undefined {
+    return this.#recognizedTypeTag;
   }
 
   /** @innheritDoc */
@@ -48,21 +48,21 @@ export abstract class BaseFabricCodec implements FabricCodec {
   /**
    * @inheritDoc
    *
-   * Returns this codec's preferred {@link #wireTypeTag}. A codec with no
-   * preferred tag (whose instances carry per-instance tags) must override this.
+   * Returns this codec's {@link #recognizedTypeTag}. A codec with no recognized
+   * tag (whose instances carry per-instance tags) must override this.
    */
   tagForValue(_value: FabricValue): string {
-    if (this.#wireTypeTag === undefined) {
+    if (this.#recognizedTypeTag === undefined) {
       throw new Error(
-        "Shouldn't happen: codec has no preferred tag; `tagForValue()` must be overridden.",
+        "Shouldn't happen: codec has no recognized tag; `tagForValue()` must be overridden.",
       );
     }
-    return this.#wireTypeTag;
+    return this.#recognizedTypeTag;
   }
 
   /** @inheritDoc */
   abstract decode(
-    wireTypeTag: string,
+    typeTag: string,
     state: FabricValue,
     context: ReconstructionContext,
   ): FabricValue;

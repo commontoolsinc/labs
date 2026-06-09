@@ -81,7 +81,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
        * Stub -- throws until `Set` support is implemented.
        */
       decode(
-        _wireTypeTag: string,
+        _typeTag: string,
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {

@@ -101,13 +101,13 @@ export class FabricBytes extends BaseFabricPrimitive {
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricBytes | ProblematicValue {
         if (typeof state !== "string") {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `Bytes: expected string state, got ${typeof state}`,
           );
@@ -117,7 +117,7 @@ export class FabricBytes extends BaseFabricPrimitive {
           return new FabricBytes(bytes);
         } catch {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `Bytes: invalid base64: ${state}`,
           );

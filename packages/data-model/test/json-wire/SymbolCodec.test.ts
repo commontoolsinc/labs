@@ -12,9 +12,9 @@ describe("SymbolCodec", () => {
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {
-    describe("wireTypeTag", () => {
+    describe("recognizedTypeTag", () => {
       it("is the `Symbol` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(expectedTag);
+        expect(codec.recognizedTypeTag).toBe(expectedTag);
       });
     });
 

@@ -68,11 +68,11 @@ export class UnknownValue extends ExplicitTagValue {
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         context: ReconstructionContext,
       ): FabricValue {
-        const result = new UnknownValue(wireTypeTag, state);
+        const result = new UnknownValue(typeTag, state);
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
         return context.shouldDeepFreeze ? deepFreeze(result) : result;

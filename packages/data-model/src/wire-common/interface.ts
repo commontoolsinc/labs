@@ -23,14 +23,14 @@ export interface FabricCodec {
   get uniqueHandledClass(): Constructor | undefined;
 
   /**
-   * The unique preferred wire format tag that is associated with the format
-   * this instance decodes from, or `undefined` for a codec with no single
-   * preferred tag. When defined, the codec system uses it to mark state
-   * produced by {@link #encode} and (by default) routes state so marked back to
-   * this instance (or an equivalent) for decoding; a codec with no tag is not
-   * registered for tag-based decode dispatch.
+   * The unique wire format tag that is associated with the format this instance
+   * decodes from, or `undefined` for a codec with no single tag. When defined,
+   * the codec system uses it to mark state produced by {@link #encode} and (by
+   * default) routes state so marked back to this instance (or an equivalent)
+   * for decoding; a codec with no tag is not registered for tag-based decode
+   * dispatch.
    */
-  get wireTypeTag(): string | undefined;
+  get recognizedTypeTag(): string | undefined;
 
   /**
    * Returns `true` if this handler can encode the state of the given value.
@@ -40,9 +40,9 @@ export interface FabricCodec {
   /**
    * Returns the wire type tag to use when encoding the given value. Only ever
    * called on a value for which {@link #canEncode} has returned `true`. Unlike
-   * {@link #wireTypeTag} -- the codec's single preferred tag, if it has one --
-   * this is the concrete tag for a _specific_ value; a codec whose instances
-   * each carry their own per-instance tag reads it from the value.
+   * {@link #recognizedTypeTag} -- the codec's single recognized tag, if it has
+   * one -- this is the concrete tag for a _specific_ value; a codec whose
+   * instances each carry their own per-instance tag reads it from the value.
    */
   tagForValue(value: FabricValue): string;
 
@@ -53,12 +53,12 @@ export interface FabricCodec {
    * decoding. The codec system handles recursively converting `state` contents
    * as necessary.
    *
-   * The given `wireTypeTag` is what was associated with the given `state` and
-   * does not necessarily correspond to {@link #wireTypeTag} (depending on how
-   * an instance of this class got hooked up).
+   * The given `typeTag` is what was associated with the given `state` and
+   * does not necessarily correspond to {@link #recognizedTypeTag} (depending on
+   * how an instance of this class got hooked up).
    */
   decode(
-    wireTypeTag: string,
+    typeTag: string,
     state: FabricValue,
     context: ReconstructionContext,
   ): FabricValue;

@@ -59,9 +59,9 @@ describe("FabricEpochNsec", () => {
       const expectedTag = WIRE_TYPE_TAGS.EpochNsec;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
-      describe("wireTypeTag", () => {
+      describe("recognizedTypeTag", () => {
         it("is the `EpochNsec` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(expectedTag);
+          expect(codec.recognizedTypeTag).toBe(expectedTag);
         });
       });
 

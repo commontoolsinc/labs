@@ -142,13 +142,13 @@ export class FabricRegExp extends BaseFabricPrimitive {
 
       /** @inheritDoc */
       decode(
-        wireTypeTag: string,
+        typeTag: string,
         state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
         if (!isPlainObject(state)) {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `RegExp: expected object state, got ${typeof state}`,
           );
@@ -167,7 +167,7 @@ export class FabricRegExp extends BaseFabricPrimitive {
           return new FabricRegExp(flavor, source, flags);
         } catch (e) {
           return new ProblematicValue(
-            wireTypeTag,
+            typeTag,
             state,
             `RegExp: ${e instanceof Error ? e.message : String(e)}`,
           );
