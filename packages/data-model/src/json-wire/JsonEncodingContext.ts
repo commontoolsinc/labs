@@ -8,7 +8,6 @@ import {
   type SerializationContext,
 } from "@/wire-common/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
