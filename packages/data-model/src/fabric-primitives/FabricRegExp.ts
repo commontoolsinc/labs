@@ -91,11 +91,6 @@ export class FabricRegExp extends BaseFabricPrimitive {
     Object.freeze(this);
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.RegExp;
-  }
-
   /** The pattern source text. */
   get source(): string {
     return this.#source;

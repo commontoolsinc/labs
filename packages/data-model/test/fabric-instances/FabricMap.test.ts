@@ -19,10 +19,9 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 describe("FabricMap", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (they don't fit a single member, aren't construction mechanics).
-  it("implements `FabricInstance` with expected `.wireTypeTag`", () => {
+  it("implements `FabricInstance`", () => {
     const sm = new FabricMap(new Map());
     expect(sm instanceof FabricInstance).toBe(true);
-    expect(sm.wireTypeTag).toBe("Map@1");
   });
 
   it("is an instance of `FabricNativeWrapper`", () => {

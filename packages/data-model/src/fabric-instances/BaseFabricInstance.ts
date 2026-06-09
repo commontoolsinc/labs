@@ -18,11 +18,6 @@ export abstract class BaseFabricInstance extends FabricInstance {
   //
 
   /**
-   * The type tag to use for this instance to identify it in wire protocols.
-   */
-  abstract get wireTypeTag(): string;
-
-  /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */

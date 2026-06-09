@@ -19,11 +19,6 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     super();
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Set;
-  }
-
   /**
    * Stub -- throws until `Set` support is fully implemented. `FabricSet` is
    * not yet used and is being reworked separately; the protocol methods are

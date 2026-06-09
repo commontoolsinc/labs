@@ -20,11 +20,6 @@ export class FabricMap
     super();
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Map;
-  }
-
   /**
    * Stub -- throws until `Map` support is fully implemented. `FabricMap` is
    * not yet used and is being reworked separately; the protocol methods are

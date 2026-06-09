@@ -64,11 +64,6 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     Object.freeze(this);
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Hash;
-  }
-
   /**
    * CID-link-style accessor, returns the raw hash bytes. Present to satisfy
    * the `EntityId` structural type (`{ "/": string | Uint8Array }`).

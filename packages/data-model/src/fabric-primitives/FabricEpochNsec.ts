@@ -38,11 +38,6 @@ export class FabricEpochNsec extends BaseFabricPrimitive
     Object.freeze(this);
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.EpochNsec;
-  }
-
   /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
   get value(): bigint {
     return this.#value;

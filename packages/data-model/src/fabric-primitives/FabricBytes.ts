@@ -47,11 +47,6 @@ export class FabricBytes extends BaseFabricPrimitive {
   // Instance members
   //
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.Bytes;
-  }
-
   /** The number of bytes. */
   get length(): number {
     return this.#bytes.length;

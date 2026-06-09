@@ -38,11 +38,6 @@ export class FabricEpochDays extends BaseFabricPrimitive
     Object.freeze(this);
   }
 
-  /** @inheritDoc */
-  get wireTypeTag(): string {
-    return WIRE_TYPE_TAGS.EpochDays;
-  }
-
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
   get value(): bigint {
     return this.#value;
