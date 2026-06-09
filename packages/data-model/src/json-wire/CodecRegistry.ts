@@ -10,6 +10,21 @@ import type { Constructor } from "@commonfabric/utils/types";
 export const SELF_REP = "self-rep" as const;
 
 /**
+ * The primitive `type` keys the registry accepts: the `typeof` results that are
+ * encodable `FabricValue` primitives, plus `"null"` for the `null` value.
+ * `"object"` and `"function"` are deliberately excluded -- object values are
+ * matched by class via {@link CodecRegistry#register}.
+ */
+export type PrimitiveTypeName =
+  | "null"
+  | "undefined"
+  | "boolean"
+  | "number"
+  | "bigint"
+  | "string"
+  | "symbol";
+
+/**
  * Gets the constructor function ("class") of the given value, if any, for the
  * purposes of fast-path lookup.
  */
@@ -52,15 +67,13 @@ export class CodecRegistry {
 
   /**
    * Primitive `type` -> codec map for the O(1) encode fast path on primitives.
-   * Keyed by `typeof` result (or `"null"`).
    */
-  readonly #primitiveCodecs = new Map<string, FabricCodec>();
+  readonly #primitiveCodecs = new Map<PrimitiveTypeName, FabricCodec>();
 
   /**
-   * Primitive `type`s that are self-representing (encoded as-is). Keyed the
-   * same way as {@link #primitiveCodecs}.
+   * Primitive `type`s that are self-representing (encoded as-is).
    */
-  readonly #selfRepTypes = new Set<string>();
+  readonly #selfRepTypes = new Set<PrimitiveTypeName>();
 
   /**
    * Registers a codec, indexing it by its `wireTypeTag` (for decode) and its
@@ -83,19 +96,11 @@ export class CodecRegistry {
   }
 
   /**
-   * Registers a codec for a primitive `type` -- a `typeof` result (e.g.
-   * `"bigint"`, `"symbol"`) or `"null"` for the `null` value. `"object"` is not
-   * allowed: object values are matched by class via {@link #register}. Indexes
-   * the codec by its `wireTypeTag` (for decode) and by `type` (for the O(1)
-   * encode fast path on primitives).
+   * Registers a codec for a primitive `type` (see {@link PrimitiveTypeName}).
+   * Indexes the codec by its `wireTypeTag` (for decode) and by `type` (for the
+   * O(1) encode fast path on primitives).
    */
-  registerPrimitive(type: string, codec: FabricCodec): void {
-    if (type === "object") {
-      throw new Error(
-        '`registerPrimitive()` does not accept `"object"`; use `register()`.',
-      );
-    }
-
+  registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
     this.#primitiveCodecs.set(type, codec);
 
     const tag = codec.wireTypeTag;
@@ -105,19 +110,14 @@ export class CodecRegistry {
   }
 
   /**
-   * Registers a primitive `type` (a `typeof` result, or `"null"`) as
+   * Registers a primitive `type` (see {@link PrimitiveTypeName}) as
    * self-representing: a value of that type is its own wire form, so
-   * {@link #codecFromValue} returns {@link SELF_REP} for it. `"object"` is not
-   * allowed. A type may be both self-representing and have a
-   * {@link #registerPrimitive} codec (e.g. `"number"`: finite numbers are
-   * self-representing, special ones go through a codec); the codec is tried
-   * first.
+   * {@link #codecFromValue} returns {@link SELF_REP} for it. A type may be both
+   * self-representing and have a {@link #registerPrimitive} codec (e.g.
+   * `"number"`: finite numbers are self-representing, special ones go through a
+   * codec); the codec is tried first.
    */
-  registerSelfRep(type: string): void {
-    if (type === "object") {
-      throw new Error('`registerSelfRep()` does not accept `"object"`.');
-    }
-
+  registerSelfRep(type: PrimitiveTypeName): void {
     this.#selfRepTypes.add(type);
   }
 
@@ -130,9 +130,10 @@ export class CodecRegistry {
   codecFromValue(
     value: FabricValue,
   ): FabricCodec | typeof SELF_REP | undefined {
-    // Fast path: primitive-type dispatch.
+    // Fast path: primitive-type dispatch. (`typeof` can't yield `"function"`
+    // for a `FabricValue`, but the guard narrows the type for the lookups.)
     const type = (value === null) ? "null" : typeof value;
-    if (type !== "object") {
+    if (type !== "object" && type !== "function") {
       const codec = this.#primitiveCodecs.get(type);
       if (codec && codec.canEncode(value)) {
         return codec;

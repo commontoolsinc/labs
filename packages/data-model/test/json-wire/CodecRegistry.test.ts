@@ -169,13 +169,6 @@ describe("CodecRegistry", () => {
       );
       expect(registry.codecFromValue(99n)).toBeUndefined();
     });
-
-    it('rejects `"object"`', () => {
-      const registry = new CodecRegistry();
-      expect(() =>
-        registry.registerPrimitive("object", new TestCodec("X@1", undefined))
-      ).toThrow('does not accept `"object"`');
-    });
   });
 
   describe("registerSelfRep()", () => {
@@ -192,13 +185,6 @@ describe("CodecRegistry", () => {
       registry.registerSelfRep("number");
       expect(registry.codecFromValue(42)).toBe(codec); // codec match
       expect(registry.codecFromValue(99)).toBe(SELF_REP); // self-rep fallback
-    });
-
-    it('rejects `"object"`', () => {
-      const registry = new CodecRegistry();
-      expect(() => registry.registerSelfRep("object")).toThrow(
-        'does not accept `"object"`',
-      );
     });
   });
 
