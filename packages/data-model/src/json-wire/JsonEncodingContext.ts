@@ -248,15 +248,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       );
     }
 
-    // Primitives
-    if (
-      value === null || typeof value === "boolean" ||
-      typeof value === "number" || typeof value === "string"
-    ) {
-      return value as JsonWireValue;
-    }
-
-    // Past this point, `typeof value === "object"`.
+    // Self-representing primitives (`null`, `boolean`, finite `number`,
+    // `string`) returned `SELF_REP` above. Past this point, `value` is an
+    // `object` -- an array or a plain object.
 
     // Arrays
     if (Array.isArray(value)) {
