@@ -24,11 +24,12 @@ export class UnknownValue extends ExplicitTagValue {
   /**
    * @inheritDoc
    *
-   * Delegates to this class's `[CODEC]`, the source of truth for the encoded
-   * form.
+   * Returns the `{ type, state }` envelope (preserved tag and raw state). This
+   * is the protocol/hashing form; the wire form (via `[CODEC]`) is the bare
+   * `state`, with the tag carried separately.
    */
   [DECONSTRUCT](): FabricValue {
-    return UnknownValue[CODEC].encode(this);
+    return { type: this.wireTypeTag, state: this.state };
   }
 
   /**
@@ -61,8 +62,8 @@ export class UnknownValue extends ExplicitTagValue {
   }
 
   /**
-   * Reconstructs an `UnknownValue` from its essential state. Delegates to this
-   * class's `[CODEC]`, the source of truth for decoding.
+   * Reconstructs an `UnknownValue` from its `[DECONSTRUCT]` envelope. Forwards
+   * to `[CODEC].decode` with the preserved tag and bare state.
    */
   static [RECONSTRUCT](
     state: { type: string; state: FabricValue },
@@ -70,7 +71,7 @@ export class UnknownValue extends ExplicitTagValue {
   ): UnknownValue {
     return UnknownValue[CODEC].decode(
       state.type,
-      state,
+      state.state,
       context,
     ) as UnknownValue;
   }
@@ -95,27 +96,27 @@ export class UnknownValue extends ExplicitTagValue {
       /**
        * @inheritDoc
        *
-       * Deconstructs into a `{ type, state }` envelope carrying the preserved
-       * tag and raw state. Does NOT recurse into `state` -- the serialization
-       * system handles that.
+       * Returns the bare inner `state`. The tag travels separately (via
+       * {@link #tagForValue}), so an `UnknownValue` round-trips to the same
+       * storage form as the value it stands in for. Does NOT recurse into
+       * `state` -- the serialization system handles that.
        */
       encode(value: UnknownValue): FabricValue {
-        return { type: value.wireTypeTag, state: value.state };
+        return value.state;
       }
 
       /**
        * @inheritDoc
        *
-       * Reconstructs an `UnknownValue` from its `{ type, state }` envelope.
-       * Honors `context.shouldDeepFreeze`.
+       * Reconstructs an `UnknownValue` from its wire `wireTypeTag` and bare
+       * `state`. Honors `context.shouldDeepFreeze`.
        */
       decode(
-        _wireTypeTag: string,
+        wireTypeTag: string,
         state: FabricValue,
         context: ReconstructionContext,
       ): FabricValue {
-        const s = state as { type: string; state: FabricValue };
-        const result = new UnknownValue(s.type, s.state);
+        const result = new UnknownValue(wireTypeTag, state);
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
         return context.shouldDeepFreeze ? deepFreeze(result) : result;

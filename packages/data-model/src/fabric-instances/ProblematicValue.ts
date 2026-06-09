@@ -39,11 +39,12 @@ export class ProblematicValue extends ExplicitTagValue {
   /**
    * @inheritDoc
    *
-   * Delegates to this class's `[CODEC]`, the source of truth for the encoded
-   * form.
+   * Returns the `{ type, state, error }` envelope (preserved tag, raw state,
+   * and failure description). This is the protocol/hashing form; the wire form
+   * (via `[CODEC]`) is the bare `state`, with the tag carried separately.
    */
   [DECONSTRUCT](): FabricValue {
-    return ProblematicValue[CODEC].encode(this);
+    return { type: this.wireTypeTag, state: this.state, error: this.error };
   }
 
   /**
@@ -76,8 +77,9 @@ export class ProblematicValue extends ExplicitTagValue {
   }
 
   /**
-   * Reconstructs a `ProblematicValue` from its essential state. Delegates to
-   * this class's `[CODEC]`, the source of truth for decoding.
+   * Reconstructs a `ProblematicValue` from its `[DECONSTRUCT]` envelope.
+   * Forwards to `[CODEC].decode` with the preserved tag and bare state; the
+   * envelope's `error` is dropped, since it is not part of the codec form.
    */
   static [RECONSTRUCT](
     state: { type: string; state: FabricValue; error: string },
@@ -85,7 +87,7 @@ export class ProblematicValue extends ExplicitTagValue {
   ): ProblematicValue {
     return ProblematicValue[CODEC].decode(
       state.type,
-      state,
+      state.state,
       context,
     ) as ProblematicValue;
   }
@@ -110,31 +112,29 @@ export class ProblematicValue extends ExplicitTagValue {
       /**
        * @inheritDoc
        *
-       * Deconstructs into a `{ type, state, error }` envelope carrying the
-       * preserved tag, raw state, and failure description. Does NOT recurse
-       * into `state` -- the serialization system handles that.
+       * Returns the bare inner `state`. The tag travels separately (via
+       * {@link #tagForValue}), and the failure `error` is not part of the
+       * codec form -- so a `ProblematicValue` round-trips to the same storage
+       * form as the value it stands in for. Does NOT recurse into `state` --
+       * the serialization system handles that.
        */
       encode(value: ProblematicValue): FabricValue {
-        return {
-          type: value.wireTypeTag,
-          state: value.state,
-          error: value.error,
-        };
+        return value.state;
       }
 
       /**
        * @inheritDoc
        *
-       * Reconstructs a `ProblematicValue` from its `{ type, state, error }`
-       * envelope. Honors `context.shouldDeepFreeze`.
+       * Reconstructs a `ProblematicValue` from its wire `wireTypeTag` and bare
+       * `state`. The original failure `error` is not carried by the codec form,
+       * so the result has none. Honors `context.shouldDeepFreeze`.
        */
       decode(
-        _wireTypeTag: string,
+        wireTypeTag: string,
         state: FabricValue,
         context: ReconstructionContext,
       ): FabricValue {
-        const s = state as { type: string; state: FabricValue; error: string };
-        const result = new ProblematicValue(s.type, s.state, s.error);
+        const result = new ProblematicValue(wireTypeTag, state, "");
         // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
         // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
         return context.shouldDeepFreeze ? deepFreeze(result) : result;
