@@ -356,15 +356,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
         super(WIRE_TYPE_TAGS.Error, FabricError);
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Deconstructs into a flat record with `type`, `name`, `message`,
-       * `stack`, `cause`, and the extras-bag entries. Does NOT recurse into
-       * nested values -- the serialization system handles that. `name` is
-       * emitted as `null` when it equals `type` (the common case) to avoid
-       * redundancy.
-       */
+      /** @inheritDoc */
       encode(value: FabricError): FabricValue {
         const state: Record<string, FabricValue> = {
           type: value.type,
@@ -383,13 +375,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
         return state as FabricValue;
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Reconstructs a `FabricError` from its essential state (flat record).
-       * Nested values in `state` have already been reconstructed by the
-       * serialization system. Honors `context.shouldDeepFreeze`.
-       */
+      /** @inheritDoc */
       decode(
         _wireTypeTag: string,
         state: FabricValue,

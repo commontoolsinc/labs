@@ -68,33 +68,17 @@ export class UnknownValue extends ExplicitTagValue {
         super(undefined, UnknownValue);
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Reads the preserved per-instance tag off the value.
-       */
+      /** @inheritDoc */
       override tagForValue(value: UnknownValue): string {
         return value.wireTypeTag;
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Returns the bare inner `state`. The tag travels separately (via
-       * {@link #tagForValue}), so an `UnknownValue` round-trips to the same
-       * storage form as the value it stands in for. Does NOT recurse into
-       * `state` -- the serialization system handles that.
-       */
+      /** @inheritDoc */
       encode(value: UnknownValue): FabricValue {
         return value.state;
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Reconstructs an `UnknownValue` from its wire `wireTypeTag` and bare
-       * `state`. Honors `context.shouldDeepFreeze`.
-       */
+      /** @inheritDoc */
       decode(
         wireTypeTag: string,
         state: FabricValue,

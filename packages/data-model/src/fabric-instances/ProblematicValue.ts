@@ -83,35 +83,17 @@ export class ProblematicValue extends ExplicitTagValue {
         super(undefined, ProblematicValue);
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Reads the preserved per-instance tag off the value.
-       */
+      /** @inheritDoc */
       override tagForValue(value: ProblematicValue): string {
         return value.wireTypeTag;
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Returns the bare inner `state`. The tag travels separately (via
-       * {@link #tagForValue}), and the failure `error` is not part of the
-       * codec form -- so a `ProblematicValue` round-trips to the same storage
-       * form as the value it stands in for. Does NOT recurse into `state` --
-       * the serialization system handles that.
-       */
+      /** @inheritDoc */
       encode(value: ProblematicValue): FabricValue {
         return value.state;
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Reconstructs a `ProblematicValue` from its wire `wireTypeTag` and bare
-       * `state`. The original failure `error` is not carried by the codec form,
-       * so the result has none. Honors `context.shouldDeepFreeze`.
-       */
+      /** @inheritDoc */
       decode(
         wireTypeTag: string,
         state: FabricValue,
