@@ -6,14 +6,14 @@ import { toCompactDebugString } from "@/value-debug.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,
-} from "@/wire-common/interface.ts";
+} from "@/codec-common/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue } from "./interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
-import { WIRE_META_TAGS } from "@/wire-common/wire-meta-tags.ts";
+import { WIRE_META_TAGS } from "@/codec-common/wire-meta-tags.ts";
 
 /**
  * Tag prefix for the encoded form used by this module. We use this explicit

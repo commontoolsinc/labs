@@ -7,9 +7,9 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { CODEC } from "@/codec-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {

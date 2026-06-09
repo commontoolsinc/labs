@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { SpecialNumberCodec } from "@/json-wire/SpecialNumberCodec.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
+import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("SpecialNumberCodec", () => {

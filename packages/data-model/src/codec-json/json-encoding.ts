@@ -1,8 +1,8 @@
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/fabric-value.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
-import { EmptyReconstructionContext } from "@/wire-common/EmptyReconstructionContext.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
+import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { JsonEncodingContext } from "./JsonEncodingContext.ts";
 
 /** Shared JSON encoding context. */

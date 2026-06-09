@@ -9,7 +9,7 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
 } from "./interface.ts";
-import { codecOf } from "@/wire-common/index.ts";
+import { codecOf } from "@/codec-common/index.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the

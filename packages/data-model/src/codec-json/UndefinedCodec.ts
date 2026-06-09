@@ -1,7 +1,7 @@
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
 
 /**
  * Codec for `undefined`. Encodes to the `Undefined@1` tag with `null` state.

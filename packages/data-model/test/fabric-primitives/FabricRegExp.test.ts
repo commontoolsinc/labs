@@ -3,9 +3,9 @@ import { expect } from "@std/expect";
 
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { CODEC } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { CODEC } from "@/codec-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
@@ -17,7 +17,7 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@/native-type-tags.ts";
-import { jsonFromValue, valueFromJson } from "@/json-wire/index.ts";
+import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {

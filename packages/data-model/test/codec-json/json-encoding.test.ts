@@ -6,10 +6,10 @@ import {
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "@/json-wire/json-encoding.ts";
+} from "@/codec-json/json-encoding.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
-import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
+import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {

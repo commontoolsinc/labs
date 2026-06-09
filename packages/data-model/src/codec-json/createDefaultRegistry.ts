@@ -1,4 +1,4 @@
-import { CODEC } from "@/wire-common/interface.ts";
+import { CODEC } from "@/codec-common/interface.ts";
 import { codecClasses as primitiveCodecClasses } from "@/fabric-primitives/index.ts";
 import { codecClasses as instanceCodecClasses } from "@/fabric-instances/index.ts";
 

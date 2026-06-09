@@ -1563,7 +1563,7 @@ serialization and deserialization. This type is internal to the JSON
 implementation — it is not part of the public boundary interface.
 
 ```typescript
-// file: packages/data-model/json-wire/interface.ts
+// file: packages/data-model/codec-json/interface.ts
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -1660,7 +1660,7 @@ handlers** — small objects that know how to serialize values of a specific typ
 and how to deserialize them from a specific tag.
 
 ```typescript
-// file: packages/data-model/json-wire/interface.ts
+// file: packages/data-model/codec-json/interface.ts
 
 /**
  * Narrow interface for what type handlers need from the encoding context
@@ -1830,10 +1830,10 @@ version requirements.
 The storage boundary routes through functions that bridge between the
 storage layer (JSON strings) and the runtime layer (`FabricValue`). These
 functions live in a dedicated module
-(`packages/data-model/json-wire/json-encoding.ts`).
+(`packages/data-model/codec-json/json-encoding.ts`).
 
 ```typescript
-// file: packages/data-model/json-wire/json-encoding.ts
+// file: packages/data-model/codec-json/json-encoding.ts
 
 /**
  * Encode a fabric value to a JSON string. Serializes special types

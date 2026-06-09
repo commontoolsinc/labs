@@ -10,14 +10,14 @@ import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from "@/wire-common/interface.ts";
+} from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
