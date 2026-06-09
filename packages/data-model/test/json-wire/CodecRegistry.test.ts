@@ -152,6 +152,32 @@ describe("CodecRegistry", () => {
     }
   });
 
+  describe("registerPrimitive()", () => {
+    it("dispatches a primitive value to its codec (encode + decode)", () => {
+      const registry = new CodecRegistry();
+      const codec = new TestCodec("Big@1", undefined, 42n);
+      registry.registerPrimitive("bigint", codec);
+      expect(registry.codecFromValue(42n)).toBe(codec);
+      expect(registry.codecFromTag("Big@1")).toBe(codec);
+    });
+
+    it("returns undefined when the codec's `canEncode()` rejects", () => {
+      const registry = new CodecRegistry();
+      registry.registerPrimitive(
+        "bigint",
+        new TestCodec("Big@1", undefined, 42n),
+      );
+      expect(registry.codecFromValue(99n)).toBeUndefined();
+    });
+
+    it('rejects `"object"`', () => {
+      const registry = new CodecRegistry();
+      expect(() =>
+        registry.registerPrimitive("object", new TestCodec("X@1", undefined))
+      ).toThrow('does not accept `"object"`');
+    });
+  });
+
   describe("codecFromTag()", () => {
     it("returns the codec registered under a tag", () => {
       const registry = new CodecRegistry();

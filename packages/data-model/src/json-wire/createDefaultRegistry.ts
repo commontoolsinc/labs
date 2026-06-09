@@ -36,11 +36,12 @@ export function createDefaultRegistry(): CodecRegistry {
     registry.register(cls[CODEC]);
   }
 
-  // JS primitives that need tagged encoding (no owned class to host a codec).
-  registry.register(new BigIntCodec());
-  registry.register(new SpecialNumberCodec());
-  registry.register(new SymbolCodec());
-  registry.register(new UndefinedCodec());
+  // JS primitives that need tagged encoding (no owned class to host a codec),
+  // registered by `typeof` for O(1) encode dispatch.
+  registry.registerPrimitive("bigint", new BigIntCodec());
+  registry.registerPrimitive("number", new SpecialNumberCodec());
+  registry.registerPrimitive("symbol", new SymbolCodec());
+  registry.registerPrimitive("undefined", new UndefinedCodec());
 
   return registry;
 }

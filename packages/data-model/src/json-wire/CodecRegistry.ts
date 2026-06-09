@@ -44,6 +44,12 @@ export class CodecRegistry {
   readonly #classMap = new Map<Constructor, FabricCodec>();
 
   /**
+   * Primitive `type` -> codec map for the O(1) encode fast path on primitives.
+   * Keyed by `typeof` result (or `"null"`).
+   */
+  readonly #primitiveCodecs = new Map<string, FabricCodec>();
+
+  /**
    * Registers a codec, indexing it by its `wireTypeTag` (for decode) and its
    * `uniqueHandledClass` (for encode). If either is `undefined`, then the codec
    * is left unregistered with the corresponding index. And whether or not it
@@ -64,11 +70,43 @@ export class CodecRegistry {
   }
 
   /**
+   * Registers a codec for a primitive `type` -- a `typeof` result (e.g.
+   * `"bigint"`, `"symbol"`) or `"null"` for the `null` value. `"object"` is not
+   * allowed: object values are matched by class via {@link #register}. Indexes
+   * the codec by its `wireTypeTag` (for decode) and by `type` (for the O(1)
+   * encode fast path on primitives).
+   */
+  registerPrimitive(type: string, codec: FabricCodec): void {
+    if (type === "object") {
+      throw new Error(
+        '`registerPrimitive()` does not accept `"object"`; use `register()`.',
+      );
+    }
+
+    this.#primitiveCodecs.set(type, codec);
+
+    const tag = codec.wireTypeTag;
+    if (tag !== undefined) {
+      this.#tagMap.set(tag, codec);
+    }
+  }
+
+  /**
    * Finds a codec that can encode the given value. Returns `undefined` if none
    * matches (the caller should fall through to structural handling for
    * primitives, arrays, and plain objects).
    */
   codecFromValue(value: FabricValue): FabricCodec | undefined {
+    // Fast path: primitive-type dispatch.
+    const type = (value === null) ? "null" : typeof value;
+    if (type !== "object") {
+      const codec = this.#primitiveCodecs.get(type);
+      if (codec && codec.canEncode(value)) {
+        return codec;
+      }
+    }
+
+    // Class fast-path, then linear scan.
     const constructorFn = constructorOf(value);
     if (constructorFn) {
       const codec = this.#classMap.get(constructorFn);
