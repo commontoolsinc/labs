@@ -7,7 +7,8 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { DECONSTRUCT, RECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
+import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
@@ -377,7 +378,7 @@ describe("native-conversion", () => {
     });
   });
 
-  describe("`[RECONSTRUCT]` honors `shouldDeepFreeze`", () => {
+  describe("codec `decode()` honors `shouldDeepFreeze`", () => {
     const frozenCtx = new DummyReconstructionContext(true);
     const mutableCtx = new DummyReconstructionContext(false);
 
@@ -387,32 +388,38 @@ describe("native-conversion", () => {
         name: null,
         message: "boom",
       } as unknown as FabricValue;
-      const frozen = FabricError[RECONSTRUCT](state, frozenCtx);
+      const frozen = FabricError[CODEC].decode(
+        WIRE_TYPE_TAGS.Error,
+        state,
+        frozenCtx,
+      );
       expect(isDeepFrozen(frozen)).toBe(true);
-      const mutable = FabricError[RECONSTRUCT](state, mutableCtx);
+      const mutable = FabricError[CODEC].decode(
+        WIRE_TYPE_TAGS.Error,
+        state,
+        mutableCtx,
+      );
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
     it("`ProblematicValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      const state = {
-        type: "Bad@1",
-        state: { x: 1 },
-        error: "oops",
-      } as unknown as { type: string; state: FabricValue; error: string };
-      const frozen = ProblematicValue[RECONSTRUCT](state, frozenCtx);
+      // Tag travels separately; the bare inner state is the codec payload.
+      const state = { x: 1 } as unknown as FabricValue;
+      const frozen = ProblematicValue[CODEC].decode("Bad@1", state, frozenCtx);
       expect(isDeepFrozen(frozen)).toBe(true);
-      const mutable = ProblematicValue[RECONSTRUCT](state, mutableCtx);
+      const mutable = ProblematicValue[CODEC].decode(
+        "Bad@1",
+        state,
+        mutableCtx,
+      );
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
     it("`UnknownValue`: `shouldDeepFreeze` is `true` => deep-frozen, `false` => mutable", () => {
-      const state = { type: "Fancy@3", state: { y: 2 } } as unknown as {
-        type: string;
-        state: FabricValue;
-      };
-      const frozen = UnknownValue[RECONSTRUCT](state, frozenCtx);
+      const state = { y: 2 } as unknown as FabricValue;
+      const frozen = UnknownValue[CODEC].decode("Fancy@3", state, frozenCtx);
       expect(isDeepFrozen(frozen)).toBe(true);
-      const mutable = UnknownValue[RECONSTRUCT](state, mutableCtx);
+      const mutable = UnknownValue[CODEC].decode("Fancy@3", state, mutableCtx);
       expect(Object.isFrozen(mutable)).toBe(false);
     });
   });

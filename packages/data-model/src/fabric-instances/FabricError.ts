@@ -3,7 +3,6 @@ import {
   CODEC,
   DECONSTRUCT,
   type FabricCodec,
-  RECONSTRUCT,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
 import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
@@ -78,7 +77,7 @@ export type FabricErrorState = {
  * extras bag mirrors this by gating `setExtra` / `deleteExtra` on the
  * frozen state. The serialization layer handles `FabricError` via its static
  * `[CODEC]`, which is the source of truth for the encoded form; the
- * `[DECONSTRUCT]` / `[RECONSTRUCT]` protocol members delegate to it.
+ * `[DECONSTRUCT]` protocol member delegates to it.
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
@@ -334,36 +333,21 @@ export class FabricError extends FabricNativeWrapper<Error> {
   override deepClone(frozen: boolean): FabricError {
     if (frozen && isDeepFrozen(this)) return this;
 
-    // `[RECONSTRUCT]` honors `context.shouldDeepFreeze`. This clone path owns
-    // its own frozenness decision via the wrapper `frozen ? deepFreeze :
-    // result` below, so pre-freezing inside `[RECONSTRUCT]` would be
-    // redundant when `frozen` is true and wrong when it is false. Match
-    // contexts to this clone's intent.
+    // The codec honors `context.shouldDeepFreeze`. This clone path owns its own
+    // frozenness decision via the wrapper `frozen ? deepFreeze : result` below,
+    // so pre-freezing inside the codec would be redundant when `frozen` is true
+    // and wrong when it is false. Match the context to this clone's intent.
+    const codec = FabricError[CODEC];
     const reconstructContext = new EmptyReconstructionContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
-    const result = FabricError[RECONSTRUCT](
-      this[DECONSTRUCT](),
-      reconstructContext,
-    );
-    return frozen ? deepFreeze(result) : result;
-  }
-
-  /**
-   * Reconstructs a `FabricError` from its essential state (flat record).
-   * Delegates to this class's `[CODEC]`, the source of truth for decoding.
-   * `[RECONSTRUCT]` remains the protocol entry point relied on by `deepClone`.
-   */
-  static [RECONSTRUCT](
-    state: FabricValue,
-    context: ReconstructionContext,
-  ): FabricError {
-    return FabricError[CODEC].decode(
+    const result = codec.decode(
       WIRE_TYPE_TAGS.Error,
-      state,
-      context,
+      codec.encode(this),
+      reconstructContext,
     ) as FabricError;
+    return frozen ? deepFreeze(result) : result;
   }
 
   static #codec = Object.freeze(
@@ -372,15 +356,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
         super(WIRE_TYPE_TAGS.Error, FabricError);
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Deconstructs into a flat record with `type`, `name`, `message`,
-       * `stack`, `cause`, and the extras-bag entries. Does NOT recurse into
-       * nested values -- the serialization system handles that. `name` is
-       * emitted as `null` when it equals `type` (the common case) to avoid
-       * redundancy.
-       */
+      /** @inheritDoc */
       encode(value: FabricError): FabricValue {
         const state: Record<string, FabricValue> = {
           type: value.type,
@@ -399,13 +375,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
         return state as FabricValue;
       }
 
-      /**
-       * @inheritDoc
-       *
-       * Reconstructs a `FabricError` from its essential state (flat record).
-       * Nested values in `state` have already been reconstructed by the
-       * serialization system. Honors `context.shouldDeepFreeze`.
-       */
+      /** @inheritDoc */
       decode(
         _wireTypeTag: string,
         state: FabricValue,

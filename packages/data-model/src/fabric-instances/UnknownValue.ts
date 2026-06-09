@@ -1,9 +1,11 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
+  CODEC,
   DECONSTRUCT,
-  RECONSTRUCT,
+  type FabricCodec,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 
@@ -18,6 +20,13 @@ export class UnknownValue extends ExplicitTagValue {
     super(wireTypeTag, state);
   }
 
+  /**
+   * @inheritDoc
+   *
+   * Returns the `{ type, state }` envelope (preserved tag and raw state). This
+   * is the protocol/hashing form; the wire form (via `[CODEC]`) is the bare
+   * `state`, with the tag carried separately.
+   */
   [DECONSTRUCT](): FabricValue {
     return { type: this.wireTypeTag, state: this.state };
   }
@@ -51,13 +60,40 @@ export class UnknownValue extends ExplicitTagValue {
     return new UnknownValue(this.wireTypeTag, this.state);
   }
 
-  static [RECONSTRUCT](
-    state: { type: string; state: FabricValue },
-    context: ReconstructionContext,
-  ): UnknownValue {
-    const result = new UnknownValue(state.type, state.state);
-    // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
-    // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-    return context.shouldDeepFreeze ? deepFreeze(result) : result;
+  static #codec = Object.freeze(
+    new (class UnknownValueCodec extends BaseFabricCodec {
+      constructor() {
+        // No preferred wire tag: an `UnknownValue` round-trips to its
+        // *preserved* tag, which varies per instance.
+        super(undefined, UnknownValue);
+      }
+
+      /** @inheritDoc */
+      override tagForValue(value: UnknownValue): string {
+        return value.wireTypeTag;
+      }
+
+      /** @inheritDoc */
+      encode(value: UnknownValue): FabricValue {
+        return value.state;
+      }
+
+      /** @inheritDoc */
+      decode(
+        wireTypeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        const result = new UnknownValue(wireTypeTag, state);
+        // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
+        // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
+        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }

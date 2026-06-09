@@ -50,11 +50,12 @@ describe("FabricEpochDays", () => {
   describe("static members", () => {
     describe("[CODEC]", () => {
       const codec = FabricEpochDays[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.EpochDays;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `EpochDays` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.EpochDays);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -77,7 +78,7 @@ describe("FabricEpochDays", () => {
         it("round-trips at top level (epoch zero)", () => {
           const sd = new FabricEpochDays(0n);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(sd),
             context,
           ) as unknown as FabricEpochDays;
@@ -89,7 +90,7 @@ describe("FabricEpochDays", () => {
           const days = 19723n; // ~2024-01-01
           const sd = new FabricEpochDays(days);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(sd),
             context,
           ) as unknown as FabricEpochDays;
@@ -101,7 +102,7 @@ describe("FabricEpochDays", () => {
           const days = -365n;
           const sd = new FabricEpochDays(days);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(sd),
             context,
           ) as unknown as FabricEpochDays;

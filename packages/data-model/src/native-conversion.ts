@@ -72,7 +72,7 @@ const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
 ]);
 
 /**
- * Helper for `FabricError.[RECONSTRUCT]()`, which returns the `Error`
+ * Helper for `FabricError`'s codec `decode()`, which returns the `Error`
  * constructor for the given type string (e.g. `"TypeError"`). Falls back
  * to the base `Error` constructor for unknown types.
  */

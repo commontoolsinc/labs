@@ -7,12 +7,13 @@ import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionC
 
 describe("UndefinedCodec", () => {
   const codec = new UndefinedCodec();
+  const expectedTag = WIRE_TYPE_TAGS.Undefined;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {
     describe("wireTypeTag", () => {
       it("is the `Undefined` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Undefined);
+        expect(codec.wireTypeTag).toBe(expectedTag);
       });
     });
 
@@ -34,13 +35,13 @@ describe("UndefinedCodec", () => {
 
     describe("decode()", () => {
       it("decodes `null` state back to `undefined`", () => {
-        const decoded = codec.decode(codec.wireTypeTag, null, context);
+        const decoded = codec.decode(expectedTag, null, context);
         expect(decoded).toBe(undefined);
       });
 
       it("round-trips `undefined` via encode -> decode", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(undefined),
           context,
         );
@@ -48,7 +49,7 @@ describe("UndefinedCodec", () => {
       });
 
       it("throws when decoding non-`null` state", () => {
-        expect(() => codec.decode(codec.wireTypeTag, 42, context)).toThrow(
+        expect(() => codec.decode(expectedTag, 42, context)).toThrow(
           "expected `null` state",
         );
       });

@@ -126,11 +126,12 @@ describe("FabricRegExp", () => {
   describe("static members", () => {
     describe("[CODEC]", () => {
       const codec = FabricRegExp[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.RegExp;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `RegExp` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.RegExp);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -156,7 +157,7 @@ describe("FabricRegExp", () => {
         it("round-trips a regex (source, flags, flavor)", () => {
           const re = new FabricRegExp(/ab+c/gi);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(re),
             context,
           ) as unknown as FabricRegExp;
@@ -169,7 +170,7 @@ describe("FabricRegExp", () => {
         it("round-trips a flagless regex", () => {
           const re = new FabricRegExp("es2025", "^x*$", "");
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(re),
             context,
           ) as unknown as FabricRegExp;
@@ -179,7 +180,7 @@ describe("FabricRegExp", () => {
         });
 
         it("decodes non-object state to `ProblematicValue`", () => {
-          const decoded = codec.decode(codec.wireTypeTag, "nope", context);
+          const decoded = codec.decode(expectedTag, "nope", context);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
       });

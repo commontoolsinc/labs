@@ -2,6 +2,8 @@ import type { FabricClassWithCodec } from "@/wire-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricMap } from "./FabricMap.ts";
 import { FabricSet } from "./FabricSet.ts";
+import { ProblematicValue } from "./ProblematicValue.ts";
+import { UnknownValue } from "./UnknownValue.ts";
 
 export { BaseFabricInstance } from "./BaseFabricInstance.ts";
 export { ExplicitTagValue } from "./ExplicitTagValue.ts";
@@ -15,11 +17,13 @@ export { FabricSet } from "./FabricSet.ts";
 /**
  * The concrete instance classes whose instances are available over the wire,
  * each via its static `[CODEC]`. This is the curated source of truth for which
- * instance types participate in serialization: add a class here once it gains
- * a `[CODEC]`. (`ExplicitTagValue` and its subclasses `UnknownValue` /
- * `ProblematicValue` are live-graph stand-ins carrying a per-instance tag,
- * handled directly by the encoding context rather than via a `[CODEC]`, so
- * they are intentionally absent.)
+ * instance types participate in serialization.
+ *
+ * `UnknownValue` / `ProblematicValue` (the `ExplicitTagValue` subclasses) are
+ * included too. Their codecs have no preferred wire tag -- the encode path uses
+ * `tagForValue()` to read each instance's preserved per-instance tag -- and
+ * they are not tag-routed on decode (an unrecognized tag is wrapped in an
+ * `UnknownValue` by the encoding context, not decoded via a codec).
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
@@ -31,4 +35,6 @@ const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   FabricError,
   FabricMap,
   FabricSet,
+  ProblematicValue,
+  UnknownValue,
 ]);

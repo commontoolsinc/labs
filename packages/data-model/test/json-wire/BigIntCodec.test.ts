@@ -8,12 +8,13 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("BigIntCodec", () => {
   const codec = new BigIntCodec();
+  const expectedTag = WIRE_TYPE_TAGS.BigInt;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {
     describe("wireTypeTag", () => {
       it("is the `BigInt` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.BigInt);
+        expect(codec.wireTypeTag).toBe(expectedTag);
       });
     });
 
@@ -63,7 +64,7 @@ describe("BigIntCodec", () => {
     describe("decode()", () => {
       it("round-trips at top level", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(42n),
           context,
         );
@@ -72,7 +73,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips negative bigint", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(-999n),
           context,
         );
@@ -81,7 +82,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips zero bigint", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(0n),
           context,
         );
@@ -90,7 +91,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips `1n`", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(1n),
           context,
         );
@@ -99,7 +100,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips `-1n`", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(-1n),
           context,
         );
@@ -109,7 +110,7 @@ describe("BigIntCodec", () => {
       it("round-trips large bigint", () => {
         const big = 2n ** 64n;
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(big),
           context,
         );
@@ -119,7 +120,7 @@ describe("BigIntCodec", () => {
       it("round-trips large negative bigint", () => {
         const big = -(2n ** 64n);
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(big),
           context,
         );
@@ -128,7 +129,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips boundary value `127n`", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(127n),
           context,
         );
@@ -137,7 +138,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips boundary value `128n`", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(128n),
           context,
         );
@@ -146,7 +147,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips boundary value `-128n`", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(-128n),
           context,
         );
@@ -155,7 +156,7 @@ describe("BigIntCodec", () => {
 
       it("round-trips boundary value `-129n`", () => {
         const decoded = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(-129n),
           context,
         );
@@ -164,20 +165,20 @@ describe("BigIntCodec", () => {
 
       it("accepts unpadded base64url input", () => {
         // "Kg" is the standard unpadded base64url encoding of 42n.
-        const result = codec.decode(codec.wireTypeTag, "Kg", context);
+        const result = codec.decode(expectedTag, "Kg", context);
         expect(result).toBe(42n);
       });
 
       it("accepts padded base64 input", () => {
         // "Kg==" is the padded form of "Kg" (42n) -- padding is accepted by the
         // web-standard Uint8Array.fromBase64.
-        const result = codec.decode(codec.wireTypeTag, "Kg==", context);
+        const result = codec.decode(expectedTag, "Kg==", context);
         expect(result).toBe(42n);
       });
 
       it("decodes non-string state to `ProblematicValue`", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           42,
           context,
         );
@@ -188,13 +189,13 @@ describe("BigIntCodec", () => {
       });
 
       it("decodes `null` state to `ProblematicValue`", () => {
-        const result = codec.decode(codec.wireTypeTag, null, context);
+        const result = codec.decode(expectedTag, null, context);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
 
       it("decodes object state to `ProblematicValue`", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           { bad: true },
           context,
         );
@@ -202,7 +203,7 @@ describe("BigIntCodec", () => {
       });
 
       it("decodes empty base64 string to `ProblematicValue`", () => {
-        const result = codec.decode(codec.wireTypeTag, "", context);
+        const result = codec.decode(expectedTag, "", context);
         expect(result).toBeInstanceOf(ProblematicValue);
         const prob = result as unknown as ProblematicValue;
         expect(prob.wireTypeTag).toBe("BigInt@1");

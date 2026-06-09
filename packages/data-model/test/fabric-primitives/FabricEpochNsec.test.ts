@@ -56,11 +56,12 @@ describe("FabricEpochNsec", () => {
   describe("static members", () => {
     describe("[CODEC]", () => {
       const codec = FabricEpochNsec[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.EpochNsec;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `EpochNsec` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.EpochNsec);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -83,7 +84,7 @@ describe("FabricEpochNsec", () => {
         it("round-trips at top level (epoch zero)", () => {
           const sn = new FabricEpochNsec(0n);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(sn),
             context,
           ) as unknown as FabricEpochNsec;
@@ -96,7 +97,7 @@ describe("FabricEpochNsec", () => {
           const nsec = 1704067200000000000n;
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(sn),
             context,
           ) as unknown as FabricEpochNsec;
@@ -108,7 +109,7 @@ describe("FabricEpochNsec", () => {
           const nsec = -86400000000000n; // -1 day in nanoseconds
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(sn),
             context,
           ) as unknown as FabricEpochNsec;
@@ -121,7 +122,7 @@ describe("FabricEpochNsec", () => {
           const nsec = 32503680000000000000n;
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(sn),
             context,
           ) as unknown as FabricEpochNsec;

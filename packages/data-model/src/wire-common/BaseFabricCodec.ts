@@ -6,15 +6,18 @@ import type { FabricCodec, ReconstructionContext } from "./interface.ts";
  * Base class for `FabricCodec` which provides commonly-needed functionality.
  */
 export abstract class BaseFabricCodec implements FabricCodec {
-  #wireTypeTag: string;
+  #wireTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
   /**
    * Constructs an instance.
    */
   constructor(
-    /** The preferred wire type tag. */
-    wireTypeTag: string,
+    /**
+     * The preferred wire type tag, or `undefined` for a codec with no single
+     * preferred tag.
+     */
+    wireTypeTag: string | undefined,
     /**
      * The unique class (constructor function), if any, whose _direct_ instances
      * this instance handles.
@@ -31,7 +34,7 @@ export abstract class BaseFabricCodec implements FabricCodec {
   }
 
   /** @inheritDoc */
-  get wireTypeTag(): string {
+  get wireTypeTag(): string | undefined {
     return this.#wireTypeTag;
   }
 
@@ -40,6 +43,21 @@ export abstract class BaseFabricCodec implements FabricCodec {
     const cls = this.#uniqueHandledClass;
 
     return (cls !== undefined) && (value instanceof cls);
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * Returns this codec's preferred {@link #wireTypeTag}. A codec with no
+   * preferred tag (whose instances carry per-instance tags) must override this.
+   */
+  tagForValue(_value: FabricValue): string {
+    if (this.#wireTypeTag === undefined) {
+      throw new Error(
+        "Shouldn't happen: codec has no preferred tag; `tagForValue()` must be overridden.",
+      );
+    }
+    return this.#wireTypeTag;
   }
 
   /** @inheritDoc */
