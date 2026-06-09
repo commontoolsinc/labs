@@ -334,26 +334,26 @@ export class FabricError extends FabricNativeWrapper<Error> {
   override deepClone(frozen: boolean): FabricError {
     if (frozen && isDeepFrozen(this)) return this;
 
-    // `[RECONSTRUCT]` honors `context.shouldDeepFreeze`. This clone path owns
-    // its own frozenness decision via the wrapper `frozen ? deepFreeze :
-    // result` below, so pre-freezing inside `[RECONSTRUCT]` would be
-    // redundant when `frozen` is true and wrong when it is false. Match
-    // contexts to this clone's intent.
+    // The codec honors `context.shouldDeepFreeze`. This clone path owns its own
+    // frozenness decision via the wrapper `frozen ? deepFreeze : result` below,
+    // so pre-freezing inside the codec would be redundant when `frozen` is true
+    // and wrong when it is false. Match the context to this clone's intent.
+    const codec = FabricError[CODEC];
     const reconstructContext = new EmptyReconstructionContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
-    const result = FabricError[RECONSTRUCT](
-      this[DECONSTRUCT](),
+    const result = codec.decode(
+      WIRE_TYPE_TAGS.Error,
+      codec.encode(this),
       reconstructContext,
-    );
+    ) as FabricError;
     return frozen ? deepFreeze(result) : result;
   }
 
   /**
    * Reconstructs a `FabricError` from its essential state (flat record).
    * Delegates to this class's `[CODEC]`, the source of truth for decoding.
-   * `[RECONSTRUCT]` remains the protocol entry point relied on by `deepClone`.
    */
   static [RECONSTRUCT](
     state: FabricValue,
