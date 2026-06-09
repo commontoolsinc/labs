@@ -9,7 +9,6 @@ import {
 } from "@/wire-common/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
-import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
@@ -221,7 +220,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
         addedToSeen = true;
       }
 
-      const tag = codec.wireTypeTag;
+      // `tagForValue` (not `wireTypeTag`): a codec may have no single preferred
+      // tag -- `UnknownValue` / `ProblematicValue` carry a per-instance tag, so
+      // the wire form shows that preserved tag rather than a fixed codec tag.
+      const tag = codec.tagForValue(value);
       const unprocessedState = codec.encode(value);
       const finalState = this.#encodeValue(unprocessedState, seen, registry);
       const result: JsonWireValue = { [`/${tag}`]: finalState };
@@ -230,25 +232,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
         seen.delete(value as object);
       }
 
-      return result;
-    }
-
-    // `ExplicitTagValue` (`UnknownValue` / `ProblematicValue`): live-graph
-    // stand-ins for values that arrived with an unknown tag or failed to
-    // decode. They round-trip to their *preserved* tag plus raw state, so the
-    // wire form shows that original tag -- never an `ExplicitTagValue` tag.
-    // Uses `.state` directly (NOT `[DECONSTRUCT]()`, whose shape differs).
-    if (value instanceof ExplicitTagValue) {
-      const seen = _seen ?? new Set<object>();
-      if (seen.has(value)) {
-        throw new Error("Circular reference detected during serialization");
-      }
-      seen.add(value);
-      const result = this.wrapTag(
-        value.wireTypeTag,
-        this.#encodeValue(value.state, seen, registry),
-      );
-      seen.delete(value);
       return result;
     }
 
@@ -299,12 +282,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result as JsonWireValue;
     }
 
-    // Codec values, `ExplicitTagValue`, `FabricInstance`, primitives, and
-    // arrays were all handled above. The only legitimate remaining shape is a
-    // *plain* object. Anything else -- a non-object (e.g. an uninterned/unique
-    // `symbol`) or a non-plain object (a class instance with no codec) -- is
-    // unencodable and must fail loudly rather than be silently mis-encoded as
-    // a plain object.
+    // Codec values (including `UnknownValue` / `ProblematicValue`),
+    // `FabricInstance`, primitives, and arrays were all handled above. The only
+    // legitimate remaining shape is a *plain* object. Anything else -- a
+    // non-object (e.g. an uninterned/unique `symbol`) or a non-plain object (a
+    // class instance with no codec) -- is unencodable and must fail loudly
+    // rather than be silently mis-encoded as a plain object.
     if (!isPlainObject(value)) {
       throw new Error(
         `Cannot encode ${

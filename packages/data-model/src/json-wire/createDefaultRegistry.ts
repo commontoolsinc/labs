@@ -20,9 +20,10 @@ import { UndefinedCodec } from "./UndefinedCodec.ts";
  * `null`, `boolean`, finite `number`, `string`, arrays, and plain objects are
  * handled as fallthrough in the serializer after no codec matches.
  *
- * `ExplicitTagValue` / `UnknownValue` / `ProblematicValue` are live-graph
- * stand-ins that carry a per-instance tag and are handled directly by the
- * encoding context, so they are not registered here.
+ * `UnknownValue` / `ProblematicValue` are registered (via `instanceCodecClasses`)
+ * but their codecs declare no preferred wire tag: the encode path resolves each
+ * instance's tag with `tagForValue()`, and an unrecognized tag on decode is
+ * wrapped in an `UnknownValue` by the encoding context rather than tag-routed.
  */
 export function createDefaultRegistry(): CodecRegistry {
   const registry = new CodecRegistry();
