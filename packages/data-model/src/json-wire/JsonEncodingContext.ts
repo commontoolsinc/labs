@@ -220,10 +220,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
         addedToSeen = true;
       }
 
-      // `tagForValue` (not `wireTypeTag`): a codec may have no single preferred
-      // tag -- `UnknownValue` / `ProblematicValue` carry a per-instance tag, so
-      // the wire form shows that preserved tag rather than a fixed codec tag.
+      // We use `tagForValue()` here rather than relying on any direct property
+      // of `value`, because `value` might not actually know what codec is being
+      // used for it, and it is up to the _codec_ not the value per se to
+      // determine the correct tag.
       const tag = codec.tagForValue(value);
+
       const unprocessedState = codec.encode(value);
       const finalState = this.#encodeValue(unprocessedState, seen, registry);
       const result: JsonWireValue = { [`/${tag}`]: finalState };
@@ -235,8 +237,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
       return result;
     }
 
-    // Every other `FabricInstance` must be representable by a registered codec.
-    // An un-codec'd instance is a programming error, not something to silently
+    // Every `FabricInstance` must be representable by a registered codec. An
+    // un-codec'd instance is a programming error, not something to silently
     // encode as a plain object.
     if (value instanceof BaseFabricInstance) {
       throw new Error(
