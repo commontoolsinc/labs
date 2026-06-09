@@ -101,6 +101,15 @@ export class ProblematicValue extends ExplicitTagValue {
       /**
        * @inheritDoc
        *
+       * Reads the preserved per-instance tag off the value.
+       */
+      override tagForValue(value: ProblematicValue): string {
+        return value.wireTypeTag;
+      }
+
+      /**
+       * @inheritDoc
+       *
        * Deconstructs into a `{ type, state, error }` envelope carrying the
        * preserved tag, raw state, and failure description. Does NOT recurse
        * into `state` -- the serialization system handles that.

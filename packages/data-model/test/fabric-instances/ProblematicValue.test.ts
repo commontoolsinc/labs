@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
-import { DECONSTRUCT } from "@/wire-common/interface.ts";
+import { CODEC, DECONSTRUCT } from "@/wire-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
@@ -64,6 +64,17 @@ describe("ProblematicValue", () => {
         expect(Object.isFrozen(pv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
         expect(pv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
+    });
+  });
+
+  describe("static members", () => {
+    describe("[CODEC]", () => {
+      describe("tagForValue()", () => {
+        it("returns the value's own (per-instance) wire type tag", () => {
+          const pv = new ProblematicValue("Weird@7", "s", "oops");
+          expect(ProblematicValue[CODEC].tagForValue(pv)).toBe("Weird@7");
+        });
       });
     });
   });

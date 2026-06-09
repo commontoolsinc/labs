@@ -45,6 +45,21 @@ export abstract class BaseFabricCodec implements FabricCodec {
     return (cls !== undefined) && (value instanceof cls);
   }
 
+  /**
+   * @inheritDoc
+   *
+   * Returns this codec's preferred {@link #wireTypeTag}. A codec with no
+   * preferred tag (whose instances carry per-instance tags) must override this.
+   */
+  tagForValue(_value: FabricValue): string {
+    if (this.#wireTypeTag === undefined) {
+      throw new Error(
+        "Shouldn't happen: codec has no preferred tag; `tagForValue()` must be overridden.",
+      );
+    }
+    return this.#wireTypeTag;
+  }
+
   /** @inheritDoc */
   abstract decode(
     wireTypeTag: string,

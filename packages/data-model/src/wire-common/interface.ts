@@ -64,6 +64,15 @@ export interface FabricCodec {
   canEncode(value: FabricValue): boolean;
 
   /**
+   * Returns the wire type tag to use when encoding the given value. Only ever
+   * called on a value for which {@link #canEncode} has returned `true`. Unlike
+   * {@link #wireTypeTag} -- the codec's single preferred tag, if it has one --
+   * this is the concrete tag for a _specific_ value; a codec whose instances
+   * each carry their own per-instance tag reads it from the value.
+   */
+  tagForValue(value: FabricValue): string;
+
+  /**
    * Decodes a value from the given essential state, which is (alleged / supposed)
    * to be a value that was produced by an earlier call to {@link #encode} on
    * a compatible class to this one. The result is expected to be a _shallow_

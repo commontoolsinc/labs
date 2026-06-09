@@ -86,6 +86,15 @@ export class UnknownValue extends ExplicitTagValue {
       /**
        * @inheritDoc
        *
+       * Reads the preserved per-instance tag off the value.
+       */
+      override tagForValue(value: UnknownValue): string {
+        return value.wireTypeTag;
+      }
+
+      /**
+       * @inheritDoc
+       *
        * Deconstructs into a `{ type, state }` envelope carrying the preserved
        * tag and raw state. Does NOT recurse into `state` -- the serialization
        * system handles that.
