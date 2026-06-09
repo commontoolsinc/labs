@@ -12,7 +12,7 @@ import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue } from "./interface.ts";
-import type { CodecRegistry } from "./CodecRegistry.ts";
+import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
 import { WIRE_META_TAGS } from "@/wire-common/wire-meta-tags.ts";
 
 /**
@@ -205,9 +205,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
     _seen?: Set<object>,
     registry: CodecRegistry = defaultRegistry,
   ): JsonWireValue {
-    // Try the registry first.
     const codec = registry.codecFromValue(value);
-    if (codec) {
+
+    if (codec === SELF_REP) {
+      // A self-representing primitive is its own wire form.
+      return value as JsonWireValue;
+    } else if (codec) {
       const seen = _seen ?? new Set<object>();
       let addedToSeen = false;
 
@@ -244,15 +247,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
       );
     }
 
-    // Primitives
-    if (
-      value === null || typeof value === "boolean" ||
-      typeof value === "number" || typeof value === "string"
-    ) {
-      return value as JsonWireValue;
-    }
-
-    // Past this point, `typeof value === "object"`.
+    // Self-representing primitives returned `SELF_REP` above. Past this point,
+    // `value` is an `object`.
 
     // Arrays
     if (Array.isArray(value)) {
