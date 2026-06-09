@@ -139,12 +139,14 @@ export class CodecRegistry {
         type = valueType;
         break;
       }
+
       case "object": {
         if (value === null) {
           type = "null";
         }
         break;
       }
+
       case "function": {
         // Not a `FabricValue`; nothing can encode it.
         return undefined;
