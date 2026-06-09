@@ -470,6 +470,36 @@ describe("pattern-binding", () => {
       expect(links.map((l) => l.path)).toEqual([["a"]]);
     });
 
+    it("resolves a chained redirect relative to its own document, not the base cell", () => {
+      // Cross-document chain: the binding (resolved against cellA) redirects to
+      // cellB's `mid`, whose value is a *relative* redirect to `x`. That nested
+      // redirect must resolve against cellB (the doc it lives in), not cellA. If
+      // the recursion re-based onto cellA, the second link would carry cellA's id.
+      const cellA = runtime.getCell<Record<string, unknown>>(
+        space,
+        "xdoc chain A",
+        undefined,
+        tx,
+      );
+      const cellB = runtime.getCell<Record<string, unknown>>(
+        space,
+        "xdoc chain B",
+        undefined,
+        tx,
+      );
+      cellB.set({ x: 55 });
+      cellB.key("mid").set(
+        cellB.key("x").getAsWriteRedirectLink({ base: cellB }),
+      );
+      const binding = cellB.key("mid").getAsWriteRedirectLink({ base: cellA });
+      const links = findAllWriteRedirectCells(binding, cellA);
+      const bId = cellB.getAsNormalizedFullLink().id;
+      expect(links.map((l) => ({ id: l.id, path: l.path }))).toEqual([
+        { id: bId, path: ["mid"] },
+        { id: bId, path: ["x"] },
+      ]);
+    });
+
     it("should find all write redirect links in an array", () => {
       const testCell = runtime.getCell<{ arr: number[] }>(
         space,

@@ -369,7 +369,11 @@ export function findAllWriteRedirectCells<T>(
   baseCell: AnyCell<T>,
 ): NormalizedFullLink[] {
   const seen: NormalizedFullLink[] = [];
-  function find(binding: unknown, baseCell: AnyCell<T>): void {
+  // `baseCell` is only used for link resolution (runtime/tx/parseLink), which
+  // does not depend on the cell's value type, so accept any cell. This lets the
+  // redirect-chain recursion re-base onto the resolved `linkCell` (a
+  // `Cell<unknown>`) rather than the original typed base.
+  function find(binding: unknown, baseCell: AnyCell<unknown>): void {
     if (isLegacyAlias(binding) && typeof binding.$alias.cell === "number") {
       // Numbered docs are yet to be unwrapped nested patterns. Ignore them.
       return;
@@ -394,7 +398,10 @@ export function findAllWriteRedirectCells<T>(
       );
       if (!linkCell) throw new Error("Link cell not found");
       const target = linkCell.getRaw({ meta: ignoreReadForScheduling });
-      if (isWriteRedirectLink(target)) find(target, baseCell);
+      // Resolve the next redirect relative to `linkCell` (the cell the chained
+      // redirect lives in), not the original `baseCell`: a relative redirect in
+      // a cross-document target must resolve against its own document.
+      if (isWriteRedirectLink(target)) find(target, linkCell);
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;
