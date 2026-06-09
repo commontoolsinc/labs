@@ -11,10 +11,7 @@ import {
   type FabricValue,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  DECONSTRUCT,
-  FabricDeconstructable,
-} from "@commonfabric/data-model/wire-common";
+import { codecOf } from "@commonfabric/data-model/wire-common";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -2494,21 +2491,15 @@ export function recursivelyAddIDIfNeeded<T>(
   // `FabricInstance`s are opaque with respect to plain-object-like property
   // access; they have class-defined identity. Iterating their own-enumerable
   // properties via the generic walker would descend into wrapper internals
-  // meaninglessly. Instead, walk the observable internal structure via
-  // `[DECONSTRUCT]()` (the same mechanism the serialization system uses) for
-  // side effects only — tracking shared references in `seen` and populating
-  // `frame.generatedIdCounter` for any objects-in-arrays nested inside — then
-  // return the original instance unchanged. Subclasses that haven't implemented
-  // `[DECONSTRUCT]` yet will throw from this path; that's the right signal the
-  // moment they start seeing traffic.
+  // meaninglessly. Instead, walk the observable internal structure via the
+  // class's `[CODEC]` `encode()` (the same mechanism the serialization system
+  // uses) for side effects only — tracking shared references in `seen` and
+  // populating `frame.generatedIdCounter` for any objects-in-arrays nested
+  // inside — then return the original instance unchanged.
   if (value instanceof FabricInstance) {
     seen.set(value, value);
 
-    // All `FabricInstance`s must implement `FabricDeconstructable`, even though
-    // the type system can't let us say that (because of how the `data-model`
-    // separates client vs. internal-implementation concerns).
-    const deconstructable = value as unknown as FabricDeconstructable;
-    const state = deconstructable[DECONSTRUCT]();
+    const state = codecOf(value).encode(value);
     if (isRecord(state) || Array.isArray(state)) {
       recursivelyAddIDIfNeeded(state, frame, seen);
     }
@@ -2528,15 +2519,13 @@ export function recursivelyAddIDIfNeeded<T>(
   // These are atomic fabric values and must be returned unchanged rather than
   // walked as records (their state is private, so the record branch below would
   // flatten them to `{}`). Only `FabricInstance`s carry nested `FabricValue`s
-  // that need `[ID]` assignment via `[DECONSTRUCT]()`; `FabricPrimitive`s are
-  // leaves.
+  // that need `[ID]` assignment via the codec's `encode()`; `FabricPrimitive`s
+  // are leaves.
   if (converted instanceof FabricSpecialObject) {
     seen.set(value, converted);
 
     if (converted instanceof FabricInstance) {
-      // See above in re this cast.
-      const deconstructable = converted as unknown as FabricDeconstructable;
-      const state = deconstructable[DECONSTRUCT]();
+      const state = codecOf(converted).encode(converted);
       if (isRecord(state) || Array.isArray(state)) {
         recursivelyAddIDIfNeeded(state, frame, seen);
       }
