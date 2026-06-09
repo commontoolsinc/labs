@@ -210,7 +210,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     if (codec === SELF_REP) {
       // A self-representing primitive is its own wire form.
       return value as JsonWireValue;
-    } if (codec) {
+    } else if (codec) {
       const seen = _seen ?? new Set<object>();
       let addedToSeen = false;
 
