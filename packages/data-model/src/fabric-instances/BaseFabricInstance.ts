@@ -48,32 +48,4 @@ export abstract class BaseFabricInstance extends FabricInstance
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
-
-  //
-  // Static members
-  //
-
-  /**
-   * Gets the `.wireTypeTag` from a value which is _supposed_ to be an instance
-   * of this class but is only statically known / assumed to be an instance of
-   * the fully abstract `FabricInstance`. Throws a "shouldn't happen" error if
-   * there's trouble.
-   */
-  static wireTypeTagOf(value: FabricInstance | FabricDeconstructable): string {
-    if (!(value instanceof BaseFabricInstance)) {
-      throw new Error(
-        "Shouldn't happen: Encountered a `FabricInstance` which is not a `BaseFabricInstance`.",
-      );
-    }
-
-    const result = value.wireTypeTag;
-
-    if (typeof result !== "string") {
-      throw new Error(
-        "Shouldn't happen: Encountered a `BaseFabricInstance` with a non-string `wireTypeTag`.",
-      );
-    }
-
-    return result;
-  }
 }
