@@ -8,7 +8,7 @@ import {
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
 import { CODEC } from "@/codec-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
@@ -113,7 +113,7 @@ describe("FabricMap", () => {
     // `Map` support is implemented.
     describe("[CODEC]", () => {
       const codec = FabricMap[CODEC];
-      const expectedTag = WIRE_TYPE_TAGS.Map;
+      const expectedTag = CODEC_TYPE_TAGS.Map;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("recognizedTypeTag", () => {

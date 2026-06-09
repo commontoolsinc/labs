@@ -17,7 +17,7 @@ import {
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -150,7 +150,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   static #codec = Object.freeze(
     new (class HashCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.Hash, FabricHash);
+        super(CODEC_TYPE_TAGS.Hash, FabricHash);
       }
 
       /** @inheritDoc */

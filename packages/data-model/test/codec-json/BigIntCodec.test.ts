@@ -2,13 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { BigIntCodec } from "@/codec-json/BigIntCodec.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("BigIntCodec", () => {
   const codec = new BigIntCodec();
-  const expectedTag = WIRE_TYPE_TAGS.BigInt;
+  const expectedTag = CODEC_TYPE_TAGS.BigInt;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {

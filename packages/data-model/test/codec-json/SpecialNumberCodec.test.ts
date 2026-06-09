@@ -2,13 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("SpecialNumberCodec", () => {
   const codec = new SpecialNumberCodec();
-  const expectedTag = WIRE_TYPE_TAGS.SpecialNumber;
+  const expectedTag = CODEC_TYPE_TAGS.SpecialNumber;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {

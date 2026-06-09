@@ -3,7 +3,7 @@
  * here for ease of reference. It is in the form of a frozen `const` to help
  * prevent inadvertent skew.
  */
-export const WIRE_TYPE_TAGS = Object.freeze(
+export const CODEC_TYPE_TAGS = Object.freeze(
   {
     //
     // Tags for JavaScript primitives that aren't representable in JSON. These

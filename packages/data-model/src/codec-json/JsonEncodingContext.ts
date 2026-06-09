@@ -13,7 +13,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue } from "./interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
-import { WIRE_META_TAGS } from "@/codec-common/wire-meta-tags.ts";
+import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
 
 /**
  * Tag prefix for the encoded form used by this module. We use this explicit
@@ -267,7 +267,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
             count++;
             i++;
           }
-          result.push(this.wrapTag(WIRE_META_TAGS.hole, count));
+          result.push(this.wrapTag(CODEC_META_TAGS.hole, count));
         } else {
           result.push(
             this.#encodeValue(value[i] as FabricValue, seen, registry),
@@ -323,9 +323,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
             Object.entries(result).map(([k, v]) => [k, unquote(v)]),
           ),
         );
-        return this.wrapTag(WIRE_META_TAGS.quote, unquoted) as JsonWireValue;
+        return this.wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonWireValue;
       }
-      return this.wrapTag(WIRE_META_TAGS.object, result) as JsonWireValue;
+      return this.wrapTag(CODEC_META_TAGS.object, result) as JsonWireValue;
     }
 
     return result as JsonWireValue;
@@ -349,13 +349,13 @@ export class JsonEncodingContext implements SerializationContext<string> {
     if (decoded !== null) {
       const { tag, state: rawState } = decoded;
 
-      // `WIRE_META_TAGS.quote` literal handling (Section 5.6).
-      if (tag === WIRE_META_TAGS.quote) {
+      // `CODEC_META_TAGS.quote` literal handling (Section 5.6).
+      if (tag === CODEC_META_TAGS.quote) {
         return rawState as FabricValue;
       }
 
-      // `WIRE_META_TAGS.object` unwrapping (Section 5.6).
-      if (tag === WIRE_META_TAGS.object) {
+      // `CODEC_META_TAGS.object` unwrapping (Section 5.6).
+      if (tag === CODEC_META_TAGS.object) {
         const inner = rawState as Record<string, JsonWireValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
@@ -425,7 +425,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let logicalLength = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
+        if (
+          entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
+        ) {
           logicalLength += entryDecoded.state as number;
         } else {
           logicalLength++;
@@ -436,7 +438,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       let targetIndex = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
-        if (entryDecoded !== null && entryDecoded.tag === WIRE_META_TAGS.hole) {
+        if (
+          entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
+        ) {
           targetIndex += entryDecoded.state as number;
         } else {
           result[targetIndex] = this.#decodeValue(entry, context, registry);

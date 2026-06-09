@@ -8,7 +8,7 @@ import {
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
 import { CODEC } from "@/codec-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
@@ -97,7 +97,7 @@ describe("FabricSet", () => {
     // `Set` support is implemented.
     describe("[CODEC]", () => {
       const codec = FabricSet[CODEC];
-      const expectedTag = WIRE_TYPE_TAGS.Set;
+      const expectedTag = CODEC_TYPE_TAGS.Set;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("recognizedTypeTag", () => {

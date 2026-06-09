@@ -20,7 +20,7 @@ import {
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
@@ -50,7 +50,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
   static #codec = Object.freeze(
     new (class EpochDaysCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.EpochDays, FabricEpochDays);
+        super(CODEC_TYPE_TAGS.EpochDays, FabricEpochDays);
       }
 
       /** @inheritDoc */

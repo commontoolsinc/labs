@@ -5,7 +5,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
 import { CODEC } from "@/codec-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 
 describe("FabricEpochNsec", () => {
@@ -56,7 +56,7 @@ describe("FabricEpochNsec", () => {
   describe("static members", () => {
     describe("[CODEC]", () => {
       const codec = FabricEpochNsec[CODEC];
-      const expectedTag = WIRE_TYPE_TAGS.EpochNsec;
+      const expectedTag = CODEC_TYPE_TAGS.EpochNsec;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("recognizedTypeTag", () => {

@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { CODEC } from "@/codec-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { isConvertibleNativeInstance } from "@/native-conversion.ts";
@@ -126,7 +126,7 @@ describe("FabricRegExp", () => {
   describe("static members", () => {
     describe("[CODEC]", () => {
       const codec = FabricRegExp[CODEC];
-      const expectedTag = WIRE_TYPE_TAGS.RegExp;
+      const expectedTag = CODEC_TYPE_TAGS.RegExp;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("recognizedTypeTag", () => {

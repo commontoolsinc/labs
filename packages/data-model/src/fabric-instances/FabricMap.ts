@@ -5,7 +5,7 @@ import {
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { WIRE_TYPE_TAGS } from "@/codec-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
@@ -64,7 +64,7 @@ export class FabricMap
   static #codec = Object.freeze(
     new (class FabricMapCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.Map, FabricMap);
+        super(CODEC_TYPE_TAGS.Map, FabricMap);
       }
 
       /**
