@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import type { Constructor } from "@commonfabric/utils/types";
 
 import { toCompactDebugString } from "@/value-debug.ts";
-import { CodecRegistry } from "@/json-wire/CodecRegistry.ts";
+import { CodecRegistry, SELF_REP } from "@/json-wire/CodecRegistry.ts";
 import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/wire-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
@@ -175,6 +175,30 @@ describe("CodecRegistry", () => {
       expect(() =>
         registry.registerPrimitive("object", new TestCodec("X@1", undefined))
       ).toThrow('does not accept `"object"`');
+    });
+  });
+
+  describe("registerSelfRep()", () => {
+    it("returns `SELF_REP` for a self-representing primitive value", () => {
+      const registry = new CodecRegistry();
+      registry.registerSelfRep("string");
+      expect(registry.codecFromValue("hi")).toBe(SELF_REP);
+    });
+
+    it("tries the type's codec before falling to self-rep", () => {
+      const registry = new CodecRegistry();
+      const codec = new TestCodec("Num@1", undefined, 42);
+      registry.registerPrimitive("number", codec);
+      registry.registerSelfRep("number");
+      expect(registry.codecFromValue(42)).toBe(codec); // codec match
+      expect(registry.codecFromValue(99)).toBe(SELF_REP); // self-rep fallback
+    });
+
+    it('rejects `"object"`', () => {
+      const registry = new CodecRegistry();
+      expect(() => registry.registerSelfRep("object")).toThrow(
+        'does not accept `"object"`',
+      );
     });
   });
 

@@ -3,6 +3,13 @@ import type { FabricCodec } from "@/wire-common/interface.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**
+ * Sentinel returned by {@link CodecRegistry#codecFromValue} for a
+ * self-representing value -- one that is its own wire form (encoded as-is, with
+ * no codec and no tag).
+ */
+export const SELF_REP = "self-rep" as const;
+
+/**
  * Gets the constructor function ("class") of the given value, if any, for the
  * purposes of fast-path lookup.
  */
@@ -50,6 +57,12 @@ export class CodecRegistry {
   readonly #primitiveCodecs = new Map<string, FabricCodec>();
 
   /**
+   * Primitive `type`s that are self-representing (encoded as-is). Keyed the
+   * same way as {@link #primitiveCodecs}.
+   */
+  readonly #selfRepTypes = new Set<string>();
+
+  /**
    * Registers a codec, indexing it by its `wireTypeTag` (for decode) and its
    * `uniqueHandledClass` (for encode). If either is `undefined`, then the codec
    * is left unregistered with the corresponding index. And whether or not it
@@ -92,17 +105,40 @@ export class CodecRegistry {
   }
 
   /**
-   * Finds a codec that can encode the given value. Returns `undefined` if none
-   * matches (the caller should fall through to structural handling for
-   * primitives, arrays, and plain objects).
+   * Registers a primitive `type` (a `typeof` result, or `"null"`) as
+   * self-representing: a value of that type is its own wire form, so
+   * {@link #codecFromValue} returns {@link SELF_REP} for it. `"object"` is not
+   * allowed. A type may be both self-representing and have a
+   * {@link #registerPrimitive} codec (e.g. `"number"`: finite numbers are
+   * self-representing, special ones go through a codec); the codec is tried
+   * first.
    */
-  codecFromValue(value: FabricValue): FabricCodec | undefined {
+  registerSelfRep(type: string): void {
+    if (type === "object") {
+      throw new Error('`registerSelfRep()` does not accept `"object"`.');
+    }
+
+    this.#selfRepTypes.add(type);
+  }
+
+  /**
+   * Finds how to encode the given value: a `FabricCodec` that can encode it,
+   * {@link SELF_REP} if it is a self-representing primitive, or `undefined` if
+   * neither matches (the caller falls through to structural handling for
+   * arrays and plain objects, or fails for an unencodable value).
+   */
+  codecFromValue(
+    value: FabricValue,
+  ): FabricCodec | typeof SELF_REP | undefined {
     // Fast path: primitive-type dispatch.
     const type = (value === null) ? "null" : typeof value;
     if (type !== "object") {
       const codec = this.#primitiveCodecs.get(type);
       if (codec && codec.canEncode(value)) {
         return codec;
+      }
+      if (this.#selfRepTypes.has(type)) {
+        return SELF_REP;
       }
     }
 

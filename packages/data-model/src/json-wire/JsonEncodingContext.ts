@@ -12,7 +12,7 @@ import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue } from "./interface.ts";
-import type { CodecRegistry } from "./CodecRegistry.ts";
+import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
 import { WIRE_META_TAGS } from "@/wire-common/wire-meta-tags.ts";
 
 /**
@@ -207,6 +207,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
   ): JsonWireValue {
     // Try the registry first.
     const codec = registry.codecFromValue(value);
+    if (codec === SELF_REP) {
+      // A self-representing primitive is its own wire form.
+      return value as JsonWireValue;
+    }
     if (codec) {
       const seen = _seen ?? new Set<object>();
       let addedToSeen = false;
