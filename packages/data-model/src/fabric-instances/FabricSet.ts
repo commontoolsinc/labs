@@ -12,9 +12,11 @@ import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
- * Wrapper for `Set` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until `Set` support is fully implemented. Extra properties beyond the
- * wrapped collection are not supported on non-`Error` wrappers.
+ * Wrapper for `Set` instances. Stub -- the static `[CODEC]` (the source of
+ * truth) throws until `Set` support is fully implemented, and the
+ * `[DECONSTRUCT]` / `[RECONSTRUCT]` protocol members delegate to it. Extra
+ * properties beyond the wrapped collection are not supported on non-`Error`
+ * wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   constructor(readonly set: Set<FabricValue>) {
@@ -26,8 +28,14 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     return WIRE_TYPE_TAGS.Set;
   }
 
+  /**
+   * @inheritDoc
+   *
+   * Delegates to this class's `[CODEC]` (the source of truth), which throws
+   * until `Set` support is implemented.
+   */
   [DECONSTRUCT](): FabricValue {
-    throw new Error("FabricSet: not yet implemented");
+    return FabricSet[CODEC].encode(this);
   }
 
   /**
@@ -71,11 +79,19 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     return new Set(this.set);
   }
 
+  /**
+   * Delegates to this class's `[CODEC]` (the source of truth), which throws
+   * until `Set` support is implemented.
+   */
   static [RECONSTRUCT](
-    _state: FabricValue,
-    _context: ReconstructionContext,
+    state: FabricValue,
+    context: ReconstructionContext,
   ): FabricSet {
-    throw new Error("FabricSet: not yet implemented");
+    return FabricSet[CODEC].decode(
+      WIRE_TYPE_TAGS.Set,
+      state,
+      context,
+    ) as FabricSet;
   }
 
   static #codec = Object.freeze(
@@ -84,18 +100,26 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
         super(WIRE_TYPE_TAGS.Set, FabricSet);
       }
 
-      /** @inheritDoc */
-      encode(value: FabricSet): FabricValue {
-        return value[DECONSTRUCT]();
+      /**
+       * @inheritDoc
+       *
+       * Stub -- throws until `Set` support is implemented.
+       */
+      encode(_value: FabricSet): FabricValue {
+        throw new Error("FabricSet: not yet implemented");
       }
 
-      /** @inheritDoc */
+      /**
+       * @inheritDoc
+       *
+       * Stub -- throws until `Set` support is implemented.
+       */
       decode(
         _wireTypeTag: string,
-        state: FabricValue,
-        context: ReconstructionContext,
+        _state: FabricValue,
+        _context: ReconstructionContext,
       ): FabricValue {
-        return FabricSet[RECONSTRUCT](state, context);
+        throw new Error("FabricSet: not yet implemented");
       }
     })(),
   );
