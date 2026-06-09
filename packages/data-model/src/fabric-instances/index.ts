@@ -15,11 +15,11 @@ export { FabricSet } from "./FabricSet.ts";
 /**
  * The concrete instance classes whose instances are available over the wire,
  * each via its static `[CODEC]`. This is the curated source of truth for which
- * instance types participate in serialization: add a class here once it gains
- * a `[CODEC]`. (`ExplicitTagValue` and its subclasses `UnknownValue` /
- * `ProblematicValue` are live-graph stand-ins carrying a per-instance tag,
- * handled directly by the encoding context rather than via a `[CODEC]`, so
- * they are intentionally absent.)
+ * instance types participate in serialization. (`ExplicitTagValue`'s subclasses
+ * `UnknownValue` / `ProblematicValue` are live-graph stand-ins carrying a
+ * per-instance tag. They do define a `[CODEC]` -- the source of truth for their
+ * `[DECONSTRUCT]` / `[RECONSTRUCT]` form -- but it has no preferred wire tag and
+ * is intentionally absent here: the encoding context handles them directly.)
  *
  * Returned frozen so callers cannot mutate the shared list.
  */

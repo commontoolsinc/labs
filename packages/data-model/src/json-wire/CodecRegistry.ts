@@ -44,9 +44,11 @@ export class CodecRegistry {
   readonly #classMap = new Map<Constructor, FabricCodec>();
 
   /**
-   * Registers a codec, indexing it by its `wireTypeTag` (for decode) and, when
-   * it declares a `uniqueHandledClass`, by that class (for the encode fast
-   * path). It also joins the ordered list used by the encode linear scan.
+   * Registers a codec, indexing it by its `wireTypeTag` (for decode) and its
+   * `uniqueHandledClass` (for encode). If either is `undefined`, then the codec
+   * is left unregistered with the corresponding index. And whether or not it
+   * has something `undefined`, it is added to the ordered list used by the
+   * encode linear scan.
    */
   register(codec: FabricCodec): void {
     const uniqueClass = codec.uniqueHandledClass;
@@ -54,7 +56,10 @@ export class CodecRegistry {
       this.#classMap.set(uniqueClass, codec);
     }
 
-    this.#tagMap.set(codec.wireTypeTag, codec);
+    const tag = codec.wireTypeTag;
+    if (tag !== undefined) {
+      this.#tagMap.set(tag, codec);
+    }
     this.#codecs.push(codec);
   }
 

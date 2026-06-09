@@ -6,15 +6,18 @@ import type { FabricCodec, ReconstructionContext } from "./interface.ts";
  * Base class for `FabricCodec` which provides commonly-needed functionality.
  */
 export abstract class BaseFabricCodec implements FabricCodec {
-  #wireTypeTag: string;
+  #wireTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
   /**
    * Constructs an instance.
    */
   constructor(
-    /** The preferred wire type tag. */
-    wireTypeTag: string,
+    /**
+     * The preferred wire type tag, or `undefined` for a codec with no single
+     * preferred tag.
+     */
+    wireTypeTag: string | undefined,
     /**
      * The unique class (constructor function), if any, whose _direct_ instances
      * this instance handles.
@@ -31,7 +34,7 @@ export abstract class BaseFabricCodec implements FabricCodec {
   }
 
   /** @inheritDoc */
-  get wireTypeTag(): string {
+  get wireTypeTag(): string | undefined {
     return this.#wireTypeTag;
   }
 

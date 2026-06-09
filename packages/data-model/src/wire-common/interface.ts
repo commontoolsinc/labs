@@ -50,11 +50,13 @@ export interface FabricCodec {
 
   /**
    * The unique preferred wire format tag that is associated with the format
-   * this instance decodes from. The codec system uses this to mark state
-   * produced by {@link #encode} on this instance and (by default) routes state
-   * so marked back to this instance (or an equivalent) for decoding.
+   * this instance decodes from, or `undefined` for a codec with no single
+   * preferred tag. When defined, the codec system uses it to mark state
+   * produced by {@link #encode} and (by default) routes state so marked back to
+   * this instance (or an equivalent) for decoding; a codec with no tag is not
+   * registered for tag-based decode dispatch.
    */
-  get wireTypeTag(): string;
+  get wireTypeTag(): string | undefined;
 
   /**
    * Returns `true` if this handler can encode the state of the given value.

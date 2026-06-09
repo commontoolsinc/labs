@@ -91,11 +91,12 @@ describe("FabricBytes", () => {
   describe("static members", () => {
     describe("[CODEC]", () => {
       const codec = FabricBytes[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.Bytes;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `Bytes` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Bytes);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -124,7 +125,7 @@ describe("FabricBytes", () => {
         it("round-trips via encode -> decode", () => {
           const fb = new FabricBytes(new Uint8Array([10, 20, 30, 40]));
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(fb),
             context,
           ) as unknown as FabricBytes;
@@ -135,7 +136,7 @@ describe("FabricBytes", () => {
         it("round-trips empty bytes", () => {
           const fb = new FabricBytes(new Uint8Array());
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(fb),
             context,
           ) as unknown as FabricBytes;
@@ -144,13 +145,13 @@ describe("FabricBytes", () => {
         });
 
         it("decodes non-string state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(codec.wireTypeTag, 42, context);
+          const decoded = codec.decode(expectedTag, 42, context);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
         it("decodes malformed base64 to a `ProblematicValue`", () => {
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             "not valid base64!!",
             context,
           );

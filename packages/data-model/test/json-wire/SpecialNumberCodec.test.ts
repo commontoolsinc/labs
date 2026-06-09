@@ -8,12 +8,13 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("SpecialNumberCodec", () => {
   const codec = new SpecialNumberCodec();
+  const expectedTag = WIRE_TYPE_TAGS.SpecialNumber;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {
     describe("wireTypeTag", () => {
       it("is the `SpecialNumber` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.SpecialNumber);
+        expect(codec.wireTypeTag).toBe(expectedTag);
       });
     });
 
@@ -58,7 +59,7 @@ describe("SpecialNumberCodec", () => {
     describe("decode()", () => {
       it("round-trips `-0` (preserves sign of zero)", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(-0),
           context,
         );
@@ -67,7 +68,7 @@ describe("SpecialNumberCodec", () => {
 
       it("round-trips `NaN`", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(NaN),
           context,
         );
@@ -76,7 +77,7 @@ describe("SpecialNumberCodec", () => {
 
       it("round-trips `+Infinity`", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(Infinity),
           context,
         );
@@ -85,7 +86,7 @@ describe("SpecialNumberCodec", () => {
 
       it("round-trips `-Infinity`", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(-Infinity),
           context,
         );
@@ -94,7 +95,7 @@ describe("SpecialNumberCodec", () => {
 
       it("decodes non-string state to `ProblematicValue`", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           0,
           context,
         );
@@ -106,7 +107,7 @@ describe("SpecialNumberCodec", () => {
 
       it("decodes an unknown literal to `ProblematicValue`", () => {
         // "Infinity" (missing leading +) is not a recognized literal.
-        const result = codec.decode(codec.wireTypeTag, "Infinity", context);
+        const result = codec.decode(expectedTag, "Infinity", context);
         expect(result).toBeInstanceOf(ProblematicValue);
         expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
           "SpecialNumber@1",

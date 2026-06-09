@@ -8,12 +8,13 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 describe("SymbolCodec", () => {
   const codec = new SymbolCodec();
+  const expectedTag = WIRE_TYPE_TAGS.Symbol;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {
     describe("wireTypeTag", () => {
       it("is the `Symbol` wire type tag", () => {
-        expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Symbol);
+        expect(codec.wireTypeTag).toBe(expectedTag);
       });
     });
 
@@ -41,7 +42,7 @@ describe("SymbolCodec", () => {
     describe("decode()", () => {
       it("round-trips an interned symbol to the same registry instance", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(Symbol.for("hello")),
           context,
         );
@@ -52,7 +53,7 @@ describe("SymbolCodec", () => {
       it("round-trips a key with non-ASCII characters", () => {
         const key = "café-☕-\u{1F600}";
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           codec.encode(Symbol.for(key)),
           context,
         );
@@ -61,7 +62,7 @@ describe("SymbolCodec", () => {
 
       it("decodes non-string state to `ProblematicValue`", () => {
         const result = codec.decode(
-          codec.wireTypeTag,
+          expectedTag,
           42,
           context,
         );

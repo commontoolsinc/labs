@@ -105,11 +105,12 @@ describe("FabricSet", () => {
     // to the not-yet-implemented `[DECONSTRUCT]`/`[RECONSTRUCT]` protocol.
     describe("[CODEC]", () => {
       const codec = FabricSet[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.Set;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `Set` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Set);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -130,7 +131,7 @@ describe("FabricSet", () => {
 
       describe("decode()", () => {
         it("throws (stub, via `[RECONSTRUCT]`)", () => {
-          expect(() => codec.decode(codec.wireTypeTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, context)).toThrow(
             "not yet implemented",
           );
         });

@@ -153,11 +153,12 @@ describe("FabricHash", () => {
 
     describe("[CODEC]", () => {
       const codec = FabricHash[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.Hash;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `Hash` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Hash);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -184,7 +185,7 @@ describe("FabricHash", () => {
         it("decodes a `{ tag, hash }` object back to a `FabricHash`", () => {
           const cid = new FabricHash(SAMPLE_HASH, "fid1");
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             { tag: "fid1", hash: cid.hashString },
             context,
           );
@@ -197,7 +198,7 @@ describe("FabricHash", () => {
         it("round-trips via encode -> decode (non-`fid1` tag)", () => {
           const cid = new FabricHash(SAMPLE_HASH_17, "sha3");
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(cid),
             context,
           );
@@ -207,13 +208,13 @@ describe("FabricHash", () => {
         });
 
         it("decodes non-object state to a `ProblematicValue`", () => {
-          const decoded = codec.decode(codec.wireTypeTag, 123, context);
+          const decoded = codec.decode(expectedTag, 123, context);
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
         it("decodes missing/non-string fields to a `ProblematicValue`", () => {
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             { tag: "fid1" },
             context,
           );
@@ -222,7 +223,7 @@ describe("FabricHash", () => {
 
         it("decodes a malformed base64 `hash` to a `ProblematicValue`", () => {
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             { tag: "fid1", hash: "not valid base64!!" },
             context,
           );

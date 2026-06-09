@@ -129,11 +129,12 @@ describe("FabricMap", () => {
     // to the not-yet-implemented `[DECONSTRUCT]`/`[RECONSTRUCT]` protocol.
     describe("[CODEC]", () => {
       const codec = FabricMap[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.Map;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `Map` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Map);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -154,7 +155,7 @@ describe("FabricMap", () => {
 
       describe("decode()", () => {
         it("throws (stub, via `[RECONSTRUCT]`)", () => {
-          expect(() => codec.decode(codec.wireTypeTag, null, context)).toThrow(
+          expect(() => codec.decode(expectedTag, null, context)).toThrow(
             "not yet implemented",
           );
         });

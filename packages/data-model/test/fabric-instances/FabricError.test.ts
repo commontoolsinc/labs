@@ -365,11 +365,12 @@ describe("FabricError", () => {
 
     describe("[CODEC]", () => {
       const codec = FabricError[CODEC];
+      const expectedTag = WIRE_TYPE_TAGS.Error;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("wireTypeTag", () => {
         it("is the `Error` wire type tag", () => {
-          expect(codec.wireTypeTag).toBe(WIRE_TYPE_TAGS.Error);
+          expect(codec.wireTypeTag).toBe(expectedTag);
         });
       });
 
@@ -414,7 +415,7 @@ describe("FabricError", () => {
         it("round-trips a basic `Error`", () => {
           const se = FabricError.fromNativeError(new Error("hello"));
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(se),
             context,
           ) as unknown as FabricError;
@@ -427,7 +428,7 @@ describe("FabricError", () => {
         it("round-trips a `TypeError`", () => {
           const se = FabricError.fromNativeError(new TypeError("bad type"));
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(se),
             context,
           ) as unknown as FabricError;
@@ -442,7 +443,7 @@ describe("FabricError", () => {
             new RangeError("out of range"),
           );
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(se),
             context,
           ) as unknown as FabricError;
@@ -457,7 +458,7 @@ describe("FabricError", () => {
             new Error("outer", { cause: inner }),
           );
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(outer),
             context,
           ) as unknown as FabricError;
@@ -477,7 +478,7 @@ describe("FabricError", () => {
           outerErr.cause = innerSe;
           const outerSe = FabricError.fromNativeError(outerErr);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(outerSe),
             context,
           ) as unknown as FabricError;
@@ -492,7 +493,7 @@ describe("FabricError", () => {
           (err as unknown as Record<string, unknown>).detail = "more info";
           const se = FabricError.fromNativeError(err);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(se),
             context,
           ) as unknown as FabricError;
@@ -510,7 +511,7 @@ describe("FabricError", () => {
           err.name = "MyCustomError";
           const se = FabricError.fromNativeError(err);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(se),
             context,
           ) as unknown as FabricError;
@@ -521,7 +522,7 @@ describe("FabricError", () => {
         it("round-trips a `TypeError` preserving `name === type` identity", () => {
           const se = FabricError.fromNativeError(new TypeError("rt"));
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(se),
             context,
           ) as unknown as FabricError;
@@ -538,7 +539,7 @@ describe("FabricError", () => {
           err.name = "CustomName";
           const se = FabricError.fromNativeError(err);
           const decoded = codec.decode(
-            codec.wireTypeTag,
+            expectedTag,
             codec.encode(se),
             context,
           ) as unknown as FabricError;

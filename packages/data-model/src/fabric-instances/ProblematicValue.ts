@@ -1,9 +1,12 @@
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import {
+  CODEC,
   DECONSTRUCT,
+  type FabricCodec,
   RECONSTRUCT,
   type ReconstructionContext,
 } from "@/wire-common/interface.ts";
+import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 
@@ -33,8 +36,14 @@ export class ProblematicValue extends ExplicitTagValue {
     return this.#error;
   }
 
+  /**
+   * @inheritDoc
+   *
+   * Delegates to this class's `[CODEC]`, the source of truth for the encoded
+   * form.
+   */
   [DECONSTRUCT](): FabricValue {
-    return { type: this.wireTypeTag, state: this.state, error: this.error };
+    return ProblematicValue[CODEC].encode(this);
   }
 
   /**
@@ -66,13 +75,66 @@ export class ProblematicValue extends ExplicitTagValue {
     return new ProblematicValue(this.wireTypeTag, this.state, this.error);
   }
 
+  /**
+   * Reconstructs a `ProblematicValue` from its essential state. Delegates to
+   * this class's `[CODEC]`, the source of truth for decoding.
+   */
   static [RECONSTRUCT](
     state: { type: string; state: FabricValue; error: string },
     context: ReconstructionContext,
   ): ProblematicValue {
-    const result = new ProblematicValue(state.type, state.state, state.error);
-    // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
-    // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-    return context.shouldDeepFreeze ? deepFreeze(result) : result;
+    return ProblematicValue[CODEC].decode(
+      state.type,
+      state,
+      context,
+    ) as ProblematicValue;
+  }
+
+  static #codec = Object.freeze(
+    new (class ProblematicValueCodec extends BaseFabricCodec {
+      constructor() {
+        // No preferred wire tag: a `ProblematicValue` round-trips to its
+        // *preserved* tag, which varies per instance.
+        super(undefined, ProblematicValue);
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Deconstructs into a `{ type, state, error }` envelope carrying the
+       * preserved tag, raw state, and failure description. Does NOT recurse
+       * into `state` -- the serialization system handles that.
+       */
+      encode(value: ProblematicValue): FabricValue {
+        return {
+          type: value.wireTypeTag,
+          state: value.state,
+          error: value.error,
+        };
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Reconstructs a `ProblematicValue` from its `{ type, state, error }`
+       * envelope. Honors `context.shouldDeepFreeze`.
+       */
+      decode(
+        _wireTypeTag: string,
+        state: FabricValue,
+        context: ReconstructionContext,
+      ): FabricValue {
+        const s = state as { type: string; state: FabricValue; error: string };
+        const result = new ProblematicValue(s.type, s.state, s.error);
+        // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen
+        // form via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
+        return context.shouldDeepFreeze ? deepFreeze(result) : result;
+      }
+    })(),
+  );
+
+  /** The codec for instances of this class. */
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
