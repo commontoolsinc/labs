@@ -12,9 +12,11 @@ import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
 /**
- * Wrapper for `Map` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until `Map` support is fully implemented. Extra properties beyond the
- * wrapped collection are not supported on non-`Error` wrappers.
+ * Wrapper for `Map` instances. Stub -- the static `[CODEC]` (the source of
+ * truth) throws until `Map` support is fully implemented, and the
+ * `[DECONSTRUCT]` / `[RECONSTRUCT]` protocol members delegate to it. Extra
+ * properties beyond the wrapped collection are not supported on non-`Error`
+ * wrappers.
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
@@ -27,8 +29,14 @@ export class FabricMap
     return WIRE_TYPE_TAGS.Map;
   }
 
+  /**
+   * @inheritDoc
+   *
+   * Delegates to this class's `[CODEC]` (the source of truth), which throws
+   * until `Map` support is implemented.
+   */
   [DECONSTRUCT](): FabricValue {
-    throw new Error("FabricMap: not yet implemented");
+    return FabricMap[CODEC].encode(this);
   }
 
   /**
@@ -72,11 +80,19 @@ export class FabricMap
     return new Map(this.map);
   }
 
+  /**
+   * Delegates to this class's `[CODEC]` (the source of truth), which throws
+   * until `Map` support is implemented.
+   */
   static [RECONSTRUCT](
-    _state: FabricValue,
-    _context: ReconstructionContext,
+    state: FabricValue,
+    context: ReconstructionContext,
   ): FabricMap {
-    throw new Error("FabricMap: not yet implemented");
+    return FabricMap[CODEC].decode(
+      WIRE_TYPE_TAGS.Map,
+      state,
+      context,
+    ) as FabricMap;
   }
 
   static #codec = Object.freeze(
@@ -85,18 +101,26 @@ export class FabricMap
         super(WIRE_TYPE_TAGS.Map, FabricMap);
       }
 
-      /** @inheritDoc */
-      encode(value: FabricMap): FabricValue {
-        return value[DECONSTRUCT]();
+      /**
+       * @inheritDoc
+       *
+       * Stub -- throws until `Map` support is implemented.
+       */
+      encode(_value: FabricMap): FabricValue {
+        throw new Error("FabricMap: not yet implemented");
       }
 
-      /** @inheritDoc */
+      /**
+       * @inheritDoc
+       *
+       * Stub -- throws until `Map` support is implemented.
+       */
       decode(
         _wireTypeTag: string,
-        state: FabricValue,
-        context: ReconstructionContext,
+        _state: FabricValue,
+        _context: ReconstructionContext,
       ): FabricValue {
-        return FabricMap[RECONSTRUCT](state, context);
+        throw new Error("FabricMap: not yet implemented");
       }
     })(),
   );
