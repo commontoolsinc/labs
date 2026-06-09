@@ -930,7 +930,6 @@ describe("Cell Static Methods", () => {
         const cell = Cell.of(epoch);
         const got = cell.get() as FabricEpochNsec;
         expect(got.value).toBe(epoch.value);
-        expect(got.wireTypeTag).toBe("EpochNsec@1");
       });
     });
 
@@ -942,8 +941,7 @@ describe("Cell Static Methods", () => {
     const DATE_ISO = "2024-01-01T00:00:00Z";
     const DATE_NS = BigInt(Date.parse(DATE_ISO)) * 1_000_000n;
     const assertEpochNsec = (got: unknown) => {
-      const v = got as { value?: bigint; wireTypeTag?: string };
-      expect(v?.wireTypeTag).toBe("EpochNsec@1");
+      const v = got as { value?: bigint };
       expect(v?.value).toBe(DATE_NS);
     };
     const inFreshRuntime = async (

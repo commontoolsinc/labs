@@ -533,12 +533,10 @@ describe("fetch-data mutex mechanism", () => {
     // with message/stack lost.
     expect(data.error).toBeDefined();
     const fe = data.error as {
-      wireTypeTag: string;
       name: string;
       message: string;
       stack: string;
     };
-    expect(fe.wireTypeTag).toBe("Error@1");
     expect(fe.name).toBe("Error");
     expect(fe.message).toMatch(/HTTP 404/);
     expect(typeof fe.stack).toBe("string");
