@@ -830,6 +830,14 @@ const profileWish = wish({ query: "#profile" }); // resolves the viewer's profil
 - **Only the current viewer** has a reachable profile cell. You cannot render
   `cf-profile-badge` for other participants today (no cross-space profile cell —
   see CT-1667); use `cf-avatar` for them.
+- ⚠️ **Bind it at a STATIC `[UI]` position.** Like every `$`-bidirectional binding
+  (`$value`, `$checked`, …), `$profile` must be bound where the JSX is constructed
+  once — **never inside a `{computed(() => …)}` subtree**. Inside a computed the
+  cell is auto-unwrapped to a plain value and the renderer throws *"Bidirectionally
+  bound property $profile is not reactive"*, blanking the whole pattern. Resolve
+  `wish({query:"#profile"})` once and place the badge in the static JSX; gate only
+  its *siblings* reactively, or use `ifElse(cond, staticA, staticB)` as a child of a
+  static wrapper. Repro: `packages/patterns/scope-bug-computed-vnode-blank/`.
 
 ---
 
