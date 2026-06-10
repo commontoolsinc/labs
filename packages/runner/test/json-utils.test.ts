@@ -843,7 +843,7 @@ describe("moduleToJSON", () => {
     expect("implementation" in serialized).toBe(false);
   });
 
-  it("does not stringify verified compiled callbacks after standalone-engine registration", async () => {
+  it("keeps the fallback body when the registering runtime can't resolve the $implRef (standalone-engine registration)", async () => {
     const compileEngine = new Engine(runtime);
     const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
       /\/$/,
@@ -911,14 +911,23 @@ describe("moduleToJSON", () => {
 
     runtime.patternManager.registerPattern(pattern);
 
-    // The implementation became verified during the standalone Engine's
-    // evaluation, so it carries content-addressed provenance (recorded by
-    // Engine.recordModuleProvenance — module-global, not per-engine). That is
-    // what lets `moduleToJSON` emit a `$implRef` and OMIT the stringified body
-    // even though this pattern was registered without going through the
-    // runtime harness's own evaluation (the cross-engine path that the deleted
-    // `associatePattern` bridge used to cover).
+    // The implementation became verified during the STANDALONE Engine's
+    // evaluation, so it carries process-global content-addressed provenance
+    // (Engine.recordModuleProvenance) and `moduleToJSON` dual-writes a
+    // `$implRef`. But this pattern was registered WITHOUT going through
+    // `compilePattern`/`registerEvaluatedModules`, so the runtime's own
+    // identity index never saw the artifact and cannot resolve that `$implRef`
+    // on reload (the cross-engine path the deleted `associatePattern` bridge
+    // used to serve). The serializer must therefore KEEP the stringified body
+    // as the fallback — otherwise reload would miss the index, miss the
+    // registry, and throw.
     expect(getVerifiedProvenance(targetModule.implementation)).toBeDefined();
+    expect(
+      runtime.patternManager.artifactFromIdentitySync(
+        getVerifiedProvenance(targetModule.implementation)!.identity,
+        getVerifiedProvenance(targetModule.implementation)!.symbol!,
+      ),
+    ).toBeUndefined();
 
     const frame = pushFrame({ runtime });
     let serialized: ReturnType<typeof moduleToJSON>;
@@ -932,6 +941,8 @@ describe("moduleToJSON", () => {
       implementationRef: targetModule.implementationRef,
     });
     expect(serialized).toHaveProperty("$implRef");
-    expect("implementation" in serialized).toBe(false);
+    // Body KEPT: this runtime cannot resolve the $implRef, so the fallback is
+    // required for a successful reload.
+    expect("implementation" in serialized).toBe(true);
   });
 });
