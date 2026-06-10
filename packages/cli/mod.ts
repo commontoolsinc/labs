@@ -44,8 +44,12 @@ export async function main(args: string[]) {
     setGlobalLogFloor(level as LogLevel);
     Deno.env.set("CF_LOG_LEVEL", level); // workers inherit
   } else if (!Deno.env.get("CF_LOG_LEVEL")) {
-    setGlobalLogFloor("error" as LogLevel); // default: only errors
-    Deno.env.set("CF_LOG_LEVEL", "error");
+    // Default to `warn` so transformer-pipeline warnings (e.g. unknown-typed
+    // reactive captures) reach authors. On the happy path no runtime
+    // `logger.warn` fires, so this stays quiet in practice; it only lights up
+    // when there's something worth seeing.
+    setGlobalLogFloor("warn" as LogLevel);
+    Deno.env.set("CF_LOG_LEVEL", "warn");
   }
   // If CF_LOG_LEVEL env var already set, floor was initialized at module load time
 

@@ -88,6 +88,27 @@ export class TransformationContext {
     }
   }
 
+  /**
+   * Like {@link reportDiagnostic}, but emits at most one diagnostic per
+   * (file, type, source range). The capture schemas are built in one shared
+   * place that several stages re-walk, so the same capture can reach a
+   * diagnostic call more than once; this keys on the resolved range via the
+   * shared CrossStageState so the duplicates collapse to one. The file name is
+   * part of the key because that state is shared across every file in a
+   * compilation, and the range is a file-relative offset that would otherwise
+   * collide between files. With no shared state present it falls back to
+   * reporting unconditionally.
+   */
+  reportDiagnosticOnce(input: DiagnosticInput): void {
+    const { start, length } = this.resolveDiagnosticRange(input.node);
+    const key = `${this.sourceFile.fileName}:${input.type}:${start}:${length}`;
+    const state = this.options.state;
+    if (state && !state.markDiagnosticReported(key)) {
+      return;
+    }
+    this.reportDiagnostic(input);
+  }
+
   private resolveDiagnosticRange(
     node: ts.Node,
   ): { start: number; length: number } {
