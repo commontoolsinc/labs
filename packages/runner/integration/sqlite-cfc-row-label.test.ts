@@ -163,7 +163,10 @@ async function runTest(base: URL) {
       );
       expectAtoms(
         row0.integ,
-        [{ kind: "claimed-authored-by", subject: "did:mailto:alice@a.example" }],
+        [{
+          kind: "claimed-authored-by",
+          subject: "did:mailto:alice@a.example",
+        }],
         [],
         "row 0 integrity",
       );
@@ -199,7 +202,9 @@ async function runTest(base: URL) {
         throw new Error(
           `qCount should have failed closed; got error=${
             JSON.stringify(countError)
-          } result=${JSON.stringify(result.key("qCount").key("result").getRaw())}`,
+          } result=${
+            JSON.stringify(result.key("qCount").key("result").getRaw())
+          }`,
         );
       }
 
