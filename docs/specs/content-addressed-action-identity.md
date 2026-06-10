@@ -93,7 +93,7 @@ or stops needing identity-carry, the symbols die with it.)
 
 | # | Copy site | What it does | Verdict |
 |---|---|---|---|
-| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `toJSONWithLegacyAliases` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`json-utils.ts:183`) | **Copy stays** (the `Pattern` IS the serialized artifact). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). Long-term, nested trusted patterns can serialize as `$patternRef` sentinels directly once build-time refs are resolvable (see Open questions — refs aren't known until post-module-evaluation, which is why the lazy backref exists today). |
+| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `toJSONWithLegacyAliases` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`json-utils.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
 | C2 | `moduleToJSON` pattern-type implementation (`json-utils.ts:387`, the CT-1230 workaround): sub-pattern passed as a module implementation (e.g. to `.map()`) | Serializes the nested pattern graph instead of stringifying it | **Subsumed by op-by-identity.** The op already travels as `$patternRef` + `$opFallback`; with `$opFallback` retained the embedded copy is only the fallback payload. When the fallback is dropped (Phase 4), this copy site disappears. |
 | C3 | `traverseValue` (`traverse-utils.ts:54`): copies during build traversal (`collectCellsAndNodes`, `node-utils` connect) | Preserves the backref so a traversal copy still resolves `getArtifactEntryRef` | **Copy stays; backref replaced** by side-table registration at the same line. |
 | C4 | `unwrapOneLevelAndBindtoDoc` (`pattern-binding.ts:333–340`): instantiation-time rebinding copies | Propagates backref + the `verifiedLoadId` side-table entry to the bound copy | **Copy stays; backref replaced** by side-table registration; the `verifiedLoadId` propagation is deleted outright (CFC identity no longer flows through loadIds — § CFC). |
@@ -298,6 +298,42 @@ the global `addressableByIdentity` index suffices and the pattern-scoped
 second key is dropped. `PatternManager`'s piece/meta `patternId` (URIs, meta
 cells, LRU) is unrelated and stays.
 
+### 7. Pattern JSON becomes refs; the graph representation goes internal
+
+Decision (resolves former open question 1): the serialization *boundary* emits
+`{ identity, symbol }` refs — the full node-graph JSON becomes a runtime-
+internal representation (and a debug output, e.g. `cf check --pattern-json`).
+
+The timing objection that motivated the lazy backref does not apply at the
+boundary: `createPattern` runs during module evaluation (refs not yet indexed),
+but `toJSON` runs when a value is *written to a cell* — after
+`registerEvaluatedModules` has indexed the module. So:
+
+- `Pattern.toJSON()` → `{ $patternRef: { identity, symbol } }` (plus
+  `argumentSchema`/`resultSchema` if consumers need them without resolving).
+- `moduleToJSON` for a pattern-type implementation (C2) → the same ref, not an
+  embedded graph.
+- `moduleToJSON` for javascript modules → `$implRef` (§1).
+- `Pattern.nodes` / `result` / `initial` stay as the in-memory instantiation
+  representation only; nothing outside the runner consumes them as JSON.
+
+Known things this trips (each becomes a work item):
+
+- **`$opFallback`** embeds a full serialized graph *on purpose* (eviction
+  resilience). Refs-only `toJSON` would silently turn the fallback into a ref
+  too, defeating it. Either give the fallback an explicit
+  `serializePatternGraph()` escape hatch (internal serializer, not `toJSON`),
+  or drop the fallback and solve eviction pinning first (open question 2 —
+  these two decisions are now coupled).
+- Anything that JSON-round-trips patterns and expects a graph: json-utils
+  round-trip tests, pattern-as-value deserialization in `pattern-binding`,
+  debug tooling. Deserialization of a ref requires the module to be loadable
+  by identity (in-memory, or storage-backed via the compile cache) — which is
+  the whole point, but makes by-identity load the only rehydration path.
+- Wire/IPC surfaces that today receive pattern JSON (runtime-client
+  `getPatternSources` is source-based and unaffected; audit any other
+  protocol field carrying serialized patterns).
+
 ## Persisted-data compatibility
 
 What's in stored graphs today (verified writer): `{ type: "javascript",
@@ -308,6 +344,23 @@ same (ordinal-dependent!) refs when the pattern re-evaluates.
 
 Phased migration (op-migration playbook):
 
+- **Phase 0 — drop the `ordinal` from `ensureImplementationRef` (landable
+  now).** The ordinal (`frame.generatedIdCounter++`) was a defense against the
+  same function being inline-declared twice; the builder-call-hoisting
+  transformer moves every builder call to a module-scope declaration and the
+  SES verifier enforces that shape, so under the ESM loader `(kind, src,
+  preview)` is already unique — and `src` is the canonical
+  `cf:module/<hash>/<path>:line:col`, making the ref content-derived. Removing
+  the ordinal eliminates build-order sensitivity (the same class of bug as the
+  CT-1623 reload churn). Compat caveat: refs are persisted inside serialized
+  graphs (e.g. `$opFallback` payloads); old ordinal-bearing refs will no
+  longer match re-minted ones, so resolution of such stored graphs falls to
+  the stringified-implementation fallback (or fails where the implementation
+  was omitted). If pre-change persisted graphs matter, register a legacy
+  alias during a transition: keep incrementing the counter and ALSO register
+  the fn under `createRef({kind, source, preview, ordinal})`. Decide based on
+  an audit of real stored data; the in-memory/identity fast paths are
+  unaffected either way.
 - **Phase 1 — dual-write, dual-read.** Writers emit `$implRef` (+ keep
   `implementationRef` and the conditional stringified `implementation`).
   Readers prefer `$implRef`; absent that, fall back to the legacy
@@ -362,6 +415,32 @@ canary test compiling+resolving with `$implRef` stripped.
 - `runner.ts`: `resolveJavaScriptFunction` ref path, `discoverAndCacheFunctions`,
   `verifiedLoadId` threading through `JavaScriptNodeContext`/frames.
 
+## Delivery
+
+- **Separate PRs per target**, independently revertible, each green before the
+  next: (1) Phase 0 ordinal removal; (2) `unsafe_parentPattern` deletion
+  (write-only today — no design dependency); (3) `noteDerivedCopy` + trust/
+  entry-ref decoupling, then `unsafe_originalPattern` deletion; (4) `$implRef`
+  dual-write + CFC provenance WeakMap; (5) pattern-scoped registry deletion;
+  (6) flips and shim removals per the phases. Action-identity `patternId`
+  rides on (5); the broader piece/root-pattern `patternId` (~300 refs across
+  shell/piece/runtime-client, wire + persisted surfaces) is a separately
+  designed follow-on — it has its own compat constraints (stored ids, IPC) and
+  must not be bundled here.
+- A note on layering (why `noteDerivedCopy` and not "just look at the
+  manager"): the copy sites live in builder-layer utilities with no
+  PatternManager handle. Either `noteDerivedCopy` lives module-level next to
+  the trust WeakSets (preferred — `valueToEntryRef` keys are globally
+  meaningful content addresses, so promoting that map toward module level is
+  safe), or the builder calls it through the ambient frame.
+- **Red-team pass** (security gate for the CFC change, PR 4): a dedicated
+  adversarial review of the verified-identity path — forged functions with
+  matching source text, `__cf_data`-shaped factories, replayed `$implRef`s
+  pointing at other modules' symbols, host-artifact escalation attempts — with
+  each attack landed as a test (extend `cfreg-security.test.ts` /
+  `esm-verifier-adversarial.test.ts`). Every fail-closed property must be
+  demonstrated, not argued.
+
 ## Test plan
 
 - Red-green per phase: serialization snapshot tests pin the `$implRef` form;
@@ -382,19 +461,13 @@ canary test compiling+resolving with `$implRef` stripped.
 
 ## Open questions
 
-1. **Build-time sentinels (C1).** Can `createPattern` serialize nested trusted
-   patterns as `$patternRef` directly instead of embedding graphs + side-table
-   carry? Requires refs at build time, but indexing happens post-evaluation.
-   Options: a deferred slot patched by `registerEvaluatedModules` (the
-   serialized graph is still in memory then), or keeping instantiation-time
-   substitution (status quo, generalized). Default: keep instantiation-time.
-2. **Eviction pinning.** `addressableByIdentity` is FIFO-bounded; the op path
+1. **Eviction pinning.** `addressableByIdentity` is FIFO-bounded; the op path
    tolerates eviction via `$opFallback`. If Phase 4 drops fallbacks, running
    patterns must pin their modules' index entries (refcount on running pieces)
    or the resolver needs a sync-safe re-evaluation path from
    `modulesByIdentity`. Decide before Phase 4; until then fallbacks cover it.
-3. **`cfc/canonical.ts` digests.** Confirm no *persisted* artifact compares
+2. **`cfc/canonical.ts` digests.** Confirm no *persisted* artifact compares
    `bundleId`s across sessions (believed session-only; verify before Phase 3).
-4. **`location`/`preview` retention.** Keep both on serialized modules for
+3. **`location`/`preview` retention.** Keep both on serialized modules for
    debugging (they're inert), or derive `location` from `$implRef` + symbol?
    Default: keep.

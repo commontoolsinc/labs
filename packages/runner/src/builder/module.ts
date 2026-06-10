@@ -699,17 +699,22 @@ function ensureImplementationRef(
   implementation: (...args: any[]) => unknown,
   kind: "fn" | "handler",
 ): string {
-  const frame = getTopFrame();
   const existing = (implementation as { implementationRef?: string })
     .implementationRef;
   const implementationRef = existing ?? (() => {
+    // Purely content-derived: `src` is the canonical content-addressed source
+    // location (`cf:module/<hash>/<path>:line:col`) under the ESM loader, and
+    // the builder-call-hoisting transformer + SES verifier guarantee one
+    // builder call per module-scope declaration, so (source, preview)
+    // uniquely identifies the implementation. (An order-dependent `ordinal`
+    // used to be folded in as a defense against inline duplicate
+    // declarations, which made refs build-order-dependent.)
     const source = (implementation as { src?: string }).src ??
       implementation.name;
     const minted = createRef({
       kind,
       source,
       preview: implementation.toString(),
-      ...(frame ? { ordinal: frame.generatedIdCounter++ } : {}),
     }, "verified implementation").toString();
 
     if (Object.isExtensible(implementation)) {
