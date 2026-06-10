@@ -24,10 +24,22 @@ class SharedServerStorageManager extends EmulatedStorageManager {
     server: MemoryV2Server.Server,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
   ): SharedServerStorageManager {
-    return new SharedServerStorageManager(
+    const manager = new SharedServerStorageManager(
       { ...options, memoryHost: new URL("memory://") },
       () => server,
     );
+    manager.sharedServer = server;
+    return manager;
+  }
+
+  private sharedServer!: MemoryV2Server.Server;
+
+  // The server is SHARED between managers and closed once by the test's
+  // afterEach — serve it without ever initializing the base class's private
+  // `#server`, whose `close()` would otherwise close the shared server once
+  // per manager.
+  protected override server(): MemoryV2Server.Server {
+    return this.sharedServer;
   }
 }
 
@@ -183,6 +195,11 @@ describe("cross-space value reads (CT-1667)", () => {
     }
   });
 
+  // This is THE regression guard: red without the fix (the deep value read
+  // goes through traverse's followPointer, which had no fetch trigger at
+  // all). The key-path-pull and sink steps above/below converge through
+  // link-resolution's pre-existing cross-space kick under loopback timing —
+  // they pin the contract but already passed on main in this harness.
   it("a whole-value pull() of the linking parent materializes the child", async () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),

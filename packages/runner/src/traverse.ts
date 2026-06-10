@@ -1880,11 +1880,17 @@ function followPointer(
       // runtime can kick an async load; this read still resolves notFound
       // and the tracked dependency re-runs the reader when the doc arrives.
       // Pass the link with the narrowed selector schema so the fetch covers
-      // the shape this traversal actually needs.
+      // the shape this traversal actually needs. The selector was re-rooted
+      // at the TARGET doc (its path is `["value", ...inDocPath]`), so when
+      // one exists its path — minus the "value" prefix — is the path the
+      // schema describes; pairing the schema with the bare link path would
+      // register a malformed watch selector.
       context.onMissingLinkTarget?.({
         space: link.space,
         id: link.id,
-        path: link.path,
+        path: selector !== undefined
+          ? selector.path.slice(1) as readonly string[]
+          : link.path,
         scope: link.scope,
         ...(selector?.schema !== undefined || link.schema !== undefined
           ? {
