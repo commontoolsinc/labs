@@ -22,6 +22,10 @@ const internalVerifierReadMarker: unique symbol = Symbol(
   "internalVerifierReadMarker",
 );
 
+const linkResolutionProbeMarker: unique symbol = Symbol(
+  "linkResolutionProbeMarker",
+);
+
 export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
@@ -38,6 +42,19 @@ export const internalVerifierRead: Metadata = {
   [internalVerifierReadMarker]: true,
 };
 
+/**
+ * Marks the "is there a link here?" probe reads issued by link resolution.
+ * They stay in the journal (reactivity must re-resolve when a link appears
+ * or changes), but flow-label derivation treats them as shape observations
+ * of link topology, not content reads: following a reference must not taint
+ * the follower with the target's content label when nothing reads the
+ * target's value (SC-8 / blind-passing). The residual signal is the 1-bit
+ * "this path holds no link", accepted until observation classes land.
+ */
+export const linkResolutionProbe: Metadata = {
+  [linkResolutionProbeMarker]: true,
+};
+
 export function isReadIgnoredForScheduling(meta?: Metadata): boolean {
   return meta?.[ignoreReadForSchedulingMarker] === true;
 }
@@ -52,6 +69,10 @@ export function isMutableTransactionReadAllowed(meta?: Metadata): boolean {
 
 export function isInternalVerifierRead(meta?: Metadata): boolean {
   return meta?.[internalVerifierReadMarker] === true;
+}
+
+export function isLinkResolutionProbe(meta?: Metadata): boolean {
+  return meta?.[linkResolutionProbeMarker] === true;
 }
 
 export function reactivityLogFromActivities(
