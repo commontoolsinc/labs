@@ -41,7 +41,7 @@ import {
   trimmedName,
 } from "./schemas.tsx";
 
-interface LobbyOutput {
+export interface LobbyOutput {
   [UI]: PerSession<VNode>;
   gameName: string;
   player1: PlayerData | null;
@@ -428,7 +428,11 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       player2: player2Data,
       shots: computed(() => shots.get()),
       gameState: computed(() => gameState.get()),
-      myName: computed(() => myName.get()),
+      // Normalize like myPlayerNumber below: an unwritten PerUser cell reads
+      // as undefined in runtimes that didn't create the instance, and a
+      // computed that RETURNS undefined is indistinguishable from "not yet
+      // computed" for cross-runtime readers.
+      myName: computed(() => trimmedName(myName.get())),
       myPlayerNumber: computed(() =>
         normalizePlayerNumber(myPlayerNumber.get())
       ),

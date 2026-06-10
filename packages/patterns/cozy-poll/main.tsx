@@ -357,6 +357,12 @@ export interface CozyPollOutput {
   resetVotes: Stream<ResetVotesEvent>;
 }
 
+// Stable empty fallbacks for the output snapshots below — fresh `[]` per
+// recompute would make the computed results non-idempotent.
+const EMPTY_OPTIONS: Option[] = [];
+const EMPTY_VOTES: Vote[] = [];
+const EMPTY_USERS: User[] = [];
+
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
     {
@@ -1165,11 +1171,17 @@ export default pattern<CozyPollInput, CozyPollOutput>(
         </cf-theme>
       ),
       question,
-      options,
-      votes,
-      users,
-      adminName,
-      myName,
+      // Output snapshots readable from OTHER runtimes (multi-user tests,
+      // remote viewers): raw scoped values read as undefined in runtimes that
+      // didn't write them, and a computed that RETURNS undefined is
+      // indistinguishable from "not yet computed" for cross-runtime readers —
+      // so every snapshot yields a real, stable value (the shared EMPTY
+      // constants keep the fallback idempotent across recomputes).
+      options: computed(() => options ?? EMPTY_OPTIONS),
+      votes: computed(() => votes ?? EMPTY_VOTES),
+      users: computed(() => users ?? EMPTY_USERS),
+      adminName: computed(() => trimmedName(adminName)),
+      myName: computed(() => trimmedName(myName)),
       userCount,
       optionCount,
       voteCount,

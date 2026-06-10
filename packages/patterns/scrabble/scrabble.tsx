@@ -1104,6 +1104,13 @@ const submitTurn = handler<
   );
 });
 
+// Stable empty fallbacks for the output snapshots below — fresh `[]` per
+// recompute would make the computed results non-idempotent.
+const EMPTY_TILES: PlacedTile[] = [];
+const EMPTY_LETTERS: Letter[] = [];
+const EMPTY_PLAYERS: Player[] = [];
+const EMPTY_EVENTS: GameEvent[] = [];
+
 const ScrabbleGame = pattern<GameInput, GameOutput>(
   (
     {
@@ -1581,15 +1588,21 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
           </aside>
         </div>
       ),
-      myName,
-      board,
-      bag,
-      bagIndex,
-      players,
-      gameEvents,
-      rack,
-      placed,
-      message,
+      // Output snapshots readable from OTHER runtimes (multi-user tests,
+      // remote viewers): raw scoped cells read as undefined in runtimes that
+      // didn't write them, and a computed that RETURNS undefined is
+      // indistinguishable from "not yet computed" for cross-runtime readers —
+      // so every snapshot yields a real, stable value (the shared EMPTY
+      // constants keep the fallback idempotent across recomputes).
+      myName: computed(() => trimmedName(myName.get())),
+      board: computed(() => board.get() ?? EMPTY_TILES),
+      bag: computed(() => bag.get() ?? EMPTY_LETTERS),
+      bagIndex: computed(() => bagIndex.get() ?? 0),
+      players: computed(() => players.get() ?? EMPTY_PLAYERS),
+      gameEvents: computed(() => gameEvents.get() ?? EMPTY_EVENTS),
+      rack: computed(() => rack.get() ?? EMPTY_LETTERS),
+      placed: computed(() => placed.get() ?? EMPTY_TILES),
+      message: computed(() => message.get() ?? ""),
       joinGame,
       joinWithName,
       placeTile,
