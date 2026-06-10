@@ -250,6 +250,8 @@ const unionAtoms = (
 // A write ceiling (`maxConfidentiality`) tightens only: absent = unlimited, so a
 // present ceiling beats absent, and two present ceilings meet at their
 // intersection (the smaller allowed set). It can never widen or be removed.
+// An EMPTY intersection stays `[]`, which the verifier reads as "public only"
+// (the tightest ceiling) — collapsing it to undefined would forge "no ceiling".
 const tightenCeiling = (
   prior: unknown[] | undefined,
   next: unknown[] | undefined,
@@ -259,6 +261,24 @@ const tightenCeiling = (
   return prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
 };
 
+// Integrity atoms are trust/provenance claims, NOT a confidentiality grade: a
+// row read from a column carries them to satisfy downstream `requiredIntegrity`
+// gates. So a re-derivation may keep or NARROW a column's integrity but must
+// never MINT trust the prior store didn't already carry — unioning would let a
+// re-declared `integrity: ["b"]` forge a claim the column was never trusted for
+// (mirrors schema-merge.ts, where integrity is subset-clamped like the ceiling).
+// Identical to `tightenCeiling` EXCEPT the prior-absent case yields undefined
+// (no prior trust to inherit) rather than adopting `next` wholesale.
+const clampIntegrity = (
+  prior: unknown[] | undefined,
+  next: unknown[] | undefined,
+): unknown[] | undefined => {
+  if (prior === undefined) return undefined;
+  if (next === undefined) return prior;
+  const kept = prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
+  return kept.length > 0 ? kept : undefined;
+};
+
 const mergeColumnIfcGrowOnly = (
   prior: ColumnIfc,
   next: ColumnIfc | undefined,
@@ -266,7 +286,7 @@ const mergeColumnIfcGrowOnly = (
   const n = next ?? {};
   const merged: ColumnIfc = {};
   const confidentiality = unionAtoms(prior.confidentiality, n.confidentiality);
-  const integrity = unionAtoms(prior.integrity, n.integrity);
+  const integrity = clampIntegrity(prior.integrity, n.integrity);
   const maxConfidentiality = tightenCeiling(
     prior.maxConfidentiality,
     n.maxConfidentiality,

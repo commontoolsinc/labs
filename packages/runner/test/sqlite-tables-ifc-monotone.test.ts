@@ -34,12 +34,47 @@ describe("growOnlyMergeDbTables (audit S8)", () => {
     ]);
   });
 
-  it("unions confidentiality/integrity (strengthening is allowed)", () => {
+  it("unions confidentiality (read label may strengthen)", () => {
     const prior = {
-      t: table({ c: { ifc: { confidentiality: ["a"], integrity: ["x"] } } }),
+      t: table({ c: { ifc: { confidentiality: ["a"] } } }),
     };
     const next = {
-      t: table({ c: { ifc: { confidentiality: ["b"], integrity: ["y"] } } }),
+      t: table({ c: { ifc: { confidentiality: ["b"] } } }),
+    };
+    const merged = growOnlyMergeDbTables(prior, next) as Record<string, {
+      properties: Record<string, { ifc?: { confidentiality?: unknown[] } }>;
+    }>;
+    expect(merged.t.properties.c.ifc?.confidentiality).toEqual(["a", "b"]);
+  });
+
+  it("does NOT union integrity: a re-declared claim can't mint trust", () => {
+    // Integrity atoms are trust claims that satisfy downstream requiredIntegrity
+    // gates. Prior trusted the column for ["x"]; a re-derivation declaring ["y"]
+    // must NOT yield ["x","y"] — that would forge a claim "y" the store never had
+    // (and re-derivations read potentially-weaker inputs). Subset-clamp instead.
+    const prior = {
+      t: table({ c: { ifc: { integrity: ["x"] } } }),
+    };
+    const next = {
+      t: table({ c: { ifc: { integrity: ["y"] } } }),
+    };
+    const merged = growOnlyMergeDbTables(prior, next) as Record<string, {
+      properties: Record<string, { ifc?: { integrity?: unknown[] } }>;
+    }>;
+    // "y" was never trusted and "x" was not re-asserted: intersection is empty.
+    expect(merged.t.properties.c.ifc?.integrity).toBeUndefined();
+  });
+
+  it("never mints integrity on a column the prior store didn't trust", () => {
+    // Prior column carries a read label but NO integrity. A re-derivation adding
+    // integrity would mint trust from nothing — clamp it away.
+    const prior = {
+      t: table({ c: { ifc: { confidentiality: ["a"] } } }),
+    };
+    const next = {
+      t: table({
+        c: { ifc: { confidentiality: ["a"], integrity: ["forged"] } },
+      }),
     };
     const merged = growOnlyMergeDbTables(prior, next) as Record<string, {
       properties: Record<
@@ -47,8 +82,21 @@ describe("growOnlyMergeDbTables (audit S8)", () => {
         { ifc?: { confidentiality?: unknown[]; integrity?: unknown[] } }
       >;
     }>;
-    expect(merged.t.properties.c.ifc?.confidentiality).toEqual(["a", "b"]);
-    expect(merged.t.properties.c.ifc?.integrity).toEqual(["x", "y"]);
+    expect(merged.t.properties.c.ifc?.integrity).toBeUndefined();
+    expect(merged.t.properties.c.ifc?.confidentiality).toEqual(["a"]);
+  });
+
+  it("allows integrity to NARROW (subset re-declaration)", () => {
+    const prior = {
+      t: table({ c: { ifc: { integrity: ["a", "b"] } } }),
+    };
+    const next = {
+      t: table({ c: { ifc: { integrity: ["a"] } } }),
+    };
+    const merged = growOnlyMergeDbTables(prior, next) as Record<string, {
+      properties: Record<string, { ifc?: { integrity?: unknown[] } }>;
+    }>;
+    expect(merged.t.properties.c.ifc?.integrity).toEqual(["a"]);
   });
 
   it("never widens a write ceiling: a present ceiling can't be removed", () => {
@@ -81,6 +129,21 @@ describe("growOnlyMergeDbTables (audit S8)", () => {
     }>;
     // Only the meet survives — the smaller allowed set.
     expect(merged.t.properties.c.ifc?.maxConfidentiality).toEqual(["b"]);
+  });
+
+  it("keeps a disjoint ceiling intersection as [] (public-only), not absent", () => {
+    // The verifier reads `undefined` as "no ceiling" but `[]` as "public only"
+    // (the tightest ceiling). Two ceilings with no atom in common must meet at
+    // [], NOT collapse to undefined — that would forge an unlimited ceiling.
+    const prior = { t: table({ c: { ifc: { maxConfidentiality: ["a"] } } }) };
+    const next = { t: table({ c: { ifc: { maxConfidentiality: ["b"] } } }) };
+    const merged = growOnlyMergeDbTables(prior, next) as Record<string, {
+      properties: Record<
+        string,
+        { ifc?: { maxConfidentiality?: unknown[] } }
+      >;
+    }>;
+    expect(merged.t.properties.c.ifc?.maxConfidentiality).toEqual([]);
   });
 
   it("restores a labeled table that a re-derivation drops entirely", () => {
@@ -120,17 +183,19 @@ describe("growOnlyMergeDbTables (audit S8)", () => {
     const prior = { t: table({ a: { ifc: { confidentiality: ["x"] } } }) };
     const next = {
       t: table({
-        a: { ifc: { confidentiality: ["x"], integrity: ["new"] } }, // stricter
+        // Stricter via confidentiality (a read label only grows). Adding
+        // integrity here would be a mint, covered by its own test above.
+        a: { ifc: { confidentiality: ["x", "more"] } },
         b: { ifc: { confidentiality: ["y"] } }, // new column
       }),
     };
     const merged = growOnlyMergeDbTables(prior, next) as Record<string, {
       properties: Record<
         string,
-        { ifc?: { confidentiality?: unknown[]; integrity?: unknown[] } }
+        { ifc?: { confidentiality?: unknown[] } }
       >;
     }>;
-    expect(merged.t.properties.a.ifc?.integrity).toEqual(["new"]);
+    expect(merged.t.properties.a.ifc?.confidentiality).toEqual(["x", "more"]);
     expect(merged.t.properties.b.ifc?.confidentiality).toEqual(["y"]);
   });
 });
