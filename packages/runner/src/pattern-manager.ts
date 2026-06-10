@@ -23,6 +23,10 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
+import {
+  readBindingIdentity,
+  recordVerifiedProvenance,
+} from "./harness/verified-provenance.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -998,6 +1002,21 @@ export class PatternManager {
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
     setArtifactEntryRef(value, { identity, symbol });
+    // Content-addressed CFC provenance for the artifact's implementation
+    // function: registering through this (trust-gated) indexing path is what
+    // makes a function "verified" under the by-identity model. The factory
+    // carries the CT-1665 binding annotation when present.
+    const implementation =
+      (value as { implementation?: unknown }).implementation ?? value;
+    if (typeof implementation === "function") {
+      recordVerifiedProvenance(implementation, {
+        identity,
+        symbol,
+        ...(readBindingIdentity(value) === undefined
+          ? {}
+          : { bindingIdentity: readBindingIdentity(value)! }),
+      });
+    }
   }
 
   /**

@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 // CT-1665: An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
@@ -69,26 +70,31 @@ function recordedBindingPaths(rt: Runtime): string[][] {
     .filter((p): p is string[] => Array.isArray(p));
 }
 
-// Capture the binding metadata resolved through the PUBLIC harness API while a
-// handler runs — the exact lookup the CFC verifier performs at commit. Returns
-// the bindingPaths that resolved to a non-empty result during `fn()`.
+// Capture the bindingPaths of the writer identities STAMPED on transactions
+// while a handler runs — the value the CFC verifier consumes at commit.
+// Channel-agnostic: the identity may resolve through the content-addressed
+// provenance WeakMap or the legacy implementationRef registry; what matters
+// is the identity (with its bindingPath) reaching the transaction.
 async function bindingPathsResolvedDuring(
   rt: Runtime,
   fn: () => void,
 ): Promise<string[][]> {
-  const harness = rt.harness as any;
-  const orig = harness.getVerifiedBindingMetadata.bind(harness);
+  const proto = ExtendedStorageTransaction.prototype as unknown as {
+    setCfcImplementationIdentity: (identity: unknown) => void;
+  };
+  const orig = proto.setCfcImplementationIdentity;
   const resolved: string[][] = [];
-  harness.getVerifiedBindingMetadata = (ref: string) => {
-    const res = orig(ref);
-    if (res?.bindingPath) resolved.push(res.bindingPath);
-    return res;
+  proto.setCfcImplementationIdentity = function (identity: unknown) {
+    const bindingPath = (identity as { bindingPath?: string[] } | undefined)
+      ?.bindingPath;
+    if (Array.isArray(bindingPath)) resolved.push(bindingPath);
+    return orig.call(this, identity);
   };
   try {
     fn();
     await (rt as any).idle?.();
   } finally {
-    harness.getVerifiedBindingMetadata = orig;
+    proto.setCfcImplementationIdentity = orig;
   }
   return resolved;
 }

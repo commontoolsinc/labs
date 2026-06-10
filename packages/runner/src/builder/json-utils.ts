@@ -18,6 +18,7 @@ import {
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
 import { getPatternProgram, noteDerivedCopy } from "./pattern-metadata.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
@@ -405,6 +406,24 @@ export function moduleToJSON(module: Module) {
         "JavaScript function modules must carry implementationRef before serialization",
       );
     }
+    // Content-addressed reference (dual-write with implementationRef until
+    // the flip — see docs/specs/content-addressed-action-identity.md): when
+    // the implementation function has module-scope provenance, serialize its
+    // `{ identity, symbol }` so a rehydrated module resolves by identity.
+    // `toJSON` runs at cell-write time — post-evaluation, after provenance was
+    // recorded by the module indexing. Dynamic (in-action-created) artifacts
+    // have no symbol and serialize without a ref (in-session only, as before).
+    const provenance = module.type === "javascript"
+      ? getVerifiedProvenance(implementation)
+      : undefined;
+    const implRef = provenance?.symbol
+      ? {
+        $implRef: {
+          identity: provenance.identity,
+          symbol: provenance.symbol,
+        },
+      }
+      : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
     const location = (implementation as { src?: string }).src;
@@ -423,6 +442,7 @@ export function moduleToJSON(module: Module) {
       : undefined;
     return {
       ...rest,
+      ...implRef,
       ...(module.type === "javascript" &&
           admittedImplementation !== implementation
         ? {

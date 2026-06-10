@@ -477,6 +477,14 @@ function handlerInternal<E, T>(
     return eventStream;
   }, module);
 
+  // Provenance brand, like every factory from `createNodeFactory` (whose
+  // comment always claimed handler coverage — handler factories are built
+  // here and bypassed it): only a branded artifact may acquire a
+  // content-addressed `{ identity, symbol }` reference via `__cfReg`
+  // indexing, and a non-exported handler's `$implRef`/CFC provenance depends
+  // on exactly that registration.
+  brandTrustedBuilderArtifact(factory);
+
   return factory;
 }
 

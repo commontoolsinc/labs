@@ -320,10 +320,21 @@ const writeAuthorizedByReason = (
       path.join("/")
     }`;
   }
+  // Identity arm (fail closed): a claim stamped with the content-addressed
+  // moduleIdentity must match it; a legacy claim (bundleId only, written
+  // before the moduleIdentity switch) must match the live bundleId. A claim
+  // carrying neither is rejected. New claims are stamped with BOTH (see
+  // rebindWriteAuthorizedByClaims), so the bundleId arm only serves stored
+  // legacy data and retires with it.
+  const identityArmMatches = typeof bindingIdentity.moduleIdentity === "string"
+    ? (typeof identity.moduleIdentity === "string" &&
+      identity.moduleIdentity.length > 0 &&
+      identity.moduleIdentity === bindingIdentity.moduleIdentity)
+    : (typeof identity.bundleId === "string" &&
+      identity.bundleId.length > 0 &&
+      identity.bundleId === bindingIdentity.bundleId);
   if (
-    typeof identity.bundleId !== "string" ||
-    identity.bundleId.length === 0 ||
-    identity.bundleId !== bindingIdentity.bundleId ||
+    !identityArmMatches ||
     normalizeIdentitySource(identity.sourceFile) !==
       normalizeIdentitySource(bindingIdentity.file) ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
@@ -335,7 +346,12 @@ const writeAuthorizedByReason = (
 
 const parseWriteAuthorizedByBindingIdentity = (
   claim: unknown,
-): { bundleId?: string; file: string; path: string[] } | undefined => {
+): {
+  bundleId?: string;
+  moduleIdentity?: string;
+  file: string;
+  path: string[];
+} | undefined => {
   if (!isRecord(claim) || !isRecord(claim.__ctWriterIdentityOf)) {
     return undefined;
   }
@@ -350,6 +366,9 @@ const parseWriteAuthorizedByBindingIdentity = (
   return {
     ...(typeof identity.bundleId === "string"
       ? { bundleId: identity.bundleId }
+      : {}),
+    ...(typeof identity.moduleIdentity === "string"
+      ? { moduleIdentity: identity.moduleIdentity }
       : {}),
     file: identity.file,
     path: [...identity.path],
@@ -716,7 +735,10 @@ const stripWriterIdentityBundleIds = (value: unknown): unknown => {
 
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (key === "bundleId" && typeof value.file === "string") {
+    if (
+      (key === "bundleId" || key === "moduleIdentity") &&
+      typeof value.file === "string"
+    ) {
       continue;
     }
     next[key] = stripWriterIdentityBundleIds(entry);
@@ -777,27 +799,34 @@ const rebindWriteAuthorizedByClaims = (
   schema: JSONSchema,
   identity: ImplementationIdentity | undefined,
 ): JSONSchema => {
-  if (
-    !identity || identity.kind !== "verified" ||
-    typeof identity.bundleId !== "string" ||
-    identity.bundleId.length === 0
-  ) {
+  if (!identity || identity.kind !== "verified") {
+    return schema;
+  }
+  const bundleId = typeof identity.bundleId === "string" &&
+      identity.bundleId.length > 0
+    ? identity.bundleId
+    : undefined;
+  const moduleIdentity = typeof identity.moduleIdentity === "string" &&
+      identity.moduleIdentity.length > 0
+    ? identity.moduleIdentity
+    : undefined;
+  if (!bundleId && !moduleIdentity) {
     return schema;
   }
   return rebindWriteAuthorizedByClaimsInner(
     schema,
-    identity.bundleId,
+    { bundleId, moduleIdentity },
   ) as JSONSchema;
 };
 
 const rebindWriteAuthorizedByClaimsInner = (
   value: unknown,
-  bundleId: string,
+  ids: { bundleId?: string; moduleIdentity?: string },
 ): unknown => {
   if (Array.isArray(value)) {
     let changed = false;
     const next = value.map((entry) => {
-      const rebound = rebindWriteAuthorizedByClaimsInner(entry, bundleId);
+      const rebound = rebindWriteAuthorizedByClaimsInner(entry, ids);
       changed ||= rebound !== entry;
       return rebound;
     });
@@ -810,23 +839,28 @@ const rebindWriteAuthorizedByClaimsInner = (
   let changed = false;
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    const rebound = rebindWriteAuthorizedByClaimsInner(entry, bundleId);
+    const rebound = rebindWriteAuthorizedByClaimsInner(entry, ids);
     changed ||= rebound !== entry;
     next[key] = rebound;
   }
 
   if (isRecord(value.ifc) && isRecord(value.ifc.writeAuthorizedBy)) {
     const claim = value.ifc.writeAuthorizedBy;
+    // Stamp an unstamped claim with BOTH identity arms: the content-addressed
+    // moduleIdentity (the durable one) and the legacy bundleId (kept so a
+    // rollback or an older reader can still verify; retired with the flip).
     if (
       isRecord(claim.__ctWriterIdentityOf) &&
-      claim.__ctWriterIdentityOf.bundleId === undefined
+      claim.__ctWriterIdentityOf.bundleId === undefined &&
+      claim.__ctWriterIdentityOf.moduleIdentity === undefined
     ) {
       const nextIfc = { ...value.ifc };
       nextIfc.writeAuthorizedBy = {
         ...claim,
         __ctWriterIdentityOf: {
           ...claim.__ctWriterIdentityOf,
-          bundleId,
+          ...(ids.bundleId ? { bundleId: ids.bundleId } : {}),
+          ...(ids.moduleIdentity ? { moduleIdentity: ids.moduleIdentity } : {}),
         },
       };
       next.ifc = nextIfc;
