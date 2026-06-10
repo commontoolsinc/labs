@@ -25,6 +25,9 @@ deno task cf check --help     # Type checking
 ```bash
 ls -la cf.key                  # Check for existing
 
+# Never overwrite an existing key file — existing identity-scoped data
+# becomes invisible under a new identity.
+
 # For local dev: derive key matching toolshed's "implicit trust" identity
 deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
 
@@ -54,7 +57,7 @@ prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
 **Environment variables** (avoid repeating flags):
 
 ```bash
-export CF_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.net/
+export CF_API_URL=http://localhost:8000  # local dev default; only target a remote instance when the task explicitly requires it — remote set/rm/setsrc mutate shared state
 export CF_IDENTITY=./cf.key
 ```
 
@@ -65,17 +68,8 @@ or default. For identity-sensitive local work, use one key everywhere and import
 the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
 `docs/development/SHARED_IDENTITY.md`.
 
-**Experimental flags** (must be set on both servers AND CLI commands):
-
-```bash
-# Pass experiment env vars to CLI commands:
-EXPERIMENTAL_EXAMPLE_NAME_1=true \
-EXPERIMENTAL_EXAMPLE_NAME_2=true \
-deno task cf piece new pattern.tsx ...
-```
-
-Replace `EXAMPLE_NAME_*` with an actual defined experiment name. See
-`docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
+**Experimental flags** must be set as env vars on both servers AND CLI commands.
+See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 **Local servers**: See `docs/development/LOCAL_DEV_SERVERS.md`
 
@@ -205,11 +199,11 @@ cf fuse mount /tmp/cf -s my-space
 # error: Unknown option "-s"
 ```
 
-**Fix:** use the source CLI through the repo task wrapper instead:
+**Fix:** use the source CLI through the repo task wrapper instead (cd to the
+labs repo root first):
 
 ```bash
-cd ~/code/labs
-export CF_IDENTITY=./shared.key
+export CF_IDENTITY=./cf.key
 export CF_API_URL=http://localhost:8000
 
 deno task cf fuse mount /tmp/cf -s my-space
