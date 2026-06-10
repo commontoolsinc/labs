@@ -26,7 +26,11 @@ interface AuthorizedSaveOutput {
   save: Stream<void>;
 }
 
-export default pattern<AuthorizedSaveInput, AuthorizedSaveOutput>(
+// Named (not an anonymous `export default pattern(...)`) so importing files'
+// CTS transformer recognizes the factory: anonymous default exports make
+// `instance.save` in a consumer lift into a derived cell instead of a direct
+// `.key("save")` stream reference, which breaks sending events to it.
+const AuthorizedSave = pattern<AuthorizedSaveInput, AuthorizedSaveOutput>(
   ({ draftTitle, savedTitle }) => {
     const trustedSave = TrustedSaveSurface({ draftTitle, savedTitle });
 
@@ -65,3 +69,5 @@ export default pattern<AuthorizedSaveInput, AuthorizedSaveOutput>(
     };
   },
 );
+
+export default AuthorizedSave;

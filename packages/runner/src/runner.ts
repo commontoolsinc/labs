@@ -34,7 +34,6 @@ import { type Action } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
-  unsafe_noteParentOnPatterns,
   unwrapOneLevelAndBindtoDoc,
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -3549,10 +3548,10 @@ export class Runner {
    * The embedded graph is retained as `$opFallback` (correctness over the
    * bounded module cache — see `resolveOpPattern`). `inputBindings` here is the
    * freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindtoDoc`; its pattern values still carry the in-memory
-   * `unsafe_originalPattern` backref, so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`). With no known ref the op
-   * is left as the embedded graph (legacy / ESM-loader-off).
+   * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
+   * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
+   * (assigned post-eval by `registerEvaluatedModules`). With no known ref the
+   * op is left as the embedded graph.
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
@@ -3623,15 +3622,11 @@ export class Runner {
       resultCellLink,
     );
 
-    // For `map` and future other node types that take closures, we need to
-    // note the parent pattern on the closure patterns.
-    unsafe_noteParentOnPatterns(pattern, mappedInputBindings);
-
     // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
     // with a compact `{ $patternRef }` sentinel when its content-addressed entry
     // ref is known. This is the post-eval moment where the in-memory op object
-    // (reachable via `unsafe_originalPattern`, preserved through binding) carries
-    // its `{ identity, symbol }`; the sentinel then survives the immutable-cell
+    // (linked to its original via `noteDerivedCopy`, preserved through binding)
+    // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
     // JSON round-trip, so the builtin resolves the live canonical pattern by
     // identity instead of deserializing the embedded graph.
     this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);

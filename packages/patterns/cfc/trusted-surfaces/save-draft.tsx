@@ -13,7 +13,7 @@ import {
 
 export const TRUSTED_SAVE_DRAFT_SURFACE = "TrustedSaveDraftSurface";
 
-const SAVE_DRAFT_ACTION = "TrustedSaveDraft";
+export const SAVE_DRAFT_ACTION = "TrustedSaveDraft";
 
 export type TrustedSavedDraftTitleUiContract = TrustedActionUiContract<
   string,

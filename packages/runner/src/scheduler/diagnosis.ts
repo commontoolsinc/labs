@@ -4,8 +4,13 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
-import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts";
+import {
+  getTransactionReadDetails,
+  getTransactionWriteDetails,
+} from "../storage/transaction-inspection.ts";
 import { ignoreReadForScheduling } from "../storage/reactivity-log.ts";
+import { arraysOverlap } from "../reactive-dependencies.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type {
   CycleReport,
   NonIdempotentReport,
@@ -174,6 +179,80 @@ export function findNonIdempotentPair(
   return undefined;
 }
 
+/**
+ * Values a transaction observed for its reads (its read invariants), keyed
+ * by address. Available after commit/abort since per-document snapshots are
+ * pinned for the transaction's lifetime.
+ */
+function transactionReadInvariants(
+  tx: IExtendedStorageTransaction,
+  spaces: ReadonlySet<IMemorySpaceAddress["space"]>,
+): Map<string, { address: IMemorySpaceAddress; value: unknown }> {
+  const invariants = new Map<
+    string,
+    { address: IMemorySpaceAddress; value: unknown }
+  >();
+  for (const space of spaces) {
+    try {
+      for (const detail of getTransactionReadDetails(tx, space)) {
+        // makeAddressKey ignores scope; include it so same id+path reads
+        // under different cell scopes don't collide.
+        const key = `${normalizeCellScope(detail.address.scope)}|${
+          makeAddressKey(detail.address)
+        }`;
+        invariants.set(key, {
+          address: detail.address,
+          value: detail.value,
+        });
+      }
+    } catch { /* read details unavailable — treat as no invariants */ }
+  }
+  return invariants;
+}
+
+/**
+ * Whether an input read by both runs changed value between them without the
+ * action itself having written it. That means a concurrent writer (another
+ * action's commit rollback, or a cross-runtime sync apply in multi-runtime
+ * setups) landed between the first run and the recheck — the two runs
+ * computed over different inputs, so differing writes say nothing about
+ * idempotency. Self-caused moves (the action reads what it writes, the
+ * accumulator anti-pattern) stay flagged.
+ */
+function readInvariantMovedExternally(
+  tx: IExtendedStorageTransaction,
+  tx2: IExtendedStorageTransaction,
+  log: ReactivityLog,
+  log2: ReactivityLog,
+): boolean {
+  const spaces = new Set<IMemorySpaceAddress["space"]>();
+  for (const read of log.reads) spaces.add(read.space);
+  for (const read of log.shallowReads) spaces.add(read.space);
+  for (const read of log2.reads) spaces.add(read.space);
+  for (const read of log2.shallowReads) spaces.add(read.space);
+  const before = transactionReadInvariants(tx, spaces);
+  if (before.size === 0) return false;
+  const after = transactionReadInvariants(tx2, spaces);
+  for (const [key, { address, value }] of after) {
+    const previous = before.get(key);
+    // Only reads both runs performed are comparable.
+    if (!previous) continue;
+    if (deepEqual(previous.value, value)) continue;
+    // Cover writes of EITHER run: run1's commit moving its own read is the
+    // accumulator pattern, and a write-then-read inside the recheck run is
+    // nondeterminism, not external interference — both must stay flagged.
+    // Scope participates in the match: different scopes are different
+    // documents, so a write in another scope cannot have moved this read.
+    const coveredByOwnWrites = [...log.writes, ...log2.writes].some((write) =>
+      write.space === address.space && write.id === address.id &&
+      normalizeCellScope(write.scope) === normalizeCellScope(address.scope) &&
+      arraysOverlap(write.path, address.path)
+    );
+    if (!coveredByOwnWrites) return true;
+  }
+  return false;
+}
+
 export function runIdempotencyRecheck(
   state: {
     readonly idempotencyViolations: NonIdempotentReport[];
@@ -207,16 +286,27 @@ export function runIdempotencyRecheck(
   const writes2 = isAsync
     ? new Map()
     : captureTransactionWrites(tx2, log2.writes);
-  tx2.abort();
 
   // Skip comparison for async actions; writes are incomplete/unreliable.
-  if (isAsync) return;
+  if (isAsync) {
+    tx2.abort();
+    return;
+  }
 
   const differingKeys = findDifferingWriteKeys(writes1, writes2, {
     keySet: "latest",
   });
 
-  if (differingKeys.length === 0) return;
+  if (differingKeys.length === 0) {
+    tx2.abort();
+    return;
+  }
+
+  // Differing writes only witness non-idempotency if both runs read the same
+  // inputs (capture both runs' read invariants before aborting tx2).
+  const inputsMoved = readInvariantMovedExternally(tx, tx2, log, log2);
+  tx2.abort();
+  if (inputsMoved) return;
 
   const actionId = state.getActionId(action);
   // Deduplicate: only record first violation per action.

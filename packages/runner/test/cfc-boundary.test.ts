@@ -34,6 +34,31 @@ import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
+// Seed stored CFC metadata via an ungated path-[] full-document write (the
+// shape hydration delivers it), reading the current doc first so the value
+// survives. A direct (unprivileged) ["cfc"] write is rejected as label forgery
+// (audit S18); the runtime's own ["cfc"] writes go through prepareCfc's
+// ECMAScript-private privileged scope, which tests can't (and shouldn't) reach.
+const seedPrivilegedCfc = (
+  tx: unknown,
+  address: unknown,
+  metadata: unknown,
+): void => {
+  const t = tx as {
+    readOrThrow(address: unknown): unknown;
+    writeOrThrow(address: unknown, value: unknown): void;
+  };
+  const docAddress = { ...(address as Record<string, unknown>), path: [] };
+  let current: unknown;
+  try {
+    current = t.readOrThrow(docAddress);
+  } catch {
+    current = undefined;
+  }
+  const base = current && typeof current === "object" ? current : {};
+  t.writeOrThrow(docAddress, { ...base, cfc: metadata });
+};
+
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
   constructor(private readonly server: MemoryV2Server.Server) {}
 
@@ -1322,7 +1347,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           value: { source: "seed" },
         },
       );
-      seed.writeOrThrow(
+      seedPrivilegedCfc(
+        seed,
         {
           space: signer.did(),
           scope: "space",
@@ -1418,7 +1444,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         { auditedField: "seed" },
       );
-      seed.writeOrThrow(
+      seedPrivilegedCfc(
+        seed,
         {
           space: signer.did(),
           scope: "space",

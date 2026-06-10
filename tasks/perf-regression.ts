@@ -51,6 +51,7 @@ import {
   MIN_BASELINE_RUNS,
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
+  newestArtifactsByName,
   normalizeName,
   parseBaselineOverrides,
   parseDenoTestLog,
@@ -474,9 +475,11 @@ async function main() {
           }
         }
 
-        const timingArtifacts = artifacts.filter(
+        // Newest per name: re-run attempts upload duplicates, and iterating
+        // them all would double-count the run in the baseline timeline.
+        const timingArtifacts = newestArtifactsByName(artifacts.filter(
           (a) => a.name.startsWith("test-timing-") && !a.expired,
-        );
+        ));
 
         if (timingArtifacts.length > 0) {
           for (const artifact of timingArtifacts) {
