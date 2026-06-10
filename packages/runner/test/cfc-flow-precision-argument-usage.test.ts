@@ -13,7 +13,9 @@ import type { ListOpArgumentUsage } from "../src/builtins/list-op-argument-usage
 // StableRelativeOrder) stay.
 
 const claimTypes = (schema: unknown): string[] => {
-  const ifc = (schema as { ifc?: { flowPrecisionClaim?: { claims?: Array<{ type: string }> } } })
+  const ifc = (schema as {
+    ifc?: { flowPrecisionClaim?: { claims?: Array<{ type: string }> } };
+  })
     .ifc;
   return (ifc?.flowPrecisionClaim?.claims ?? []).map((c) => c.type);
 };
@@ -65,7 +67,11 @@ describe("flow-precision claims vs op argument usage", () => {
 
   it("keeps all filter/flatMap claims when element-local", () => {
     for (const builtin of ["filter", "flatMap"]) {
-      const schema = flowPrecisionSchemaForBuiltin(builtin, undefined, usage({}));
+      const schema = flowPrecisionSchemaForBuiltin(
+        builtin,
+        undefined,
+        usage({}),
+      );
       expect(claimTypes(schema).sort()).toEqual(
         ["ElementLocalExpansion", "StableRelativeOrder"].sort(),
       );

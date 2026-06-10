@@ -51,9 +51,9 @@ import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
+  CFC_ENFORCING_STRICTNESS,
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
-  CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
   type CfcTxState,
   type ConsumedRead,
