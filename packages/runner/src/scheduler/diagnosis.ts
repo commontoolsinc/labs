@@ -10,6 +10,7 @@ import {
 } from "../storage/transaction-inspection.ts";
 import { ignoreReadForScheduling } from "../storage/reactivity-log.ts";
 import { arraysOverlap } from "../reactive-dependencies.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type {
   CycleReport,
   NonIdempotentReport,
@@ -196,7 +197,7 @@ function transactionReadInvariants(
       for (const detail of getTransactionReadDetails(tx, space)) {
         // makeAddressKey ignores scope; include it so same id+path reads
         // under different cell scopes don't collide.
-        const key = `${detail.address.scope ?? ""}|${
+        const key = `${normalizeCellScope(detail.address.scope)}|${
           makeAddressKey(detail.address)
         }`;
         invariants.set(key, {
@@ -240,8 +241,11 @@ function readInvariantMovedExternally(
     // Cover writes of EITHER run: run1's commit moving its own read is the
     // accumulator pattern, and a write-then-read inside the recheck run is
     // nondeterminism, not external interference — both must stay flagged.
+    // Scope participates in the match: different scopes are different
+    // documents, so a write in another scope cannot have moved this read.
     const coveredByOwnWrites = [...log.writes, ...log2.writes].some((write) =>
       write.space === address.space && write.id === address.id &&
+      normalizeCellScope(write.scope) === normalizeCellScope(address.scope) &&
       arraysOverlap(write.path, address.path)
     );
     if (!coveredByOwnWrites) return true;
