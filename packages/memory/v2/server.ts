@@ -43,12 +43,7 @@ import {
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
-import {
-  ANYONE_USER,
-  type Capability,
-  isACL,
-  isCapable,
-} from "../acl.ts";
+import { ANYONE_USER, type Capability, isACL, isCapable } from "../acl.ts";
 import {
   aliasForDbId,
   attachDatabase,

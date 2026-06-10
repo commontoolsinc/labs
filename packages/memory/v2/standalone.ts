@@ -102,7 +102,10 @@ export class StandaloneMemoryServer {
     options: {
       /** Space ACL config, passed through to the memory server. Default:
        *  off (the historical wide-open behavior in-process tests expect). */
-      acl?: { mode: MemoryServer.MemoryAclMode; serviceDids?: readonly string[] };
+      acl?: {
+        mode: MemoryServer.MemoryAclMode;
+        serviceDids?: readonly string[];
+      };
     } = {},
   ): StandaloneMemoryServer {
     const memory = new MemoryServer.Server({

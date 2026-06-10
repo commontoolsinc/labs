@@ -135,7 +135,12 @@ Deno.test("acl enforce: creator is seeded as OWNER and a stranger is denied", as
     assertExists(opened.ok, "creator open should succeed");
 
     // The seed is a real commit: the ACL doc is readable and names the creator.
-    const acl = await graphQuery(alice, space, opened.ok.sessionId, `of:${space}`);
+    const acl = await graphQuery(
+      alice,
+      space,
+      opened.ok.sessionId,
+      `of:${space}`,
+    );
     assertExists(acl.ok);
     const aclDoc = JSON.stringify(acl.ok);
     assert(
@@ -465,7 +470,12 @@ Deno.test("acl observe: creator seeding still happens (migration path)", async (
   try {
     const opened = await openSession(alice, space, ALICE);
     assertExists(opened.ok);
-    const acl = await graphQuery(alice, space, opened.ok.sessionId, `of:${space}`);
+    const acl = await graphQuery(
+      alice,
+      space,
+      opened.ok.sessionId,
+      `of:${space}`,
+    );
     const aclDoc = JSON.stringify(acl.ok ?? {});
     assert(
       aclDoc.includes(ALICE) && aclDoc.includes("OWNER"),
