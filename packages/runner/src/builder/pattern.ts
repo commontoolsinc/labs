@@ -14,6 +14,7 @@ import {
   type Pattern,
   type PatternFactory,
   type RequireDefaults,
+  type Schema,
   type SchemaWithoutCell,
   SELF,
   type toJSON,
@@ -88,12 +89,12 @@ export function pattern<S extends JSONSchema, R>(
 export function pattern<S extends JSONSchema, RS extends JSONSchema>(
   fn: (
     input: OpaqueRef<SchemaWithoutCell<S>> & {
-      [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
+      [SELF]: OpaqueRef<Schema<RS>>;
     },
-  ) => Opaque<SchemaWithoutCell<RS>>,
+  ) => Opaque<Schema<RS>>,
   argumentSchema: S,
   resultSchema: RS,
-): PatternFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
+): PatternFactory<SchemaWithoutCell<S>, Schema<RS>>;
 // Explicit T with optional schemas (e.g. pattern<{ x: number }>(fn, schema))
 export function pattern<T>(
   fn: (
