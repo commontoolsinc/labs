@@ -614,6 +614,12 @@ export class XHeaderView extends BaseView {
       this._piecesCache = undefined;
       this._setupFavoritesSubscription();
     }
+    // One runtime serves every space, so a space switch no longer
+    // replaces rt — the per-space pieces cache must invalidate on the
+    // space itself.
+    if (changedProperties.has("space")) {
+      this._piecesCache = undefined;
+    }
     if (changedProperties.has("pieceId")) {
       this._localIsFavorite = undefined;
     }
@@ -621,9 +627,9 @@ export class XHeaderView extends BaseView {
 
   /**
    * Eagerly fetch all pieces in the current space as soon as the
-   * runtime is available. Results are cached until the runtime changes
-   * (e.g. navigating to a different space). This ensures the piece list
-   * is ready by the time the user opens a dropdown.
+   * runtime is available. Results are cached until the runtime or the
+   * viewed space changes. This ensures the piece list is ready by the
+   * time the user opens a dropdown.
    * Fetches are parallelized with Promise.allSettled; pieces that fail
    * to resolve are silently skipped.
    */

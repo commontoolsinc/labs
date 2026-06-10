@@ -251,9 +251,8 @@ export class XRootView extends BaseView {
     if (token !== this.#resolveSpaceToken) return;
     this.space = space;
     const global = getCommonfabricGlobal();
-    if (global.commonfabric) {
-      global.commonfabric.space = space;
-    }
+    global.commonfabric ??= {};
+    global.commonfabric.space = space;
   }
 
   private _onThemeChanged = (e: Event) => {
