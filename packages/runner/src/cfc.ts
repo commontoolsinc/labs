@@ -347,9 +347,13 @@ export class ContextualFlowControl {
       byKey = new Map();
       this.#schemaAtPathCache.set(schema, byKey);
     }
-    const key = `${defaultEmptyProperties}\0${defaultMissingProperty}\0${
-      path.join("\0")
-    }`;
+    // Length-prefix each segment so a segment containing the separator (a
+    // NUL-bearing property name) cannot collide with a differently-split
+    // path — same idiom as traverse.ts's pathKey.
+    let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
+    for (const part of path) {
+      key += `|${part.length}:${part}`;
+    }
     let result = byKey.get(key);
     if (result === undefined) {
       result = this.schemaAtPathInternal(
