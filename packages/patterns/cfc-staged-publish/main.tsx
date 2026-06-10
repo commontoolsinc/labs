@@ -48,7 +48,9 @@ interface StagedPublishOutput {
   publishReviewed: Stream<void>;
 }
 
-export default pattern<StagedPublishInput, StagedPublishOutput>(
+// Named (not an anonymous `export default pattern(...)`) so importing files'
+// CTS transformer recognizes the factory; see cfc-authorized-save/main.tsx.
+const StagedPublish = pattern<StagedPublishInput, StagedPublishOutput>(
   ({
     draftTitle,
     draftBody,
@@ -147,3 +149,5 @@ export default pattern<StagedPublishInput, StagedPublishOutput>(
     };
   },
 );
+
+export default StagedPublish;

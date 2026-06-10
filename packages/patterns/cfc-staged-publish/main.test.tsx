@@ -1,4 +1,12 @@
-import { computed, handler, pattern, Stream, Writable } from "commonfabric";
+import { computed, handler, pattern, Writable } from "commonfabric";
+import {
+  PUBLISH_SNAPSHOT_ACTION,
+  REVIEW_SNAPSHOT_ACTION,
+  SAVE_DRAFT_ACTION,
+  TRUSTED_PUBLISH_SURFACE,
+  TRUSTED_REVIEW_SURFACE,
+  TRUSTED_SAVE_DRAFT_SURFACE,
+} from "../cfc/trusted-surfaces/mod.ts";
 import StagedPublish from "./main.tsx";
 
 const setDraft = handler<
@@ -12,10 +20,6 @@ const setDraft = handler<
 >((_, { draftTitle, draftBody, title, body }) => {
   draftTitle.set(title);
   draftBody.set(body);
-});
-
-const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
-  stream.send();
 });
 
 export default pattern(() => {
@@ -45,15 +49,12 @@ export default pattern(() => {
     title: "Launch checklist",
     body: "Ship the staged publish demo with trusted UI gates.",
   });
-  const action_save = trigger({ stream: instance.saveDraft });
   const action_edit_draft = setDraft({
     draftTitle,
     draftBody,
     title: "Launch checklist v2",
     body: "Edited after save but before review.",
   });
-  const action_review = trigger({ stream: instance.reviewSaved });
-  const action_publish = trigger({ stream: instance.publishReviewed });
 
   const assert_initial_stage = computed(() => instance.stage === "drafting");
   const assert_saved_snapshot = computed(() =>
@@ -82,13 +83,33 @@ export default pattern(() => {
     tests: [
       { assertion: assert_initial_stage },
       { action: action_set_draft },
-      { action: action_save },
+      // Each stage's write is gated on its reviewed surface's trusted
+      // gesture (TrustedAction UI contracts on saved/reviewed/published).
+      {
+        action: instance.saveDraft,
+        trustedUi: {
+          surface: TRUSTED_SAVE_DRAFT_SURFACE,
+          action: SAVE_DRAFT_ACTION,
+        },
+      },
       { assertion: assert_saved_snapshot },
       { action: action_edit_draft },
       { assertion: assert_saved_stays_stable_after_edit },
-      { action: action_review },
+      {
+        action: instance.reviewSaved,
+        trustedUi: {
+          surface: TRUSTED_REVIEW_SURFACE,
+          action: REVIEW_SNAPSHOT_ACTION,
+        },
+      },
       { assertion: assert_reviewed_snapshot },
-      { action: action_publish },
+      {
+        action: instance.publishReviewed,
+        trustedUi: {
+          surface: TRUSTED_PUBLISH_SURFACE,
+          action: PUBLISH_SNAPSHOT_ACTION,
+        },
+      },
       { assertion: assert_published_snapshot },
     ],
     instance,
