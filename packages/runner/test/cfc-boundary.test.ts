@@ -35,6 +35,24 @@ import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
+// Seed stored CFC metadata the way the runtime's prepareBoundaryCommit does:
+// inside the privileged system-write scope. A direct (unprivileged) ["cfc"]
+// write is rejected as label forgery (audit S18); a test standing in for the
+// runtime — the one legitimate ["cfc"] writer — seeds privileged.
+const seedPrivilegedCfc = (
+  tx: unknown,
+  address: unknown,
+  metadata: unknown,
+): void => {
+  const privileged = tx as {
+    runPrivilegedSystemWrite(fn: () => void): void;
+    writeOrThrow(address: unknown, value: unknown): void;
+  };
+  privileged.runPrivilegedSystemWrite(() =>
+    privileged.writeOrThrow(address, metadata)
+  );
+};
+
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
   constructor(private readonly server: MemoryV2Server.Server) {}
 
@@ -1321,7 +1339,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           value: { source: "seed" },
         },
       );
-      seed.writeOrThrow(
+      seedPrivilegedCfc(
+        seed,
         {
           space: signer.did(),
           scope: "space",
@@ -1417,7 +1436,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         { auditedField: "seed" },
       );
-      seed.writeOrThrow(
+      seedPrivilegedCfc(
+        seed,
         {
           space: signer.did(),
           scope: "space",

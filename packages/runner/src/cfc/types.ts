@@ -279,4 +279,10 @@ export type CfcTxState = {
   implementationIdentity?: ImplementationIdentity;
   outbox: PostCommitSideEffect[];
   diagnostics: string[];
+  // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
+  // runtime's privileged persistence scope (audit S18). The runtime's own label
+  // writes in prepareBoundaryCommit run privileged and never land here; anything
+  // that does is forging metadata that drives derivation for other writes, so
+  // prepareBoundaryCommit turns each into a fail-closed reason.
+  unprivilegedSystemWrites: string[];
 };

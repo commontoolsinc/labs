@@ -2203,6 +2203,14 @@ export const prepareBoundaryCommit = (
 ): string[] => {
   const reasons: string[] = [];
   const state = tx.getCfcState();
+  // A write to a document's ["cfc"] label-map path made outside the runtime's
+  // privileged persistence scope forges the metadata that drives CFC derivation
+  // for other writes (audit S18). Each was recorded at the extended-tx write
+  // chokepoint; surface one fail-closed reason apiece so it rejects in enforce
+  // mode and diagnoses in observe, uniformly with every other reason here.
+  for (const target of state.unprivilegedSystemWrites ?? []) {
+    reasons.push(`unprivileged write to protected cfc path ${target}`);
+  }
   const identityForInput = (
     input: WritePolicyInput,
   ): ImplementationIdentity | undefined =>

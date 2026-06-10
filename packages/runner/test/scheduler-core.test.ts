@@ -25,6 +25,24 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
 
+// Seed stored CFC metadata the way the runtime's prepareBoundaryCommit does:
+// inside the privileged system-write scope. A direct (unprivileged) ["cfc"]
+// write is rejected as label forgery (audit S18); a test standing in for the
+// runtime — the one legitimate ["cfc"] writer — seeds privileged.
+const seedPrivilegedCfc = (
+  tx: unknown,
+  address: unknown,
+  metadata: unknown,
+): void => {
+  const privileged = tx as {
+    runPrivilegedSystemWrite(fn: () => void): void;
+    writeOrThrow(address: unknown, value: unknown): void;
+  };
+  privileged.runPrivilegedSystemWrite(() =>
+    privileged.writeOrThrow(address, metadata)
+  );
+};
+
 describe("scheduler", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -1040,7 +1058,8 @@ describe("scheduler", () => {
     expect(lastApplies).toBe(false);
     expect(resultCell.get()).toEqual({ count: 1, applies: false });
 
-    tx.writeOrThrow(
+    seedPrivilegedCfc(
+      tx,
       {
         space: secretLink.space,
         id: secretLink.id,
@@ -1125,7 +1144,8 @@ describe("scheduler", () => {
     expect(lastVersion).toBe(0);
     expect(resultCell.get()).toEqual({ count: 1, version: 0 });
 
-    tx.writeOrThrow(
+    seedPrivilegedCfc(
+      tx,
       {
         space: sourceLink.space,
         id: sourceLink.id,
