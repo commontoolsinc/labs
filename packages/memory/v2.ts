@@ -318,6 +318,10 @@ export interface SqliteDbRef {
   id: string;
   tables?: Record<string, unknown>;
   scope?: CellScope;
+  /** The db's owner — the principal that created the SqliteDb cell. Resolves
+   *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
+   *  property, captured once at handle creation, never the acting reader. */
+  owner?: string;
 }
 
 export interface SqliteQueryRequest {
@@ -344,6 +348,35 @@ export interface SqliteResultColumn {
  *  and the runner's per-column label schema, so the two can't drift. */
 export function columnDeclaresIfc(ifc: unknown): boolean {
   return !!ifc && typeof ifc === "object" && Object.keys(ifc).length > 0;
+}
+
+/** Whether a table schema carries a per-row label rule (CFC Phase 3). */
+export function tableDeclaresRowLabel(table: unknown): boolean {
+  if (!table || typeof table !== "object") return false;
+  const spec = (table as { rowLabel?: unknown }).rowLabel;
+  return !!spec && typeof spec === "object";
+}
+
+/** Whether a read of this db needs sound per-result-column provenance for CFC
+ *  labeling: any column declares `ifc` (Phase 2) OR any table declares a
+ *  per-row label rule (Phase 3 — the rule's input columns are located by TRUE
+ *  origin, never output name). The single gate shared by the server (capture
+ *  origins) and the runner (expect them), so the two can't drift. Unlabeled
+ *  dbs — the common case — return false and pay nothing. */
+export function dbNeedsColumnProvenance(
+  tables: Record<string, unknown> | undefined,
+): boolean {
+  if (tables === undefined) return false;
+  for (const table of Object.values(tables)) {
+    if (tableDeclaresRowLabel(table)) return true;
+    const props = (table as { properties?: Record<string, unknown> })
+      ?.properties;
+    if (!props) continue;
+    for (const col of Object.values(props)) {
+      if (columnDeclaresIfc((col as { ifc?: unknown })?.ifc)) return true;
+    }
+  }
+  return false;
 }
 
 export interface SqliteQueryResult {

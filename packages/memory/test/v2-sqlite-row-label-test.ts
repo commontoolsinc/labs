@@ -530,3 +530,35 @@ Deno.test("zero matches in an integrity position mints no claim", () => {
   if ("error" in res) throw new Error(res.error);
   assertEquals(res.integrity, []);
 });
+
+// ---------------------------------------------------------------------------
+// Provenance gate predicates (shared server/runner — v2.ts)
+// ---------------------------------------------------------------------------
+
+Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too", async () => {
+  const { dbNeedsColumnProvenance, tableDeclaresRowLabel } = await import(
+    "../v2.ts"
+  );
+  const ruleOnly = {
+    emails: table(
+      { from: "text" },
+      (f) => ({
+        confidentiality: all(principal("mailto", match(f.from, ADDR))),
+      }),
+    ),
+  };
+  assert(tableDeclaresRowLabel(ruleOnly.emails));
+  assert(dbNeedsColumnProvenance(ruleOnly));
+
+  const columnOnly = {
+    notes: {
+      properties: { body: { ifc: { confidentiality: ["secret"] } } },
+    },
+  };
+  assert(dbNeedsColumnProvenance(columnOnly));
+
+  const unlabeled = { notes: table({ body: "text" }) };
+  assert(!tableDeclaresRowLabel(unlabeled.notes));
+  assert(!dbNeedsColumnProvenance(unlabeled));
+  assert(!dbNeedsColumnProvenance(undefined));
+});
