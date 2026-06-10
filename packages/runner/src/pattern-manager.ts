@@ -32,6 +32,7 @@ import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
   loadCompiledClosure,
+  loadVerifiedSourceClosure,
   ROOT_LINK_SPECIFIER,
   writeCompiledDocs,
   writeSourceDocs,
@@ -132,6 +133,22 @@ export class PatternManager {
   // In-flight compiled-cache write-backs (fire-and-forget); awaited by
   // flushCompileCacheWrites() for graceful shutdown / deterministic tests.
   private compileCacheWrites = new Set<Promise<unknown>>();
+  // The subset of `compileCacheWrites` that are cold-compile closure
+  // write-backs. Tracked separately so `replicateClosures` can await them
+  // before reading the origin space — its own promise lives in
+  // `compileCacheWrites`, so awaiting that whole set would deadlock on itself.
+  private pendingCacheWriteBacks = new Set<Promise<unknown>>();
+  // `${patternId}\0${space}` pairs whose meta has been persisted this session.
+  // Per-SPACE (not per-pattern): an `inSpace` child piece is loaded from its
+  // own space by a fresh runtime, so the same pattern's meta may need to exist
+  // in several spaces (CT-1687). Entries record durable storage facts, so they
+  // intentionally survive `evictIfNeeded` (a re-save would be an idempotent,
+  // content-addressed write anyway).
+  private savedMetaSpaces = new Set<string>();
+  // `${entryIdentity}\0${space}` closure replications already kicked off this
+  // session (see `replicatePatternToSpace`). An entry is removed on failure so
+  // the next child creation retries.
+  private replicatedClosures = new Set<string>();
 
   constructor(readonly runtime: Runtime) {}
 
@@ -443,18 +460,31 @@ export class PatternManager {
     // and eat the conflict, until we support these kinds of writes properly.
     providedTx = undefined;
 
-    const tx = providedTx ?? this.runtime.edit();
-
-    // Already saved
-    if (this.patternMetaCellById.has(patternId)) {
+    // "Already saved" is per (patternId, space), NOT per pattern: an `inSpace`
+    // child piece is loaded from its OWN space by a fresh runtime, so the meta
+    // must be persisted there even when the parent's space already has a copy
+    // (CT-1687). The first-saved (or first-loaded) meta cell stays canonical in
+    // `patternMetaCellById`; saves into further spaces don't displace it.
+    const spaceKey = `${patternId}\0${space}`;
+    if (this.savedMetaSpaces.has(spaceKey)) return true;
+    const canonicalMetaCell = this.patternMetaCellById.get(patternId);
+    if (canonicalMetaCell && canonicalMetaCell.space === space) {
+      this.savedMetaSpaces.add(spaceKey);
       return true;
     }
 
-    const program = getPatternProgram(this.patternIdMap.get(patternId));
+    const tx = providedTx ?? this.runtime.edit();
+
+    // Prefer the live program; fall back to the canonical meta cell's stored
+    // value when the in-memory pattern is source-free (a by-identity load).
+    const canonicalMeta = canonicalMetaCell?.get();
+    const program = getPatternProgram(this.patternIdMap.get(patternId)) ??
+      canonicalMeta?.program;
     if (!program) return false;
 
     const pending = this.pendingMetaById.get(patternId) ?? {};
     const patternMeta: PatternMeta = {
+      ...(canonicalMeta as Partial<PatternMeta> | undefined),
       program,
       ...(pending as Partial<PatternMeta>),
     } as PatternMeta;
@@ -464,14 +494,39 @@ export class PatternManager {
 
     if (!providedTx) {
       this.runtime.prepareTxForCommit(tx);
-      tx.commit().then((result) => {
-        if (result.error) {
-          logger.warn("pattern", "Pattern already existed", patternId);
+      tx.commit().then(async (result) => {
+        if (!result.error) return;
+        // A commit error here is usually the benign content-addressed
+        // "already existed" conflict (see HACK above) — but for a cross-space
+        // save it can be a real failure (no write access to the child space,
+        // offline). Verify rather than taxonomize: if the meta is readable
+        // with a program, the desired state holds and the claim stands;
+        // otherwise release the claim so the next save into this space
+        // retries instead of silently never landing (CT-1687).
+        try {
+          const metaCell = this.getPatternMetaCell({ patternId, space });
+          await metaCell.sync();
+          if (metaCell.get()?.program) {
+            logger.warn("pattern", "Pattern already existed", patternId);
+            return;
+          }
+        } catch {
+          // fall through to release
         }
+        this.savedMetaSpaces.delete(spaceKey);
+        logger.warn(
+          "pattern",
+          "Pattern meta save failed",
+          patternId,
+          space,
+        );
       });
     }
 
-    this.patternMetaCellById.set(patternId, patternMetaCell.withTx());
+    if (!canonicalMetaCell) {
+      this.patternMetaCellById.set(patternId, patternMetaCell.withTx());
+    }
+    this.savedMetaSpaces.add(spaceKey);
     // If we have a pattern object for this id, ensure the back mapping exists
     const pattern = this.patternIdMap.get(patternId);
     if (pattern) this.patternToIdMap.set(pattern, patternId);
@@ -492,6 +547,148 @@ export class PatternManager {
     if (this.savePattern({ patternId, space }, tx)) {
       await this.getPatternMetaCell({ patternId, space }, tx).sync();
     }
+  }
+
+  /**
+   * Make a cross-space child piece independently loadable from its own space
+   * (CT-1687). A fresh runtime navigating to a `Factory.inSpace(...)` child
+   * loads pattern artifacts from the CHILD's space — but the parent bundle's
+   * meta save and compile-cache write-back both target the space the parent
+   * compiled into, so the child space had nothing and the load died with
+   * "has no stored source". Replicates both recovery paths into `toSpace`:
+   *
+   * - the pattern meta (program), when a program is available (a pattern
+   *   registered with source in hand, or one whose canonical meta cell holds
+   *   the stored program);
+   * - the content-addressed source + compiled closures, when the pattern
+   *   carries an artifact entry ref (the by-identity reload path — the only
+   *   one available to an ESM bundle SUB-pattern, which has no program object).
+   *
+   * Closure replication is fire-and-forget (tracked in `compileCacheWrites`,
+   * awaited by `flushCompileCacheWrites`): the child is loadable in-session
+   * regardless, this only affects fresh runtimes. A failure is logged and
+   * retried on the next child creation — never on the caller's commit path.
+   */
+  replicatePatternToSpace(
+    pattern: Pattern | Module,
+    toSpace: MemorySpace,
+    fromSpace: MemorySpace,
+  ): void {
+    if (toSpace === fromSpace) return;
+    const patternId = this.registerPattern(pattern);
+    this.savePattern({ patternId, space: toSpace });
+
+    const entryRef = this.getArtifactEntryRef(pattern);
+    if (!entryRef) return;
+    const dedupeKey = `${entryRef.identity}\0${toSpace}`;
+    if (this.replicatedClosures.has(dedupeKey)) return;
+    this.replicatedClosures.add(dedupeKey);
+    const replication = this.replicateClosures(
+      entryRef.identity,
+      fromSpace,
+      toSpace,
+    ).catch((error) => {
+      // Release the claim so a later child creation retries.
+      this.replicatedClosures.delete(dedupeKey);
+      logger.error("closure-replication-failed", () => [
+        `entry=${entryRef.identity}`,
+        `from=${fromSpace}`,
+        `to=${toSpace}`,
+        String(error),
+      ]);
+    });
+    this.compileCacheWrites.add(replication);
+    replication.finally(() => this.compileCacheWrites.delete(replication));
+  }
+
+  /**
+   * Copy the source + compiled closures reachable from `entryIdentity` out of
+   * `fromSpace` into `toSpace`, rebuilding the emitted-module shape the write
+   * functions expect. All-or-nothing: a partial compiled closure can never be
+   * served (the loaders require a full, integrity-valid hit), so an incomplete
+   * origin set throws instead of persisting an unservable copy.
+   */
+  private async replicateClosures(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+  ): Promise<void> {
+    // The origin-space closure may have been produced by THIS session's cold
+    // compile, whose write-back is itself fire-and-forget and may not have
+    // committed yet. A lost race would throw here — and for a handler-created
+    // child (one space per profile) nothing re-fires the released dedupe key,
+    // leaving that child permanently unloadable. Await the in-flight
+    // write-backs first. (Their own set, not flushCompileCacheWrites: this
+    // replication promise is tracked there and would await itself.)
+    await Promise.allSettled([...this.pendingCacheWriteBacks]);
+    const cacheOpts = {
+      runtimeVersion: COMPILE_CACHE_RUNTIME_VERSION,
+      compilerDid: this.runtime.userIdentityDID,
+    };
+    const readTx = this.runtime.edit();
+    let sourceDocs;
+    let compiledDocs;
+    try {
+      // Verification recomputes module identities with the default ("")
+      // runtimeFingerprint — the same default every compile path in the tree
+      // uses today. If a non-empty fingerprint is ever threaded into
+      // compilation, it must be threaded here too or verification will
+      // reject every closure (logged as replication failures).
+      sourceDocs = await loadVerifiedSourceClosure(
+        this.runtime,
+        fromSpace,
+        entryIdentity,
+        readTx,
+      );
+      compiledDocs = await loadCompiledClosure(
+        this.runtime,
+        fromSpace,
+        entryIdentity,
+        cacheOpts,
+        readTx,
+      );
+    } finally {
+      readTx.abort?.("closure-replication read complete");
+    }
+    if (!sourceDocs?.has(entryIdentity)) {
+      throw new Error("source closure unavailable in origin space");
+    }
+    const modules: CacheableModule[] = [];
+    for (const [identity, doc] of sourceDocs) {
+      const compiled = compiledDocs.get(identity);
+      if (!compiled) {
+        throw new Error(`compiled doc missing for ${identity}`);
+      }
+      modules.push({
+        identity,
+        filename: doc.filename,
+        source: doc.code,
+        js: compiled.code,
+        ...(compiled.sourceMap !== undefined
+          ? { sourceMap: compiled.sourceMap }
+          : {}),
+        // The write functions re-derive the entry's root links; keep only the
+        // real import edges.
+        imports: doc.imports
+          .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .map((imp) => ({
+            specifier: imp.specifier,
+            targetIdentity: imp.identity,
+          })),
+      });
+    }
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      writeSourceDocs(this.runtime, toSpace, modules, entryIdentity, tx);
+      writeCompiledDocs(
+        this.runtime,
+        toSpace,
+        modules,
+        entryIdentity,
+        cacheOpts,
+        tx,
+      );
+    });
+    if (error) throw error;
   }
 
   private async syncLinkedPatternSource(
@@ -706,7 +903,11 @@ export class PatternManager {
         cacheOpts,
       );
       this.compileCacheWrites.add(writeBack);
-      writeBack.finally(() => this.compileCacheWrites.delete(writeBack));
+      this.pendingCacheWriteBacks.add(writeBack);
+      writeBack.finally(() => {
+        this.compileCacheWrites.delete(writeBack);
+        this.pendingCacheWriteBacks.delete(writeBack);
+      });
     }
 
     return this.patternFromEvaluation(result, program, entryIdentity);

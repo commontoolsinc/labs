@@ -433,6 +433,17 @@ The cache is designed around this:
   server**: the server becomes the sole acceptor of that write integrity (it
   only stamps the label from its own compilation step), making the label a hard
   guarantee — with no change to the read path, which already requires it.
+- **Cross-space closure replication (CT-1687).** Cache docs do not only live
+  where they compiled: when a pattern materializes a child piece in another
+  space (`Factory.inSpace(...)`), the runner replicates the child pattern's
+  source + compiled closures into the child's space so the piece is
+  independently loadable there (`PatternManager.replicatePatternToSpace`).
+  Chain-of-custody holds — compiled docs are read through the integrity-gated
+  loader (a user can only replicate docs already carrying their own stamp) and
+  re-stamped on the child-space write by a legitimate child-space writer. Note
+  for the server-compilation end state: a client can then no longer stamp
+  replicated compiled docs, so child spaces will need server-side replication
+  or by-identity source recovery instead.
 - **CFC verified-source derives from the source set, not the cached JS.** A
   poisoned-but-SES-safe JS document must not be able to spoof `fn.src` /
   authorship, so the CFC verified-source identity is anchored to the
