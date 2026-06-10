@@ -2016,6 +2016,7 @@ const derivePersistedLinkLabel = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,
   candidateSchemas: ReadonlyMap<string, JSONSchema>,
+  authoringIdentity: ImplementationIdentity | undefined,
 ): { label?: IFCLabel; reason?: string } => {
   const sourceMetadata = storedMetadataFor(
     tx,
@@ -2059,14 +2060,27 @@ const derivePersistedLinkLabel = (
     ) ?? {},
     pendingSourceLabel,
   );
+  // The source/link-schema integrity is author-influenceable (a link value can
+  // carry a forged link schema or label view). Gate runtime-minted evidence
+  // atoms out of it unless a trusted builtin authored the link write, THEN add
+  // the runtime-minted LinkReference — which is added here, never filtered, and
+  // is the only evidence atom a link write legitimately mints (audit S4 review).
+  const gatedIntegrity = gateRuntimeMintedIntegrity(
+    {
+      integrity: mergeLabelValues(
+        sourceLabel.integrity,
+        linkSchemaLabel.integrity,
+      ),
+    },
+    authoringIdentity,
+  ).integrity;
   const label: IFCLabel = {
     confidentiality: mergeLabelValues(
       sourceLabel.confidentiality,
       linkSchemaLabel.confidentiality,
     ),
     integrity: mergeLabelValues(
-      sourceLabel.integrity,
-      linkSchemaLabel.integrity,
+      gatedIntegrity,
       [linkReferenceIntegrity(input)],
     ),
   };
@@ -2370,7 +2384,13 @@ export const prepareBoundaryCommit = (
       }
     }
     for (const input of linkWriteInputs) {
-      const result = derivePersistedLinkLabel(tx, input, candidates);
+      const linkIdentity = identityForInput(input);
+      const result = derivePersistedLinkLabel(
+        tx,
+        input,
+        candidates,
+        linkIdentity,
+      );
       if (result.reason !== undefined) {
         reasons.push(result.reason);
         continue;
@@ -2386,12 +2406,18 @@ export const prepareBoundaryCommit = (
         if (!hasLabelValues(entry.label)) {
           continue;
         }
+        // The carried label view is author-influenceable; gate runtime-minted
+        // evidence atoms unless a builtin authored the link write (audit S4
+        // review).
         persistedLabelEntries.push({
           path: [
             ...targetPath,
             ...canonicalizeLogicalPath(entry.path),
           ],
-          label: cloneLabel(entry.label),
+          label: gateRuntimeMintedIntegrity(
+            cloneLabel(entry.label),
+            linkIdentity,
+          ),
         });
       }
     }
