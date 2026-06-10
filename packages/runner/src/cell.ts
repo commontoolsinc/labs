@@ -988,8 +988,20 @@ export class CellImpl<T extends FabricValue>
         isEffect: true,
       });
 
-      // Wait for the scheduler to process all pending work, then resolve
-      this.runtime.scheduler.idle().then(() => {
+      // Wait for the scheduler to process all pending work, then resolve.
+      // Convergence (CT-1667): the read may have kicked async loads of link
+      // targets absent from the local replica (typically across a space
+      // boundary). Each arrival re-runs the read action (the absent doc is a
+      // tracked dependency) and can discover the NEXT hop, so loop — bounded
+      // — until no cross-space loads remain. Pulls that kicked nothing take
+      // the zero-iteration path and keep their existing timing.
+      this.runtime.scheduler.idle().then(async () => {
+        const storage = this.runtime.storageManager;
+        for (let round = 0; round < 10; round++) {
+          if ((storage.pendingCrossSpacePromiseCount?.() ?? 0) === 0) break;
+          await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+          await this.runtime.scheduler.idle();
+        }
         cancel?.();
         resolve(result);
       });

@@ -919,6 +919,17 @@ export type TraversalContext = {
   schemaTracker: MapSet<string, SchemaPathSelector>;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
+  /**
+   * Called when a followed link's target document is entirely absent from
+   * the local replica (CT-1667). Per-space server queries cannot follow
+   * links across space boundaries (and minimal-schema subscriptions can
+   * leave even same-space targets uncovered), so the traversal is the first
+   * place the gap is observable. The runtime-aware caller kicks an async
+   * load (see `Runtime.ensureLinkedDocLoaded`); the traversal itself only
+   * reports. Optional: schema-tracking traversals on the server have no
+   * runtime and no replica gap.
+   */
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void;
 };
 
 export function createTraversalContext(
@@ -927,6 +938,7 @@ export function createTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
 ): TraversalContext {
   return {
     tracker,
@@ -934,6 +946,7 @@ export function createTraversalContext(
     schemaTracker,
     includeMeta,
     metaDocsVisited,
+    onMissingLinkTarget,
   };
 }
 
@@ -942,6 +955,7 @@ export function createDefaultTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
   metaDocsVisited: Set<string> = new Set<string>(),
+  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
 ): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker<
@@ -952,6 +966,7 @@ export function createDefaultTraversalContext(
     schemaTracker,
     includeMeta,
     metaDocsVisited,
+    onMissingLinkTarget,
   );
 }
 
@@ -1859,6 +1874,26 @@ function followPointer(
         "traverse",
         () => ["followPointer found missing/retracted fact", valueEntry],
       );
+      // A linked doc absent from the local replica may simply never have
+      // been fetched — the subscription that loaded the SOURCE doc cannot
+      // cover targets across a space boundary (CT-1667). Report it so the
+      // runtime can kick an async load; this read still resolves notFound
+      // and the tracked dependency re-runs the reader when the doc arrives.
+      // Pass the link with the narrowed selector schema so the fetch covers
+      // the shape this traversal actually needs.
+      context.onMissingLinkTarget?.({
+        space: link.space,
+        id: link.id,
+        path: link.path,
+        scope: link.scope,
+        ...(selector?.schema !== undefined || link.schema !== undefined
+          ? {
+            schema: (selector?.schema ?? link.schema) as
+              | JSONSchema
+              | undefined,
+          }
+          : {}),
+      } as NormalizedFullLink);
       // We include the path in the address, so that information is available,
       return [notFound(target), selector];
     } else if (error.name !== "NotFoundError") {
@@ -2055,6 +2090,7 @@ function traverseMetaLinkedDoc(
     context.schemaTracker,
     context.includeMeta,
     context.metaDocsVisited,
+    context.onMissingLinkTarget,
   );
   const traverser = new SchemaObjectTraverser(
     tx,

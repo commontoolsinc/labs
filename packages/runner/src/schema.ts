@@ -1068,7 +1068,15 @@ export function validateAndTransform(
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
-    createDefaultTraversalContext(options?.traverseCells ?? false),
+    createDefaultTraversalContext(
+      options?.traverseCells ?? false,
+      undefined,
+      undefined,
+      // Absent link targets (typically across a space boundary, which the
+      // source doc's per-space subscription cannot cover) get an async load
+      // kicked; the tracked read re-runs the reader on arrival (CT-1667).
+      (missing) => runtime.ensureLinkedDocLoaded(missing),
+    ),
     objectCreator,
   );
   const { ok: val, error: _err } = traverser.traverse(doc, link);
