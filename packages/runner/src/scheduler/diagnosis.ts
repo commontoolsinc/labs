@@ -226,7 +226,9 @@ function readInvariantMovedExternally(
 ): boolean {
   const spaces = new Set<IMemorySpaceAddress["space"]>();
   for (const read of log.reads) spaces.add(read.space);
+  for (const read of log.shallowReads) spaces.add(read.space);
   for (const read of log2.reads) spaces.add(read.space);
+  for (const read of log2.shallowReads) spaces.add(read.space);
   const before = transactionReadInvariants(tx, spaces);
   if (before.size === 0) return false;
   const after = transactionReadInvariants(tx2, spaces);
@@ -294,7 +296,7 @@ export function runIdempotencyRecheck(
   }
 
   // Differing writes only witness non-idempotency if both runs read the same
-  // inputs (read both journals before aborting tx2).
+  // inputs (capture both runs' read invariants before aborting tx2).
   const inputsMoved = readInvariantMovedExternally(tx, tx2, log, log2);
   tx2.abort();
   if (inputsMoved) return;
