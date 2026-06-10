@@ -246,17 +246,11 @@ describe("shell piece tests", () => {
         return await page.evaluate(() => !!globalThis.commonfabric?.rt);
       });
       await waitForSpaceRootPattern(page);
-      // Ensure the space-root/sub-pattern compile-cache write-backs are durable
-      // before we snapshot the baseline and load the piece. Otherwise a write
-      // still in flight can be missed by the piece load's cache read, forcing an
-      // in-client recompile (the flake this test guards against). This awaits
-      // persistence specifically, NOT reactive idle.
-      await page.evaluate(async () => {
-        await globalThis.commonfabric?.rt?.flushCompileCacheWrites();
-      });
-      const clientCompileCountBeforePieceLoad =
-        await getClientEngineCompileCount(page);
-
+      // First in-browser load of the piece: pieces are no longer eagerly
+      // started when the space loads (CT-1623 — the header used to start every
+      // piece just to label its menu), so this navigation performs the cold
+      // in-client compile and seeds the compilation cache. The cache contract
+      // is asserted below against a fresh worker.
       await page.evaluate(async (spaceName, pieceId) => {
         await globalThis.app.setView({ spaceName, pieceId });
       }, { args: [SPACE_NAME, pieceId] });
@@ -290,18 +284,6 @@ describe("shell piece tests", () => {
       };
 
       await waitForActivePattern();
-      const clientCompileCountAfterPieceLoad =
-        await getClientEngineCompileCount(
-          page,
-        );
-      if (
-        clientCompileCountAfterPieceLoad !== clientCompileCountBeforePieceLoad
-      ) {
-        throw new Error(
-          `Expected 0 in-client compilations while loading cf-created piece ${pieceId}; ` +
-            `engine compile count changed from ${clientCompileCountBeforePieceLoad} to ${clientCompileCountAfterPieceLoad}`,
-        );
-      }
 
       await waitFor(async () =>
         (await currentPiece.result.get(["value"])) === 0
@@ -313,6 +295,71 @@ describe("shell piece tests", () => {
       );
 
       await clickPierce(page, "#counter-decrement");
+      await waitFor(async () =>
+        (await currentPiece.result.get(["value"])) === -2
+      );
+
+      // Compilation-cache contract: the piece's cold compile above was written
+      // back to the IDB-backed CachedCompiler. A FRESH worker must then load
+      // the piece from that cache — zero in-client compilations during the
+      // piece load. Flush the write-backs first: a write still in flight when
+      // the fresh worker reads the cache forces a recompile (the flake this
+      // guard exists for).
+      await page.evaluate(async () => {
+        await globalThis.commonfabric?.rt?.flushCompileCacheWrites();
+      });
+      await page.evaluate(async () => {
+        try {
+          await globalThis.commonfabric?.rt?.dispose();
+        } finally {
+          if (globalThis.commonfabric) globalThis.commonfabric.rt = undefined;
+        }
+      });
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: {
+          spaceName: SPACE_NAME,
+        },
+        identity,
+      });
+      await waitFor(async () => {
+        return await page.evaluate(() => !!globalThis.commonfabric?.rt);
+      });
+      await waitForSpaceRootPattern(page);
+      // Let the space-root chain's own compiles finish and settle before
+      // baselining (a trailing root compile landing inside the measurement
+      // window would show up as a false piece recompile).
+      let settledCompileCount = await getClientEngineCompileCount(page);
+      await waitFor(async () => {
+        const before = settledCompileCount;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        settledCompileCount = await getClientEngineCompileCount(page);
+        return settledCompileCount === before;
+      });
+      const compileCountBeforePieceLoad = settledCompileCount;
+      await page.evaluate(async (spaceName, pieceId) => {
+        await globalThis.app.setView({ spaceName, pieceId });
+      }, { args: [SPACE_NAME, pieceId] });
+      await shell.waitForState({
+        view: {
+          spaceName: SPACE_NAME,
+          pieceSlug: slug,
+        },
+        identity,
+      });
+      await waitForActivePattern();
+      const compileCountAfterPieceLoad = await getClientEngineCompileCount(
+        page,
+      );
+      if (compileCountAfterPieceLoad !== compileCountBeforePieceLoad) {
+        throw new Error(
+          `Expected 0 in-client compilations while a fresh worker loads the ` +
+            `cached cf-created piece ${pieceId}; engine compile count ` +
+            `changed from ${compileCountBeforePieceLoad} to ` +
+            `${compileCountAfterPieceLoad}`,
+        );
+      }
+
       await waitFor(async () =>
         (await currentPiece.result.get(["value"])) === -2
       );
