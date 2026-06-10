@@ -26,12 +26,17 @@ export class ArrayMethodStrategy implements ClosureTransformationStrategy {
     return !!arrayMethodInfo && !arrayMethodInfo.lowered;
   }
 
+  // Caller must pass a call expression.
   transform(
     node: ts.Node,
     context: TransformationContext,
     visitor: ts.Visitor,
   ): ts.Node | undefined {
-    if (!ts.isCallExpression(node)) return undefined;
+    if (!ts.isCallExpression(node)) {
+      throw new Error(
+        "ArrayMethodStrategy.transform requires a call expression",
+      );
+    }
 
     const callback = node.arguments[0];
     if (callback && isFunctionLikeExpression(callback)) {

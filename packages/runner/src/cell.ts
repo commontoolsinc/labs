@@ -13,7 +13,10 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  internSchema,
+  isInternedSchema,
+} from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
@@ -1455,11 +1458,12 @@ export class CellImpl<T extends FabricValue>
     schema?: JSONSchema,
   ): Cell<T>;
   asSchema(schema?: JSONSchema): Cell<any> {
-    // asSchema creates a sibling with same identity but different schema
-    // Create a new link with modified schema
+    // asSchema creates a sibling with same identity but different schema.
+    // Create a new link with the modified schema, interned so downstream
+    // identity-keyed schema caches hit (see `internCellLinkSchema`).
     const siblingLink: NormalizedLink = {
       ...this._link,
-      schema: schema,
+      schema: internCellLinkSchema(schema),
     };
 
     return new CellImpl(
@@ -2795,6 +2799,54 @@ export function schemaCellScope(
   return isRecord(schema) && isCellScope(schema.scope)
     ? schema.scope
     : undefined;
+}
+
+/**
+ * Returns `true` if the value is, or transitively contains, a query-result
+ * proxy. Schemas are plain JSON, so the walk is acyclic; visiting plain
+ * objects is trap-free, and a proxy is detected before recursing into it.
+ */
+function containsCellResult(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  if (isCellResultForDereferencing(value)) return true;
+  for (const v of Object.values(value)) {
+    if (containsCellResult(v)) return true;
+  }
+  return false;
+}
+
+/**
+ * Interns a schema for attachment to a cell link, so the link carries the
+ * canonical deep-frozen instance and the downstream identity-keyed schema
+ * caches (cfc.schemaAtPath, schema-ref memos, selector standardization,
+ * value-hash) hit instead of staying cold for mutable schema literals.
+ *
+ * Interning deep-freezes the caller's schema object in place — the same
+ * contract `resolveSchema()` already applies to cell schemas on every
+ * read/write-policy path.
+ *
+ * Exception: schemas read through a query-result proxy (e.g. the wish
+ * builtin's `schema` argument) must NOT be frozen in place — `Object.freeze`
+ * forwards through the proxy and would freeze the underlying stored value,
+ * breaking the proxy's object invariants (and any later `JSON.stringify` of
+ * it). Those are round-tripped to a plain value first, the documented
+ * convention for proxy-wrapped schemas (see `cloneSchemaMutable`'s note in
+ * data-model's schema-utils).
+ */
+export function internCellLinkSchema(schema: JSONSchema): JSONSchema;
+export function internCellLinkSchema(
+  schema?: JSONSchema,
+): JSONSchema | undefined;
+export function internCellLinkSchema(
+  schema?: JSONSchema,
+): JSONSchema | undefined {
+  if (schema === undefined) return undefined;
+  // Already canonical (covers boolean schemas): skip the proxy scan.
+  if (isInternedSchema(schema)) return schema;
+  if (containsCellResult(schema)) {
+    return internSchema(JSON.parse(JSON.stringify(schema)) as JSONSchema);
+  }
+  return internSchema(schema);
 }
 
 /**

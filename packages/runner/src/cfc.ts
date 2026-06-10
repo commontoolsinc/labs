@@ -1,6 +1,7 @@
 import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import type {
   AsCellEntry,
   CellKind,
@@ -32,6 +33,17 @@ export {
 } from "@commonfabric/api/cfc";
 
 type IFCAtom = ImmutableJSONValue;
+
+// schemaAtPath derivations per deep-frozen schema identity. The derivation is
+// pure given (schema, path, boolean default flags) when no extra
+// confidentiality is passed — instance state never enters it (`lub` delegates
+// to a static and has no subclasses) — and it runs per array element / object
+// property on read and write-diff paths, so identical lookups repeat
+// constantly. Module-level rather than per-instance: several hot paths create
+// a fresh ContextualFlowControl per call (storage pull/watch, traversal
+// contexts), which would leave a per-instance cache permanently cold.
+// Mutable schemas are never cached (in-place edits must be observed).
+const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
 
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
@@ -96,6 +108,42 @@ export class ContextualFlowControl {
     }
     if (schema.ifc) {
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
+    }
+    // A value validates against one (anyOf/oneOf) or all (allOf) branches, so the
+    // confidentiality LUB must union every branch's atoms; otherwise branch-local
+    // confidentiality is silently dropped (under-tainting fail-open, audit 1.6).
+    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+      const branches = (schema as Record<string, unknown>)[key];
+      if (Array.isArray(branches)) {
+        for (const branch of branches) {
+          if (branch !== undefined && typeof branch === "object") {
+            ContextualFlowControl.joinSchema(
+              joined,
+              branch as JSONSchema,
+              ContextualFlowControl.childFullSchema(
+                branch as JSONSchema,
+                fullSchema,
+              ),
+              cycleTracker,
+            );
+          }
+        }
+      }
+    }
+    // Tuple element schemas carry their own confidentiality too.
+    if (Array.isArray((schema as Record<string, unknown>).prefixItems)) {
+      for (
+        const item of (schema as { prefixItems: JSONSchema[] }).prefixItems
+      ) {
+        if (item !== undefined && typeof item === "object") {
+          ContextualFlowControl.joinSchema(
+            joined,
+            item,
+            ContextualFlowControl.childFullSchema(item, fullSchema),
+            cycleTracker,
+          );
+        }
+      }
     }
     if (schema.properties && typeof schema.properties === "object") {
       for (const value of Object.values(schema.properties)) {
@@ -319,14 +367,48 @@ export class ContextualFlowControl {
   ): JSONSchema {
     // Take defs from schema if available
     const defs = isRecord(schema) && schema.$defs ? schema.$defs : undefined;
-    return this.schemaAtPathInternal(
-      schema,
-      path,
-      defs,
-      extraConfidentiality,
-      defaultEmptyProperties,
-      defaultMissingProperty,
-    );
+    const cacheable = extraConfidentiality === undefined &&
+      typeof defaultEmptyProperties === "boolean" &&
+      typeof defaultMissingProperty === "boolean" &&
+      isRecord(schema) && isDeepFrozen(schema);
+    if (!cacheable) {
+      return this.schemaAtPathInternal(
+        schema,
+        path,
+        defs,
+        extraConfidentiality,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      );
+    }
+    let byKey = schemaAtPathCache.get(schema);
+    if (byKey === undefined) {
+      byKey = new Map();
+      schemaAtPathCache.set(schema, byKey);
+    }
+    // Length-prefix each segment so a segment containing the separator (a
+    // NUL-bearing property name) cannot collide with a differently-split
+    // path — same idiom as traverse.ts's pathKey.
+    let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
+    for (const part of path) {
+      key += `|${part.length}:${part}`;
+    }
+    let result = byKey.get(key);
+    if (result === undefined) {
+      // Intern the derivation so the cached result is the canonical frozen
+      // instance: downstream identity-keyed caches (standardization, value
+      // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
+      result = internSchema(this.schemaAtPathInternal(
+        schema,
+        path,
+        defs,
+        undefined,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      ));
+      byKey.set(key, result);
+    }
+    return result;
   }
 
   private schemaAtPathInternal(

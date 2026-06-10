@@ -51,7 +51,7 @@ Deno.test("StorageManager.closeNow does not wait for a pending session sync", as
   const signer = await Identity.fromPassphrase("storage-close-pending-sync");
   const storage = TestStorageManager.create({
     as: signer,
-    address: new URL("http://localhost:65535"),
+    memoryHost: new URL("http://localhost:65535"),
   }, new PendingSessionFactory());
 
   const provider = storage.open(signer.did());
@@ -75,7 +75,7 @@ Deno.test("Provider.destroyNow force-closes after destroy is already pending", a
   const signer = await Identity.fromPassphrase("storage-provider-destroy-now");
   const storage = TestStorageManager.create({
     as: signer,
-    address: new URL("http://localhost:65535"),
+    memoryHost: new URL("http://localhost:65535"),
   }, new PendingSessionFactory());
 
   const provider = storage.open(signer.did());

@@ -51,8 +51,10 @@ import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
+  CFC_ENFORCING_STRICTNESS,
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
+  cfcEnforcementStrictness,
   type CfcTxState,
   type ConsumedRead,
   DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -77,6 +79,9 @@ type CfcInstrumentationHooks = {
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;
+  onSinkReleaseReject?(
+    info: { sink: string; effectId: string; detail: string },
+  ): void;
 };
 
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
@@ -103,6 +108,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
+  // Highest enforcing strictness ever set on this tx; mode cannot drop below it.
+  private cfcEnforcementFloor = 0;
   // Per-transaction cache of `Cell.get()` results, keyed by cell link identity.
   // Replaced wholesale on any write (see `invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -116,12 +123,39 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     private cfcInstrumentation: CfcInstrumentationHooks = {},
   ) {}
 
+  noteCfcSinkReleaseReject(
+    info: { sink: string; effectId: string; detail: string },
+  ): void {
+    this.cfcState.diagnostics.push(
+      `sink-request release rejected for ${info.sink} (${info.effectId}): ${info.detail}`,
+    );
+    this.cfcInstrumentation.onSinkReleaseReject?.(info);
+  }
+
   getCfcState(): Readonly<CfcTxState> {
     return this.cfcState;
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
+    // Enforcement may be raised but never weakened below the highest enforcing
+    // level set on this transaction (audit S3). The control surface is on the
+    // public transaction interface and cell.tx is reachable, so this prevents
+    // code holding a Cell from disabling enforcement mid-transaction to commit a
+    // policy violation. `disabled`/`observe` impose no floor (neither enforces),
+    // so they may still be juggled before any enforcing mode is set.
+    if (cfcEnforcementStrictness(mode) < this.cfcEnforcementFloor) {
+      throw new Error(
+        `CFC enforcement mode cannot be weakened to "${mode}": transaction is ` +
+          `pinned at strictness ${this.cfcEnforcementFloor} or higher`,
+      );
+    }
     this.cfcState.enforcementMode = mode;
+    if (cfcEnforcementStrictness(mode) >= CFC_ENFORCING_STRICTNESS) {
+      this.cfcEnforcementFloor = Math.max(
+        this.cfcEnforcementFloor,
+        cfcEnforcementStrictness(mode),
+      );
+    }
   }
 
   markCfcRelevant(reason?: string): void {
@@ -308,20 +342,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
   }
 
-  prepareCfc(input?: PreparedDigestInput): string {
-    if (input === undefined) {
-      const reasons = prepareBoundaryCommit(this);
-      if (reasons.length > 0) {
-        this.cfcInstrumentation.onPrepareReject?.(reasons);
-        this.cfcState.prepare = {
-          status: "invalidated",
-          reasons,
-        };
-        this.cfcState.diagnostics.push(...reasons);
-        return "";
-      }
+  prepareCfc(): string {
+    // Verification always runs. There is deliberately no caller-supplied input
+    // override: the commit-time digest recheck only confirms the prepared input
+    // matches real activity, so accepting an external input here would let a
+    // caller skip prepareBoundaryCommit while still passing the recheck (audit
+    // S2 — verification bypass).
+    const reasons = prepareBoundaryCommit(this);
+    if (reasons.length > 0) {
+      this.cfcInstrumentation.onPrepareReject?.(reasons);
+      this.cfcState.prepare = {
+        status: "invalidated",
+        reasons,
+      };
+      this.cfcState.diagnostics.push(...reasons);
+      return "";
     }
-    const preparedInput = input ?? this.buildPreparedDigestInput();
+    const preparedInput = this.buildPreparedDigestInput();
     const digest = preparedDigestFor(preparedInput);
     this.cfcState.prepare = {
       status: "prepared",
@@ -805,8 +842,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.recordCfcDereferenceTrace(trace);
   }
 
-  prepareCfc(input?: PreparedDigestInput): string {
-    return this.wrapped.prepareCfc(input);
+  prepareCfc(): string {
+    return this.wrapped.prepareCfc();
   }
 
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void {
@@ -821,6 +858,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcWritePolicyInput(input: WritePolicyInput): void {
     this.wrapped.recordCfcWritePolicyInput(input);
+  }
+
+  noteCfcSinkReleaseReject(
+    info: { sink: string; effectId: string; detail: string },
+  ): void {
+    this.wrapped.noteCfcSinkReleaseReject(info);
   }
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {

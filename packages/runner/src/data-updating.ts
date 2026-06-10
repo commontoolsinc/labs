@@ -41,7 +41,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { resolveSchemaForValue } from "./schema.ts";
+import { resolveSchema, resolveSchemaForValue } from "./schema.ts";
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
@@ -615,6 +615,38 @@ export function normalizeAndDiff(
     );
   }
 
+  // Scope realization on write: the base-scope slot of a scoped instance
+  // holds a regular link with an explicitly narrower scope (materialized at
+  // setup; see the narrowing branch above and the eager-redirect pass in the
+  // object branch below). A write of *content* arriving at this slot without
+  // a scope-declaring schema (e.g. through a serialized binding whose schema
+  // is scope-silent, like the renderer's $value cell) must follow that link
+  // into the narrower-scope instance — overwriting it would land per-user /
+  // per-session state at the shared base scope. Reference values are exempt:
+  // writing a link re-binds the slot (and the schema-declared narrowing above
+  // already handled scoped re-binds before reaching here).
+  if (isPrimitiveCellLink(currentValue) && !isCellLink(newValue)) {
+    const storedLink = parseLink(currentValue, link);
+    if (scopeRank(storedLink.scope) > scopeRank(link.scope)) {
+      diffLogger.debug(
+        "diff",
+        () =>
+          `[BRANCH_SCOPED_REDIRECT] Following narrower-scope stored link at path=${pathStr} (${link.scope} -> ${storedLink.scope})`,
+      );
+      return normalizeAndDiff(
+        runtime,
+        tx,
+        storedLink.schema === undefined && link.schema !== undefined
+          ? { ...storedLink, schema: link.schema }
+          : storedLink,
+        newValue,
+        context,
+        options,
+        seen,
+      );
+    }
+  }
+
   if (isPrimitiveCellLink(newValue)) {
     diffLogger.debug(
       "diff",
@@ -943,9 +975,64 @@ export function normalizeAndDiff(
       changes.push(...nestedChanges);
     }
 
+    // The scope-narrowing branch at the top of normalizeAndDiff only fires for
+    // keys present in newValue (e.g. populated from a schema default). A
+    // property whose schema declares a narrower scope but arrives with no
+    // value would leave the base-scope slot empty, so later schema-less writes
+    // (e.g. through a handler's cell reference) would land at the base scope
+    // instead of the narrower instance. Eagerly materialize the redirect for
+    // those keys, and exempt them from removal below so an object rewrite that
+    // omits the key can't strip the redirect either. Only the redirect is
+    // written; the narrower-scope instance's content is left untouched.
+    // (resolveSchema, not resolveSchemaForValue: the latter recurses through
+    // property values and diverges on circular values + recursive $ref
+    // schemas; only the top-level property names are needed here.)
+    const eagerScopedKeys = new Set<string>();
+    const resolvedSchema = resolveSchema(link.schema);
+    const schemaProperties = isRecord(resolvedSchema)
+      ? resolvedSchema.properties
+      : undefined;
+    if (isRecord(schemaProperties)) {
+      for (const key in schemaProperties) {
+        if (key in newValue) continue;
+        const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
+        const childScope = declaredCellScope(childSchema);
+        if (
+          childScope === undefined ||
+          scopeRank(childScope) <= scopeRank(link.scope)
+        ) {
+          continue;
+        }
+        const childLink: NormalizedFullLink = {
+          ...link,
+          path: [...link.path, key],
+          schema: childSchema,
+        };
+        const scopedLink: NormalizedFullLink = {
+          ...childLink,
+          scope: childScope,
+        };
+        changes.push(
+          ...normalizeAndDiff(
+            runtime,
+            tx,
+            childLink,
+            createSigilLinkFromParsedLink(scopedLink, {
+              base: childLink,
+            }) as unknown,
+            context,
+            options,
+            seen,
+            currentRecord[key],
+          ),
+        );
+        eagerScopedKeys.add(key);
+      }
+    }
+
     // Handle removed keys
     for (const key in currentRecord) {
-      if (!(key in newValue)) {
+      if (!(key in newValue) && !eagerScopedKeys.has(key)) {
         changes.push({
           location: { ...link, path: [...link.path, key] },
           value: undefined,

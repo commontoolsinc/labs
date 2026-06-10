@@ -25,12 +25,14 @@ export class EmulatedStorageManager extends StorageManager {
   #server?: MemoryV2Server.Server;
 
   static emulate(
-    options: Omit<Options, "address">,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
   ): EmulatedStorageManager {
     return new this(
       {
         ...options,
-        address: new URL("memory://"),
+        // Placeholder: the emulated session factory is loopback and never
+        // resolves a storage address against this.
+        memoryHost: new URL("memory://"),
       },
       () =>
         new MemoryV2Server.Server({

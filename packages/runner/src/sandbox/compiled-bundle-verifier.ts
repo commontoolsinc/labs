@@ -1102,6 +1102,21 @@ function verifyTrustedBuilderCall(
 ): void {
   const measureStart = performance.now();
   try {
+    // multiUserTest is the one builder without a callback: it tags a
+    // descriptor object whose leaves are other trusted-builder results, so
+    // its arguments verify as trusted value expressions.
+    if (builderName === "multiUserTest") {
+      for (const argument of args) {
+        verifyTrustedValueExpression(
+          source,
+          filename,
+          argument.start,
+          argument.end,
+          env,
+        );
+      }
+      return;
+    }
     const callbackIndexes = callbackIndexesForBuilder(
       source,
       builderName,

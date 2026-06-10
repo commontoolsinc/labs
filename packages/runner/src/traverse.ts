@@ -154,23 +154,18 @@ function internSet(
 }
 
 /**
- * Identity tokens for schema objects, used to build memo keys without
- * hashing. Two structurally-equal but distinct schema objects get different
- * tokens — that only costs a cache miss, never correctness. The `WeakMap`
- * never retains the schema.
+ * Memo-key fragment for a schema: `hashSchema()` for objects, small
+ * constants for value-like schemas. The memo gates only admit interned or
+ * deep-frozen schemas, whose structural hash is computed once and
+ * WeakMap-cached by value-hash — so this is an O(1) lookup after first
+ * touch, with no separate token bookkeeping. Structural keying also lets
+ * distinct-but-equal frozen schemas share memo entries, which identity
+ * tokens could not.
  */
-const _schemaTokens = new WeakMap<object, number>();
-let _nextSchemaToken = 1;
-
-function schemaToken(schema: JSONSchema | undefined): string | number {
+function schemaKeyPart(schema: JSONSchema | undefined): string {
   if (schema === undefined) return "u";
   if (typeof schema === "boolean") return schema ? "t" : "f";
-  let token = _schemaTokens.get(schema);
-  if (token === undefined) {
-    token = _nextSchemaToken++;
-    _schemaTokens.set(schema, token);
-  }
-  return token;
+  return hashSchema(schema);
 }
 
 /**
@@ -210,15 +205,16 @@ function pathKey(path: readonly string[]): string {
  * The output is structurally identical to the un-memoized computation
  * (interning only substitutes the canonical instance of an equal schema).
  *
- * Keyed on content (injective `pathKey()` encodings) plus schema identity
- * tokens, in one module-level capped `Map`: callers like
- * `traversePointerWithSchema` mint a fresh selector object per call (only
- * its `schema` is identity-stable), so a cache rooted on selector identity
- * would never hit, and every miss would mint yet another distinct frozen
- * selector for downstream code to full-hash. Memoization requires both
- * schemas to be `isMemoizableSchemaInput` (immutable identities); otherwise
- * the exact un-memoized computation runs. The capped string-keyed `Map`
- * follows the `_combineSchemaCache` precedent for bounding growth.
+ * Keyed on content (injective `pathKey()` encodings) plus cached schema
+ * hashes (`schemaKeyPart()`), in one module-level capped `Map`: callers
+ * like `traversePointerWithSchema` mint a fresh selector object per call
+ * (only its `schema` is identity-stable), so a cache rooted on selector
+ * identity would never hit, and every miss would mint yet another distinct
+ * frozen selector for downstream code to full-hash. Memoization requires
+ * both schemas to be `isMemoizableSchemaInput` (immutable identities, hash
+ * cached after first touch); otherwise the exact un-memoized computation
+ * runs. The capped string-keyed `Map` follows the `_combineSchemaCache`
+ * precedent for bounding growth.
  */
 const _linkHopSelectorCache = new Map<string, SchemaPathSelector>();
 
@@ -235,8 +231,8 @@ function narrowAndCombineSelectorForLink(
   const key = isMemoizableSchemaInput(selector.schema) &&
       isMemoizableSchemaInput(linkSchema)
     ? `${pathKey(selector.path)}|${pathKey(docPath)}|${pathKey(targetPath)}|${
-      schemaToken(selector.schema)
-    }|${schemaToken(linkSchema)}`
+      schemaKeyPart(selector.schema)
+    }|${schemaKeyPart(linkSchema)}`
     : undefined;
   if (key !== undefined) {
     const cached = _linkHopSelectorCache.get(key);

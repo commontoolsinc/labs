@@ -102,6 +102,83 @@ export default pattern(() => {
 - test a sub-pattern before building the next dependent layer when that helps
   isolate failures
 
+## Multi-User Tests
+
+A single-runtime test cannot exercise `PerUser`/`PerSession` scoping or
+cross-client propagation — one runtime is one user and one session. For
+patterns with multi-user behavior, export a `multiUserTest` descriptor as the
+default export instead of a single test pattern. `cf test` then runs each
+participant pattern in its own isolated runtime (own identity, own realm)
+against one shared space on an in-process storage server.
+
+```tsx
+import { action, computed, multiUserTest, pattern } from "commonfabric";
+import Chat, { type ChatOutput } from "./pattern.tsx";
+
+interface Setup {
+  chat: ChatOutput;
+}
+
+// Instantiates the shared state ONCE; every participant runtime runs this
+// same instance (like every browser tab does) and receives its result as
+// the `setup` input.
+export const setup = pattern(() => ({ chat: Chat({}) }));
+
+export const alice = pattern<{ setup: Setup }>(({ setup }) => {
+  const save = action(() => setup.chat.saveProfile.send());
+  const sees_bob = computed(() => /* ... */);
+  return {
+    tests: [
+      { action: save },
+      { label: "alice-saved" }, //  announce a marker
+      { await: "bob-saved" }, //    park until bob announces
+      { assertion: sees_bob },
+    ],
+  };
+});
+
+export const bob = pattern<{ setup: Setup }>(({ setup }) => {
+  /* ... */
+});
+
+export default multiUserTest({ setup, participants: { alice, bob } });
+```
+
+Key points:
+
+- A participant's steps run in order; cross-participant ordering happens
+  ONLY at `{ label: "name" }` / `{ await: "name" }` markers. If every
+  remaining participant is parked on an unannounced marker, the test fails
+  with a deadlock report.
+- Each participant gets its own identity. Use
+  `{ pattern: aliceTab2, user: "alice" }` for a second session of an
+  existing user (PerUser state shared, PerSession state isolated).
+- Assertions retry (with settling) until the step timeout, since asserted
+  state may still be propagating from another runtime — don't assert
+  "other user does NOT see X yet" right after the other user acted; assert
+  stable invariants instead.
+- Pattern outputs a participant asserts on must be computed snapshots that
+  always yield a REAL, STABLE value. In a runtime that didn't write the
+  underlying scoped cell, the cell reads as `undefined` — and a computed that
+  returns `undefined` (or a fresh `[]` per recompute) is indistinguishable
+  from "not yet computed" for cross-runtime readers, so the assertion never
+  settles. Normalize inside the computed (`trimmedName(name.get())`,
+  `cell.get() ?? EMPTY_LIST` with a module-level constant).
+- Read another runtime's arrays with INLINE literal indexing in the assertion
+  computed (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
+  indexing, and module-level helper calls over the array resolve in the
+  runtime that wrote it but NOT cross-runtime before a local write.
+- A participant cannot read their own never-written `PerUser` array (e.g. an
+  empty rack before joining); assert pre-join isolation via normalized
+  primitives (`myName === ""`) instead.
+- The example to copy:
+  `packages/patterns/cfc-group-chat-demo/multi-user.test.tsx`; for the
+  output-snapshot and inline-read idioms see
+  `packages/patterns/scrabble/multi-user.test.tsx` and
+  `packages/patterns/lunch-poll/multi-user.test.tsx`. The scope model
+  background: `docs/common/patterns/multi-user-patterns.md` and
+  `docs/development/debugging/gotchas/scoped-cell-pitfalls.md`.
+
 ## Testing Time and Randomness
 
 If a pattern uses `safeDateNow()` or `nonPrivateRandom()`, keep the assertions

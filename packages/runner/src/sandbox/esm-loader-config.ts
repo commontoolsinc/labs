@@ -4,11 +4,11 @@
  * persistent-scheduler-state ambient flag: the `Runtime` constructor
  * propagates the explicit option here and reads the effective value back.
  *
- * Unlike that one, the default is seeded from the `CF_ESM_MODULE_LOADER`
- * environment variable, so the ESM loader can be exercised suite-wide (e.g. a
+ * The default is ON: the ESM module-record loader is the production default.
+ * Set `CF_ESM_MODULE_LOADER=0` (or `false`) to opt back into the legacy AMD
+ * bundle loader. The env var also lets the loader be selected suite-wide (e.g. a
  * regression cross-check) without threading the option through every `Runtime`
- * construction. The production default stays OFF (the env var is unset), so this
- * is NOT the flag flip — it only makes the flag toggleable from the environment.
+ * construction.
  */
 
 function readEnvDefault(): boolean {
@@ -16,10 +16,12 @@ function readEnvDefault(): boolean {
     const value = (globalThis as {
       Deno?: { env?: { get(name: string): string | undefined } };
     }).Deno?.env?.get?.("CF_ESM_MODULE_LOADER");
-    return value === "1" || value === "true";
+    // Default ON: the ESM module-record loader is the default loader; opt out
+    // with CF_ESM_MODULE_LOADER=0 (or "false").
+    return value !== "0" && value !== "false";
   } catch {
-    // Env access may be denied (no --allow-env); treat as unset / off.
-    return false;
+    // Env access denied (no --allow-env): use the default (ON).
+    return true;
   }
 }
 

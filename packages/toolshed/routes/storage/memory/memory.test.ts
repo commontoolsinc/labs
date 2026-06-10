@@ -95,7 +95,7 @@ const createRuntime = (identity: Identity, base: URL) =>
     apiUrl: base,
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", base),
+      memoryHost: new URL(base),
     }),
   });
 
@@ -138,7 +138,7 @@ serialTest(
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
     const storageManager = StorageManager.open({
       as: session.as,
-      address: new URL("/api/storage/memory", base),
+      memoryHost: new URL(base),
       spaceIdentity: session.spaceIdentity,
     });
     const runtime = new Runtime({
@@ -180,8 +180,8 @@ serialTest(
   async () => {
     const identity = await Identity.fromPassphrase("memory-route-traffic");
     const server = Deno.serve({ port: 0 }, app.fetch);
-    const address = new URL(
-      `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+    const base = new URL(
+      `http://${server.addr.hostname}:${server.addr.port}`,
     );
     let runtime: Runtime | undefined;
     let storageManager:
@@ -191,10 +191,10 @@ serialTest(
     try {
       storageManager = StorageManager.open({
         as: identity,
-        address,
+        memoryHost: base,
       });
       runtime = new Runtime({
-        apiUrl: new URL(`http://${server.addr.hostname}:${server.addr.port}`),
+        apiUrl: base,
         storageManager,
       });
       const tx = runtime.edit();
@@ -237,7 +237,6 @@ serialTest(
     const identity = await Identity.fromPassphrase("memory-route-persist");
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
-    const address = new URL("/api/storage/memory", base);
     const cause = `memory-toolshed-persist-${Date.now()}`;
     let runtime1: Runtime | undefined;
     let runtime2: Runtime | undefined;
@@ -247,7 +246,7 @@ serialTest(
         apiUrl: base,
         storageManager: StorageManager.open({
           as: identity,
-          address,
+          memoryHost: base,
         }),
       });
       const tx = runtime1.edit();
@@ -263,7 +262,7 @@ serialTest(
         apiUrl: base,
         storageManager: StorageManager.open({
           as: identity,
-          address,
+          memoryHost: base,
         }),
       });
       const reader = runtime2.getCell(identity.did(), cause);

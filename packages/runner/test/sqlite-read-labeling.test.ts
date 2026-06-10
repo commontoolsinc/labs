@@ -56,11 +56,13 @@ describe("labelResultSchema (pure)", () => {
     expect(schema).toBeUndefined();
   });
 
-  it("null-origin column carries the merged label of the db's sources", () => {
-    // An expression / aggregate (COUNT(*), upper(x)) has no single origin. We
-    // can't cheaply know which columns it derives from, so it conservatively
-    // inherits the combined label (the runtime's mergeLabel: union of BOTH
-    // confidentiality and integrity) across every declared labeled column.
+  it("null-origin column unions confidentiality but carries no integrity", () => {
+    // An expression / aggregate (COUNT(*), upper(x)) has no single origin. It
+    // conservatively unions the confidentiality of every declared labeled column
+    // (a sound over-approximation). It carries NO integrity: an aggregate is a
+    // new computed value and inherits no integrity evidence — unioning would let
+    // it falsely claim an atom held by a single column (§8.17.1: meet, never
+    // union; propagation classes pending, conservatively empty). [CT-1668]
     const t = {
       emails: {
         properties: {
@@ -82,7 +84,7 @@ describe("labelResultSchema (pure)", () => {
     const ifc = (schema as Record<string, any>).properties.result.items
       .properties.n.ifc;
     expect([...ifc.confidentiality].sort()).toEqual(["body-secret", "sender"]);
-    expect([...ifc.integrity].sort()).toEqual(["a", "b", "c"]); // union {a,b}∪{b,c}
+    expect(ifc.integrity ?? []).toEqual([]);
   });
 
   it("refuses a query with duplicate output column names (ambiguous label)", () => {

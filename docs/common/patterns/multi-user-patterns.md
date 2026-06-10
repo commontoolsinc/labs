@@ -196,6 +196,17 @@ remember which entry is theirs. For simpler demos where names are immutable and
 unique enough for the domain, a `PerUser<string>` display name plus shared
 records that carry that name can also be acceptable.
 
+Source the display name and avatar from the viewer's **shared profile** rather
+than a free-text field: `wish({ query: "#profile" })` resolves the current
+viewer's profile, and its built-in `[UI]` covers the whole lifecycle (create
+surface when the user has no profile, a picker with inline create when they
+have several). Snapshot the resolved `#profileName` / `#profileAvatar` strings
+into the shared entry on join. See `docs/specs/shared-profile-rosters.md`;
+worked examples: `packages/patterns/profile-group-chat/main.tsx`,
+`packages/patterns/scrabble/scrabble.tsx`,
+`packages/patterns/battleship/multiplayer/lobby.tsx`,
+`packages/patterns/lunch-poll/main.tsx`.
+
 Do not store user DIDs, session ids, or generated ids only to simulate scoped
 visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage
 instance. When comparing object or cell identity, use `equals()` instead of
@@ -306,7 +317,25 @@ inside the child pattern or handler.
 ## Testing Multi-User Behavior
 
 Use pattern tests for deterministic state transitions and browser/integration
-tests for identity behavior.
+tests for identity behavior. A single runtime (or one page that switches
+identities) cannot catch cross-user leaks or fails-to-propagate bugs.
+
+Three escalating options:
+
+1. **Multi-user pattern tests (`cf test`)** — the default for pattern
+   authors. Export a `multiUserTest({ setup, participants })` descriptor;
+   each participant pattern runs in its own isolated runtime against one
+   shared space, coordinating via `{ label }` / `{ await }` markers. See the
+   "Multi-User Tests" section of `docs/common/ai/pattern-testing-guide.md`
+   and the example `packages/patterns/cfc-group-chat-demo/multi-user.test.tsx`.
+2. **Multi-runtime integration harness**
+   (`packages/patterns/integration/multi-runtime-harness.ts`): opens an
+   existing piece in several worker-isolated runtimes (distinct identities,
+   or one identity in two sessions); supports trusted-surface CFC events
+   headlessly. See `cfc-group-chat-demo-multi-runtime.test.ts`.
+3. **Two simultaneous browsers**
+   (`cfc-group-chat-demo-two-browsers.test.ts`): guards the real DOM input
+   binding / event-provenance / login stack.
 
 Expected visibility:
 

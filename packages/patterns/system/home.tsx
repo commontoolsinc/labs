@@ -9,6 +9,7 @@ import {
   Writable,
 } from "commonfabric";
 import FavoritesManager from "./favorites-manager.tsx";
+import Self from "../self.tsx";
 import {
   type CreateProfileEvent,
   submitProfileCreation,
@@ -160,6 +161,10 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
 
   // Child components
   const favoritesComponent = FavoritesManager({});
+  // Private self-model — the "real you" tier (values, neurotype, meaning Q&A),
+  // home-local and never shared. Distinct from the outward profile/personas in
+  // the Profile tab. Owns its own durable cell (seeded via Default<>).
+  const selfComponent = Self({});
   const activeTab = new Writable("spaces").for("activeTab");
 
   return {
@@ -175,8 +180,10 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
             <cf-tab value="spaces">Spaces</cf-tab>
             <cf-tab value="favorites">Favorites</cf-tab>
             <cf-tab value="profile">Profile</cf-tab>
+            <cf-tab value="self">Self</cf-tab>
           </cf-tab-list>
           <cf-tab-panel value="favorites">{favoritesComponent}</cf-tab-panel>
+          <cf-tab-panel value="self">{selfComponent}</cf-tab-panel>
           <cf-tab-panel value="profile">
             <cf-vstack gap="4" style={{ padding: "1rem" }}>
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>

@@ -30,6 +30,39 @@ export const toSpaceWebSocketAddress = (
   return next;
 };
 
+/** Path every memory host serves its storage endpoint under. */
+export const MEMORY_STORAGE_PATH = "/api/storage/memory";
+
+/**
+ * Build the per-space storage-endpoint resolver: a space present in
+ * `spaceHostMap` resolves against that host's base URL, everything else
+ * against `defaultHost`. Host selection lives here, next to the
+ * websocket address builders, so the storage-endpoint join happens in
+ * exactly one place.
+ *
+ * Map entries are validated eagerly so a malformed host fails at
+ * configuration time with the offending space named, not later inside
+ * session creation as a bare `Invalid URL`.
+ */
+export const createStorageAddressResolver = (
+  defaultHost: URL,
+  spaceHostMap?: Record<string, string>,
+): (space: MemorySpace) => URL => {
+  const overrides = new Map<string, URL>();
+  for (const [space, host] of Object.entries(spaceHostMap ?? {})) {
+    try {
+      overrides.set(space, new URL(MEMORY_STORAGE_PATH, host));
+    } catch (cause) {
+      throw new Error(
+        `Invalid spaceHostMap entry for ${space}: "${host}"`,
+        { cause },
+      );
+    }
+  }
+  const fallback = new URL(MEMORY_STORAGE_PATH, defaultHost);
+  return (space) => new URL(overrides.get(space) ?? fallback);
+};
+
 class WebSocketTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -126,7 +159,7 @@ class WebSocketTransport implements MemoryClient.Transport {
 
 export class RemoteSessionFactory implements SessionFactory {
   constructor(
-    private readonly address: URL,
+    private readonly resolveAddress: (space: MemorySpace) => URL,
     private readonly defaultSigner: Signer,
   ) {}
 
@@ -163,7 +196,7 @@ export class RemoteSessionFactory implements SessionFactory {
   async create(space: MemorySpace, signer = this.defaultSigner) {
     const client = await MemoryClient.connect({
       transport: new WebSocketTransport(
-        toSpaceWebSocketAddress(this.address, space),
+        toSpaceWebSocketAddress(this.resolveAddress(space), space),
       ),
     });
     const session = await client.mount(

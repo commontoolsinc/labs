@@ -767,10 +767,12 @@ type ChatOutput = {
 
 ## `group-chat-lobby.tsx`
 
-Multiplayer group chat lobby where users join, pick colors, and enter a shared
-chat room. Uses `navigateTo()` to transition into `group-chat-room.tsx`.
+Multiplayer group chat lobby where users join with their shared profile
+(`wish({ query: "#profile" })` — the wish UI covers profile create/pick) and
+enter a shared chat room. Uses `navigateTo()` to transition into
+`group-chat-room.tsx`.
 
-**Keywords:** multiplayer, chat, lobby, navigateTo
+**Keywords:** multiplayer, chat, lobby, navigateTo, profile, wish
 
 ### Input Schema
 
@@ -788,8 +790,8 @@ interface Message {
 interface User {
   name: string;
   joinedAt: number;
-  color: string;
-  avatarImage?: { url: string };
+  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
+  avatar?: string;
 }
 
 interface LobbyInput {

@@ -2498,6 +2498,25 @@ export type EqualsFunction = (
   b: AnyCell<any> | object | undefined,
 ) => boolean;
 
+/**
+ * Multi-user pattern test descriptor (`cf test`). Export it as the test
+ * file's default export to run each participant pattern in its own isolated
+ * runtime (own identity) against one shared space. The optional `setup`
+ * pattern instantiates shared state once; each participant pattern receives
+ * its result as the `setup` input. Participants coordinate through
+ * `{ label: "name" }` / `{ await: "name" }` entries in their `tests` arrays.
+ * Use `{ pattern, user: "other" }` to run a second session of an existing
+ * user's identity.
+ */
+export interface MultiUserTestDescriptor {
+  setup?: (...args: never[]) => unknown;
+  participants: Record<
+    string,
+    | ((...args: never[]) => unknown)
+    | { pattern: (...args: never[]) => unknown; user?: string }
+  >;
+}
+
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
@@ -2525,6 +2544,14 @@ export declare const table: SqliteTableFunction;
 export declare const cfLink: SqliteCfLinkFunction;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
+/**
+ * Tag a multi-user test descriptor for `cf test` (identity at runtime; a
+ * call expression keeps the descriptor's pattern factories out of the
+ * plain-data hardening that module-level data literals receive).
+ */
+export declare const multiUserTest: <T extends MultiUserTestDescriptor>(
+  descriptor: T,
+) => T;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];

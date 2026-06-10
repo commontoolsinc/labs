@@ -37,6 +37,7 @@ describe("CFC runtime stats", () => {
       cfcDigestInvalidations: 0,
       cfcOutboxFlushes: 0,
       sinkDedupHits: 0,
+      sinkReleaseRejects: 0,
     });
 
     const preparedTx = runtime.edit();
@@ -125,7 +126,6 @@ describe("CFC runtime stats", () => {
     );
 
     const sinkTx = runtime.edit();
-    sinkTx.setCfcEnforcementMode("disabled");
     sinkTx.markCfcRelevant("stats-sink");
     const request = createFrozenRequestSnapshot({
       url: "https://example.com/cfc-runtime-stats",
@@ -151,16 +151,18 @@ describe("CFC runtime stats", () => {
         flushCount++;
       },
     );
+    sinkTx.prepareCfc();
     expect((await sinkTx.commit()).ok).toBeDefined();
     expect(flushCount).toBe(1);
 
     expect(runtime.getCfcStats()).toEqual({
       cfcRelevantTx: 4,
-      cfcPreparedTx: 2,
+      cfcPreparedTx: 3,
       cfcPrepareRejects: 1,
       cfcDigestInvalidations: 1,
       cfcOutboxFlushes: 2,
       sinkDedupHits: 1,
+      sinkReleaseRejects: 0,
     });
   });
 });

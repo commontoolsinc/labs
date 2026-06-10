@@ -15,6 +15,7 @@ describe("sandbox-contract", () => {
       "derive",
       "handler",
       "lift",
+      "multiUserTest",
       "pattern",
     ]);
   });

@@ -512,12 +512,12 @@ const Self = pattern<SelfInput, SelfOutput>(
               <cf-select
                 $value={systemField}
                 items={neurotypeSystemItems}
-                style="min-width: 130px;"
+                style="flex: 0 0 150px;"
               />
               <cf-input
                 $value={resultField}
                 placeholder="e.g. INTJ, 5w4…"
-                style="flex: 1;"
+                style="flex: 1 1 auto; min-width: 0;"
               />
               <cf-button
                 onClick={recordNeurotypeFromForm({

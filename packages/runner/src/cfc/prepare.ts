@@ -1,5 +1,8 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  internSchema,
+  internSchemaAsTaggedHashString,
+} from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import {
   cloneForMutation,
@@ -287,9 +290,11 @@ const writeAuthorizedByReason = (
     return `writeAuthorizedBy requires a trust snapshot at /${path.join("/")}`;
   }
 
-  // Verify against the identity that authored this target's writes, falling
-  // back to the transaction's current identity for writes recorded without one.
-  const identity = targetIdentity ?? tx.getCfcState().implementationIdentity;
+  // Verify against the identity that authored this target's writes. A write
+  // recorded without an active identity stays unattributed (undefined) and
+  // fails closed below; it must not borrow the transaction's current identity
+  // (audit S13).
+  const identity = targetIdentity;
   if (
     Array.isArray(claim) && claim.every((entry) => typeof entry === "string")
   ) {
@@ -1032,13 +1037,23 @@ const unsupportedTrustSensitiveReason = (
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return undefined;
   }
+  // Claims the runner does not implement. A write to a path declaring one must
+  // fail closed rather than be silently ignored (and dropped by schema-merge),
+  // which would give an author no enforcement and no error (audit S10).
   const unsupportedKeys = [
     "projection",
     "collection",
+    "opaque",
+    "passThrough",
+    "recomposeProjections",
+    "combinedFrom",
+    "combinationType",
+    "transformation",
+    "addedIntegrity",
   ] as const;
+  const ifc = schema.ifc as Record<string, unknown>;
   for (const key of unsupportedKeys) {
-    const value = schema.ifc[key];
-    if (value !== undefined) {
+    if (ifc[key] !== undefined) {
       return `unsupported trust-sensitive claim ${key} at /${path.join("/")}`;
     }
   }
@@ -1506,7 +1521,9 @@ const policySchemaMatchesValue = (
   return true;
 };
 
-const wildcardPolicyMatchesValue = (
+// Exported for unit testing of the unresolvable-link fail-closed branch (S17).
+// Not part of the public CFC surface.
+export const wildcardPolicyMatchesValue = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -1529,9 +1546,11 @@ const wildcardPolicyMatchesValue = (
     return policySchemaMatchesValue(schema, linkedValue);
   }
 
-  const link = parseLink(value, { ...target, path: [] });
-  return link?.schema === undefined ||
-    schemasEqualIgnoringWriterBundleIds(schema, link.schema);
+  // The link's target value is unresolvable, so the policy's value condition
+  // cannot be evaluated against real data. The link's embedded schema is
+  // author-controlled and must not be trusted to exclude the policy (audit
+  // S17): fail closed by treating the entry as applying.
+  return true;
 };
 
 const ifcEntryAppliesToAttemptedWrite = (
@@ -1758,8 +1777,10 @@ const verifyInputRequirements = (
       }
     }
 
-    const maxConfidentiality = ifc?.maxConfidentiality ?? [];
-    if (maxConfidentiality.length > 0 && consumed.length > 0) {
+    // undefined means no ceiling; a declared (even empty) ceiling is enforced.
+    // An empty ceiling is "public only": any consumed confidential atom fails.
+    const maxConfidentiality = ifc?.maxConfidentiality;
+    if (maxConfidentiality !== undefined && consumed.length > 0) {
       const ok = consumed.every((read) =>
         (read.label?.confidentiality ?? []).every((value) =>
           maxConfidentiality.some((allowed) => deepEqual(allowed, value))
@@ -1830,6 +1851,23 @@ const verifyExactCopyRequirements = (
     if (sourcePath === undefined) {
       continue;
     }
+    // Only verify a claim whose target path the transaction actually wrote.
+    // Without this gate an untouched entry compares undefined to undefined and
+    // passes vacuously, accepting the claim (and copying its label) unverified.
+    if (
+      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+    ) {
+      continue;
+    }
+    // Array-item (wildcard) exactCopyOf is unsupported: the per-path value
+    // reconstruction matches segments literally, so "*" never resolves against a
+    // concrete write and the comparison would pass vacuously. Fail closed
+    // (audit W2.15).
+    if (entry.path.includes("*") || sourcePath.includes("*")) {
+      return `exactCopyOf under an array wildcard is unsupported at /${
+        entry.path.join("/")
+      }`;
+    }
     const targetValue = writeValueForTarget(tx, {
       ...target,
       path: entry.path,
@@ -1873,6 +1911,56 @@ const derivePersistedLabel = (
         actingPrincipal,
       ),
     ),
+  };
+};
+
+// Integrity atom families that are concrete evidence minted only by trusted
+// runtime code (the InjectionSafe sanitizer, code-identity/provenance minting,
+// the harness prompt-slot binder). Untrusted schema authors must not be able to
+// self-attach them and then satisfy a requiredIntegrity gate or the
+// prompt-injection screen (audit S4). The current-principal claim family
+// (authored-by / represents-principal) is gated separately by
+// currentPrincipalIntegrityReason and intentionally not listed here.
+const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
+  CFC_ATOM_TYPE.InjectionSafe,
+  CFC_ATOM_TYPE.Builtin,
+  CFC_ATOM_TYPE.LinkReference,
+  CFC_ATOM_TYPE.Origin,
+  CFC_ATOM_TYPE.PromptSlotBound,
+  CFC_ATOM_TYPE.PromptSlotInfluence,
+  CFC_ATOM_TYPE.UserSurfaceInput,
+]);
+
+const isRuntimeMintedIntegrityAtom = (atom: unknown): boolean =>
+  isRecord(atom) && typeof atom.type === "string" &&
+  RUNTIME_MINTED_INTEGRITY_ATOM_TYPES.has(atom.type);
+
+/**
+ * Drops runtime-minted evidence atoms from a persisted label's integrity unless
+ * the write was authored by a trusted builtin (the sanitizer, compile cache,
+ * and link/provenance minting all run as builtins). Verified pattern code and
+ * unattributed writes may not mint evidence (audit S4).
+ */
+const gateRuntimeMintedIntegrity = (
+  label: IFCLabel,
+  authoringIdentity: ImplementationIdentity | undefined,
+): IFCLabel => {
+  if (authoringIdentity?.kind === "builtin") {
+    return label;
+  }
+  const integrity = label.integrity;
+  if (integrity === undefined || integrity.length === 0) {
+    return label;
+  }
+  const filtered = integrity.filter((atom) =>
+    !isRuntimeMintedIntegrityAtom(atom)
+  );
+  if (filtered.length === integrity.length) {
+    return label;
+  }
+  return {
+    ...label,
+    integrity: filtered.length > 0 ? filtered : undefined,
   };
 };
 
@@ -1945,6 +2033,7 @@ const derivePersistedLinkLabel = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,
   candidateSchemas: ReadonlyMap<string, JSONSchema>,
+  authoringIdentity: ImplementationIdentity | undefined,
 ): { label?: IFCLabel; reason?: string } => {
   const sourceMetadata = storedMetadataFor(
     tx,
@@ -1988,14 +2077,27 @@ const derivePersistedLinkLabel = (
     ) ?? {},
     pendingSourceLabel,
   );
+  // The source/link-schema integrity is author-influenceable (a link value can
+  // carry a forged link schema or label view). Gate runtime-minted evidence
+  // atoms out of it unless a trusted builtin authored the link write, THEN add
+  // the runtime-minted LinkReference — which is added here, never filtered, and
+  // is the only evidence atom a link write legitimately mints (audit S4 review).
+  const gatedIntegrity = gateRuntimeMintedIntegrity(
+    {
+      integrity: mergeLabelValues(
+        sourceLabel.integrity,
+        linkSchemaLabel.integrity,
+      ),
+    },
+    authoringIdentity,
+  ).integrity;
   const label: IFCLabel = {
     confidentiality: mergeLabelValues(
       sourceLabel.confidentiality,
       linkSchemaLabel.confidentiality,
     ),
     integrity: mergeLabelValues(
-      sourceLabel.integrity,
-      linkSchemaLabel.integrity,
+      gatedIntegrity,
       [linkReferenceIntegrity(input)],
     ),
   };
@@ -2038,6 +2140,15 @@ const ensureSchemaDocument = (
   schemaHash: string,
   schema: JSONSchema,
 ): void => {
+  // Defense in depth: the content address must be the canonical hash of the
+  // schema it names. A mismatch is a programming error in the caller; refuse it
+  // rather than write a self-inconsistent cid: document (audit S5).
+  const actualHash = internSchemaAsTaggedHashString(schema);
+  if (actualHash !== schemaHash) {
+    throw new Error(
+      `cid schema document hash mismatch: claimed ${schemaHash}, actual ${actualHash}`,
+    );
+  }
   const id = `cid:${schemaHash}`;
   // Do not pre-read the content-addressed schema document here. A read-before-
   // write can make otherwise idempotent schema persistence fail with stale-read
@@ -2054,7 +2165,8 @@ const ensureSchemaDocument = (
   });
 };
 
-const loadSchemaDocument = (
+// Exported for unit testing of the read-side content-address verification (S5).
+export const loadSchemaDocument = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   schemaHash: string,
@@ -2071,7 +2183,19 @@ const loadSchemaDocument = (
   if (!isRecord(existing) || existing.value === undefined) {
     throw new Error(`stored schemaHash ${schemaHash} is missing or unreadable`);
   }
-  return existing.value as JSONSchema;
+  const schema = existing.value as JSONSchema;
+  // The cid: document is content-addressed but stored on an unverified write
+  // path that any same-space writer can reach. Re-derive its canonical hash and
+  // reject a value that does not match the address it was loaded from; the
+  // loaded schema drives label derivation for other principals' writes, so a
+  // poisoned schema must not be trusted (audit S5).
+  const actualHash = internSchemaAsTaggedHashString(schema);
+  if (actualHash !== schemaHash) {
+    throw new Error(
+      `cid schema document hash mismatch for ${schemaHash}: content hashes to ${actualHash}`,
+    );
+  }
+  return schema;
 };
 
 export const prepareBoundaryCommit = (
@@ -2082,7 +2206,13 @@ export const prepareBoundaryCommit = (
   const identityForInput = (
     input: WritePolicyInput,
   ): ImplementationIdentity | undefined =>
-    state.writePolicyInputIdentities.get(input) ?? state.implementationIdentity;
+    // Honor the identity captured when the input was recorded, even when that
+    // is undefined. Falling back to the transaction's current identity would
+    // let a write recorded before any identity was set borrow a trusted
+    // identity established later in the same transaction (audit S13). Every
+    // recorded input is registered in this map, so a missing key cannot occur
+    // for a real input; an unattributed write must fail closed.
+    state.writePolicyInputIdentities.get(input);
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,
@@ -2225,18 +2355,43 @@ export const prepareBoundaryCommit = (
         entry.schema,
       ]),
     );
+    const existingConfidentiality = (existing?.labelMap.entries ?? [])
+      .filter((e) => (e.label.confidentiality?.length ?? 0) > 0)
+      .map((e) => ({
+        path: canonicalizeLogicalPath(e.path),
+        confidentiality: e.label.confidentiality as readonly unknown[],
+      }));
     const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
       if (
         !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
       ) {
         return [];
       }
-      const label = derivePersistedLabel(
-        tx,
-        entry.schema,
-        entry.label,
-        mergedSchemaEntryLabels,
+      const derived = gateRuntimeMintedIntegrity(
+        derivePersistedLabel(
+          tx,
+          entry.schema,
+          entry.label,
+          mergedSchemaEntryLabels,
+        ),
+        identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
       );
+      // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
+      // not drop confidentiality the labelMap already carried beyond the schema
+      // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
+      // matching, so a new child entry shadows an ancestor — merge prior
+      // confidentiality from this path AND every ancestor of it, not just an
+      // exact-path match (audit S9, review follow-up). Integrity is left as
+      // derived (freshly gated) — it must not regrow.
+      const prior = existingConfidentiality
+        .filter((e) => isPrefix(e.path, entry.path))
+        .flatMap((e) => e.confidentiality);
+      const label = prior.length > 0
+        ? {
+          ...derived,
+          confidentiality: mergeLabelValues(derived.confidentiality, prior),
+        }
+        : derived;
       return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
         ? [{
           path: entry.path,
@@ -2268,7 +2423,13 @@ export const prepareBoundaryCommit = (
       }
     }
     for (const input of linkWriteInputs) {
-      const result = derivePersistedLinkLabel(tx, input, candidates);
+      const linkIdentity = identityForInput(input);
+      const result = derivePersistedLinkLabel(
+        tx,
+        input,
+        candidates,
+        linkIdentity,
+      );
       if (result.reason !== undefined) {
         reasons.push(result.reason);
         continue;
@@ -2284,12 +2445,18 @@ export const prepareBoundaryCommit = (
         if (!hasLabelValues(entry.label)) {
           continue;
         }
+        // The carried label view is author-influenceable; gate runtime-minted
+        // evidence atoms unless a builtin authored the link write (audit S4
+        // review).
         persistedLabelEntries.push({
           path: [
             ...targetPath,
             ...canonicalizeLogicalPath(entry.path),
           ],
-          label: cloneLabel(entry.label),
+          label: gateRuntimeMintedIntegrity(
+            cloneLabel(entry.label),
+            linkIdentity,
+          ),
         });
       }
     }

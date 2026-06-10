@@ -40,7 +40,12 @@ import type {
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
-import { type Cell, createCell, schemaCellScope } from "./cell.ts";
+import {
+  type Cell,
+  createCell,
+  internCellLinkSchema,
+  schemaCellScope,
+} from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
@@ -220,6 +225,7 @@ export interface CfcRuntimeStats {
   cfcDigestInvalidations: number;
   cfcOutboxFlushes: number;
   sinkDedupHits: number;
+  sinkReleaseRejects: number;
 }
 
 const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
@@ -229,6 +235,7 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcDigestInvalidations: 0,
   cfcOutboxFlushes: 0,
   sinkDedupHits: 0,
+  sinkReleaseRejects: 0,
 });
 
 /**
@@ -590,6 +597,9 @@ export class Runtime {
       onSinkDedupHit: () => {
         this.cfcStats.sinkDedupHits += 1;
       },
+      onSinkReleaseReject: () => {
+        this.cfcStats.sinkReleaseRejects += 1;
+      },
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
@@ -884,7 +894,19 @@ export class Runtime {
         & { cfcLabelView?: CfcLabelView };
       link = cleanLink;
     }
-    if (schema !== undefined) link = { ...link, schema };
+    // Intern the schema so the link carries the canonical deep-frozen
+    // instance: all downstream identity-keyed schema caches (schemaAtPath,
+    // schema-ref memos, SelectorTracker standardization, value-hash) key off
+    // deep-frozen identity and stay cold for mutable schema literals. The
+    // explicit parameter takes precedence; a schema already embedded in the
+    // link (sigil links preserve them through parseLink) is interned too, so
+    // schema-bearing links don't bypass the seam. Note that this deep-freezes
+    // the schema object in place — see `internCellLinkSchema` for the
+    // contract and the proxy exception.
+    const effectiveSchema = schema !== undefined ? schema : link.schema;
+    if (effectiveSchema !== undefined) {
+      link = { ...link, schema: internCellLinkSchema(effectiveSchema) };
+    }
     return createCell(
       this,
       link as NormalizedFullLink,
@@ -925,7 +947,7 @@ export class Runtime {
         space,
         path: [],
         id: asDataURI,
-        schema,
+        schema: internCellLinkSchema(schema),
       },
       tx,
       false,

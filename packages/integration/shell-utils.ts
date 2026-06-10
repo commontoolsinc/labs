@@ -130,6 +130,13 @@ export class ShellIntegration {
     return this.#page!;
   }
 
+  // Browser-level CDP websocket endpoint, for attaching a second CDP client
+  // (e.g. `CdpWorkerProfiler`).
+  wsEndpoint(): string {
+    this.checkIsOk();
+    return this.#browser!.wsEndpoint();
+  }
+
   async newPage(url?: string): Promise<Page> {
     this.checkIsOk();
     const page = await this.#browser!.newPage(url);

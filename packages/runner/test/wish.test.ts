@@ -9,6 +9,10 @@ import { Runtime } from "../src/runtime.ts";
 import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { NAME, UI } from "../src/builder/types.ts";
 import { parseWishTarget, tagMatchesHashtag } from "../src/builtins/wish.ts";
+import {
+  getPatternEnvironment,
+  setPatternEnvironment,
+} from "../src/builder/env.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -2477,6 +2481,70 @@ describe("wish built-in", () => {
           .resolveAsCell()
           .getRaw(),
       ).toBeUndefined();
+    });
+
+    it("fetches the profile-create pattern from the pattern environment apiUrl set after module load", async () => {
+      // Regression test: the sidecar pattern URLs (profile-create / picker /
+      // suggestion) must be resolved when the fetch happens, not at module
+      // import. In the browser worker, wish.ts is imported before the runtime
+      // calls setPatternEnvironment with the real API URL; a module-load-time
+      // const captures the default (the worker's own origin, i.e. the frontend
+      // server), whose SPA fallback serves index.html instead of the pattern.
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-create-fetch-url",
+        undefined,
+        tx,
+      );
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const recordedUrls: string[] = [];
+      const originalFetch = globalThis.fetch;
+      const originalEnvironment = getPatternEnvironment();
+      setPatternEnvironment({ apiUrl: new URL("https://pattern-env.test/") });
+      globalThis.fetch = ((input: Request | URL | string) => {
+        recordedUrls.push(
+          input instanceof Request ? input.url : String(input),
+        );
+        return Promise.resolve(new Response("not found", { status: 404 }));
+      }) as typeof fetch;
+
+      try {
+        const wishPattern = pattern(() => ({
+          profile: wish({ query: "#profile" }),
+        }));
+        const resultCell = runtime.getCell<Record<string, any>>(
+          patternSpace.did(),
+          "wish-profile-create-fetch-url-result",
+          undefined,
+          tx,
+        );
+        const result = runtime.run(tx, wishPattern, {}, resultCell);
+        await tx.commit();
+        tx = runtime.edit();
+
+        await result.pull();
+
+        // The missing-profile UI kicks off a deferred profile-create fetch.
+        const expectedUrl =
+          "https://pattern-env.test/api/patterns/system/profile-create.tsx";
+        const deadline = Date.now() + 5_000;
+        while (
+          !recordedUrls.includes(expectedUrl) && Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(recordedUrls).toContain(expectedUrl);
+      } finally {
+        globalThis.fetch = originalFetch;
+        setPatternEnvironment(originalEnvironment);
+        await runtime.idle();
+      }
     });
 
     it("searches home default profile elements for hashtag wishes with profile scope", async () => {

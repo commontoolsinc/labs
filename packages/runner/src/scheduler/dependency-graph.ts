@@ -225,7 +225,10 @@ export function backfillDependentsForNewWrites(
   writer: Action,
   writes: readonly IMemorySpaceAddress[],
 ): void {
-  if (writes.length === 0) return;
+  // Caller must ensure writes is non-empty.
+  if (writes.length === 0) {
+    throw new Error("backfillDependentsForNewWrites requires non-empty writes");
+  }
   const readers = new Set<Action>();
   for (const write of writes) {
     for (const action of state.triggerIndex.collectReadersForWrite(write)) {

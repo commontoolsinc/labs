@@ -29,7 +29,7 @@ const runtime = new Runtime({
   apiUrl: new URL(env.API_URL),
   storageManager: StorageManager.open({
     as: identity,
-    address: new URL("/api/storage/memory", env.API_URL),
+    memoryHost: new URL(env.API_URL),
   }),
   experimental: {
     modernCellRep: env.EXPERIMENTAL_MODERN_CELL_REP,

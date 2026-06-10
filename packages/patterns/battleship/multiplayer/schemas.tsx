@@ -61,6 +61,8 @@ import { createEmptyGrid } from "../shared/index.tsx";
 
 export interface PlayerData {
   name: string;
+  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
+  avatar?: string;
   ships: Ship[];
   color: string;
   joinedAt: number;
@@ -126,8 +128,9 @@ export function trimmedName(value: string | undefined): string {
 // ============ PATTERN INPUT/OUTPUT TYPES ============
 
 /**
- * Shared match state is per-space; viewer identity and join-form text are
- * scoped separately so the entry pattern does not need a navigation lobby.
+ * Shared match state is per-space; viewer identity is scoped per user. The
+ * join name/avatar come from the viewer's shared profile (resolved via
+ * `wish({ query: "#profile" })` in the lobby), so there is no join-form text.
  */
 export interface LobbyState {
   gameName?: PerSpace<string | Default<"Battleship">>;
@@ -137,7 +140,6 @@ export interface LobbyState {
   gameState?: PerSpace<GameStateCell>;
   myName?: PerUser<PlayerNameCell>;
   myPlayerNumber?: PerUser<PlayerNumberCell>;
-  joinName?: PerSession<PlayerNameCell>;
 }
 
 /**

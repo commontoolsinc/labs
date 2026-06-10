@@ -25,7 +25,11 @@ classification lattice
 
 Labels join by **union with structural dedup** (`deepEqual`), and confidentiality
 is checked by "every atom in the label fits under the destination's
-`maxConfidentiality` ceiling." Async effects already declare a **write policy**
+`maxConfidentiality` ceiling." This flat representation is the all-singleton
+degenerate case of the CFC spec's CNF algebra (every atom an independent
+conjunctive clause; the subset ceiling check is CFC spec §8.10.3's clause
+subsumption restricted to singletons) — the clause-aware migration path is CFC
+spec §18.5. Async effects already declare a **write policy**
 before committing side effects via the sink-request mechanism
 ([`packages/runner/src/cfc/sink-request.ts`](../../../packages/runner/src/cfc/sink-request.ts)),
 which is the seam SQLite writes will use.
@@ -129,26 +133,38 @@ sender, and all recipients — constructed from row data, e.g.
 static schema label; it must be computed from the row's values at write time and
 re-derived at read time.
 
+**"To the user, the sender, and all recipients" means *any-of*** — one
+OR-clause `[[sender ∨ recipients ∨ owner]]` in CFC terms (an authored
+disjunction, CFC spec §3.1.8), written `any(...)` in the rule surface. Under
+the runner's current flat **conjunctive** lowering the same atom set means
+*all-of*: a row fits only a ceiling listing every participant, so per-user
+views return nothing. The surface keeps the two combinators explicit — `all(...)`
+(conjunctive clauses, implementable today) and `any(...)` (one OR-clause,
+**errors at `table()` time** until the clause-aware label profile lands, CFC
+spec §18.5.3) — so the wrong semantics is never shipped silently.
+
 Proposed surface: a **row-label rule** on the table schema that maps row fields
 to label atoms. It is a declarative projection (so it can run on the server
-during the commit and during reads) rather than arbitrary pattern code:
+during the commit and during reads) rather than arbitrary pattern code (full
+helper set and AST: [plans/cfc-phase3-per-row.md](./plans/cfc-phase3-per-row.md) §4–§5):
 
 ```tsx
+const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
 const EmailRowSchema = table(
   {
     id: "integer",
     from_email: "text",
-    to_emails: "text", // JSON array of addresses
+    to_emails: "text", // dirty "Name <addr>, addr" list; regex splits it
     body: "text",
   },
-  {
-    // Per-row confidentiality derived from row fields.
-    rowConfidentiality: (row) => [
-      principal(row.from_email),          // "did:mailto:" + from_email
-      ...jsonArray(row.to_emails).map(principal),
-      currentUserPrincipal(),             // resolves to the viewing/owning user
-    ],
-  },
+  (f) => ({
+    // Per-row confidentiality derived from row fields: one OR-clause.
+    confidentiality: any(
+      principal("mailto", match(f.from_email, ADDR)),
+      principal("mailto", match(f.to_emails, ADDR)),
+      dbOwner(),                          // the mailbox owner, from the db ref
+    ),
+  }),
 );
 ```
 
@@ -160,13 +176,21 @@ Semantics:
   it would exceed the destination ceiling or fail required integrity.
 - **On read**, the same rule re-derives each row's label from its column values,
   and the row's cell label is the **join** of the per-column labels and the
-  per-row label. Rows the reader is not cleared for are filtered (or the query
-  fails closed), per the standard confidentiality check.
-- The rule must be a **pure projection over the row's own fields** (plus
-  runtime-resolved principals like `currentUserPrincipal()`), so it is
-  evaluable both server-side at commit and client-side at read without running
-  pattern code. Helpers like `principal(field)` compile to
-  `"did:mailto:" + field` (or `did:key:` etc. by helper variant).
+  per-row label. When a row's label exceeds what the result may carry, the query
+  **fails closed by default**; dropping the offending rows (`onExceed: "skip"`)
+  is a declared opt-in, because skipping releases one row-presence bit per
+  withheld row — it requires the table's policy to permit that existence
+  release and the skips to be auditable (Q17, adjudicated as CFC spec §8.17.2
+  and invariant 14). Skip never applies to aggregates.
+- The rule must be a **pure projection over the row's own fields** (plus fixed
+  db properties like `dbOwner()`), so it is evaluable both server-side at
+  commit and client-side at read with the **same** result. The acting-principal
+  placeholder is deliberately not a rule term — re-derived at read time it
+  would resolve to the *reader*, placing every reader into an `any(...)`
+  clause; it belongs in the result's declared ceiling instead (CFC spec
+  §8.17.3). Helpers like `principal("mailto", term)` compile to
+  `"did:mailto:" + v` per extracted value (or `did:key:` etc. by protocol
+  argument).
 
 ## Why this stays declarative
 

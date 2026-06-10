@@ -2,7 +2,11 @@
  * Multiplayer Free-for-All Scrabble
  *
  * Shared board, bag, scoreboard, and event log are scoped to the space. Each
- * user's name, rack, and unsubmitted board tiles are scoped per user.
+ * user's name, rack, and unsubmitted board tiles are scoped per user. The
+ * viewer's name and avatar come from their shared profile
+ * (`wish({ query: "#profile" })`): the wish's built-in UI lets them pick an
+ * existing profile or create a new one, and joining snapshots the resolved
+ * values into the shared player roster.
  */
 
 import {
@@ -18,6 +22,7 @@ import {
   safeDateNow,
   Stream,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -36,6 +41,8 @@ export interface PlacedTile {
 
 export interface Player {
   name: string;
+  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
+  avatar?: string;
   color: string;
   score: number;
   joinedAt: number;
@@ -318,7 +325,6 @@ export interface GameInput {
   rack?: PerUser<RackCell>;
   placed?: PerUser<PlacedCell>;
   myName?: PerUser<NameCell>;
-  joinName?: PerSession<NameCell>;
   message?: PerSession<MessageCell>;
 }
 
@@ -609,6 +615,7 @@ function returnedLetters(tiles: readonly PlacedTile[]): Letter[] {
 
 function joinPlayerByName(
   nameInput: string | undefined,
+  avatar: string,
   myName: NameCell,
   rack: RackCell,
   placed: PlacedCell,
@@ -621,7 +628,7 @@ function joinPlayerByName(
 ): boolean {
   const name = trimmedName(nameInput);
   if (!name) {
-    message.set("Enter your name to join.");
+    message.set("Set up a profile to join.");
     return false;
   }
 
@@ -661,6 +668,7 @@ function joinPlayerByName(
   const drawn = drawTilesFromBag(currentBag, currentIndex, 7);
   const player: Player = {
     name,
+    avatar: (avatar ?? "").trim(),
     color: getRandomColor(existingPlayers.length),
     score: 0,
     joinedAt: safeDateNow(),
@@ -681,10 +689,13 @@ function joinPlayerByName(
   return true;
 }
 
+// Join with the viewer's resolved profile. `name`/`avatar` arrive as plain
+// strings (named `computed` values auto-unwrap as handler state).
 const joinGameHandler = handler<
   void,
   {
-    joinName: NameCell;
+    name: string;
+    avatar: string;
     myName: NameCell;
     rack: RackCell;
     placed: PlacedCell;
@@ -698,7 +709,8 @@ const joinGameHandler = handler<
 >((
   _event,
   {
-    joinName,
+    name,
+    avatar,
     myName,
     rack,
     placed,
@@ -710,8 +722,9 @@ const joinGameHandler = handler<
     message,
   },
 ) => {
-  const joined = joinPlayerByName(
-    joinName.get(),
+  joinPlayerByName(
+    name,
+    avatar,
     myName,
     rack,
     placed,
@@ -722,7 +735,6 @@ const joinGameHandler = handler<
     gameEvents,
     message,
   );
-  if (joined) joinName.set("");
 });
 
 const joinWithNameHandler = handler<
@@ -744,6 +756,7 @@ const joinWithNameHandler = handler<
 ) => {
   joinPlayerByName(
     name,
+    "",
     myName,
     rack,
     placed,
@@ -1091,6 +1104,13 @@ const submitTurn = handler<
   );
 });
 
+// Stable empty fallbacks for the output snapshots below — fresh `[]` per
+// recompute would make the computed results non-idempotent.
+const EMPTY_TILES: PlacedTile[] = [];
+const EMPTY_LETTERS: Letter[] = [];
+const EMPTY_PLAYERS: Player[] = [];
+const EMPTY_EVENTS: GameEvent[] = [];
+
 const ScrabbleGame = pattern<GameInput, GameOutput>(
   (
     {
@@ -1103,11 +1123,30 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       rack,
       placed,
       myName,
-      joinName,
       message,
     },
   ) => {
     const cellWithGap = CELL_SIZE + 2;
+
+    // Resolve THIS viewer's shared profile. The `#profile` wish's built-in UI
+    // covers the whole lifecycle: a create surface when the viewer has no
+    // profile, a link when they have one, and a picker (with inline create)
+    // when they have several. The field targets give the snapshot strings.
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+
+    const profileName = computed(() => profileNameWish.result ?? "");
+    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+    const hasProfile = computed(() =>
+      (profileNameWish.result ?? "").trim() !== ""
+    );
+    const joinLabel = computed(() =>
+      hasProfile ? `Join as ${profileName}` : "Create a profile to join"
+    );
+
     const joined = computed(() =>
       players.get().some((player) => player.name === trimmedName(myName.get()))
     );
@@ -1117,7 +1156,8 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       rack.get().map((letter, index) => ({ ...letter, index }))
     );
     const joinGame = joinGameHandler({
-      joinName,
+      name: profileName,
+      avatar: profileAvatar,
       myName,
       rack,
       placed,
@@ -1210,13 +1250,17 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                       width: "min(420px, 100%)",
                     }}
                   >
-                    <cf-input
-                      $value={joinName}
-                      placeholder="Your name"
-                      timing-strategy="immediate"
-                      style="flex: 1;"
-                    />
-                    <cf-button onClick={joinGame}>Join</cf-button>
+                    {
+                      /* Built-in profile UI: create a profile when there is
+                        none, pick between existing profiles otherwise. */
+                    }
+                    <div style={{ flex: 1 }}>{profileWish[UI]}</div>
+                    <cf-button
+                      onClick={joinGame}
+                      disabled={computed(() => !hasProfile)}
+                    >
+                      {joinLabel}
+                    </cf-button>
                   </div>
                 )}
             </div>
@@ -1503,8 +1547,12 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                     : "3px solid transparent",
                 }}
               >
-                <div style={{ fontWeight: 700 }}>
-                  {getInitials(player.name)}
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <cf-avatar
+                    src={player.avatar}
+                    name={player.name}
+                    size="sm"
+                  />
                 </div>
                 <div
                   style={{
@@ -1540,15 +1588,21 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
           </aside>
         </div>
       ),
-      myName,
-      board,
-      bag,
-      bagIndex,
-      players,
-      gameEvents,
-      rack,
-      placed,
-      message,
+      // Output snapshots readable from OTHER runtimes (multi-user tests,
+      // remote viewers): raw scoped cells read as undefined in runtimes that
+      // didn't write them, and a computed that RETURNS undefined is
+      // indistinguishable from "not yet computed" for cross-runtime readers —
+      // so every snapshot yields a real, stable value (the shared EMPTY
+      // constants keep the fallback idempotent across recomputes).
+      myName: computed(() => trimmedName(myName.get())),
+      board: computed(() => board.get() ?? EMPTY_TILES),
+      bag: computed(() => bag.get() ?? EMPTY_LETTERS),
+      bagIndex: computed(() => bagIndex.get() ?? 0),
+      players: computed(() => players.get() ?? EMPTY_PLAYERS),
+      gameEvents: computed(() => gameEvents.get() ?? EMPTY_EVENTS),
+      rack: computed(() => rack.get() ?? EMPTY_LETTERS),
+      placed: computed(() => placed.get() ?? EMPTY_TILES),
+      message: computed(() => message.get() ?? ""),
       joinGame,
       joinWithName,
       placeTile,

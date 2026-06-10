@@ -91,6 +91,8 @@ export function filter(
       const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
         tx.getCfcState().implementationIdentity,
         "filter",
+        undefined,
+        argumentUsage,
       );
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.

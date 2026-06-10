@@ -50,6 +50,18 @@ class MockRuntimeClient {
     return Promise.resolve(this.slugByPageId.get(pageId));
   }
 
+  /** Records every (pageId, runIt) pair so tests can assert which calls START
+   * the piece (CT-1623: name listings must not start every piece). */
+  getPageCalls: Array<{ pageId: string; runIt: boolean | undefined }> = [];
+
+  getPage(
+    pageId: string,
+    runIt?: boolean,
+  ): Promise<{ id: () => string }> {
+    this.getPageCalls.push({ pageId, runIt });
+    return Promise.resolve({ id: () => pageId });
+  }
+
   dispose(): Promise<void> {
     return Promise.resolve();
   }
@@ -266,5 +278,91 @@ describe("RuntimeInternals", () => {
       trustSnapshot: null,
     });
     expect(withoutTrust.trustSnapshot).toBeUndefined();
+  });
+
+  // CT-1623: starting a piece is expensive (pattern instantiation + eager
+  // dependency collection in the worker). Read-only consumers like the header
+  // pieces menu must be able to resolve page handles WITHOUT starting, and a
+  // non-started cache entry must not block a later display-path start.
+  describe("getPattern start semantics", () => {
+    const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-pattern" as DID;
+
+    async function makeRuntime() {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(
+        client as any,
+        spaceDid,
+        undefined,
+        false,
+        spaceDid,
+      );
+      return { client, runtime };
+    }
+
+    it("starts by default (display path)", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("does not start when start: false (name listings)", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1", { start: false });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: false },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("upgrades a non-started cache entry when a starting caller asks", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1", { start: false });
+        await runtime.getPattern("piece-1");
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: false },
+          { pageId: "piece-1", runIt: true },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("serves started entries from cache for both kinds of callers", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1", { start: false });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("serves repeated non-started requests from cache", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1", { start: false });
+        await runtime.getPattern("piece-1", { start: false });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: false },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
   });
 });
