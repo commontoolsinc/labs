@@ -118,7 +118,7 @@ function normalizeColumn(name: string, spec: ColumnSpec): ColumnSchema {
  * a per-row CFC label as a pure projection over the row's columns (CFC Phase
  * 3); it is built + validated eagerly — a malformed rule throws here, at
  * definition time — and serializes onto the schema as `rowLabel` (see
- * `row-label.ts` and docs/specs/sqlite-builtin/plans/cfc-phase3-per-row.md).
+ * `row-label.ts` and docs/specs/sqlite-builtin/06-cfc.md).
  */
 export function table<C extends Record<string, ColumnSpec>>(
   columns: C,
