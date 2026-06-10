@@ -17,9 +17,10 @@ const envDefault: boolean = (() => {
     const v = (globalThis as {
       Deno?: { env?: { get(name: string): string | undefined } };
     }).Deno?.env?.get?.("CF_ESM_MODULE_LOADER");
-    return v === "1" || v === "true";
+    // Mirror readEnvDefault: ON by default unless explicitly "0"/"false".
+    return v !== "0" && v !== "false";
   } catch {
-    return false;
+    return true;
   }
 })();
 
