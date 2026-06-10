@@ -17,11 +17,85 @@ import {
 
 interface ColumnIfc {
   maxConfidentiality?: readonly unknown[];
+  confidentiality?: readonly unknown[];
 }
 type Tables = Record<
   string,
   { properties?: Record<string, { ifc?: ColumnIfc }> } | undefined
 >;
+
+/** Any column anywhere declares a read-label or a write-ceiling. */
+function dbDeclaresAnyLabel(tables: Tables): boolean {
+  return Object.values(tables).some((t) =>
+    Object.values(t?.properties ?? {}).some((c) =>
+      (c?.ifc?.maxConfidentiality !== undefined) ||
+      ((c?.ifc?.confidentiality?.length ?? 0) > 0)
+    )
+  );
+}
+
+/** A bound-paramless RHS token that stores no column-derived data. */
+function rhsIsLiteral(rhs: string): boolean {
+  const t = rhs.replace(/;\s*$/, "").trim();
+  return t === "" ||
+    /^''$/.test(t) || // blanked string literal
+    /^[-+]?\d+(\.\d+)?$/.test(t) || // numeric literal
+    /^(null|true|false)$/i.test(t) || // keyword literal
+    t === "?"; // positional param (handled by the param path)
+}
+
+/**
+ * Whether a write with no bound params moves column-derived data into a stored
+ * position — `INSERT…SELECT`, or `UPDATE col = <column expr>`. Such a write
+ * relabels data past a destination column's declared label and cannot be
+ * attributed without bound params, so a labeled db must fail closed on it
+ * (audit S6). Literal-only INSERT/UPDATE and DELETE store no column data.
+ * Sound over-approximation: any non-literal RHS counts as a column reference.
+ */
+function paramlessRelabelRisk(blanked: string): boolean {
+  const kw = /^\s*(\w+)/.exec(blanked)?.[1]?.toUpperCase();
+  if (kw === "DELETE") return false;
+  if (kw === "INSERT" || kw === "REPLACE") {
+    return /\bselect\b/i.test(blanked);
+  }
+  if (kw === "UPDATE") {
+    const setIdx = blanked.search(/\bset\b/i);
+    if (setIdx === -1) return true; // unparseable → fail closed
+    let depth = 0;
+    let region = "";
+    for (let i = setIdx + 3; i < blanked.length; i++) {
+      const c = blanked[i];
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      if (
+        depth === 0 &&
+        /^\s*\b(where|returning|from)\b/i.test(blanked.slice(i))
+      ) break;
+      region += c;
+    }
+    if (depth !== 0) return true; // unbalanced → fail closed
+    // Split top-level assignments and inspect each RHS.
+    let d = 0;
+    let current = "";
+    const parts: string[] = [];
+    for (const c of region) {
+      if (c === "(") d++;
+      else if (c === ")") d--;
+      if (c === "," && d === 0) {
+        parts.push(current);
+        current = "";
+      } else current += c;
+    }
+    parts.push(current);
+    for (const part of parts) {
+      const eq = part.indexOf("=");
+      if (eq === -1) continue;
+      if (!rhsIsLiteral(part.slice(eq + 1))) return true;
+    }
+    return false;
+  }
+  return true; // unknown shape → fail closed
+}
 
 /** Returns a violation message, or undefined if the write is within ceiling. */
 export function checkSqliteWriteCeiling(
@@ -31,10 +105,26 @@ export function checkSqliteWriteCeiling(
   /** The confidentiality atoms carried by a bound value ([] if unlabeled). */
   confidentialityOf: (value: unknown) => readonly unknown[],
 ): string | undefined {
-  if (!tables || params === undefined) return undefined;
+  if (!tables) return undefined;
   // Blank string-literals/comments once; both parsers read the same SQL.
   const blanked = blankWriteSql(sql);
   const table = parseWriteTable(sql, blanked);
+
+  // Paramless writes carry no bound values to attribute, so the per-value ceiling
+  // check below has nothing to inspect. A column-to-column flow (INSERT…SELECT,
+  // UPDATE col = col) would still relabel data past a destination column's
+  // declared label. On a labeled db, fail closed for such shapes (audit S6).
+  if (params === undefined) {
+    if (dbDeclaresAnyLabel(tables) && paramlessRelabelRisk(blanked)) {
+      return (
+        "sqlite: a paramless write moves column data on a labeled database " +
+        "(e.g. INSERT…SELECT or UPDATE col = col); its labels cannot be " +
+        "attributed, so it is refused — use positional ? params with an " +
+        "explicit column list, or literal values"
+      );
+    }
+    return undefined;
+  }
 
   const UNRESOLVED =
     "sqlite: a labeled value is bound in a write whose target column cannot be " +
