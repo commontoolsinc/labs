@@ -118,8 +118,10 @@ reachable. Every API used below is exercised elsewhere in the repo:
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
 - `safeDateNow()` for timestamps in handlers —
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
-- `<img src={...}>` avatar rendering —
-  `packages/patterns/group-chat-room.tsx`.
+- avatar rendering from snapshot strings — `<img src={...}>` here for
+  self-containment; production patterns use `<cf-avatar src name>`
+  (`packages/patterns/group-chat-room.tsx`,
+  `packages/patterns/profile-group-chat/main.tsx`).
 
 ```tsx
 import {

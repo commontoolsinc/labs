@@ -109,9 +109,10 @@ const peopleNames = computed(() =>
 ```
 
 The receiver is now an OpaqueRef again; the transformer rewrites the inner
-`.map`. Shipping example:
-`packages/patterns/factory-outputs/lot-watch/main.tsx:1443-1447`
-(definition) consumed at `:2110-2118`.
+`.map`. Shipping example: `packages/patterns/factory-outputs/lot-watch/main.tsx`
+— the hoisted `people` receiver, consumed inside the sightings rows by the
+quick-pick chips
+(`people.map((p) => … setAssignPersonName.send({ name: p.name }))`).
 
 ### C — Local `computed()` bridge inside the row callback
 
