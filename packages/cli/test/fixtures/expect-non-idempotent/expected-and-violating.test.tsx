@@ -1,11 +1,7 @@
 /**
- * Test that exercises a non-idempotent accumulator computation.
- * expectNonIdempotent asserts the idempotency check detects it; the test
- * FAILS if no violation is reported. Detection is deterministic here: the
- * computation reads the log it appends to, so the recheck always writes one
- * more entry than the run it verifies.
- *
- * Run: deno task cf test packages/patterns/test/non-idempotent/accumulator.test.tsx --verbose
+ * expectNonIdempotent: true on a genuinely non-idempotent accumulator
+ * (same shape as packages/patterns/test/non-idempotent/accumulator.test.tsx).
+ * The detected violation satisfies the expectation, so this test must PASS.
  */
 import { computed, pattern, Writable } from "commonfabric";
 
@@ -19,7 +15,6 @@ export default pattern(() => {
     log.set([...current, `${value.get()} at run #${current.length + 1}`]);
   });
 
-  // Trivial assertion: log should have at least one entry after initial run
   const hasEntries = computed(() => log.get().length > 0);
 
   return {
