@@ -18,9 +18,7 @@ import {
 import { type IdentitySeal, identitySeal } from "./identity-seal.ts";
 import {
   registerSeal,
-  sealGlowDelay,
   type SealLivenessClient,
-  sealSpinDelay,
   unregisterSeal,
 } from "./seal-liveness.ts";
 
@@ -222,23 +220,20 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         border-radius: var(--cf-border-radius-full, 9999px);
       }
 
-      /* Always-on, lockstep liveness once verified: the ring slowly rotates and
-        the shimmer sweeps. Both are seeded to a shared epoch (inline
-        animation-delay) so all verified seals move in unison — the "chorus" a
-        forgery can't join. */
-      .badge[data-state="verified"] .aura-ring {
-        animation: cf-aura-spin var(--seal-spin-period, 26s) linear infinite;
-        animation-delay: var(--seal-spin-delay, 0ms);
+      /* Ambient self-motion is gated to :hover so a dense roster stays calm at
+        rest and a seal comes alive when engaged. The cursor sheen (.aura-sheen,
+        above) is the *always-on* part — it reacts to the host cursor anywhere on
+        screen, hovered or not, which is the unforgeable signal. On hover the ring
+        rotates, the shimmer sweeps, and the seal lifts a touch. */
+      .badge[data-state="verified"] .aura:hover .aura-ring {
+        animation: cf-aura-spin 26s linear infinite;
       }
 
-      .badge[data-state="verified"] .aura-glow {
+      .badge[data-state="verified"] .aura:hover .aura-glow {
         opacity: 1;
-        animation: cf-aura-glow var(--seal-glow-period, 7s) linear infinite;
-        animation-delay: var(--seal-glow-delay, 0ms);
+        animation: cf-aura-glow 7s linear infinite;
       }
 
-      /* Hover lifts the seal a touch — a deliberate "this is special" tell that
-        user-space chrome doesn't get. */
       .badge[data-state="verified"] .aura:hover {
         transform: scale(1.04);
         transition: transform 160ms ease-out;
@@ -260,13 +255,12 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .badge[data-state="verified"] .aura-ring,
-        .badge[data-state="verified"] .aura-glow {
+        .badge[data-state="verified"] .aura:hover .aura-ring,
+        .badge[data-state="verified"] .aura:hover .aura-glow {
           animation: none;
         }
-        .badge[data-state="verified"] .aura-glow {
-          opacity: 0.5;
-          background-position: 50% 50%;
+        .badge[data-state="verified"] .aura:hover .aura-glow {
+          opacity: 0;
         }
         .badge[data-state="verified"] .aura:hover {
           transform: none;
@@ -313,11 +307,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   private _resolveGeneration = 0;
 
   // Liveness: whether this seal is currently registered with the shared cursor
-  // controller, and the per-seal animation phases (seeded to the shared epoch
-  // when the seal is derived, so all verified seals move in lockstep).
+  // controller, and the last sheen alpha written (so far-from-cursor frames can
+  // skip redundant style writes).
   private _livenessRegistered = false;
-  private _spinDelay = "0ms";
-  private _glowDelay = "0ms";
   private _lastSheenA = -1;
 
   override connectedCallback(): void {
@@ -347,8 +339,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
   protected override updated(changed: PropertyValues): void {
     super.updated(changed);
-    // Register for cursor sheen only while actually verified + connected; the
-    // shared controller is a no-op under prefers-reduced-motion.
+    // Register for cursor sheen only while actually verified + connected. The
+    // shared controller manages reduced-motion (it won't run the loop while the
+    // user prefers reduced motion, and tears it down live if they enable it).
     const verified = this._state === "verified" && this._seal !== undefined;
     this._setLiveness(verified && this.isConnected);
   }
@@ -405,6 +398,16 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       "--seal-sheen-hue",
       String(Math.round((hue + frameMs * 0.03 + nx * 40 + 360) % 360)),
     );
+  }
+
+  /**
+   * Reset the cursor sheen to nothing. Called by the shared controller when it
+   * stops the loop (e.g. the user enables reduced motion) so the highlight
+   * doesn't freeze mid-glint.
+   */
+  clearSeal(): void {
+    this.style.setProperty("--seal-sheen-a", "0");
+    this._lastSheenA = 0;
   }
 
   private _cleanup(): void {
@@ -487,10 +490,6 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
       const owner = ownerPrincipalFromLabel(view);
       if (owner) {
         this._seal = identitySeal(owner);
-        // Seed the lockstep animation phases to the shared epoch so this seal
-        // joins the chorus in sync with every other verified seal on screen.
-        this._spinDelay = sealSpinDelay();
-        this._glowDelay = sealGlowDelay();
         this._state = "verified";
       } else {
         this._seal = undefined;
@@ -523,11 +522,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     const sealTitle = verified
       ? "Identity verified by the system"
       : "System-rendered identity";
-    // Per-identity hue (tints the shimmer) + lockstep animation phases, supplied
-    // inline so the seeded delays line this seal up with the shared clock.
-    const auraStyle = verified
-      ? `--seal-hue: ${hue}; --seal-spin-delay: ${this._spinDelay}; --seal-glow-delay: ${this._glowDelay};`
-      : "";
+    // Per-identity hue, supplied inline so the hover shimmer is tinted to match
+    // this identity's palette.
+    const auraStyle = verified ? `--seal-hue: ${hue};` : "";
 
     return html`
       <span
