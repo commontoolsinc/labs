@@ -71,10 +71,12 @@ import {
   type LogLevel,
   NotificationType,
   type PageCreateRequest,
+  type PageGetAllRequest,
   type PageGetRequest,
   type PageGetSlugRequest,
   PageGetSpaceDefault as PatternGetSpaceRoot,
   type PageRemoveRequest,
+  type PageSyncedRequest,
   PageResponse,
   type PageStartRequest,
   type PageStopRequest,
@@ -269,10 +271,16 @@ export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
     typeof schema === "object" && schema !== null &&
     Object.keys(schema).length > 0);
 
+type SpaceContext = {
+  pieceManager: PieceManager;
+  cc: PiecesController;
+};
+
 export class RuntimeProcessor {
   private runtime: Runtime;
   private pieceManager: PieceManager;
   private cc: PiecesController;
+  private spaces = new Map<DID, SpaceContext>();
   private apiUrl: URL;
   private space: DID;
   private identity: Identity;
@@ -301,6 +309,7 @@ export class RuntimeProcessor {
     this.runtime = runtime;
     this.pieceManager = pieceManager;
     this.cc = cc;
+    this.spaces.set(space, { pieceManager, cc });
     this.apiUrl = apiUrl;
     this.space = space;
     this.identity = identity;
@@ -451,6 +460,28 @@ export class RuntimeProcessor {
 
   isDisposed(): boolean {
     return this._isDisposed;
+  }
+
+  /**
+   * Resolve the piece context for a space. No space (or the home
+   * space) ⇒ the context built at initialize; any other space lazily
+   * gets its own PieceManager/PiecesController, sharing this worker's
+   * runtime/scheduler/storage (the storage layer is already
+   * multi-space). The per-space session authenticates as the user —
+   * no per-space signer, matching the storage connections.
+   */
+  private getSpaceCtx(space?: DID): SpaceContext {
+    const target = space ?? this.space;
+    let ctx = this.spaces.get(target);
+    if (!ctx) {
+      const pieceManager = new PieceManager(
+        { as: this.identity, space: target },
+        this.runtime,
+      );
+      ctx = { pieceManager, cc: new PiecesController(pieceManager) };
+      this.spaces.set(target, ctx);
+    }
+    return ctx;
   }
 
   handleCellGet(
@@ -677,18 +708,20 @@ export class RuntimeProcessor {
   }
 
   async handleGetSpaceRootPattern(
-    _: PatternGetSpaceRoot,
+    request: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
-    const piece = await this.cc.ensureDefaultPattern();
+    const { cc } = this.getSpaceCtx(request.space);
+    const piece = await cc.ensureDefaultPattern();
     return {
       page: createPageRef(piece.getCell()),
     };
   }
 
   async handleRecreateSpaceRootPattern(
-    _: RecreateSpaceRootPatternRequest,
+    request: RecreateSpaceRootPatternRequest,
   ): Promise<PageResponse> {
-    const piece = await this.cc.recreateDefaultPattern();
+    const { cc } = this.getSpaceCtx(request.space);
+    const piece = await cc.recreateDefaultPattern();
     return {
       page: createPageRef(piece.getCell()),
     };
@@ -699,8 +732,9 @@ export class RuntimeProcessor {
   async handlePageGet(
     request: PageGetRequest,
   ): Promise<PageResponse> {
+    const { pieceManager, cc } = this.getSpaceCtx(request.space);
     const requestedCell = this.runtime.getCellFromEntityId(
-      this.pieceManager.getSpace(),
+      pieceManager.getSpace(),
       { "/": request.pageId },
     );
     await requestedCell.sync();
@@ -711,7 +745,7 @@ export class RuntimeProcessor {
     if (redirect?.overwrite === "redirect") {
       const target = this.runtime.getCellFromLink({
         ...redirect,
-        space: redirect.space ?? this.pieceManager.getSpace(),
+        space: redirect.space ?? pieceManager.getSpace(),
         scope: redirect.scope ?? "space",
       });
       await target.sync();
@@ -727,7 +761,7 @@ export class RuntimeProcessor {
         };
       }
 
-      const cell = await this.cc.manager().get(
+      const cell = await cc.manager().get(
         target,
         request.runIt ?? false,
       );
@@ -736,7 +770,7 @@ export class RuntimeProcessor {
       };
     }
 
-    const cell = await this.cc.manager().get(
+    const cell = await cc.manager().get(
       request.pageId,
       request.runIt ?? false,
     );
@@ -749,8 +783,9 @@ export class RuntimeProcessor {
   async handlePageGetSlug(
     request: PageGetSlugRequest,
   ): Promise<SlugResponse> {
+    const { pieceManager } = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
-      this.pieceManager.getSpace(),
+      pieceManager.getSpace(),
       { "/": request.pageId },
     );
     await cell.sync();
@@ -761,13 +796,15 @@ export class RuntimeProcessor {
   async handlePageRemove(
     request: PageRemoveRequest,
   ): Promise<BooleanResponse> {
-    return { value: await this.cc.remove(request.pageId) };
+    const { cc } = this.getSpaceCtx(request.space);
+    return { value: await cc.remove(request.pageId) };
   }
 
   async handlePageStart(
     request: PageStartRequest,
   ): Promise<BooleanResponse> {
-    await this.cc.start(request.pageId);
+    const { cc } = this.getSpaceCtx(request.space);
+    await cc.start(request.pageId);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
     return { value: true };
@@ -776,21 +813,24 @@ export class RuntimeProcessor {
   async handlePageStop(
     request: PageStopRequest,
   ): Promise<BooleanResponse> {
-    await this.cc.stop(request.pageId);
+    const { cc } = this.getSpaceCtx(request.space);
+    await cc.stop(request.pageId);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
     return { value: true };
   }
 
-  async handlePageGetAll(): Promise<CellResponse> {
-    const piecesCell = await this.pieceManager.getPieces();
+  async handlePageGetAll(request: PageGetAllRequest): Promise<CellResponse> {
+    const { pieceManager } = this.getSpaceCtx(request.space);
+    const piecesCell = await pieceManager.getPieces();
     return {
       cell: createCellRef(piecesCell),
     };
   }
 
-  async handlePageSynced(): Promise<void> {
-    await this.pieceManager.synced();
+  async handlePageSynced(request: PageSyncedRequest): Promise<void> {
+    const { pieceManager } = this.getSpaceCtx(request.space);
+    await pieceManager.synced();
   }
 
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
@@ -1078,9 +1118,9 @@ export class RuntimeProcessor {
       case RequestType.PageStop:
         return await this.handlePageStop(request);
       case RequestType.PageGetAll:
-        return await this.handlePageGetAll();
+        return await this.handlePageGetAll(request);
       case RequestType.PageSynced:
-        return await this.handlePageSynced();
+        return await this.handlePageSynced(request);
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
       case RequestType.SetPullMode:
