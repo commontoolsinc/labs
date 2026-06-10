@@ -151,9 +151,9 @@ const handlers: Record<
     });
     runtime = new Runtime({
       storageManager: storageManager as never,
-      // Same default as single-runtime pattern tests: actions are invoked
-      // directly rather than through the trusted renderer event path.
-      cfcEnforcementMode: "observe",
+      // Same default as single-runtime pattern tests: enforce explicitly
+      // declared `ifc` policies (the production runtime default).
+      cfcEnforcementMode: "enforce-explicit",
       apiUrl: new URL(import.meta.url),
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
     });

@@ -858,10 +858,11 @@ export async function runTestPattern(
     () =>
       new Runtime({
         storageManager,
-        // Pattern-native tests invoke returned action streams directly rather
-        // than through the trusted renderer event path. Keep CFC visible while
-        // avoiding false failures for tests that intentionally bypass the UI.
-        cfcEnforcementMode: options.cfcEnforcementMode ?? "observe",
+        // Match the production runtime default: enforce explicitly declared
+        // `ifc` policies so pattern tests act as a regression net for CFC.
+        // Patterns without CFC annotations are unaffected; tests that need a
+        // laxer mode can pass `cfcEnforcementMode` explicitly.
+        cfcEnforcementMode: options.cfcEnforcementMode ?? "enforce-explicit",
         experimental: experimentalOptionsFromEnv(),
         apiUrl: new URL(import.meta.url),
         errorHandlers: [(error: ErrorWithContext) => runtimeErrors.push(error)],
