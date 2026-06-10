@@ -265,37 +265,73 @@ export class RuntimeInternals extends EventTarget {
    * (CT-1623: starting all pieces on reload cost ~10s of dependency
    * collection, either in the reload wall or on the first interaction).
    *
-   * Cached per id. A cache entry created with `start: false` is upgraded
-   * (re-fetched with start) when a starting caller asks for the same id.
+   * Cached per (space, id). A cache entry created with `start: false`
+   * is upgraded (re-fetched with start) when a starting caller asks for
+   * the same pattern.
+   *
+   * The two-arg form addresses a pattern in another space, served by
+   * the same worker over the same connection. The no-space form is the
+   * home space, unchanged.
    */
   getPattern(
     id: string,
     options?: { start?: boolean },
+  ): Promise<PageHandle<NameSchema>>;
+  getPattern(
+    space: DID,
+    id: string,
+    options?: { start?: boolean },
+  ): Promise<PageHandle<NameSchema>>;
+  getPattern(
+    idOrSpace: string,
+    idOrOptions?: string | { start?: boolean },
+    maybeOptions?: { start?: boolean },
   ): Promise<PageHandle<NameSchema>> {
     this.#check();
+    const hasSpace = typeof idOrOptions === "string";
+    const space = hasSpace ? idOrSpace as DID : undefined;
+    const id = hasSpace ? idOrOptions : idOrSpace;
+    const options = hasSpace ? maybeOptions : idOrOptions as
+      | { start?: boolean }
+      | undefined;
     const start = options?.start ?? true;
-    const cached = this.#patternCache.get(id);
+    const key = this.#patternKey(id, space);
+    const cached = this.#patternCache.get(key);
     if (cached && (cached.started || !start)) {
       return cached.promise;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, start);
+      const page = await this.#client.getPage<NameSchema>(id, start, space);
       if (!page) {
         throw new Error(`Pattern not found: ${id}`);
       }
       return page;
     })();
-    this.#patternCache.set(id, { promise, started: start });
+    this.#patternCache.set(key, { promise, started: start });
     return promise;
   }
 
-  invalidatePattern(id: string): void {
-    this.#patternCache.delete(id);
+  /**
+   * Cache key for a pattern. Always space-qualified so the no-space
+   * (home) form and an explicit `getPattern(homeDid, id)` share one
+   * entry.
+   */
+  #patternKey(id: string, space?: DID): string {
+    return `${space ?? this.#space}:${id}`;
   }
 
-  async refreshPattern(id: string): Promise<PageHandle<NameSchema>> {
-    this.invalidatePattern(id);
-    return await this.getPattern(id);
+  invalidatePattern(id: string, space?: DID): void {
+    this.#patternCache.delete(this.#patternKey(id, space));
+  }
+
+  async refreshPattern(
+    id: string,
+    space?: DID,
+  ): Promise<PageHandle<NameSchema>> {
+    this.invalidatePattern(id, space);
+    return space === undefined
+      ? await this.getPattern(id)
+      : await this.getPattern(space, id);
   }
 
   async getSlugCell(slug: string): Promise<CellHandle<unknown>> {
