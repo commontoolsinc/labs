@@ -1774,8 +1774,10 @@ const verifyInputRequirements = (
       }
     }
 
-    const maxConfidentiality = ifc?.maxConfidentiality ?? [];
-    if (maxConfidentiality.length > 0 && consumed.length > 0) {
+    // undefined means no ceiling; a declared (even empty) ceiling is enforced.
+    // An empty ceiling is "public only": any consumed confidential atom fails.
+    const maxConfidentiality = ifc?.maxConfidentiality;
+    if (maxConfidentiality !== undefined && consumed.length > 0) {
       const ok = consumed.every((read) =>
         (read.label?.confidentiality ?? []).every((value) =>
           maxConfidentiality.some((allowed) => deepEqual(allowed, value))

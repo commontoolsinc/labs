@@ -73,11 +73,10 @@ export const cfcObservationFitsCeiling = (
   confidentiality: readonly unknown[],
   observationMaxConfidentiality: CfcObservationMaxConfidentiality,
 ): boolean => {
-  if (
-    observationMaxConfidentiality === undefined ||
-    observationMaxConfidentiality.length === 0 ||
-    confidentiality.length === 0
-  ) {
+  // undefined means no ceiling. A declared but empty ceiling means "public
+  // only": no confidential atom is permitted. Public data (no confidentiality
+  // atoms) fits any ceiling, including the empty one.
+  if (observationMaxConfidentiality === undefined) {
     return true;
   }
 
