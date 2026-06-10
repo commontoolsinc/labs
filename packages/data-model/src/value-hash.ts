@@ -508,15 +508,27 @@ function hashOfInternal(
     }
 
     case "object": {
-      if (value === null) return NULL_HASH;
+      if (value === null) {
+        return NULL_HASH;
+      }
+
+      const obj = value as object;
+
+      // Even if we don't know that `obj` is deep-frozen, it's okay to look it
+      // up in the cache for same (we just won't find it if it's not
+      // deep-frozen). And doing this lookup first minimizes the number of
+      // checks needed on the fast path.
+      const cached = frozenObjectHashCache.get(obj);
+      if (cached !== undefined) {
+        return cached;
+      }
+
       if (isDeepFrozen(value)) {
-        const obj = value as object;
-        const cached = frozenObjectHashCache.get(obj);
-        if (cached !== undefined) return cached;
         const result = computeHash(value);
         frozenObjectHashCache.set(obj, result);
         return result;
       }
+
       return stringOkay ? computeHashAsString(value) : computeHash(value);
     }
 
