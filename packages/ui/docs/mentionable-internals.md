@@ -7,22 +7,21 @@ passing them to components), see
 
 ## Cell Resolution and `@link` Indirection
 
-Mentionable arrays from `wish()` results contain `@link` references, not
-direct data. Each array entry is a sub-cell (e.g.,
-`/of:parentId/internal/mentionable/0`) that points to the real piece cell
-via indirection.
+Mentionable arrays from `wish()` results contain `@link` references, not direct
+data. Each array entry is a sub-cell (e.g.,
+`/of:parentId/internal/mentionable/0`) that points to the real piece cell via
+indirection.
 
 ### The problem
 
 Without schema information, accessing these sub-cells returns nested
-`CellHandle` objects instead of data. The sub-cell IDs are also unstable
-array paths, not the stable entity IDs needed for LLM tools and link
-resolution.
+`CellHandle` objects instead of data. The sub-cell IDs are also unstable array
+paths, not the stable entity IDs needed for LLM tools and link resolution.
 
 ### The solution: `asSchema()`
 
-UI components that consume mentionable cells must use `.asSchema()` to tell
-the runtime to resolve `@link` indirection before delivering values:
+UI components that consume mentionable cells must use `.asSchema()` to tell the
+runtime to resolve `@link` indirection before delivering values:
 
 ```tsx
 import { MentionableArraySchema } from "../../core/mentionable.ts";
@@ -44,42 +43,40 @@ Without `asSchema()`, `.get()` on array entries returns `CellHandle` objects
 
 ### Resolving stable entity IDs
 
-Sub-cell IDs like `/of:parentId/internal/mentionable/0` are array indices,
-not stable entity references. To get the real piece cell ID, use
-`resolveAsCell()`:
+Sub-cell IDs like `/of:parentId/internal/mentionable/0` are array indices, not
+stable entity references. To get the real piece cell ID, use `resolveAsCell()`:
 
 ```tsx
 const resolved = await subCell.resolveAsCell();
-const stableId = resolved.ref().id;  // e.g., "of:bafyabc123"
+const stableId = resolved.ref().id; // e.g., "of:bafyabc123"
 ```
 
 **Important:** `CellHandle.id()` strips the `of:` prefix, while
-`CellHandle.ref().id` preserves it. Use `.ref().id` when building
-LLM-friendly links (`/of:...` format). Use `.id()` when you need the bare
-CID (e.g., for wiki-link format in `cf-code-editor`).
+`CellHandle.ref().id` preserves it. Use `.ref().id` when building LLM-friendly
+links (`/of:...` format). Use `.id()` when you need the bare CID (e.g., for
+wiki-link format in `cf-code-editor`).
 
 ## Link Formats
 
 The system uses two link formats for mentions, depending on context:
 
-| Format | Example | Used by |
-|--------|---------|---------|
+| Format        | Example                  | Used by                                      |
+| ------------- | ------------------------ | -------------------------------------------- |
 | Markdown link | `[Note](/of:bafyabc123)` | `cf-prompt-input`, LLM dialog, `cf-markdown` |
-| Wiki-link | `[[Note (bafyabc123)]]` | `cf-code-editor`, `note-md.tsx` |
+| Wiki-link     | `[[Note (bafyabc123)]]`  | `cf-code-editor`, `note-md.tsx`              |
 
 ### Markdown links (`/of:...`)
 
-These follow the LLM-friendly link format from `link-types.ts`. Path
-segments are encoded per RFC 6901 (JSON Pointer): `~` becomes `~0`, `/`
-becomes `~1`.
+These follow the LLM-friendly link format from `link-types.ts`. Path segments
+are encoded per RFC 6901 (JSON Pointer): `~` becomes `~0`, `/` becomes `~1`.
 
-`cf-markdown` converts rendered `<a href="/of:...">` elements into
-interactive `<cf-cell-link>` components.
+`cf-markdown` converts rendered `<a href="/of:...">` elements into interactive
+`<cf-cell-link>` components.
 
 ### Wiki-links (`[[Name (id)]]`)
 
-These use bare CIDs without the `of:` prefix. `note-md.tsx` converts them
-to markdown links for display:
+These use bare CIDs without the `of:` prefix. `note-md.tsx` converts them to
+markdown links for display:
 
 ```tsx
 raw.replace(

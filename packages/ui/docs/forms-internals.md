@@ -27,9 +27,9 @@ pattern-author-facing view (usage, create/edit modes, the copy trap), see
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`cf-form` provides `FormContext` to descendant fields via Lit context. On
-submit it validates all fields, flushes buffers to bound cells, and emits
-`cf-submit`. On reset it restores all fields to their initial cell values.
+`cf-form` provides `FormContext` to descendant fields via Lit context. On submit
+it validates all fields, flushes buffers to bound cells, and emits `cf-submit`.
+On reset it restores all fields to their initial cell values.
 
 ## Creating Form-Compatible Components
 
@@ -144,7 +144,8 @@ system just gates when writes flush.
 ### Why FormFieldController instead of a mixin?
 
 Controllers compose better with existing architecture. Components already use
-CellController; FormFieldController layers on top without inheritance complexity.
+CellController; FormFieldController layers on top without inheritance
+complexity.
 
 ### Why deferred buffer initialization?
 
