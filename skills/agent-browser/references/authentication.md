@@ -103,7 +103,7 @@ Handle 2FA with manual intervention:
 
 ```bash
 # Login with credentials
-agent-browser open https://app.example.com/login --headed  # Show browser
+agent-browser --headed open https://app.example.com/login  # Show browser
 agent-browser snapshot -i
 agent-browser fill @e1 "user@example.com"
 agent-browser fill @e2 "password123"
@@ -111,7 +111,7 @@ agent-browser click @e3
 
 # Wait for user to complete 2FA manually
 echo "Complete 2FA in the browser window..."
-agent-browser wait --url "**/dashboard" --timeout 120000
+agent-browser wait --url "**/dashboard"
 
 # Save state after 2FA
 agent-browser state save ./2fa-state.json
