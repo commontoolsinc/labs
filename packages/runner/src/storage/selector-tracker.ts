@@ -61,30 +61,6 @@ const noDefsStandardHash = (schema: Record<string, unknown>): string => {
   return hash;
 };
 
-// cfc.schemaAtPath derivations per (standardized tracked schema, sub-path).
-// Tracked schemas are interned (stable identity) and schemaAtPath is pure for
-// the flags used here, so the derivation can be cached indefinitely.
-const subSchemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
-
-const subSchemaAtPath = (
-  schema: JSONSchema & object,
-  subPath: readonly string[],
-  cfc: ContextualFlowControl,
-): JSONSchema => {
-  let byPath = subSchemaAtPathCache.get(schema);
-  if (byPath === undefined) {
-    byPath = new Map();
-    subSchemaAtPathCache.set(schema, byPath);
-  }
-  const pathKey = subPath.join("\0");
-  let subSchema = byPath.get(pathKey);
-  if (subSchema === undefined) {
-    subSchema = cfc.schemaAtPath(schema, subPath, undefined, false, false);
-    byPath.set(pathKey, subSchema);
-  }
-  return subSchema;
-};
-
 const selectorRefFor = (selector: SchemaPathSelector): string =>
   JSON.stringify([
     selector.path,
@@ -171,9 +147,15 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           continue;
         }
         const subPath = newAddress.path.slice(existingAddress.path.length);
-        const subSchema = typeof existingSchema === "boolean"
-          ? cfc.schemaAtPath(existingSchema, subPath, undefined, false, false)
-          : subSchemaAtPath(existingSchema, subPath, cfc);
+        // Tracked schemas are interned (deep-frozen), so this derivation hits
+        // cfc.schemaAtPath's identity-keyed memo.
+        const subSchema = cfc.schemaAtPath(
+          existingSchema,
+          subPath,
+          undefined,
+          false,
+          false,
+        );
         const sortedSubSchema = SelectorTracker.getStandardSchema(subSchema);
         const sortedSubSchemaHash = typeof sortedSubSchema === "boolean"
           ? sortedSubSchema
