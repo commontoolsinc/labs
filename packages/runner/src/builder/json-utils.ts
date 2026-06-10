@@ -416,14 +416,10 @@ export function moduleToJSON(module: Module) {
     const provenance = module.type === "javascript"
       ? getVerifiedProvenance(implementation)
       : undefined;
-    const implRef = provenance?.symbol
-      ? {
-        $implRef: {
-          identity: provenance.identity,
-          symbol: provenance.symbol,
-        },
-      }
-      : {};
+    const implRefValue = provenance?.symbol
+      ? { identity: provenance.identity, symbol: provenance.symbol }
+      : undefined;
+    const implRef = implRefValue ? { $implRef: implRefValue } : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
     const location = (implementation as { src?: string }).src;
@@ -440,10 +436,25 @@ export function moduleToJSON(module: Module) {
           module.implementationRef,
         )
       : undefined;
+    // Omit the stringified body only when the implementation is resolvable on
+    // load BY THE RUNTIME THAT WILL READ IT — either THIS runtime's identity
+    // index already resolves the `$implRef` (content-addressed), or the legacy
+    // verified-function registry admits it. Provenance is process-global, so
+    // a `$implRef` being PRESENT does not by itself prove the reading runtime
+    // can resolve it: a pattern compiled by a standalone Engine and registered
+    // on another runtime carries `$implRef`, but that runtime's index never saw
+    // the artifact (no `compilePattern`/`registerEvaluatedModules`), so it must
+    // keep the stringified body as the fallback or reload throws. Stringify
+    // whenever NEITHER resolution path applies.
+    const implRefResolvable = implRefValue !== undefined &&
+      frame?.runtime?.patternManager?.artifactFromIdentitySync?.(
+          implRefValue.identity,
+          implRefValue.symbol,
+        ) !== undefined;
     return {
       ...rest,
       ...implRef,
-      ...(module.type === "javascript" &&
+      ...(module.type === "javascript" && !implRefResolvable &&
           admittedImplementation !== implementation
         ? {
           implementation: Function.prototype.toString.call(implementation),
