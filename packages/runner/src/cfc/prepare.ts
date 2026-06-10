@@ -287,9 +287,11 @@ const writeAuthorizedByReason = (
     return `writeAuthorizedBy requires a trust snapshot at /${path.join("/")}`;
   }
 
-  // Verify against the identity that authored this target's writes, falling
-  // back to the transaction's current identity for writes recorded without one.
-  const identity = targetIdentity ?? tx.getCfcState().implementationIdentity;
+  // Verify against the identity that authored this target's writes. A write
+  // recorded without an active identity stays unattributed (undefined) and
+  // fails closed below; it must not borrow the transaction's current identity
+  // (audit S13).
+  const identity = targetIdentity;
   if (
     Array.isArray(claim) && claim.every((entry) => typeof entry === "string")
   ) {
@@ -1032,13 +1034,23 @@ const unsupportedTrustSensitiveReason = (
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return undefined;
   }
+  // Claims the runner does not implement. A write to a path declaring one must
+  // fail closed rather than be silently ignored (and dropped by schema-merge),
+  // which would give an author no enforcement and no error (audit S10).
   const unsupportedKeys = [
     "projection",
     "collection",
+    "opaque",
+    "passThrough",
+    "recomposeProjections",
+    "combinedFrom",
+    "combinationType",
+    "transformation",
+    "addedIntegrity",
   ] as const;
+  const ifc = schema.ifc as Record<string, unknown>;
   for (const key of unsupportedKeys) {
-    const value = schema.ifc[key];
-    if (value !== undefined) {
+    if (ifc[key] !== undefined) {
       return `unsupported trust-sensitive claim ${key} at /${path.join("/")}`;
     }
   }
@@ -1506,7 +1518,9 @@ const policySchemaMatchesValue = (
   return true;
 };
 
-const wildcardPolicyMatchesValue = (
+// Exported for unit testing of the unresolvable-link fail-closed branch (S17).
+// Not part of the public CFC surface.
+export const wildcardPolicyMatchesValue = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -1529,9 +1543,11 @@ const wildcardPolicyMatchesValue = (
     return policySchemaMatchesValue(schema, linkedValue);
   }
 
-  const link = parseLink(value, { ...target, path: [] });
-  return link?.schema === undefined ||
-    schemasEqualIgnoringWriterBundleIds(schema, link.schema);
+  // The link's target value is unresolvable, so the policy's value condition
+  // cannot be evaluated against real data. The link's embedded schema is
+  // author-controlled and must not be trusted to exclude the policy (audit
+  // S17): fail closed by treating the entry as applying.
+  return true;
 };
 
 const ifcEntryAppliesToAttemptedWrite = (
@@ -1758,8 +1774,10 @@ const verifyInputRequirements = (
       }
     }
 
-    const maxConfidentiality = ifc?.maxConfidentiality ?? [];
-    if (maxConfidentiality.length > 0 && consumed.length > 0) {
+    // undefined means no ceiling; a declared (even empty) ceiling is enforced.
+    // An empty ceiling is "public only": any consumed confidential atom fails.
+    const maxConfidentiality = ifc?.maxConfidentiality;
+    if (maxConfidentiality !== undefined && consumed.length > 0) {
       const ok = consumed.every((read) =>
         (read.label?.confidentiality ?? []).every((value) =>
           maxConfidentiality.some((allowed) => deepEqual(allowed, value))
@@ -2082,7 +2100,13 @@ export const prepareBoundaryCommit = (
   const identityForInput = (
     input: WritePolicyInput,
   ): ImplementationIdentity | undefined =>
-    state.writePolicyInputIdentities.get(input) ?? state.implementationIdentity;
+    // Honor the identity captured when the input was recorded, even when that
+    // is undefined. Falling back to the transaction's current identity would
+    // let a write recorded before any identity was set borrow a trusted
+    // identity established later in the same transaction (audit S13). Every
+    // recorded input is registered in this map, so a missing key cannot occur
+    // for a real input; an unattributed write must fail closed.
+    state.writePolicyInputIdentities.get(input);
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,

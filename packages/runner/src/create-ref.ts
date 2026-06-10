@@ -17,8 +17,13 @@ export type EntityId = {
 /**
  * Generates an entity ID.
  *
+ * Derivation inputs must resolve: a Cell with no entityId or an OpaqueRef with
+ * no value throws rather than minting a random substitute, so a derived id never
+ * silently becomes non-deterministic (audit S14). A missing `cause`, by
+ * contrast, deliberately mints a fresh random id.
+ *
  * @param source - The source object.
- * @param cause - Optional causal source. Otherwise a random n is used.
+ * @param cause - Optional causal source. If omitted, a random id is minted.
  */
 export function createRef(
   source: Record<string | number | symbol, any> = {},
@@ -64,11 +69,11 @@ export function createRef(
     if (isOpaqueRef(obj)) {
       const val = obj.export().value;
       if (val == null) {
-        console.error(
-          "[createRef] OpaqueRef has no value — falling back to randomUUID",
-          new Error().stack,
+        // An OpaqueRef feeding a derived id must carry a value; otherwise the
+        // id would silently become non-deterministic (audit S14). Fail closed.
+        throw new Error(
+          "[createRef] OpaqueRef has no value; cannot derive a stable id",
         );
-        return crypto.randomUUID();
       }
       return val;
     }
@@ -82,11 +87,12 @@ export function createRef(
     if (isCell(obj)) {
       const id = obj.entityId;
       if (id == null) {
-        console.error(
-          "[createRef] Cell has no entityId — falling back to randomUUID",
-          new Error().stack,
+        // A Cell referenced from a derived id must have an entityId; otherwise
+        // the id would silently become non-deterministic (audit S14). Fail
+        // closed rather than mint a random substitute.
+        throw new Error(
+          "[createRef] Cell has no entityId; cannot derive a stable id",
         );
-        return crypto.randomUUID();
       }
       return id;
     } else if (Array.isArray(obj)) return obj.map(traverse);

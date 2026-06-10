@@ -36,6 +36,8 @@ export type {
 } from "./types.ts";
 export {
   CFC_ENFORCEMENT_MODES,
+  CFC_ENFORCING_STRICTNESS,
+  cfcEnforcementStrictness,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   isCfcEnforcementMode,
 } from "./types.ts";

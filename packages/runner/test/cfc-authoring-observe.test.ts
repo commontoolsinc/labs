@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { CfcEnforcementMode } from "../src/cfc/mod.ts";
 import { createSchemaTransformerV2 } from "../../schema-generator/src/plugin.ts";
 import {
   asObjectSchema,
@@ -14,13 +15,14 @@ const signer = await Identity.fromPassphrase(
 );
 
 describe("CFC authoring surface trust-sensitive claims", () => {
-  const createRuntime = () => {
+  const createRuntime = (cfcEnforcementMode?: CfcEnforcementMode) => {
     const storageManager = StorageManager.emulate({
       as: signer,
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      ...(cfcEnforcementMode ? { cfcEnforcementMode } : {}),
     });
     return { runtime, storageManager };
   };
@@ -48,10 +50,9 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       },
     });
 
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime("observe");
     try {
       const observeTx = runtime.edit();
-      observeTx.setCfcEnforcementMode("observe");
 
       const observeCell = runtime.getCell(
         signer.did(),
