@@ -9,7 +9,10 @@
  * Identity follows the scrabble idiom:
  * - `users` is a per-space directory of joined participants.
  * - Each viewer's `myName` is per-user; it is set once on join and treated as
- *   immutable thereafter.
+ *   immutable thereafter. The join name/avatar come from the viewer's shared
+ *   profile (`wish({ query: "#profile" })` — its built-in UI covers profile
+ *   create/pick); programmatic callers can still pass an explicit name in the
+ *   `joinAs` event.
  * - The first joiner's name is captured into `adminName` (per-space). They can
  *   add/remove options and reset votes. `isAdmin` is derived, not stored.
  * - Open host takeover: any joined participant can `claimHost`, transferring
@@ -41,11 +44,14 @@ import {
   Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
 export interface User {
   name: string;
+  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
+  avatar?: string;
   color: string;
   joinedAt: number;
 }
@@ -294,13 +300,19 @@ const visitLabel = (wentAt: number): string => {
   }`;
 };
 
+// `profileName`/`profileAvatar` arrive as plain strings resolved from the
+// viewer's shared profile (named `computed` values auto-unwrap as handler
+// state). An explicit `name` in the event (tests, headless drivers) overrides
+// the profile name — and then deliberately skips the profile avatar.
 const joinAs = handler<JoinEvent, {
   users: UsersCell;
   myName: NameCell;
   adminName: NameCell;
-  joinName: NameCell;
-}>(({ name }, { users, myName, adminName, joinName }) => {
-  const trimmed = trimmedName(name ?? joinName.get());
+  profileName: string;
+  profileAvatar: string;
+}>(({ name }, { users, myName, adminName, profileName, profileAvatar }) => {
+  const override = trimmedName(name);
+  const trimmed = override || trimmedName(profileName);
   if (!trimmed) return;
   const current = trimmedName(myName.get());
   if (current) return;
@@ -308,12 +320,12 @@ const joinAs = handler<JoinEvent, {
   if (existing.some((u) => u.name === trimmed)) return;
   const user: User = {
     name: trimmed,
+    avatar: override ? "" : (profileAvatar ?? "").trim(),
     color: colorForIndex(existing.length),
     joinedAt: safeDateNow(),
   };
   users.push(user);
   myName.set(trimmed);
-  joinName.set("");
   if (trimmedName(adminName.get()) === "") {
     adminName.set(trimmed);
   }
@@ -701,7 +713,7 @@ export interface CozyPollInput {
   history?: PerSpace<HistoryEntry[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
-  // joinName + optionDraft are internal form drafts, declared as local
+  // optionDraft etc. are internal form drafts, declared as local
   // per-session cells in the pattern body (parking-coordinator idiom).
 }
 
@@ -753,7 +765,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Internal per-session form drafts — local to each browser session,
     // not exposed as pattern inputs. Uses the scoped-constructor idiom
     // introduced by parking-coordinator (PR #3610).
-    const joinName = Writable.perSession.of<string>("");
     const optionDraft = Writable.perSession.of<string>("");
     // Host's draft for the poll's city (scopes the menu web search).
     const cityDraft = Writable.perSession.of<string>("");
@@ -774,7 +785,32 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // way until a non-host clicks the "Hosted by …" label.
     const claimHostRevealed = Writable.perSession.of<boolean>(false);
 
-    const boundJoin = joinAs({ users, myName, adminName, joinName });
+    // Resolve THIS viewer's shared profile. The `#profile` wish's built-in UI
+    // covers the whole lifecycle: a create surface when the viewer has no
+    // profile, a link when they have one, and a picker (with inline create)
+    // when they have several. The field targets give the snapshot strings.
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+
+    const profileName = computed(() => profileNameWish.result ?? "");
+    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+    const hasProfile = computed(() =>
+      (profileNameWish.result ?? "").trim() !== ""
+    );
+    const joinLabel = computed(() =>
+      hasProfile ? `Join as ${profileName}` : "Create a profile to join"
+    );
+
+    const boundJoin = joinAs({
+      users,
+      myName,
+      adminName,
+      profileName,
+      profileAvatar,
+    });
     const boundClaimHost = claimHost({ myName, adminName });
     const boundAddOption = addOption({
       options,
@@ -1031,18 +1067,21 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     <div
                       style={{
                         display: "flex",
+                        flexDirection: "column",
                         gap: "8px",
-                        alignItems: "center",
                       }}
                     >
-                      <cf-input
-                        $value={joinName}
-                        placeholder="Your name"
-                        aria-label="Your name"
-                        timing-strategy="immediate"
-                        style="flex:1"
-                      />
-                      <cf-button onClick={boundJoin}>Join</cf-button>
+                      {
+                        /* Built-in profile UI: create a profile when there is
+                          none, pick between existing profiles otherwise. */
+                      }
+                      <div>{profileWish[UI]}</div>
+                      <cf-button
+                        onClick={boundJoin}
+                        disabled={computed(() => !hasProfile)}
+                      >
+                        {joinLabel}
+                      </cf-button>
                     </div>
                   </div>
                 )}
