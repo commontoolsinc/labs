@@ -62,9 +62,14 @@ step, and we'll ratchet targets down as we improve.
   (`writersByEntity` is Set-backed), refer() caching (~2x)
 
 **What we don't have:**
-- No measurement of where wall-clock time actually goes in a user-visible flow
 - No breakdown of "pattern load takes Xms: Y% compilation, Z% traversal, ..."
 - No profiling data from real usage
+
+**First flow profiled:** steady-state note creation in the default-app shell
+integration test — see
+[performance/default-app-note-create.md](performance/default-app-note-create.md)
+for the logger + worker-CPU-profile breakdown, the benchmarks derived from it,
+and the ranked optimization candidates.
 
 **What this means:** The optimization backlog below was identified through
 static code analysis — finding provably suboptimal code (O(n) where O(1) is
