@@ -1,27 +1,36 @@
 ---
 name: pattern-ui
-description: Add UI polish with layout and styling
+description: Design and polish pattern UIs with cf- components - theme-first styling via cf-theme, layout with cf-screen/cf-vstack, two-way binding ($value/$checked), and PerSession/PerUser/PerSpace UI-state scoping. Use when styling pattern JSX or writing a UI design doc.
 user-invocable: false
 ---
 
 # UI Polish Phase
 
-Only do this AFTER all logic is verified and tests pass.
+In a build/polish pass, apply this only after logic is verified and tests pass.
+In a design phase (e.g. Pattern Factory ui_design), use this guidance to write
+the UI design document — specify theme, layout composition, and state scoping;
+do not write implementation code.
 
 ## Read First, In Order
 
-- `docs/common/patterns/style.md` - Theme-first UI guidance and design process
+- `docs/common/components/COMPONENTS.md` - Full component reference; consult on
+  demand before assuming a component does or does not exist
+- one vignette story for the closest tone:
+  `packages/patterns/catalog/stories/vignette-recipe-story.tsx` (warm,
+  editorial light) or
+  `packages/patterns/catalog/stories/vignette-finance-story.tsx` (dark,
+  dashboard-style)
+- `docs/common/patterns/style.md` - for deeper rationale behind the theme-first
+  guidance this skill already digests
+
+If needed:
+
 - `docs/common/patterns/ui-cookbook.md` - Themed layout scaffolds and vignette
   references
-- `docs/common/components/COMPONENTS.md` - Full component reference
 - `docs/common/patterns/two-way-binding.md` - $value, $checked bindings
 - `packages/ui/README.md` - Current notes on CSS custom properties and parts
 - `packages/ui/LLM-COMPONENT-INSTRUCTIONS.md` - Agent-oriented component and
   theme system notes
-- `packages/patterns/catalog/stories/vignette-recipe-story.tsx` - warm,
-  editorial light vignette
-- `packages/patterns/catalog/stories/vignette-finance-story.tsx` - dark,
-  dashboard-style vignette
 
 ## Visual Priorities
 
@@ -36,7 +45,8 @@ Aim for:
 
 ## Design Brief Before Coding
 
-Before touching JSX, decide all of the following:
+Before touching JSX (or, in a design phase, as the core of the design doc),
+decide all of the following:
 
 - **Purpose**: What is this interface helping the user do?
 - **Tone**: Pick a concrete direction such as editorial, playful, luxurious,
@@ -85,12 +95,23 @@ Otherwise, prefer it over scattered ad hoc overrides.
   worth naming or an `iframe` / artifact case, not an excuse to guess at
   unsupported structure.
 
-## Available Components
+## Core Layout & Form Set (not exhaustive)
 
 Layout: `cf-theme`, `cf-screen`, `cf-vstack`, `cf-hstack`, `cf-vgroup`,
 `cf-hgroup`, `cf-card`, `cf-vscroll`, `cf-hscroll` Input: `cf-input`,
 `cf-textarea`, `cf-checkbox`, `cf-select` Action: `cf-button`, `cf-chip`
 Display: `cf-label`, `cf-heading`, `cf-badge`, `cf-alert`
+
+Many more exist — `cf-modal`, `cf-tabs`, `cf-table`, `cf-switch`,
+`cf-radio-group`, `cf-slider`, `cf-progress`, `cf-toast`, `cf-avatar`,
+`cf-accordion`, ... — check `docs/common/components/COMPONENTS.md` before
+concluding a component doesn't exist.
+
+If a needed component doesn't exist, name the design-system gap in your output;
+do not create Lit components or use component internals
+(`applyThemeToElement`, `@consume`, shadow selectors) — component authoring is
+the `lit-component` skill's domain, for `packages/ui` work only. In pattern JSX
+the theme is passed as `theme={...}`, not Lit's `.theme=${...}`.
 
 ## Aesthetic Guidance
 
@@ -191,6 +212,10 @@ Use existing production patterns only when you specifically need to understand a
 domain flow, not as the first place to copy styling from.
 
 ## Done When
+
+In a design phase, the artifact is the design doc (`ui-design.md` in the
+factory), not a rendering UI: done when the doc commits to a theme, layout
+composition, and explicit UI-state scoping. In a build/polish pass:
 
 - UI renders correctly
 - Bindings work (typing updates state)
