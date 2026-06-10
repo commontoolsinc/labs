@@ -466,7 +466,9 @@ Deno.test("acl enforce: owner removing their own access still gets the commit re
       "writer must not be revoked before its own response",
     );
 
-    // The next message from Alice's now-unauthorized session is denied.
+    // The writer's session was still dropped from the registry (so it receives
+    // no further pushes without READ): its next message fails closed as an
+    // unknown session.
     const after = await transactSet(
       alice,
       space,
@@ -475,7 +477,7 @@ Deno.test("acl enforce: owner removing their own access still gets the commit re
       { n: 1 },
       2,
     );
-    assertEquals(after.error?.name, "AuthorizationError");
+    assertEquals(after.error?.name, "SessionError");
   } finally {
     await server.close();
   }

@@ -769,20 +769,32 @@ export class Server {
    *  let their already-registered subscriptions receive pushes. The owning
    *  connection gets a session/revoked("unauthorized"), which the client
    *  treats as a terminal session close (no reopen loop — a reopen attempt
-   *  is denied at session.open). `skipSessionId` excludes the session that
-   *  made the triggering ACL write, so it gets that transact's response
-   *  before any revocation (a self-removal otherwise reads as a failure). */
+   *  is denied at session.open). The session that made the triggering ACL
+   *  write (`writerSessionId`) is still dropped from the registry — so it
+   *  receives no further pushes — but is NOT sent the terminal revocation, so
+   *  it gets this transact's response first (a self-removal otherwise reads as
+   *  a failure). Its next message fails closed as an unknown session. */
   #revokeDeauthorizedSessions(
     engine: Engine.Engine,
     space: string,
-    skipSessionId?: string,
+    writerSessionId?: string,
   ): void {
     if (this.#aclMode() !== "enforce") return;
     for (const session of this.#sessions.sessionsForSpace(space)) {
-      if (session.id === skipSessionId) continue;
       const capability = this.#capabilityFor(engine, space, session.principal);
       if (capability !== null && isCapable(capability, "READ")) continue;
+      // Drop the de-authorized session from the registry: the refresh loop
+      // iterates registered sessions, so removal stops all further watch
+      // pushes, and its next message fails closed (Unknown session).
       this.#sessions.remove(space, session.id);
+      if (session.id === writerSessionId) {
+        // The writer's own session — it just removed its own access. Removal
+        // already stopped its pushes and denies its next message; do NOT also
+        // send the terminal session/revoked, which the client treats as
+        // terminal and would turn this transact's successful self-removal into
+        // a reported failure.
+        continue;
+      }
       if (session.ownerConnectionId !== null) {
         this.#connections.get(session.ownerConnectionId)?.revokeSession(
           space,
@@ -1496,10 +1508,10 @@ export class Server {
       }
       if (aclTouched) {
         this.#invalidateAclCapabilities(message.space);
-        // Skip the writing session: it must receive this transact's response
-        // first (the client treats session/revoked as terminal and would
-        // report a successful self-removal as a failure). If the owner removed
-        // their own access, the per-message gate denies their next message.
+        // Pass the writing session so it isn't sent the terminal revocation
+        // before its own transact response (the client treats session/revoked
+        // as terminal). It's still dropped from the registry, so a
+        // self-deauthorized writer receives no further pushes.
         this.#revokeDeauthorizedSessions(
           engine,
           message.space,
