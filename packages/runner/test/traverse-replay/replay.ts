@@ -13,6 +13,7 @@
  *   they exist so benchmarks can attribute wins (e.g. anyOfBranches -80%).
  */
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { SchemaPathSelector } from "../../src/storage/interface.ts";
 import {
@@ -124,7 +125,11 @@ export class FixtureObjectManager implements ObjectStorageManager {
     if (value === undefined) return null;
     const attestation: IAttestation = {
       address: { ...address, path: [] },
-      value: value as Immutable<FabricValue>,
+      // Live storage deep-freezes every doc at the wire-decode boundary
+      // (decodeMemoryBoundary), so frozen corpus values are the faithful
+      // replay shape — without this, frozen-identity fast paths in traverse
+      // can never engage during replay even though they do in production.
+      value: deepFreeze(value) as Immutable<FabricValue>,
     };
     this.attestations.set(key, attestation);
     return attestation;

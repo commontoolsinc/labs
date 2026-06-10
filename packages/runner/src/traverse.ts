@@ -1,5 +1,6 @@
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   hashSchema,
   internSchema,
@@ -173,13 +174,16 @@ function schemaToken(schema: JSONSchema | undefined): string | number {
 }
 
 /**
- * True when a schema input can safely feed an identity-token memo key:
- * value-like (`undefined`/boolean) or interned (canonical and deep-frozen,
- * so the identity can never go stale through later mutation).
+ * True when a schema input can safely feed an identity-keyed memo:
+ * value-like (`undefined`/boolean), interned, or deep-frozen. Frozen
+ * suffices — the identity cannot go stale through later mutation. The
+ * distinction matters on the server: doc values arrive deep-frozen from the
+ * wire-decode boundary, so their embedded link schemas are frozen but never
+ * interned, and an interned-only gate would bypass every seam memo there.
  */
 function isMemoizableSchemaInput(schema: JSONSchema | undefined): boolean {
   return schema === undefined || typeof schema === "boolean" ||
-    isInternedSchema(schema);
+    isInternedSchema(schema) || isDeepFrozen(schema);
 }
 
 /**
@@ -258,11 +262,11 @@ function narrowAndCombineSelectorForLink(
  * returns one interned (canonical, deep-frozen) result per (schema identity,
  * path, marker variant).
  *
- * Only memoizes when `schema` is itself an interned object: interned implies
- * deep-frozen, so the identity key cannot go stale. (`schemaAtPath()` is
- * deterministic — `ContextualFlowControl` carries no instance state — so a
- * module-level cache across cfc instances is sound.) Non-interned input falls
- * back to the exact un-memoized computation.
+ * Only memoizes when `schema` is a memoizable input (interned or deep-frozen
+ * — see `isMemoizableSchemaInput()`), so the identity key cannot go stale.
+ * (`schemaAtPath()` is deterministic — `ContextualFlowControl` carries no
+ * instance state — so a module-level cache across cfc instances is sound.)
+ * Mutable input falls back to the exact un-memoized computation.
  *
  * `markers` selects the `$comment` marker pair `traverseObjectWithSchema`
  * uses to detect properties it should not descend into.
@@ -294,7 +298,7 @@ function schemaAtPathCanonical(
         MISSING_PROPERTY_MARKER,
       )
       : cfc.schemaAtPath(schema, path);
-  if (typeof schema === "boolean" || !isInternedSchema(schema)) {
+  if (typeof schema === "boolean" || !isMemoizableSchemaInput(schema)) {
     return compute();
   }
   let byPath = _schemaAtPathCache.get(schema);
@@ -322,8 +326,9 @@ function schemaAtPathCanonical(
  * scratch. Canonicalizing it once per resolved-schema identity lets those
  * lookups hit the interned-schema hash cache in O(1).
  *
- * Like the other seam memos, only an interned (identity-stable, deep-frozen)
- * `schema` is memoized; otherwise this is exactly the old inline destructure.
+ * Like the other seam memos, only a memoizable (interned or deep-frozen,
+ * hence identity-stable) `schema` is memoized; otherwise this is exactly the
+ * old inline destructure.
  */
 const _restSchemaCache = new WeakMap<
   JSONSchemaObj,
@@ -334,7 +339,7 @@ function combinatorRestSchema(
   schema: JSONSchemaObj,
   keyword: "anyOf" | "oneOf" | "allOf",
 ): JSONSchemaObj {
-  if (!isInternedSchema(schema)) {
+  if (!isMemoizableSchemaInput(schema)) {
     const { [keyword]: _dropped, ...rest } = schema;
     return rest as JSONSchemaObj;
   }
@@ -356,8 +361,9 @@ function combinatorRestSchema(
  * interned result. `$ref` resolution mints a fresh schema per call, which
  * de-canonicalizes the whole subtree below it: every identity-keyed hash
  * cache downstream (memo keys, cycle-tracker keys, pair-merge keys) misses
- * and re-walks. Only memoizes interned (identity-stable, deep-frozen)
- * inputs; the un-memoized fallback is byte-identical to the direct call.
+ * and re-walks. Only memoizes memoizable (interned or deep-frozen, hence
+ * identity-stable) inputs; the un-memoized fallback is byte-identical to
+ * the direct call.
  * `null` records a failed resolution (`undefined` result).
  */
 const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
@@ -365,7 +371,7 @@ const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
 function resolveSchemaRefsCanonical(
   schema: JSONSchemaObj,
 ): JSONSchema | undefined {
-  if (!isInternedSchema(schema)) {
+  if (!isMemoizableSchemaInput(schema)) {
     return ContextualFlowControl.resolveSchemaRefs(schema);
   }
   let cached = _resolvedRefCache.get(schema);
