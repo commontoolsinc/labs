@@ -172,8 +172,14 @@ function deriveNullOriginIfc(tables: LabelTables): IFCLabel | undefined {
       if (ifc && typeof ifc === "object") merged = mergeLabel(merged, ifc);
     }
   }
-  return (merged.confidentiality?.length || merged.integrity?.length)
-    ? merged
+  // Confidentiality unions across contributors (a sound over-approximation: the
+  // aggregate could depend on any column). Integrity does NOT: an aggregate /
+  // expression / literal is a new computed value and inherits no integrity
+  // evidence. Unioning integrity would let it falsely claim an atom held by a
+  // single column (§8.17.1: class-aware meet, never union; propagation classes
+  // pending, so conservatively empty). [CT-1668]
+  return merged.confidentiality?.length
+    ? { confidentiality: merged.confidentiality }
     : undefined;
 }
 

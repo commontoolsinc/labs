@@ -1851,6 +1851,23 @@ const verifyExactCopyRequirements = (
     if (sourcePath === undefined) {
       continue;
     }
+    // Only verify a claim whose target path the transaction actually wrote.
+    // Without this gate an untouched entry compares undefined to undefined and
+    // passes vacuously, accepting the claim (and copying its label) unverified.
+    if (
+      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+    ) {
+      continue;
+    }
+    // Array-item (wildcard) exactCopyOf is unsupported: the per-path value
+    // reconstruction matches segments literally, so "*" never resolves against a
+    // concrete write and the comparison would pass vacuously. Fail closed
+    // (audit W2.15).
+    if (entry.path.includes("*") || sourcePath.includes("*")) {
+      return `exactCopyOf under an array wildcard is unsupported at /${
+        entry.path.join("/")
+      }`;
+    }
     const targetValue = writeValueForTarget(tx, {
       ...target,
       path: entry.path,
@@ -2338,13 +2355,19 @@ export const prepareBoundaryCommit = (
         entry.schema,
       ]),
     );
+    const existingConfidentiality = (existing?.labelMap.entries ?? [])
+      .filter((e) => (e.label.confidentiality?.length ?? 0) > 0)
+      .map((e) => ({
+        path: canonicalizeLogicalPath(e.path),
+        confidentiality: e.label.confidentiality as readonly unknown[],
+      }));
     const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
       if (
         !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
       ) {
         return [];
       }
-      const label = gateRuntimeMintedIntegrity(
+      const derived = gateRuntimeMintedIntegrity(
         derivePersistedLabel(
           tx,
           entry.schema,
@@ -2353,6 +2376,22 @@ export const prepareBoundaryCommit = (
         ),
         identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
       );
+      // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
+      // not drop confidentiality the labelMap already carried beyond the schema
+      // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
+      // matching, so a new child entry shadows an ancestor — merge prior
+      // confidentiality from this path AND every ancestor of it, not just an
+      // exact-path match (audit S9, review follow-up). Integrity is left as
+      // derived (freshly gated) — it must not regrow.
+      const prior = existingConfidentiality
+        .filter((e) => isPrefix(e.path, entry.path))
+        .flatMap((e) => e.confidentiality);
+      const label = prior.length > 0
+        ? {
+          ...derived,
+          confidentiality: mergeLabelValues(derived.confidentiality, prior),
+        }
+        : derived;
       return hasLabelValues(label) || hasPersistedPolicyClaim(entry.schema)
         ? [{
           path: entry.path,
