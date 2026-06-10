@@ -44,6 +44,46 @@ describe("executePieceCallable", () => {
     ]);
   });
 
+  it("drains idle+synced BEFORE dispatching a handler event", async () => {
+    // A handler reads its asCell inputs (e.g. a SqliteDb handle) synchronously
+    // from the local replica, so piece-load watch syncs must be drained before
+    // the event is dispatched — not only after (the post-send awaits cover the
+    // handler's writes, not its inputs).
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "recordMessage",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+
+    const events = harness.tracker.events;
+    const sendIndex = events.indexOf("send");
+    expect(sendIndex).toBeGreaterThan(-1);
+    const beforeSend = events.slice(0, sendIndex);
+    expect(beforeSend).toContain("idle");
+    expect(beforeSend).toContain("synced");
+  });
+
   it("runs tools from schema-derived flags and returns JSON output", async () => {
     const toolPattern: {
       nodes: Array<{ module: string }>;
@@ -598,6 +638,8 @@ function createPieceCallableHarness(options: {
     toolRunPattern: undefined as unknown,
     toolRunInput: undefined as unknown,
     toolResultScope: undefined as string | undefined,
+    // Ordered trace of idle/synced/send calls, for dispatch-ordering tests.
+    events: [] as string[],
   };
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
@@ -635,6 +677,7 @@ function createPieceCallableHarness(options: {
               tx: { status: () => { status: string; error?: Error } },
             ) => void,
           ) => {
+            tracker.events.push("send");
             tracker.handlerWrites.push({
               cellProp: "result",
               path: [options.cellKey],
@@ -706,7 +749,10 @@ function createPieceCallableHarness(options: {
 
   const manager = {
     getSpace: () => "home",
-    synced: async () => {},
+    synced: () => {
+      tracker.events.push("synced");
+      return Promise.resolve();
+    },
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
       storageManager: {
@@ -738,7 +784,10 @@ function createPieceCallableHarness(options: {
           sink: () => () => {},
         };
       },
-      idle: async () => {},
+      idle: () => {
+        tracker.events.push("idle");
+        return Promise.resolve();
+      },
     },
   };
 
