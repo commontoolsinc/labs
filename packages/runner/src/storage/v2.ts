@@ -1161,11 +1161,21 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const normalizedEntries = normalizeSyncEntries(entries);
-    const key = hashStringOf(normalizedEntries.map(([address, selector]) => ({
-      id: address.id,
-      scope: normalizeCellScope(address.scope),
-      selector,
-    })));
+    // Compose the dedup key from per-part hashes instead of hashing a fresh
+    // wrapper object: hashOf's frozen-object cache is only consulted at entry
+    // level, so embedding the (large, already canonical) selector schema in a
+    // fresh wrapper re-walked it on every pull. hashStringOf(schema) hits the
+    // identity cache for frozen schemas and costs one walk for mutable ones.
+    // JSON.stringify escapes every field, so ids/scopes/path segments
+    // containing delimiter characters cannot produce ambiguous keys.
+    const key = JSON.stringify(
+      normalizedEntries.map(([address, selector]) => [
+        address.id,
+        normalizeCellScope(address.scope) ?? null,
+        selector === undefined ? null : selector.path,
+        selector?.schema === undefined ? null : hashStringOf(selector.schema),
+      ]),
+    );
     const existing = this.#syncTasks.get(key);
     if (existing) {
       return await existing.promise;

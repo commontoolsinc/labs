@@ -34,6 +34,17 @@ export {
 
 type IFCAtom = ImmutableJSONValue;
 
+// schemaAtPath derivations per deep-frozen schema identity. The derivation is
+// pure given (schema, path, boolean default flags) when no extra
+// confidentiality is passed — instance state never enters it (`lub` delegates
+// to a static and has no subclasses) — and it runs per array element / object
+// property on read and write-diff paths, so identical lookups repeat
+// constantly. Module-level rather than per-instance: several hot paths create
+// a fresh ContextualFlowControl per call (storage pull/watch, traversal
+// contexts), which would leave a per-instance cache permanently cold.
+// Mutable schemas are never cached (in-place edits must be observed).
+const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
@@ -311,14 +322,6 @@ export class ContextualFlowControl {
    * While we will handle $ref links as needed while getting to the schema,
    * the returned object will retain those $ref links.
    */
-  // schemaAtPath derivations per deep-frozen schema identity. The derivation
-  // is pure given (schema, path, boolean default flags) when no extra
-  // confidentiality is passed, and it runs per array element / object
-  // property on the write-diff path, so identical lookups repeat constantly.
-  // Mutable schemas are never cached (in-place edits must be observed).
-  // Per-instance because `lub` is an overridable instance method.
-  #schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
-
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
@@ -342,10 +345,10 @@ export class ContextualFlowControl {
         defaultMissingProperty,
       );
     }
-    let byKey = this.#schemaAtPathCache.get(schema);
+    let byKey = schemaAtPathCache.get(schema);
     if (byKey === undefined) {
       byKey = new Map();
-      this.#schemaAtPathCache.set(schema, byKey);
+      schemaAtPathCache.set(schema, byKey);
     }
     // Length-prefix each segment so a segment containing the separator (a
     // NUL-bearing property name) cannot collide with a differently-split
@@ -356,14 +359,17 @@ export class ContextualFlowControl {
     }
     let result = byKey.get(key);
     if (result === undefined) {
-      result = this.schemaAtPathInternal(
+      // Intern the derivation so the cached result is the canonical frozen
+      // instance: downstream identity-keyed caches (standardization, value
+      // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
+      result = internSchema(this.schemaAtPathInternal(
         schema,
         path,
         defs,
         undefined,
         defaultEmptyProperties,
         defaultMissingProperty,
-      );
+      ));
       byKey.set(key, result);
     }
     return result;

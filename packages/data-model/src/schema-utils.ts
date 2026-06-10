@@ -327,31 +327,104 @@ export function emptySchemaObject() {
  * guard internal to `hashOf()` and lets its `WeakMap` cache retain its hash
  * across repeat calls.
  */
+/**
+ * Canonical selector instances per (interned schema identity, path content).
+ * A `SchemaPathSelector` is just `{ path, schema? }`, so structurally-equal
+ * selectors can safely collapse to ONE frozen instance. That makes the
+ * selector WRAPPER identity stable across repeat constructions — without it,
+ * every freshly built selector misses entry-level identity caches
+ * (`hashOf()`'s frozen-object WeakMap, `MapSetStringToPathSelectors`'s
+ * hashing key fn, cycle trackers) and re-walks the embedded schema, which CPU
+ * profiles showed as a dominant remount cost.
+ *
+ * Inner values are `WeakRef`s: a selector held strongly here would strongly
+ * reference its schema — the outer `WeakMap` key — pinning both forever.
+ * Dead refs are dropped lazily on lookup.
+ */
+const canonicalSelectorsBySchema = new WeakMap<
+  object,
+  Map<string, WeakRef<SchemaPathSelector>>
+>();
+// `WeakMap` keys must be objects; sentinels stand in for non-object schemas.
+const NO_SCHEMA_KEY: Record<never, never> = {};
+const TRUE_SCHEMA_KEY: Record<never, never> = {};
+const FALSE_SCHEMA_KEY: Record<never, never> = {};
+
+/**
+ * Injective string key for a path: each component is length-prefixed, so a
+ * component containing the separator cannot collide with a differently-split
+ * path.
+ */
+const selectorPathKey = (path: readonly string[]): string => {
+  let key = "";
+  for (const part of path) key += `${part.length}:${part}`;
+  return key;
+};
+
+/**
+ * Sweep threshold for a per-schema path map: schemas that never die (interned
+ * canonical schemas, the boolean/no-schema sentinels) would otherwise
+ * accumulate `pathKey -> dead WeakRef` entries forever, since the lazy
+ * cleanup below only fires when the exact same path is looked up again.
+ * Sweeping on insert once the map is large bounds growth to live selectors
+ * (plus the threshold).
+ */
+const SELECTOR_CACHE_SWEEP_THRESHOLD = 2048;
+
 export function internPathSelector(
   selector: SchemaPathSelector,
 ): SchemaPathSelector {
   const { path, schema } = selector;
 
-  if (schema !== undefined) {
-    const interned = internSchema(schema);
-    if (interned !== schema) {
-      // Canonical schema differs from what the selector holds. Swap it in place
-      // if the selector is mutable; if it's frozen, we can't, so allocate a new
-      // deep-frozen selector carrying the canonical schema (sharing the now-
-      // frozen `path` array).
-      if (Object.isFrozen(selector)) {
-        return Object.freeze({
-          path: Object.freeze(path),
-          schema: interned,
-        }) as SchemaPathSelector;
-      }
-      selector.schema = interned;
+  const interned = schema === undefined ? undefined : internSchema(schema);
+  const schemaKey = interned === undefined
+    ? NO_SCHEMA_KEY
+    : interned === true
+    ? TRUE_SCHEMA_KEY
+    : interned === false
+    ? FALSE_SCHEMA_KEY
+    : (interned as object);
+
+  let byPath = canonicalSelectorsBySchema.get(schemaKey);
+  if (byPath === undefined) {
+    byPath = new Map();
+    canonicalSelectorsBySchema.set(schemaKey, byPath);
+  }
+  const pathK = selectorPathKey(path);
+  const existingRef = byPath.get(pathK);
+  if (existingRef !== undefined) {
+    const existing = existingRef.deref();
+    if (existing !== undefined) {
+      return existing;
+    }
+    byPath.delete(pathK);
+  }
+
+  if (byPath.size >= SELECTOR_CACHE_SWEEP_THRESHOLD) {
+    for (const [k, ref] of byPath) {
+      if (ref.deref() === undefined) byPath.delete(k);
     }
   }
 
-  Object.freeze(path);
-  Object.freeze(selector);
-  return selector;
+  // First instance with this content becomes the canonical one. Keep the
+  // pre-existing in-place behavior: swap in the canonical schema and freeze
+  // when the input is mutable; allocate only when the input is frozen with a
+  // non-canonical schema.
+  let canonical: SchemaPathSelector;
+  if (interned !== schema && Object.isFrozen(selector)) {
+    canonical = Object.freeze({
+      path: Object.freeze(path),
+      schema: interned,
+    }) as SchemaPathSelector;
+  } else {
+    if (interned !== schema) {
+      selector.schema = interned;
+    }
+    Object.freeze(path);
+    canonical = Object.freeze(selector);
+  }
+  byPath.set(pathK, new WeakRef(canonical));
+  return canonical;
 }
 
 /**

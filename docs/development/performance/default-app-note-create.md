@@ -231,3 +231,58 @@ lever exists.
 - Skip sink re-subscription bookkeeping when the read set is unchanged.
 - Value-graph identity reuse (freeze + reuse query results) — the remaining
   big hashing/freeze lever.
+
+## Optimization round 2 (June 2026): remount hashing + poll fix
+
+Branch `perf/reconciler-remount` (stacked on round 1). Two changes from the
+follow-up session:
+
+**Test poll quantization fixed.** `waitFor`'s default poll interval dropped
+500ms → 50ms (`CF_WAITFOR_DELAY_MS` to override). The timing series now
+measures reality: per-note totals reported ~1147ms before, **~409ms** after
+(createToView ~294ms, returnToHome ~116ms) on the optimized stack.
+
+**Remount made ~5× cheaper for all complex UIs** (investigated per the
+"don't keep mounts alive, make mounting fast" directive). Profiling 100
+mount/unmount rounds @32 children showed **58% of busy CPU was content
+hashing**: five seams rebuilt fresh-but-structurally-equal schema/selector
+objects per mount, and `hashOf`/`internSchema` caches key on object identity
+at entry only — a fresh wrapper re-walks the whole embedded vdom schema.
+The seams (each now memoized/canonicalized, gated on deep-frozen inputs):
+
+1. `asCellCompoundSchemaForValue` rebuilt + interned every anyOf branch per
+   read of every vdom node → candidate list cached per schema identity.
+2. Created child cells got a fresh stripped-`asCell` schema per
+   materialization (re-hashed at `resolveLink`'s exit intern on every
+   `isStream`) → `unwrapAsCellSchema` memoized + interned.
+3. `internPathSelector` canonicalized the schema but not the selector
+   wrapper → now returns a canonical selector instance per (schema, path).
+4. `pull`'s sync dedup key hashed a fresh wrapper embedding the selector
+   schema → key composed from per-part cached hashes.
+5. `cfc.schemaAtPath`'s cache was per-instance while pull/watch/traversal
+   create a fresh `ContextualFlowControl` per call (permanently cold) →
+   module-level, results interned. Plus `checkAnyOf`'s per-item comparison
+   hashes cached per frozen identity.
+
+Numbers:
+
+| Gauge | Baseline | Round 1 | Round 2 |
+|---|---|---|---|
+| 100 mount/unmount rounds @32 children (in-process) | 7511ms* | — | **1828ms** |
+| Reconciler bench: mount+unmount @128 | 344.7ms | 265.0ms | **69.3ms** |
+| Reconciler bench: re-mount unchanged @32 | 171.5ms | 117.7ms | **33.8ms** |
+| Reconciler bench: single-child update @32 | 6.7ms | 5.1ms | **3.7ms** |
+| Integration: worker busy CPU, notes 2–4 | 1446ms | 1182ms | **742ms (−49%)** |
+| Integration: `handleVDomMount` phase | 540ms (37%, #1) | 406ms | **110ms (15%, #5)** |
+
+*measured at round-1 state; the profile target didn't exist at baseline.
+
+Diagnosis method worth keeping: when profile attribution plateaued,
+temporarily instrumenting `internSchemaReturningSchemaAndHash` misses with
+sampled stacks (`__internMiss` counter) found the exact fresh-object seams in
+minutes — profiles alone couldn't separate "hash of what, built where".
+
+Remaining (smaller) hash consumers in the settle phase: `resolveLink` under
+query-proxy reads and `resolveSchema` under `validateAndTransform` — both
+downstream of read-path value materialization (the value-graph identity reuse
+lever), plus the schema-interning-at-getCell seam for caller literals.

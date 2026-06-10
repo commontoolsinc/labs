@@ -80,29 +80,62 @@ const linkWithAsCellScope = (
   return isCellScope(scope) ? { ...link, scope } : link;
 };
 
-const asCellCompoundSchemaForValue = (
+// Value-independent part of asCellCompoundSchemaForValue: the merged
+// candidate schemas (those that carry asCell entries) for each anyOf/oneOf
+// branch. Building them spreads the base schema and resolves + combines +
+// interns every branch — and that repeats on EVERY read of a cell with a
+// compound schema (e.g. every vdom node under rendererVDOMSchema), which
+// CPU profiles showed as the dominant hashing seam of reconciler mounts.
+// Cache per deep-frozen schema identity; mutable schemas recompute per call.
+// The cached candidates are interned (combineSchema interns its results), so
+// downstream identity-keyed memos see stable references too.
+const compoundAsCellCandidatesCache = new WeakMap<
+  JSONSchemaObj,
+  readonly JSONSchemaObj[]
+>();
+
+const asCellCompoundCandidates = (
   schema: JSONSchemaObj,
-  value: unknown,
-): JSONSchemaObj | undefined => {
+): readonly JSONSchemaObj[] => {
+  const cacheable = isDeepFrozen(schema);
+  if (cacheable) {
+    const cached = compoundAsCellCandidatesCache.get(schema);
+    if (cached !== undefined) return cached;
+  }
   const branches = [
     ...(Array.isArray(schema.anyOf) ? schema.anyOf : []),
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : []),
   ];
-  if (branches.length === 0) {
+  const candidates: JSONSchemaObj[] = [];
+  if (branches.length > 0) {
+    const { anyOf: _anyOf, oneOf: _oneOf, ...baseSchema } = schema;
+    for (const branch of branches) {
+      const branchWithDefs = branchWithParentDefs(schema, branch);
+      const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
+      const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
+      if (
+        isRecord(merged) &&
+        ContextualFlowControl.getAsCellValues(merged).length > 0
+      ) {
+        candidates.push(merged as JSONSchemaObj);
+      }
+    }
+  }
+  if (cacheable) {
+    compoundAsCellCandidatesCache.set(schema, candidates);
+  }
+  return candidates;
+};
+
+const asCellCompoundSchemaForValue = (
+  schema: JSONSchemaObj,
+  value: unknown,
+): JSONSchemaObj | undefined => {
+  if (value === undefined) {
     return undefined;
   }
-
-  const { anyOf: _anyOf, oneOf: _oneOf, ...baseSchema } = schema;
-  for (const branch of branches) {
-    const branchWithDefs = branchWithParentDefs(schema, branch);
-    const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
-    const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
-    if (
-      isRecord(merged) &&
-      ContextualFlowControl.getAsCellValues(merged).length > 0 &&
-      value !== undefined &&
-      matchesConcreteValue(merged, value)
-    ) {
+  for (const merged of asCellCompoundCandidates(schema)) {
+    if (matchesConcreteValue(merged, value)) {
       return merged;
     }
   }
@@ -1171,7 +1204,6 @@ class TransformObjectCreator
     } else if (isRecord(link.schema)) {
       const schema = asCellCompoundSchemaForValue(link.schema, value) ??
         link.schema;
-      const { asCell: _c, ...restSchema } = schema;
       const asCellValues = ContextualFlowControl.getAsCellValues(schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest
@@ -1190,10 +1222,7 @@ class TransformObjectCreator
           this.runtime,
           {
             ...link,
-            schema: {
-              ...restSchema,
-              ...(asCellValues.length > 1) && { asCell: asCellValues.slice(1) },
-            },
+            schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
           getTransactionForChildCells(this.tx),
           this.synced,
@@ -1319,13 +1348,32 @@ export function generateHandlerSchema(
   });
 }
 
+// unwrapAsCellSchema results per deep-frozen schema identity. The unwrapped
+// schema rides on every created child cell's link, where downstream identity
+// caches (link-resolution interning, schemaAtPath, value hashing) key on it —
+// a fresh spread per cell creation re-hashed the whole schema each time.
+const unwrappedAsCellSchemaCache = new WeakMap<JSONSchemaObj, JSONSchemaObj>();
+
 function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
+  const cacheable = isDeepFrozen(schema);
+  if (cacheable) {
+    const cached = unwrappedAsCellSchemaCache.get(schema);
+    if (cached !== undefined) {
+      return cached;
+    }
+  }
   const { asCell: _c, ...restSchema } = schema;
   const asCellValues = ContextualFlowControl.getAsCellValues(schema);
-  return {
+  // Intern so the result is the canonical frozen instance: child cell links
+  // then carry an identity-stable schema across repeat materializations.
+  const result = internSchema({
     ...restSchema,
     ...(asCellValues.length > 1 && { asCell: asCellValues.slice(1) }),
-  };
+  }) as JSONSchemaObj;
+  if (cacheable) {
+    unwrappedAsCellSchemaCache.set(schema, result);
+  }
+  return result;
 }
 
 function removeAsCellFromSchema(schema: JSONSchema): JSONSchema {
