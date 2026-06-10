@@ -19,7 +19,7 @@ interface Output extends Input {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     input: { foo: string; } & {} & { [SELF]: Output; };
-}, { bar: number; foo: string; [SELF]: Output; }>({
+}, { bar: number; foo: string; [SELF]: Output; }>(({ input }) => ({ ...input, bar: 123 }), {
     type: "object",
     properties: {
         input: {
@@ -44,7 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["bar", "foo"]
-} as const satisfies __cfHelpers.JSONSchema, ({ input }) => ({ ...input, bar: 123 }));
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-explicit-types
 // Verifies: explicit Input and Output type parameters generate separate input/output schemas
 //   pattern<Input, Output>() → input schema from Input, output schema from Output (includes inherited fields)

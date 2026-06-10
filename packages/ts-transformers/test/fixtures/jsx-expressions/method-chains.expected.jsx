@@ -37,7 +37,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         text: string;
     };
-}, string>({
+}, string>(({ state }) => state.text.trim().toLowerCase(), {
     type: "object",
     properties: {
         state: {
@@ -53,13 +53,13 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.trim().toLowerCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         text: string;
         searchTerm: string;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()), {
     type: "object",
     properties: {
         state: {
@@ -78,12 +78,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.toLowerCase().includes(state.searchTerm.toLowerCase()));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         text: string;
     };
-}, string>({
+}, string>(({ state }) => state.text.trim().toLowerCase().replace("old", "new").toUpperCase(), {
     type: "object",
     properties: {
         state: {
@@ -99,13 +99,13 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.trim().toLowerCase().replace("old", "new").toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         items: number[];
         threshold: number;
     };
-}, number>({
+}, number>(({ state }) => state.items.filter((x) => x > state.threshold).length, {
     type: "object",
     properties: {
         state: {
@@ -127,7 +127,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -163,7 +163,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     state: {
         factor: number;
     };
-}, number>({
+}, number>(({ x, state }) => x * state.factor, {
     type: "object",
     properties: {
         x: {
@@ -182,7 +182,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["x", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ x, state }) => x * state.factor);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const x = __cf_pattern_input.key("element");
     const state = __cf_pattern_input.key("params", "state");
@@ -242,7 +242,7 @@ const __cfLift_6 = __cfHelpers.lift<{
         start: number;
         end: number;
     };
-}, number>({
+}, number>(({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length, {
     type: "object",
     properties: {
         state: {
@@ -267,14 +267,14 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         items: number[];
         start: number;
         end: number;
     };
-}, string>({
+}, string>(({ state }) => state.items.slice(state.start, state.end).join(", "), {
     type: "object",
     properties: {
         state: {
@@ -299,13 +299,13 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.slice(state.start, state.end).join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         names: string[];
         prefix: string;
     };
-}, string>({
+}, string>(({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "), {
     type: "object",
     properties: {
         state: {
@@ -327,13 +327,13 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         names: string[];
         searchTerm: string;
     };
-}, string | undefined>({
+}, string | undefined>(({ state }) => state.names.find((n) => n.includes(state.searchTerm)), {
     type: "object",
     properties: {
         state: {
@@ -355,10 +355,10 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.names.find((n) => n.includes(state.searchTerm)));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_10 = __cfHelpers.lift<{
     name: string;
-}, string>({
+}, string>(({ name }) => name.trim().toLowerCase().replace(" ", "-"), {
     type: "object",
     properties: {
         name: {
@@ -368,7 +368,7 @@ const __cfLift_10 = __cfHelpers.lift<{
     required: ["name"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ name }) => name.trim().toLowerCase().replace(" ", "-"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const name = __cf_pattern_input.key("element");
     return (<li>{__cfLift_10({ name: name })}</li>);
@@ -406,7 +406,7 @@ const __cfLift_11 = __cfHelpers.lift<{
         prices: number[];
         discount: number;
     };
-}, number>({
+}, number>(({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0), {
     type: "object",
     properties: {
         state: {
@@ -428,13 +428,14 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_12 = __cfHelpers.lift<{
     state: {
         items: number[];
         factor: number;
     };
-}, number>({
+}, number>(({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
+    state.factor, {
     type: "object",
     properties: {
         state: {
@@ -456,14 +457,13 @@ const __cfLift_12 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
-    state.factor);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_13 = __cfHelpers.lift<{
     state: {
         prices: number[];
         discount: number;
     };
-}, string>({
+}, string>(({ state }) => (state.prices[0]! * (1 - state.discount)).toFixed(2), {
     type: "object",
     properties: {
         state: {
@@ -485,13 +485,13 @@ const __cfLift_13 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.prices[0]! * (1 - state.discount)).toFixed(2));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_14 = __cfHelpers.lift<{
     state: {
         text: string;
         prefix: string;
     };
-}, string>({
+}, string>(({ state }) => (state.text.length > 10 ? state.text : state.prefix).trim(), {
     type: "object",
     properties: {
         state: {
@@ -510,13 +510,14 @@ const __cfLift_14 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.text.length > 10 ? state.text : state.prefix).trim());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_15 = __cfHelpers.lift<{
     state: {
         text: string;
         prefix: string;
     };
-}, string>({
+}, string>(({ state }) => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
+    .join("-"), {
     type: "object",
     properties: {
         state: {
@@ -535,14 +536,13 @@ const __cfLift_15 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.text + " " + state.prefix).trim().toLowerCase().split(" ")
-    .join("-"));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_16 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
         minAge: number;
     };
-}, number>({
+}, number>(({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length, {
     type: "object",
     properties: {
         state: {
@@ -573,12 +573,12 @@ const __cfLift_16 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_17 = __cfHelpers.lift<{
     u: {
         name: string;
     };
-}, string>({
+}, string>(({ u }) => u.name.toUpperCase(), {
     type: "object",
     properties: {
         u: {
@@ -594,12 +594,12 @@ const __cfLift_17 = __cfHelpers.lift<{
     required: ["u"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ u }) => u.name.toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_18 = __cfHelpers.lift<{
     u: {
         name: string;
     };
-}, string>({
+}, string>(({ u }) => u.name.toLowerCase(), {
     type: "object",
     properties: {
         u: {
@@ -615,7 +615,7 @@ const __cfLift_18 = __cfHelpers.lift<{
     required: ["u"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ u }) => u.name.toLowerCase());
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_4 = __cfHelpers.pattern(__cf_pattern_input => {
     const u = __cf_pattern_input.key("element");
     return (<li>{__cfHelpers.ifElse({
@@ -677,7 +677,7 @@ const __cfLift_19 = __cfHelpers.lift<{
         users: { name: string; age: number; active: boolean; }[];
         minAge: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.users.some((u) => u.age >= state.minAge), {
     type: "object",
     properties: {
         state: {
@@ -705,12 +705,12 @@ const __cfLift_19 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.users.some((u) => u.age >= state.minAge));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_20 = __cfHelpers.lift<{
     state: {
         users: { name: string; age: number; active: boolean; }[];
     };
-}, boolean>({
+}, boolean>(({ state }) => state.users.every((u) => u.active), {
     type: "object",
     properties: {
         state: {
@@ -735,13 +735,13 @@ const __cfLift_20 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.users.every((u) => u.active));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_21 = __cfHelpers.lift<{
     state: {
         text: string;
         prefix: string;
     };
-}, number>({
+}, number>(({ state }) => state.text.trim().length + state.prefix.trim().length, {
     type: "object",
     properties: {
         state: {
@@ -760,13 +760,13 @@ const __cfLift_21 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.trim().length + state.prefix.trim().length);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_22 = __cfHelpers.lift<{
     state: {
         text: string;
         threshold: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.text.trim().length > state.threshold, {
     type: "object",
     properties: {
         state: {
@@ -785,13 +785,13 @@ const __cfLift_22 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.trim().length > state.threshold);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_23 = __cfHelpers.lift<{
     state: {
         words: string[];
         separator: string;
     };
-}, string>({
+}, string>(({ state }) => state.words.join(state.separator).toUpperCase(), {
     type: "object",
     properties: {
         state: {
@@ -813,7 +813,7 @@ const __cfLift_23 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.words.join(state.separator).toUpperCase());
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: method-chains
 // Verifies: chained method calls and array method chains in JSX are wrapped in a lift-applied computation
 //   state.text.trim().toLowerCase()          → lift(...)({ text })

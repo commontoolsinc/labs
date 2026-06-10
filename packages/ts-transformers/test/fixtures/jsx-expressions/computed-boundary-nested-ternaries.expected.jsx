@@ -13,7 +13,7 @@ const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
     bar: boolean;
-}, "B" | "C">({
+}, "B" | "C">(({ bar }) => bar ? "B" : "C", {
     type: "object",
     properties: {
         bar: {
@@ -23,7 +23,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["bar"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["B", "C"]
-} as const satisfies __cfHelpers.JSONSchema, ({ bar }) => bar ? "B" : "C");
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-boundary-nested-ternaries
 // Verifies: outer branch lowering does not structurally lower nested ternaries inside computed callbacks
 //   show ? computed(() => bar ? "B" : "C") : "D" → outer branch lowers, inner ternary stays authored
@@ -75,7 +75,7 @@ export const OuterTernary = pattern((__cf_pattern_input) => {
 const __cfLift_2 = __cfHelpers.lift<{
     foo: boolean;
     bar: boolean;
-}, "A" | "B" | "C">({
+}, "A" | "B" | "C">(({ foo, bar }) => foo ? "A" : bar ? "B" : "C", {
     type: "object",
     properties: {
         foo: {
@@ -88,7 +88,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["foo", "bar"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["A", "B", "C"]
-} as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo ? "A" : bar ? "B" : "C");
+} as const satisfies __cfHelpers.JSONSchema);
 export const AuthoredIfElse = pattern((__cf_pattern_input) => {
     const show = __cf_pattern_input.key("show");
     const foo = __cf_pattern_input.key("foo");

@@ -21,7 +21,11 @@ interface User {
 // `result.items.author_cf_link` carries `asCell: ["cell"]`. Combined with the
 // runtime storing a sigil OBJECT (Piece A), that asCell read rehydrates the
 // column to a live Cell.
-const readAuthor = lift({
+const readAuthor = lift((qv: {
+    result?: Array<{
+        author_cf_link: Cell<User>;
+    }>;
+}) => qv.result?.[0]?.author_cf_link, {
     type: "object",
     properties: {
         result: {
@@ -67,11 +71,7 @@ const readAuthor = lift({
             required: ["name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, (qv: {
-    result?: Array<{
-        author_cf_link: Cell<User>;
-    }>;
-}) => qv.result?.[0]?.author_cf_link);
+} as const satisfies __cfHelpers.JSONSchema);
 export default pattern(() => {
     const db = sqliteDatabase().for("db", true);
     const q = db.query<{

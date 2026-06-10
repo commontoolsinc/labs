@@ -320,67 +320,50 @@ export function resolveSourceLocationFromStack(
  *
  * @returns A module node factory that also serializes as module.
  */
-// Two-arg form: lift(argumentSchema, fn). Listed before the three-arg overload
-// so `lift(false, fn)` resolves here (the impl in slot 2) rather than matching
-// the three-arg signature and erroring on a missing resultSchema. Used by the
-// transformer to emit no-input lifts as `lift(false, fn)()`.
-export function lift<T extends JSONSchema = JSONSchema, R = any>(
-  argumentSchema: T,
-  implementation: (input: Schema<T>) => R,
-  options?: DeriveSchedulerOptions,
-): ModuleFactory<SchemaWithoutCell<T>, R>;
-export function lift<
-  T extends JSONSchema = JSONSchema,
-  R extends JSONSchema = JSONSchema,
->(
-  argumentSchema: T,
-  resultSchema: R,
-  implementation: (input: Schema<T>) => Schema<R>,
-  options?: DeriveSchedulerOptions,
-): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
+// Function-first form, matching pattern()/handler() convention: the callback
+// leads, schemas trail and are optional. The argument/result schemas are plain
+// JSONSchema values that are NOT materialized into the callback input type — the
+// callback's own (or transformer-inferred) type stands. The no-input form is
+// `lift(fn, false)`: argumentSchema:false makes the no-arg application valid
+// (the runner's isValidArgument check passes on `argumentSchema === false`),
+// which is how computed-origin (zero-capture) lifts lower.
 export function lift<T, R>(
   implementation: (input: T) => R,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<T, R>;
+): ModuleFactory<StripCell<T>, StripCell<R>>;
 export function lift<T>(
   implementation: (input: T) => any,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<T, ReturnType<typeof implementation>>;
+): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
 export function lift<T extends (...args: any[]) => any>(
   implementation: T,
+  argumentSchema?: JSONSchema,
+  resultSchema?: JSONSchema,
   options?: DeriveSchedulerOptions,
-): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
+): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
 export function lift<T, R>(
-  argumentSchema?: JSONSchema | ((input: any) => any),
-  resultSchema?: JSONSchema | ((input: any) => any) | DeriveSchedulerOptions,
   implementation?: ((input: T) => R) | DeriveSchedulerOptions,
+  argumentSchema?: JSONSchema | DeriveSchedulerOptions,
+  resultSchema?: JSONSchema | DeriveSchedulerOptions,
   options?: DeriveSchedulerOptions,
 ): ModuleFactory<T, R> {
-  if (typeof argumentSchema === "function") {
-    // lift(fn)
-    implementation = argumentSchema;
-    options = resultSchema as DeriveSchedulerOptions | undefined;
-    argumentSchema = resultSchema = undefined;
-  } else if (typeof resultSchema === "function") {
-    // lift(argumentSchema, fn) — two-arg form. The middle slot is the
-    // implementation, not a result schema. Used by the transformer to emit
-    // no-input lifts as `lift(false, fn)()`: argumentSchema:false makes the
-    // application valid with no input (see runner's isValidArgument check),
-    // which is how computed-origin (zero-capture) lifts lower without the
-    // legacy `lift(fn)({})` empty-object stopgap.
-    options = implementation as DeriveSchedulerOptions | undefined;
-    implementation = resultSchema;
-    resultSchema = undefined;
-  }
-  const resolvedImplementation = implementation as
-    | ((input: T) => R)
-    | undefined;
+  const resolvedImplementation =
+    (typeof implementation === "function" ? implementation : undefined) as
+      | ((input: T) => R)
+      | undefined;
+  const resolvedArgumentSchema = argumentSchema as JSONSchema | undefined;
   const resolvedResultSchema = resultSchema as JSONSchema | undefined;
 
   return createNodeFactory({
     type: "javascript",
     implementation: resolvedImplementation,
-    ...(argumentSchema !== undefined ? { argumentSchema } : {}),
+    ...(resolvedArgumentSchema !== undefined
+      ? { argumentSchema: resolvedArgumentSchema }
+      : {}),
     ...(resolvedResultSchema !== undefined
       ? { resultSchema: resolvedResultSchema }
       : {}),

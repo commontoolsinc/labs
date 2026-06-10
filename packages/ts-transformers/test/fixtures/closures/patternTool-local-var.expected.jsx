@@ -21,7 +21,7 @@ type Output = {
 };
 const __cfLift_1 = __cfHelpers.lift<{
     language: string;
-}, string>({
+}, string>(({ language }) => `Translate to ${language}.`, {
     type: "object",
     properties: {
         language: {
@@ -31,10 +31,10 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["language"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ language }) => `Translate to ${language}.`);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     content: string;
-}, string>({
+}, string>(({ content }) => content, {
     type: "object",
     properties: {
         content: {
@@ -44,13 +44,17 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["content"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ content }) => content);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     genResult: {
         pending: boolean;
         result?: string | undefined;
     };
-}, string | undefined>({
+}, string | undefined>(({ genResult }) => {
+    if (genResult.pending)
+        return undefined;
+    return genResult.result;
+}, {
     type: "object",
     properties: {
         genResult: {
@@ -69,11 +73,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["genResult"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema, ({ genResult }) => {
-    if (genResult.pending)
-        return undefined;
-    return genResult.result;
-});
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     language: string;
     content: string;

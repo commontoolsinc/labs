@@ -22,7 +22,11 @@ const __cfLift_1 = __cfHelpers.lift<{
             preference: "liked" | "disliked";
         }[];
     };
-}, string[]>({
+}, string[]>(({ state }) => {
+    return state.preferences
+        .filter((p) => p.preference === "liked")
+        .map((p) => p.ingredient);
+}, {
     type: "object",
     properties: {
         state: {
@@ -53,11 +57,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => {
-    return state.preferences
-        .filter((p) => p.preference === "liked")
-        .map((p) => p.ingredient);
-});
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-filter-map-chain
 // Verifies: .filter() and .map() inside computed() are NOT transformed
 // Context: Inside computed(), OpaqueRef auto-unwraps to plain array, so

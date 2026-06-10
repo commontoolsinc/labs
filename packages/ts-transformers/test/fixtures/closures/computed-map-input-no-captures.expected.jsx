@@ -26,7 +26,7 @@ interface Item {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     items: __cfHelpers.ReadonlyCell<Item[]>;
-}, number>({
+}, number>(({ items }) => items.get().map((item) => item.value).length, {
     type: "object",
     properties: {
         items: {
@@ -54,7 +54,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().map((item) => item.value).length);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-map-input-no-captures
 // Verifies: a computed over a captured cell array uses a plain .map() (not .mapWithPattern)
 //   computed(() => items.get().map(...).length) → lift(...)({ items })

@@ -23,7 +23,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.count > 10, {
     type: "object",
     properties: {
         state: {
@@ -39,12 +39,12 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 10);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         score: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.score >= 90, {
     type: "object",
     properties: {
         state: {
@@ -60,12 +60,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 90);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     state: {
         score: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.score >= 80, {
     type: "object",
     properties: {
         state: {
@@ -81,12 +81,12 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 80);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.count === 0, {
     type: "object",
     properties: {
         state: {
@@ -102,12 +102,12 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.count === 1, {
     type: "object",
     properties: {
         state: {
@@ -123,12 +123,12 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 1);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         userType: string;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.userType === "admin", {
     type: "object",
     properties: {
         state: {
@@ -144,12 +144,12 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "admin");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_7 = __cfHelpers.lift<{
     state: {
         userType: string;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.userType === "user", {
     type: "object",
     properties: {
         state: {
@@ -165,12 +165,12 @@ const __cfLift_7 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "user");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.count > 0, {
     type: "object",
     properties: {
         state: {
@@ -186,12 +186,12 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.count < 10, {
     type: "object",
     properties: {
         state: {
@@ -207,12 +207,12 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count < 10);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_10 = __cfHelpers.lift<{
     state: {
         score: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.score > 100, {
     type: "object",
     properties: {
         state: {
@@ -228,12 +228,12 @@ const __cfLift_10 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score > 100);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_11 = __cfHelpers.lift<{
     state: {
         count: number;
     };
-}, boolean>({
+}, boolean>(({ state }) => state.count > 5, {
     type: "object",
     properties: {
         state: {
@@ -249,7 +249,7 @@ const __cfLift_11 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 5);
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: jsx-conditional-rendering
 // Verifies: ternary expressions and ifElse() calls in JSX are transformed to reactive ifElse()
 //   cond ? a : b             → ifElse(schema, schema, schema, schema, cond, a, b)

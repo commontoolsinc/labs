@@ -99,7 +99,13 @@ interface Item {
 }
 const __cfLift_1 = __cfHelpers.lift<{
     items: Item[];
-}, { entry: Item; index: number; isExpanded: boolean; isPinned: boolean; allowMultiple: boolean; }[]>({
+}, { entry: Item; index: number; isExpanded: boolean; isPinned: boolean; allowMultiple: boolean; }[]>(({ items }) => items.map((entry, index) => ({
+    entry,
+    index,
+    isExpanded: index === 0,
+    isPinned: entry.pinned || false,
+    allowMultiple: entry.allowMultiple,
+})), {
     type: "object",
     properties: {
         items: {
@@ -173,18 +179,12 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["allowMultiple"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((entry, index) => ({
-    entry,
-    index,
-    isExpanded: index === 0,
-    isPinned: entry.pinned || false,
-    allowMultiple: entry.allowMultiple,
-})));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     entry: {
         collapsed?: boolean | undefined;
     };
-}, boolean>({
+}, boolean>(({ entry }) => !entry.collapsed, {
     type: "object",
     properties: {
         entry: {
@@ -203,12 +203,14 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["entry"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ entry }) => !entry.collapsed);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_3 = __cfHelpers.lift<{
     entry: {
         note?: string | undefined;
     };
-}, { fontWeight: string; }>({
+}, { fontWeight: string; }>(({ entry }) => ({
+    fontWeight: entry?.note ? "700" : "400",
+}), {
     type: "object",
     properties: {
         entry: {
@@ -229,14 +231,12 @@ const __cfLift_3 = __cfHelpers.lift<{
         }
     },
     required: ["fontWeight"]
-} as const satisfies __cfHelpers.JSONSchema, ({ entry }) => ({
-    fontWeight: entry?.note ? "700" : "400",
-}));
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_4 = __cfHelpers.lift<{
     entry: {
         note?: string | undefined;
     };
-}, string>({
+}, string>(({ entry }) => entry?.note || "Add note...", {
     type: "object",
     properties: {
         entry: {
@@ -251,10 +251,10 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["entry"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, ({ entry }) => entry?.note || "Add note...");
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_5 = __cfHelpers.lift<{
     isExpanded: boolean;
-}, boolean>({
+}, boolean>(({ isExpanded }) => !isExpanded, {
     type: "object",
     properties: {
         isExpanded: {
@@ -264,10 +264,10 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["isExpanded"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_6 = __cfHelpers.lift<{
     isExpanded: boolean;
-}, boolean>({
+}, boolean>(({ isExpanded }) => !isExpanded, {
     type: "object",
     properties: {
         isExpanded: {
@@ -277,7 +277,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["isExpanded"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded);
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const entry = __cf_pattern_input.key("element", "entry");
     const index = __cf_pattern_input.key("element", "index");
