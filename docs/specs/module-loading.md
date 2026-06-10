@@ -2,7 +2,14 @@
 
 ## Status
 
-Partially implemented. This document specifies a replacement for the current
+**Shipped and exclusive.** The ESM module-record loader described here is the
+only loader: the `esmModuleLoader` / `CF_ESM_MODULE_LOADER` flag, the AMD
+bundle pipeline (bundler, whole-bundle verifier, `Engine.compile`/`evaluate`),
+and the AMD compilation cache (`CachedCompiler`) have been removed. References
+to the flag and to the AMD path below are historical context from the design
+phase.
+
+This document specifies a replacement for the former
 AMD-bundle module pipeline with (1) per-module content-addressed identity
 computed as a Merkle hash over each module's authored TypeScript source and the
 transitive import graph, and (2) ES-module loading into SES compartments. The

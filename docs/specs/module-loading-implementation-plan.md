@@ -1,5 +1,11 @@
 # Content-Addressed Module Loading — Implementation Plan
 
+> **Status:** Shipped — the ESM module-record loader is now the only loader.
+> The `esmModuleLoader`/`CF_ESM_MODULE_LOADER` flag and the AMD bundle path
+> (bundler, whole-bundle verifier, `Engine.compile`/`evaluate`, AMD
+> compilation cache) have been removed; flag/AMD references below are
+> historical design context.
+
 Companion to [module-loading.md](module-loading.md). That document specifies the
 *what* and *why*; this one specifies the *how*: ordered, reviewable engineering
 steps with the files each touches, exit criteria, and validation commands.

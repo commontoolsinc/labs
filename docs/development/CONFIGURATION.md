@@ -192,17 +192,17 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 
 ---
 
-## Compilation cache
-
-See [`docs/specs/compilation-cache.md`](../specs/compilation-cache.md) for the
-design.
+## Build info
 
 | Var | Default | Notes |
 |---|---|---|
-| `COMPILATION_CACHE_SERVER` | `true` | Toolshed-side cache. Set to `false` to disable. |
-| `COMPILATION_CACHE_CLIENT` | `true` | Shell-side cache. Read by toolshed (start scripts pass through) and by `packages/shell/felt.config.ts` at build time via esbuild defines — toggling the browser-side value requires rebuilding the shell. |
-| `COMPILATION_CACHE_FS_DIR` | `/tmp/cf-compilation-cache` | Filesystem cache directory. In clustered setups, give each process a distinct directory. |
-| `TOOLSHED_GIT_SHA` | _(auto-detected)_ | Override the cache fingerprint at deploy time. In local dev, leave unset so dirty-file tracking works. |
+| `TOOLSHED_GIT_SHA` | _(auto-detected)_ | Deployed commit SHA, surfaced via `lib/build-info.ts`. Takes priority over the build-baked SHA. |
+
+The compilation cache for compiled patterns is the content-addressed cell
+cache (always on under an enforcing CFC mode; see
+`packages/runner/src/compilation-cache/cell-cache.ts`). The former
+`COMPILATION_CACHE_*` env vars configured the removed AMD bundle cache and no
+longer exist.
 
 ---
 
@@ -237,7 +237,6 @@ Most shell config is **build-time**: esbuild injects defines in
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
-| `COMPILATION_CACHE_CLIENT` | `$COMPILATION_CACHE_CLIENT` | `"true"` | See compilation cache. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
 ---
