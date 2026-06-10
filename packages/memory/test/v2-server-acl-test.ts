@@ -432,6 +432,55 @@ Deno.test("acl enforce: revoking a grant takes effect for subsequent messages", 
   }
 });
 
+Deno.test("acl enforce: owner removing their own access still gets the commit response", async () => {
+  // The writing session must receive its transact response before any
+  // revocation — otherwise the client treats session/revoked as terminal and
+  // reports the successful self-removal as a failure. The access change still
+  // takes effect on the owner's next message.
+  const server = createAclServer("memory://acl-enforce-self-remove", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-self";
+  const alice = await connect(server);
+  try {
+    const aliceSession = await openSession(alice, space, ALICE);
+    assertExists(aliceSession.ok);
+
+    // Alice rewrites the ACL to drop herself entirely (someone else owns now).
+    const selfRemove = await transactSet(
+      alice,
+      space,
+      aliceSession.ok.sessionId,
+      `of:${space}`,
+      { [BOB]: "OWNER" },
+      1,
+    );
+    assertExists(
+      selfRemove.ok,
+      "self-removal commit must succeed and report ok, not a revocation",
+    );
+    // No session/revoked was pushed to the writing connection for its own tx.
+    assertEquals(
+      alice.messages.length,
+      0,
+      "writer must not be revoked before its own response",
+    );
+
+    // The next message from Alice's now-unauthorized session is denied.
+    const after = await transactSet(
+      alice,
+      space,
+      aliceSession.ok.sessionId,
+      "of:doc:after",
+      { n: 1 },
+      2,
+    );
+    assertEquals(after.error?.name, "AuthorizationError");
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("acl observe: stranger is allowed but the would-deny is counted", async () => {
   const server = createAclServer("memory://acl-observe", { mode: "observe" });
   const space = "did:key:z6Mk-acl-space-8";

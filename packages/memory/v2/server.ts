@@ -769,10 +769,17 @@ export class Server {
    *  let their already-registered subscriptions receive pushes. The owning
    *  connection gets a session/revoked("unauthorized"), which the client
    *  treats as a terminal session close (no reopen loop — a reopen attempt
-   *  is denied at session.open). */
-  #revokeDeauthorizedSessions(engine: Engine.Engine, space: string): void {
+   *  is denied at session.open). `skipSessionId` excludes the session that
+   *  made the triggering ACL write, so it gets that transact's response
+   *  before any revocation (a self-removal otherwise reads as a failure). */
+  #revokeDeauthorizedSessions(
+    engine: Engine.Engine,
+    space: string,
+    skipSessionId?: string,
+  ): void {
     if (this.#aclMode() !== "enforce") return;
     for (const session of this.#sessions.sessionsForSpace(space)) {
+      if (session.id === skipSessionId) continue;
       const capability = this.#capabilityFor(engine, space, session.principal);
       if (capability !== null && isCapable(capability, "READ")) continue;
       this.#sessions.remove(space, session.id);
@@ -1489,7 +1496,15 @@ export class Server {
       }
       if (aclTouched) {
         this.#invalidateAclCapabilities(message.space);
-        this.#revokeDeauthorizedSessions(engine, message.space);
+        // Skip the writing session: it must receive this transact's response
+        // first (the client treats session/revoked as terminal and would
+        // report a successful self-removal as a failure). If the owner removed
+        // their own access, the per-message gate denies their next message.
+        this.#revokeDeauthorizedSessions(
+          engine,
+          message.space,
+          message.sessionId,
+        );
       }
       await this.runPostCommitSchedulerSideEffects(
         message.space,
