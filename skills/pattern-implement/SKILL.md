@@ -99,8 +99,8 @@ const deleteItem = handler<void, { items: Writable<Item[]>; index: number }>(
 // In JSX: onClick={deleteItem({ items, index })}
 ```
 
-**Rendering sub-patterns** - Function calls and JSX both work (verified:
-both forms pass `cf check` with a typed Output interface):
+**Rendering sub-patterns** - Function calls and JSX both work (verified: both
+forms pass `cf check` with a typed Output interface):
 
 ```tsx
 // ✅ Function call form
