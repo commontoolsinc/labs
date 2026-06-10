@@ -159,11 +159,9 @@ this yields exactly the §8.5 split with no extra machinery:
 
 Consequences:
 
-1. `ifc.flowPrecisionClaim` stays **unconsumed** in phase A. It is not needed
-   for the precision it was staged for. Keep the Wave 0 #6 defusal
-   (condition claim attachment on argument usage), and decide in phase B
-   whether to delete the minting path or keep it for ops that genuinely
-   cannot decompose (SC-7).
+1. `ifc.flowPrecisionClaim` is not needed for the precision it was staged
+   for — minting has been **deleted** (decision §13.3; this branch). The key
+   stays reserved-and-tolerated for already-persisted schemas (SC-7).
 2. The "blind passing" idiom (pass cells/links, don't `.get()`) is the
    runner-native realization of §8.13 opaque inputs: not reading is what
    avoids taint, and the journal already tells the truth. Phase A needs no
@@ -384,22 +382,23 @@ per §8. Pattern-test default mode stays `observe` until audit Wave 2 lands
 2. **Render declassify prop (S15)** — *decided*: PR #3994 lands the
    `renderDeclassificationPolicy` knob (`allow` default, `deny` available;
    verified-authority gating deferred).
-3. **flowPrecisionClaim** — *recommended, pending confirm*: stop minting in
-   `map`/`filter`/`flatMap` (phase B); tx decomposition already yields the
-   precision the claims were staged for (D4). `flowPrecisionClaim` becomes
-   reserved-and-ignored on read — NOT fail-closed rejected, because existing
-   persisted link schemas embed it (minted into result-container schemas via
-   `setSchema`, `map.ts:123,148`); a reject would break stored data. Keep
-   the concept/type definitions; re-introduce minting only with a real
-   consumer — the realistic candidates are non-decomposable ops where one tx
-   reads all elements and writes all outputs: sqlite row transforms under
-   per-row labels (CFC phase 3), batched LLM calls. Note the audit's Wave 0
-   #6 defusal is already live (`flow-precision.ts:52-55` drops element-local
-   claims when the op uses `array`/`params`).
+3. **flowPrecisionClaim** — *decided and done (this branch)*: minting
+   removed from `map`/`filter`/`flatMap` (builtin and authoring layers),
+   `cfc/flow-precision.ts` deleted; result containers get plain array
+   schemas via `builtins/list-result-schema.ts`. Tx decomposition already
+   yields the precision the claims were staged for (D4).
+   `flowPrecisionClaim` is reserved-and-ignored on read — NOT fail-closed
+   rejected, because existing persisted link schemas embed it (tolerance
+   pinned in `schema-merge.ts` and `cfc-boundary.test.ts`). If
+   dependency-structure assertions return, the expected carrier is static
+   analysis earlier in the pipeline (transformer/compiler — §14.4.4
+   territory), not runtime schema metadata; realistic runtime consumers
+   would be non-decomposable ops (sqlite row transforms under per-row
+   labels, batched LLM calls).
 4. **First egress channel** — *decided*: rendering. Default ceiling ≈
    acting-user identity atoms + allow-listed caveat-kind classes, admitted
    by default and tightened later (§10, SC-16).
-5. **Naming** — *recommended, pending confirm*: implementation keeps
+5. **Naming** — *decided*: implementation keeps
    `origin: "declared" | "link" | "derived"` (provenance axis, drives the
    update rules); the spec edit (SC-1) uses §8.12.4's existing
    store-label/data-label vocabulary for the update-discipline axis, with

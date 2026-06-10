@@ -14,6 +14,10 @@ const IFC_KEYS = [
   "exactCopyOf",
   "projection",
   "collection",
+  // Reserved legacy key: no longer minted (the list builtins' per-element
+  // transactions make pointwise precision structural) and consumed by
+  // nothing, but already-persisted link schemas embed it, so merging must
+  // keep tolerating it.
   "flowPrecisionClaim",
   "uiContract",
 ] as const;

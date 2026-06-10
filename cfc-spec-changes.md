@@ -88,7 +88,13 @@ preferred mechanism; trusted claims exist for runtimes/ops that cannot
 decompose. Clarify what the coordinator's own writes (container structure,
 membership, order, length) must be tainted by — the container/enumeration
 observations plus any predicate outputs it consumed (this also gives the
-§8.5.6.1 membership taint without claims).
+§8.5.6.1 membership taint without claims). Also note that
+dependency-structure assertions, if they return, are expected to originate
+from static analysis earlier in the pipeline (§14.4.4) rather than runtime
+schema metadata — the claim mechanism should not assume schema embedding is
+the only carrier. (Implementation note 2026-06-10: claim minting deleted
+from the list builtins; the schema key is reserved-and-tolerated for
+already-persisted data.)
 
 **SC-8 [normative] Read-API → observation-class mapping — §4.6.3.** The
 primitive read profile defines `shape`/`value`/`enumerate`/`count`/

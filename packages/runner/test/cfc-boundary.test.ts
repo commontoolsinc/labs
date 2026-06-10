@@ -22,7 +22,6 @@ import {
   canonicalizeWritePolicyInput,
   logicalPathToPointer,
 } from "../src/cfc/mod.ts";
-import { flowPrecisionSchemaForBuiltin } from "../src/cfc/flow-precision.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
@@ -1734,7 +1733,22 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
-      const schema = flowPrecisionSchemaForBuiltin("map");
+      // `flowPrecisionClaim` is a reserved legacy key: no longer minted, but
+      // already-persisted link schemas may embed it, so an ifc entry that is
+      // not a label must stay tolerated and must not persist CFC metadata.
+      const schema: JSONSchema = {
+        type: "array",
+        ifc: {
+          flowPrecisionClaim: {
+            concept:
+              "https://commonfabric.org/cfc/concepts/flow-taint-precision",
+            claims: [
+              { type: "PointwisePresencePreserved" },
+              { type: "PointwiseWriteDependency" },
+            ],
+          },
+        },
+      } as JSONSchema;
       const cell = runtime.getCell(
         signer.did(),
         "cfc-empty-label-ifc-noop",
