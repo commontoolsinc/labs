@@ -308,6 +308,18 @@ inside the child pattern or handler.
 Use pattern tests for deterministic state transitions and browser/integration
 tests for identity behavior.
 
+For headless multi-user coverage, use the multi-runtime harness
+(`packages/patterns/integration/multi-runtime-harness.ts`): it opens the same
+piece in several worker-isolated runtimes (distinct identities, or one
+identity in two sessions) against one shared in-process storage server, so
+`PerUser`/`PerSession` partitioning and cross-client propagation are actually
+exercised — no toolshed or browser needed. See
+`cfc-group-chat-demo-multi-runtime.test.ts` for usage, and
+`cfc-group-chat-demo-two-browsers.test.ts` for the two-simultaneous-browser
+variant that guards the real DOM/event stack. A single runtime (or one page
+that switches identities) cannot catch cross-user leaks or
+fails-to-propagate bugs.
+
 Expected visibility:
 
 - `PerSpace<T>` data should be visible to every identity in the same space.
