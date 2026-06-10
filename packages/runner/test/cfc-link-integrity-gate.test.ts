@@ -93,8 +93,9 @@ describe("CFC link-write integrity gate", () => {
           };
         } | undefined;
       };
-      const entries = replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
-        [];
+      const entries =
+        replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
+          [];
       const allIntegrity = entries.flatMap((e) => e.label.integrity ?? []);
       // The forged InjectionSafe must not have been persisted anywhere.
       expect(
