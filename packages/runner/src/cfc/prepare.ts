@@ -2355,14 +2355,12 @@ export const prepareBoundaryCommit = (
         entry.schema,
       ]),
     );
-    const existingConfidentialityByPath = new Map<string, readonly unknown[]>(
-      (existing?.labelMap.entries ?? [])
-        .filter((e) => (e.label.confidentiality?.length ?? 0) > 0)
-        .map((e) => [
-          pathKey(canonicalizeLogicalPath(e.path)),
-          e.label.confidentiality as readonly unknown[],
-        ]),
-    );
+    const existingConfidentiality = (existing?.labelMap.entries ?? [])
+      .filter((e) => (e.label.confidentiality?.length ?? 0) > 0)
+      .map((e) => ({
+        path: canonicalizeLogicalPath(e.path),
+        confidentiality: e.label.confidentiality as readonly unknown[],
+      }));
     const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
       if (
         !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
@@ -2380,11 +2378,15 @@ export const prepareBoundaryCommit = (
       );
       // Store confidentiality is grow-only (§8.12.1): a re-write of a path must
       // not drop confidentiality the labelMap already carried beyond the schema
-      // (e.g. link-derived or carried-view atoms). Merge the prior stored
-      // confidentiality into the freshly derived label. Integrity is left as
-      // derived (freshly gated) — it must not regrow (audit S9).
-      const prior = existingConfidentialityByPath.get(pathKey(entry.path));
-      const label = prior !== undefined
+      // (e.g. link-derived or carried-view atoms). Reads use longest-prefix
+      // matching, so a new child entry shadows an ancestor — merge prior
+      // confidentiality from this path AND every ancestor of it, not just an
+      // exact-path match (audit S9, review follow-up). Integrity is left as
+      // derived (freshly gated) — it must not regrow.
+      const prior = existingConfidentiality
+        .filter((e) => isPrefix(e.path, entry.path))
+        .flatMap((e) => e.confidentiality);
+      const label = prior.length > 0
         ? {
           ...derived,
           confidentiality: mergeLabelValues(derived.confidentiality, prior),

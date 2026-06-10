@@ -108,4 +108,106 @@ describe("CFC labelMap confidentiality monotonicity", () => {
       await storageManager.close();
     }
   });
+
+  it("preserves ancestor confidentiality when re-writing a child path", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const guarded = internSchema(
+        {
+          type: "object",
+          properties: {
+            obj: {
+              type: "object",
+              properties: {
+                field: { type: "string", ifc: { confidentiality: ["base"] } },
+              },
+              required: ["field"],
+            },
+          },
+          required: ["obj"],
+        } satisfies JSONSchema,
+        true,
+      );
+
+      // Seed an ANCESTOR-path labelMap entry (at ["obj"]) carrying extra
+      // confidentiality beyond the schema.
+      const seed = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-labelmap-monotone-ancestor",
+        undefined,
+        seed,
+      );
+      const targetId = target.getAsNormalizedFullLink().id;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, {
+        value: { obj: { field: "seeded" } },
+        cfc: {
+          version: 1,
+          schemaHash: guarded.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["obj"],
+              label: { confidentiality: ["ancestor-secret"] },
+            }],
+          },
+        },
+      });
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: `cid:${guarded.taggedHashString}`,
+        path: [],
+      }, { value: guarded.schema });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // Re-write the CHILD path; its new entry must not shadow (drop) the
+      // ancestor's confidentiality under longest-prefix reads.
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-labelmap-monotone-ancestor",
+        guarded.schema,
+        tx,
+      );
+      cell.set({ obj: { field: "updated" } });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: {
+            labelMap?: {
+              entries: Array<
+                { path: string[]; label: { confidentiality?: string[] } }
+              >;
+            };
+          };
+        } | undefined;
+      };
+      const entries = replica.getDocument(persistedId)?.cfc?.labelMap?.entries ??
+        [];
+      const child = entries.find((e) =>
+        e.path.length === 2 && e.path[0] === "obj" && e.path[1] === "field"
+      );
+      expect(child).toBeDefined();
+      expect([...(child!.label.confidentiality ?? [])].sort()).toEqual(
+        ["ancestor-secret", "base"],
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
