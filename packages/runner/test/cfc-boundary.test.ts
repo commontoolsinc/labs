@@ -266,6 +266,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["savedTitle"],
         label: {},
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -354,6 +355,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["savedTitle"],
         label: {},
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -1814,6 +1816,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           confidentiality: ["secret"],
           integrity: ["trusted"],
         },
+        origin: "declared",
       });
 
       const schemaDoc = replica.getDocument(
@@ -1882,10 +1885,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(entries).toContainEqual({
         path: ["first"],
         label: { integrity: ["shared-ref-integrity"] },
+        origin: "declared",
       });
       expect(entries).toContainEqual({
         path: ["second"],
         label: { integrity: ["shared-ref-integrity"] },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -2004,6 +2009,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           confidentiality: ["secret"],
           integrity: ["trusted"],
         },
+        origin: "declared",
       });
       expect(spacePersisted?.cfc).toBeUndefined();
 
@@ -3089,6 +3095,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: "alice",
           }],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -3201,6 +3208,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: "alice",
           }],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -3351,6 +3359,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: "alice",
           }],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -3441,12 +3450,14 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         label: {
           confidentiality: ["public"],
         },
+        origin: "declared",
       });
       expect(persisted?.cfc?.labelMap?.entries).not.toContainEqual({
         path: [],
         label: {
           confidentiality: ["public", "secret"],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -4802,6 +4813,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             "derived-integrity",
           ],
         },
+        origin: "declared",
       });
     } finally {
       await runtime.dispose();
@@ -5088,6 +5100,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: signer.did(),
           }],
         },
+        origin: "declared",
       });
       verify.abort();
     } finally {
@@ -5187,6 +5200,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: signer.did(),
           }],
         },
+        origin: "declared",
       });
       verify.abort();
     } finally {

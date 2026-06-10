@@ -43,6 +43,7 @@ import {
   type CfcMetadata,
   type IFCLabel,
   type ImplementationIdentity,
+  type LabelMapEntry,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -72,21 +73,44 @@ const labelAtPath = (
   if (!metadata) {
     return undefined;
   }
-  let match:
-    | {
-      path: readonly string[];
-      label: IFCLabel;
-    }
-    | undefined;
+  // Per-component longest-prefix resolution: within one origin component a
+  // more specific entry replaces its ancestor (§4.6.3 replace-down), but
+  // components layer independently, so the effective label is the join of
+  // each component's most-specific ancestor-or-equal entry. Legacy entries
+  // (no origin) form one combined component, preserving the historical
+  // single-map resolution for pre-component metadata.
+  const matches = new Map<
+    string,
+    { path: readonly string[]; label: IFCLabel }
+  >();
   for (const entry of metadata.labelMap.entries) {
     if (!isPrefix(entry.path, path)) {
       continue;
     }
+    const component = entry.origin ?? "legacy";
+    const match = matches.get(component);
     if (match === undefined || match.path.length < entry.path.length) {
-      match = entry;
+      matches.set(component, entry);
+    } else if (match.path.length === entry.path.length) {
+      // Two equally specific prefixes of one queried path are the same
+      // path; duplicate (path, origin) entries shouldn't survive
+      // coalescing, but join defensively rather than drop one.
+      matches.set(component, {
+        path: match.path,
+        label: mergeLabels(match.label, entry.label),
+      });
     }
   }
-  return match?.label;
+  if (matches.size === 0) {
+    return undefined;
+  }
+  let joined: IFCLabel | undefined;
+  for (const match of matches.values()) {
+    joined = joined === undefined
+      ? match.label
+      : mergeLabels(joined, match.label);
+  }
+  return joined;
 };
 
 // Effective label of a consumed read. A recursive read materializes the
@@ -2139,25 +2163,31 @@ const cloneLabel = (label: IFCLabel): IFCLabel => ({
 });
 
 const coalesceLabelEntries = (
-  entries: ReadonlyArray<{ path: readonly string[]; label: IFCLabel }>,
-): Array<{ path: readonly string[]; label: IFCLabel }> => {
-  const byPath = new Map<
-    string,
-    { path: readonly string[]; label: IFCLabel }
-  >();
+  entries: ReadonlyArray<LabelMapEntry>,
+): Array<LabelMapEntry> => {
+  // Coalesce per (path, origin): same-component entries at one path merge;
+  // entries of different components stay separate so each can follow its
+  // own update discipline (declared monotone, link/derived per-value).
+  const byKey = new Map<string, LabelMapEntry>();
   for (const entry of entries) {
     const path = [...entry.path];
-    const key = pathKey(path);
-    const existing = byPath.get(key);
-    byPath.set(key, {
+    const key = `${entry.origin ?? ""} ${pathKey(path)}`;
+    const existing = byKey.get(key);
+    byKey.set(key, {
       path,
       label: mergeLabels(existing?.label, cloneLabel(entry.label)),
+      ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
     });
   }
-  return [...byPath.values()].sort((left, right) => {
+  return [...byKey.values()].sort((left, right) => {
     const leftKey = pathKey(left.path);
     const rightKey = pathKey(right.path);
-    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    if (leftKey !== rightKey) {
+      return leftKey < rightKey ? -1 : 1;
+    }
+    const leftOrigin = left.origin ?? "";
+    const rightOrigin = right.origin ?? "";
+    return leftOrigin < rightOrigin ? -1 : leftOrigin > rightOrigin ? 1 : 0;
   });
 };
 
@@ -2388,7 +2418,8 @@ export const prepareBoundaryCommit = (
         path: canonicalizeLogicalPath(e.path),
         confidentiality: e.label.confidentiality as readonly unknown[],
       }));
-    const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
+    const persistedLabelEntries: LabelMapEntry[] = mergedSchemaEntries
+      .flatMap((entry) => {
       if (
         !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
       ) {
@@ -2423,6 +2454,7 @@ export const prepareBoundaryCommit = (
         ? [{
           path: entry.path,
           label,
+          origin: "declared" as const,
         }]
         : [];
     });
@@ -2443,9 +2475,12 @@ export const prepareBoundaryCommit = (
         hasLabelValues(entry.label) ||
         (schemaEntry !== undefined && hasPersistedPolicyClaim(schemaEntry))
       ) {
+        // Carry-forward of an untouched path preserves the entry's
+        // component (legacy entries stay legacy).
         persistedLabelEntries.push({
           path: entryPath,
           label: cloneLabel(entry.label),
+          ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
         });
       }
     }
@@ -2465,6 +2500,7 @@ export const prepareBoundaryCommit = (
         persistedLabelEntries.push({
           path: canonicalizeLogicalPath(input.target.path),
           label: result.label,
+          origin: "link",
         });
       }
       const targetPath = canonicalizeLogicalPath(input.target.path);
@@ -2484,6 +2520,7 @@ export const prepareBoundaryCommit = (
             cloneLabel(entry.label),
             linkIdentity,
           ),
+          origin: "link",
         });
       }
     }

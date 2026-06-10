@@ -185,10 +185,20 @@ export const canonicalizeCfcMetadata = (
     entries: [...metadata.labelMap.entries].map((entry) => ({
       path: canonicalizeLogicalPath(entry.path),
       label: entry.label,
+      ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
     })).sort((left, right) => {
       const leftKey = logicalPathToPointer(left.path);
       const rightKey = logicalPathToPointer(right.path);
-      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
+      const leftOrigin = left.origin ?? "";
+      const rightOrigin = right.origin ?? "";
+      return leftOrigin < rightOrigin
+        ? -1
+        : leftOrigin > rightOrigin
+        ? 1
+        : 0;
     }),
   },
 });

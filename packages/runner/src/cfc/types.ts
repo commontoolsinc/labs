@@ -128,15 +128,33 @@ export type CfcSandboxResult = {
   diagnostics?: CfcSandboxDiagnostic[];
 };
 
+/**
+ * Provenance component of a persisted labelMap entry. Components follow
+ * distinct update disciplines (S16 design):
+ * - `declared`: schema store policy — monotone (grow-only) per §8.12.
+ * - `link`: reference-carried label — replaced when the link at the path
+ *   is rewritten.
+ * - `derived`: default-transition flow label — replaced when the value at
+ *   the path is overwritten; an ancestor overwrite clears derived
+ *   descendants.
+ * Entries without an origin are legacy (pre-component) entries and are
+ * treated as one combined component with the historical update rules.
+ * The effective label at a path is the join of all components.
+ */
+export type LabelEntryOrigin = "declared" | "link" | "derived";
+
+export type LabelMapEntry = {
+  path: readonly string[];
+  label: IFCLabel;
+  origin?: LabelEntryOrigin;
+};
+
 export type CfcMetadata = {
   version: 1;
   schemaHash: string;
   labelMap: {
     version: 1;
-    entries: Array<{
-      path: readonly string[];
-      label: IFCLabel;
-    }>;
+    entries: Array<LabelMapEntry>;
   };
 };
 
