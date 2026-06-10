@@ -25,6 +25,31 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
 
+// Seed stored CFC metadata via an ungated path-[] full-document write (the
+// shape hydration delivers it), reading the current doc first so the value
+// survives. A direct (unprivileged) ["cfc"] write is rejected as label forgery
+// (audit S18); the runtime's own ["cfc"] writes go through prepareCfc's
+// ECMAScript-private privileged scope, which tests can't (and shouldn't) reach.
+const seedPrivilegedCfc = (
+  tx: unknown,
+  address: unknown,
+  metadata: unknown,
+): void => {
+  const t = tx as {
+    readOrThrow(address: unknown): unknown;
+    writeOrThrow(address: unknown, value: unknown): void;
+  };
+  const docAddress = { ...(address as Record<string, unknown>), path: [] };
+  let current: unknown;
+  try {
+    current = t.readOrThrow(docAddress);
+  } catch {
+    current = undefined;
+  }
+  const base = current && typeof current === "object" ? current : {};
+  t.writeOrThrow(docAddress, { ...base, cfc: metadata });
+};
+
 describe("scheduler", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -1040,7 +1065,8 @@ describe("scheduler", () => {
     expect(lastApplies).toBe(false);
     expect(resultCell.get()).toEqual({ count: 1, applies: false });
 
-    tx.writeOrThrow(
+    seedPrivilegedCfc(
+      tx,
       {
         space: secretLink.space,
         id: secretLink.id,
@@ -1125,7 +1151,8 @@ describe("scheduler", () => {
     expect(lastVersion).toBe(0);
     expect(resultCell.get()).toEqual({ count: 1, version: 0 });
 
-    tx.writeOrThrow(
+    seedPrivilegedCfc(
+      tx,
       {
         space: sourceLink.space,
         id: sourceLink.id,

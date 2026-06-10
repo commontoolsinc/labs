@@ -1,16 +1,13 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { isPattern, Module, Pattern, Schema } from "./builder/types.ts";
 import {
-  isPattern,
-  Module,
-  Pattern,
-  Schema,
-  unsafe_originalPattern,
-} from "./builder/types.ts";
-import {
+  getArtifactEntryRef,
   getPatternProgram,
   getVerifiedLoadId,
   isTrustedBuilderArtifact,
   isTrustedPattern,
+  resolveOriginal,
+  setArtifactEntryRef,
   setPatternProgram,
   setVerifiedLoadId,
 } from "./builder/pattern-metadata.ts";
@@ -100,17 +97,10 @@ export class PatternManager {
   private patternIdMap = new Map<URI, Pattern>();
   // Map from pattern object instance to patternId
   private patternToIdMap = new WeakMap<Pattern, URI>();
-  // Map from a builder artifact (pattern / lift / handler) to its content-
-  // addressed {identity, symbol} reference — the module's identity (prefix-free
-  // `cf:module/<hash>` minus the scheme) and the symbol it was registered/exported
-  // under. Learned on the ESM path: for an authored export the symbol is its
-  // export name; for a hoisted artifact it is the `__cfReg` key. Lets a value be
-  // referenced by {identity, symbol} and resolved straight from the in-memory
-  // cache without the program/meta indirection.
-  private valueToEntryRef = new WeakMap<
-    object,
-    { identity: string; symbol: string }
-  >();
+  // The forward value → {identity, symbol} map lives module-level in
+  // builder/pattern-metadata.ts (`setArtifactEntryRef`/`getArtifactEntryRef`)
+  // so builder-layer copy sites can carry refs onto derived copies without a
+  // PatternManager handle.
   // THE in-memory reverse index for content-addressed builder artifacts: module
   // identity -> (symbol -> live value). The single source for
   // `artifactFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
@@ -242,10 +232,9 @@ export class PatternManager {
   }
 
   private findOriginalPattern(pattern: Pattern): Pattern {
-    while (pattern[unsafe_originalPattern]) {
-      pattern = pattern[unsafe_originalPattern];
-    }
-    return pattern;
+    // Derivation links live in the module-level side table (pattern-metadata);
+    // the former `unsafe_originalPattern` symbol backref is gone.
+    return resolveOriginal(pattern);
   }
 
   // Roots already fully seeded per verifiedLoadId. The walk is idempotent
@@ -911,7 +900,7 @@ export class PatternManager {
     // `indexArtifact` would drop exported lift/handler forward refs — the gap
     // Codex flagged on an earlier revision of #3912.
     if (isTrustedPattern(pattern)) {
-      this.valueToEntryRef.set(pattern, { identity: entryIdentity, symbol });
+      setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
       if (loadId) {
         this.seedVerifiedLoadIds(pattern, loadId);
       }
@@ -1008,9 +997,7 @@ export class PatternManager {
     // the forward ref stays pinned to the original — acceptable because the
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
-    if (!this.valueToEntryRef.has(value as object)) {
-      this.valueToEntryRef.set(value as object, { identity, symbol });
-    }
+    setArtifactEntryRef(value, { identity, symbol });
   }
 
   /**
@@ -1061,7 +1048,7 @@ export class PatternManager {
     // Refresh recency.
     this.modulesByIdentity.delete(entryIdentity);
     this.modulesByIdentity.set(entryIdentity, cached);
-    this.valueToEntryRef.set(pattern, { identity: entryIdentity, symbol });
+    setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
     if (cached.loadId) this.seedVerifiedLoadIds(pattern, cached.loadId);
     return pattern;
   }
@@ -1118,7 +1105,7 @@ export class PatternManager {
     if (isTrustedPattern(pattern)) {
       setPatternProgram(pattern, program);
       if (entryIdentity) {
-        this.valueToEntryRef.set(pattern, {
+        setArtifactEntryRef(pattern, {
           identity: entryIdentity,
           symbol: exportName,
         });
@@ -1139,12 +1126,10 @@ export class PatternManager {
   getArtifactEntryRef(
     value: object,
   ): { identity: string; symbol: string } | undefined {
-    // `valueToEntryRef` is keyed by the EXACT registered/exported value. Check
-    // the exact object FIRST, then the normalized original: a copied/wrapped
-    // artifact whose `unsafe_originalPattern` root differs from the keyed object
-    // would otherwise never resolve its ref.
-    return this.valueToEntryRef.get(value) ??
-      this.valueToEntryRef.get(this.findOriginalPattern(value as Pattern));
+    // Exact object first, then the derivation root — handled by the
+    // module-level store (refs are indexed post-evaluation, after build-time
+    // copies were made, so the lookup walks the derivation link lazily).
+    return getArtifactEntryRef(value);
   }
 
   /**

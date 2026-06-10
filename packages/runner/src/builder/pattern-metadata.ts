@@ -1,5 +1,5 @@
 import type { RuntimeProgram } from "../harness/types.ts";
-import { isPattern, type Pattern, unsafe_originalPattern } from "./types.ts";
+import { isPattern, type Pattern } from "./types.ts";
 
 /**
  * Side-table storage for pattern metadata that is associated *after* a pattern
@@ -96,29 +96,116 @@ export function brandTrustedPattern<T>(value: T): T {
   return value;
 }
 
+// Derivation tracking: `copy → root original`. Replaces the former
+// `unsafe_originalPattern` symbol backref. Registered ONLY by runner-owned
+// copy sites (`noteDerivedCopy` callers: build-time graph serialization in
+// json-utils, traversal copies in traverse-utils, binding copies in
+// pattern-binding) — authored/forged values never enter, since nothing on the
+// object itself can establish the link. Module-level (not per-manager): the
+// copy sites live in builder-layer utilities with no PatternManager handle,
+// and the linked facts (trust brands, content-addressed entry refs) are
+// globally meaningful. WeakMap keys are the per-runtime live objects, so
+// multiple runtimes in one process cannot collide.
+const derivedFrom = new WeakMap<object, object>();
+
+// Content-addressed `{ identity, symbol }` entry ref per live builder
+// artifact. Written (first-write-wins) by the PatternManager's indexing of
+// evaluated modules (`indexArtifact`, gated on `isTrustedBuilderArtifact`);
+// promoted here from the manager so derived copies can resolve refs without a
+// manager handle. The reverse index (`addressableByIdentity`, identity → live
+// value) stays per-manager — it holds live values per runtime and is bounded.
+const entryRefByValue = new WeakMap<
+  object,
+  { identity: string; symbol: string }
+>();
+
+/**
+ * Resolve a (possibly derived) value to its root original. Identity for
+ * values that were never copied. Bounded: the chain is a tree toward the
+ * root original (copies are fresh objects), but guard against cycles anyway.
+ */
+export function resolveOriginal<T>(value: T): T {
+  let current = asKey(value);
+  if (!current) return value;
+  const seen = new Set<object>();
+  while (true) {
+    const next = derivedFrom.get(current);
+    if (!next || next === current || seen.has(next)) break;
+    seen.add(current);
+    current = next;
+  }
+  return current as T;
+}
+
+/**
+ * Record that `copy` is a derivation/serialized copy of `original`, carrying
+ * its identity facts forward:
+ *
+ * - trust propagates EAGERLY (sound: builders brand their artifacts at
+ *   creation time, before any copy can be made);
+ * - the entry ref propagates eagerly when already known, but lookups still
+ *   walk `derivedFrom` lazily ({@link getArtifactEntryRef}) because refs are
+ *   indexed only post-evaluation — AFTER build-time copies were made.
+ *
+ * Only runner-owned copy sites may call this; it is the sole way a copy can
+ * inherit trust, so forged values (which are never passed here with a trusted
+ * original) gain nothing.
+ */
+export function noteDerivedCopy(copy: unknown, original: unknown): void {
+  const c = asKey(copy);
+  const o = asKey(original);
+  if (!c || !o || c === o) return;
+  const root = resolveOriginal(o);
+  derivedFrom.set(c, root);
+  if (trustedPatterns.has(root)) trustedPatterns.add(c);
+  if (trustedBuilderArtifacts().has(root)) trustedBuilderArtifacts().add(c);
+  const ref = entryRefByValue.get(root);
+  if (ref && !entryRefByValue.has(c)) entryRefByValue.set(c, ref);
+}
+
+/**
+ * Associate a content-addressed `{ identity, symbol }` entry ref with a live
+ * builder artifact. First write wins (an artifact may be reachable under
+ * several symbols; the first registration is canonical, matching the
+ * pre-existing `valueToEntryRef` semantics).
+ */
+export function setArtifactEntryRef(
+  value: unknown,
+  ref: { identity: string; symbol: string },
+): void {
+  const key = asKey(value);
+  if (key && !entryRefByValue.has(key)) entryRefByValue.set(key, ref);
+}
+
+/**
+ * The content-addressed `{ identity, symbol }` entry ref for a value — the
+ * exact object first, then its root original (a copy made before the ref was
+ * indexed resolves through the derivation link).
+ */
+export function getArtifactEntryRef(
+  value: unknown,
+): { identity: string; symbol: string } | undefined {
+  const key = asKey(value);
+  if (!key) return undefined;
+  return entryRefByValue.get(key) ??
+    entryRefByValue.get(resolveOriginal(key) as object);
+}
+
 /**
  * True only for a value that is structurally a pattern AND has trusted builder
  * provenance — either it carries the brand directly, or it is a derivation /
- * serialized copy whose `unsafe_originalPattern` chain reaches a branded
- * original. Use this at trust-granting sites; a `__cf_data`-forged pattern-shaped
- * object is `isPattern` but NOT `isTrustedPattern` (it carries no brand, and the
- * `unsafe_originalPattern` symbol is module-private — authored code cannot set
- * it to point at a real pattern).
+ * serialized copy registered via {@link noteDerivedCopy} (which propagates the
+ * brand eagerly). A `__cf_data`-forged pattern-shaped object is `isPattern`
+ * but NOT `isTrustedPattern`: no own property can grant trust (the brand and
+ * derivation link live in runner-private WeakSets/WeakMaps), and forged values
+ * never reach `noteDerivedCopy` with a trusted original.
  */
 export function isTrustedPattern(value: unknown): value is Pattern {
   if (!isPattern(value)) return false;
-  // Walk the original-pattern chain; a branded ancestor confers trust on copies.
-  let current: unknown = value;
-  const seen = new Set<unknown>();
-  while (
-    current && (typeof current === "object" || typeof current === "function")
-  ) {
-    if (trustedPatterns.has(current as object)) return true;
-    if (seen.has(current)) break;
-    seen.add(current);
-    current = (current as Record<symbol, unknown>)[unsafe_originalPattern];
-  }
-  return false;
+  const key = asKey(value);
+  if (!key) return false;
+  return trustedPatterns.has(key) ||
+    trustedPatterns.has(resolveOriginal(key) as object);
 }
 
 /** Stamp a value as produced by a trusted non-pattern builder (lift/handler/…). */
@@ -130,33 +217,19 @@ export function brandTrustedBuilderArtifact<T>(value: T): T {
 
 /**
  * True for any value with trusted-builder provenance — a trusted pattern OR a
- * branded lift/handler/node-factory — walking the `unsafe_originalPattern` chain
- * so derivation / serialized copies inherit trust. This is the gate that decides
+ * branded lift/handler/node-factory — including derivation / serialized
+ * copies registered via {@link noteDerivedCopy}. This is the gate that decides
  * whether a `__cfReg`-registered value may receive a content-addressed
  * `{ identity, symbol }` reference; forged plain data carries no brand and is
- * rejected.
+ * rejected. Pure WeakSet/WeakMap probes — no property reads, so exotic values
+ * (e.g. a Proxy with a throwing get trap) cannot abort registration/lookup.
  */
 export function isTrustedBuilderArtifact(value: unknown): boolean {
-  let current: unknown = value;
-  const seen = new Set<unknown>();
-  while (
-    current && (typeof current === "object" || typeof current === "function")
-  ) {
-    if (
-      trustedBuilderArtifacts().has(current as object) ||
-      trustedPatterns.has(current as object)
-    ) {
-      return true;
-    }
-    if (seen.has(current)) break;
-    seen.add(current);
-    // Fail closed: reading the (module-private) symbol off an exotic value — e.g.
-    // a Proxy with a throwing get trap — must not abort registration/lookup.
-    try {
-      current = (current as Record<symbol, unknown>)[unsafe_originalPattern];
-    } catch {
-      return false;
-    }
+  const key = asKey(value);
+  if (!key) return false;
+  if (trustedBuilderArtifacts().has(key) || trustedPatterns.has(key)) {
+    return true;
   }
-  return false;
+  const root = resolveOriginal(key) as object;
+  return trustedBuilderArtifacts().has(root) || trustedPatterns.has(root);
 }

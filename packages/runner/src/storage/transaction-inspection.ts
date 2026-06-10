@@ -4,6 +4,7 @@ import type {
   IStorageTransaction,
   MemorySpace,
   TransactionReactivityLog,
+  TransactionReadDetail,
   TransactionWriteDetail,
 } from "./interface.ts";
 
@@ -37,6 +38,27 @@ export function getTransactionReadActivities(
       if ("read" in activity && activity.read) {
         yield activity.read;
       }
+    }
+  })();
+}
+
+export function getTransactionReadDetails(
+  tx: TxLike,
+  space: MemorySpace,
+): Iterable<TransactionReadDetail> {
+  const direct = tx.getReadDetails?.(space) ??
+    unwrap(tx).getReadDetails?.(space);
+  if (direct) {
+    return direct;
+  }
+
+  // Chronicle-style transactions record read invariants as journal history.
+  return (function* () {
+    for (const attestation of tx.journal.history(space)) {
+      yield {
+        address: { ...attestation.address, space },
+        value: attestation.value as TransactionReadDetail["value"],
+      };
     }
   })();
 }

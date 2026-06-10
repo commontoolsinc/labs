@@ -29,10 +29,11 @@ piece issues.
    - Check `docs/development/debugging/README.md` for matching errors
 
 3. **Check gotchas:**
+   - `docs/development/debugging/gotchas/quick.md` - consolidated quick gotchas,
+     one anchor per error (e.g. `#filter-map-find-is-not-a-function`,
+     `#onclick-inside-computed`)
    - `docs/development/debugging/gotchas/reactive-reference-outside-context.md`
    - `docs/development/debugging/gotchas/handler-inside-pattern.md`
-   - `docs/development/debugging/gotchas/filter-map-find-not-a-function.md`
-   - `docs/development/debugging/gotchas/onclick-inside-computed.md`
    - `docs/development/debugging/gotchas/immediate-event-invocation.md`
 
 4. **Simplify to minimal reproduction:**

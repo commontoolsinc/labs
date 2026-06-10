@@ -1,4 +1,8 @@
-import { computed, handler, pattern, Stream, Writable } from "commonfabric";
+import { computed, handler, pattern, Writable } from "commonfabric";
+import {
+  SAVE_TITLE_ACTION,
+  TRUSTED_SAVE_SURFACE,
+} from "../cfc/trusted-surfaces/mod.ts";
 import AuthorizedSave from "./main.tsx";
 
 const setDraftTitle = handler<
@@ -8,12 +12,13 @@ const setDraftTitle = handler<
   draftTitle.set(title);
 });
 
-const triggerSave = handler<
-  void,
-  { save: Stream<void> }
->((_, { save }) => {
-  save.send();
-});
+// The protected `savedTitle` write requires the trusted save gesture: send
+// the renderer-trusted event directly to the surface's stream (see the
+// `trustedUi` steps below), like a user clicking the reviewed button.
+const trustedSaveGesture = {
+  surface: TRUSTED_SAVE_SURFACE,
+  action: SAVE_TITLE_ACTION,
+};
 
 export default pattern(() => {
   const draftTitle = new Writable("");
@@ -28,17 +33,9 @@ export default pattern(() => {
     title: "First title",
   });
 
-  const action_save_first_draft = triggerSave({
-    save: instance.save,
-  });
-
   const action_set_second_draft = setDraftTitle({
     draftTitle,
     title: "Second title",
-  });
-
-  const action_save_second_draft = triggerSave({
-    save: instance.save,
   });
 
   const assert_initial_saved_empty = computed(() => savedTitle.get() === "");
@@ -60,11 +57,11 @@ export default pattern(() => {
       { assertion: assert_initial_saved_empty },
       { action: action_set_first_draft },
       { assertion: assert_first_draft_visible },
-      { action: action_save_first_draft },
+      { action: instance.save, trustedUi: trustedSaveGesture },
       { assertion: assert_first_save_committed },
       { action: action_set_second_draft },
       { assertion: assert_second_draft_does_not_autosave },
-      { action: action_save_second_draft },
+      { action: instance.save, trustedUi: trustedSaveGesture },
       { assertion: assert_second_save_committed },
     ],
     instance,

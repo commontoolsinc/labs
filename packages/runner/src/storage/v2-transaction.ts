@@ -36,6 +36,7 @@ import type {
   StorageTransactionRejected,
   StorageTransactionStatus,
   TransactionReactivityLog,
+  TransactionReadDetail,
   TransactionWriteDetail,
   Unit,
   URI,
@@ -897,6 +898,26 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
       yield* entry.writeDetails.values();
+    }
+  }
+
+  *getReadDetails(space: MemorySpace): Iterable<TransactionReadDetail> {
+    const branch = this.#branches.get(space);
+    if (!branch) {
+      return;
+    }
+    for (const [key, entry] of branch.docs) {
+      const frozenReads = entry.frozenReads;
+      if (!frozenReads) {
+        continue;
+      }
+      const { id, scope } = this.parseDocKey(key);
+      for (const [path, value] of frozenReads.entries()) {
+        yield {
+          address: { space, scope, id, path: [...path] },
+          value: value as TransactionReadDetail["value"],
+        };
+      }
     }
   }
 

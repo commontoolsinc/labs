@@ -110,7 +110,7 @@ If a conditional section still misbehaves, check:
   [Eager Ternary Branch Evaluation](gotchas/eager-ternary-branch-evaluation.md).
 - **Composed pattern cells:** condition cells taken directly from a composed
   sub-pattern can hang the piece. See
-  [ifElse with Composed Pattern Cells](gotchas/ifelse-composed-pattern-cells.md).
+  [ifElse with Composed Pattern Cells](gotchas/quick.md#ifelse-with-composed-pattern-cells).
 - **Unusual sites:** inspect the lowering with
   `deno task cf check <pattern>.tsx --show-transformed` rather than guessing.
 
