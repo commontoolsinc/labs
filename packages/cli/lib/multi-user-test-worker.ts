@@ -303,11 +303,16 @@ const handlers: Record<
   health() {
     return Promise.resolve({
       runtimeErrors: [...runtimeErrors],
-      nonIdempotent: rt().getIdempotencyViolations?.()?.map((violation) =>
-        String(
-          (violation as { actionId?: string }).actionId ?? violation,
-        )
-      ) ?? [],
+      nonIdempotent: rt().getIdempotencyViolations?.()?.map((violation) => {
+        const { actionId, differingWriteKeys } = violation as {
+          actionId?: string;
+          differingWriteKeys?: string[];
+        };
+        const id = String(actionId ?? violation);
+        return differingWriteKeys?.length
+          ? `${id} (differing writes: ${differingWriteKeys.join(", ")})`
+          : id;
+      }) ?? [],
     });
   },
 

@@ -356,6 +356,22 @@ export async function fetchArtifactsForRun(
   return data.artifacts;
 }
 
+/**
+ * Newest artifact per name. Re-running a single job uploads a same-named
+ * artifact alongside the original attempt's, and the API lists newest first —
+ * naive iteration lets the stale one win. Artifact ids are monotonic.
+ */
+export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
+  const byName = new Map<string, Artifact>();
+  for (const artifact of artifacts) {
+    const existing = byName.get(artifact.name);
+    if (!existing || artifact.id > existing.id) {
+      byName.set(artifact.name, artifact);
+    }
+  }
+  return [...byName.values()];
+}
+
 // ---------------------------------------------------------------------------
 // JUnit artifact parsing
 // ---------------------------------------------------------------------------
