@@ -2593,6 +2593,28 @@ export class Runner {
     );
     const crossSpace = resultSpace !== processCell.space;
 
+    // CT-1687: a handler that materializes a child piece in another space
+    // (`Factory.inSpace(...)`) leaves a piece that a fresh runtime must load
+    // FROM THAT SPACE — where neither the pattern meta nor the compiled
+    // closure exist (the handler's bundle artifacts live in the handler's own
+    // space). The whole result pattern materializes inside the target space,
+    // so the per-node cross-space hook in instantiatePatternNode never sees
+    // the transition; replicate here, where the originating space is known.
+    for (const { module } of resultPattern.nodes) {
+      if (
+        module.type === "pattern" &&
+        module.targetSpace !== undefined &&
+        module.targetSpace !== processCell.space &&
+        isPattern(module.implementation)
+      ) {
+        this.runtime.patternManager.replicatePatternToSpace(
+          module.implementation,
+          module.targetSpace,
+          processCell.space,
+        );
+      }
+    }
+
     if (deferForNavigate && result === undefined) {
       const resultCell = this.runtime.getCell(
         resultSpace,
@@ -4027,6 +4049,15 @@ export class Runner {
       // identity. The journal allows the cross-space write once opted in.
       this.enableCrossSpaceChildCommit(
         tx,
+        resultCell.space,
+        resultCellLink.space,
+      );
+      // CT-1687: a fresh runtime navigating to the child piece loads its
+      // pattern artifacts from `resultCell.space` (the child's own space),
+      // where neither the meta nor the compiled closure exist yet. Replicate
+      // them there (fire-and-forget) so the child is independently loadable.
+      this.runtime.patternManager.replicatePatternToSpace(
+        patternImpl,
         resultCell.space,
         resultCellLink.space,
       );
