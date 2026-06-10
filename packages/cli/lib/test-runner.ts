@@ -26,7 +26,7 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import { Engine, Runtime } from "@commonfabric/runner";
+import { Runtime } from "@commonfabric/runner";
 import type {
   Cell,
   ErrorWithContext,
@@ -862,9 +862,15 @@ export async function runTestPattern(
   if (options.verbose) {
     runtime.scheduler.enableSettleStats();
   }
+  // Compile/evaluate through the runtime's OWN harness, not a second Engine.
+  // Verified-load registration, source maps, and module hashes all live on the
+  // engine that evaluates the bundle; the runner and the builder's source-
+  // location annotation consult `runtime.harness`. A separate Engine splits
+  // that state, so `fn.src` stays a raw bundle coordinate and CFC verified-
+  // binding identities (writeAuthorizedBy) fail under enforcement.
   const engine = await withPhase(
     ["runTestPattern", "engine"],
-    () => new Engine(runtime),
+    () => runtime.harness,
   );
 
   try {

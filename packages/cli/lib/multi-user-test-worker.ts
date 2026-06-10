@@ -15,7 +15,12 @@
  * frame stack).
  */
 
-import { type Cell, Engine, type Pattern, Runtime } from "@commonfabric/runner";
+import {
+  type Cell,
+  type Engine,
+  type Pattern,
+  Runtime,
+} from "@commonfabric/runner";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import {
   createSession,
@@ -144,7 +149,10 @@ const handlers: Record<
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
     });
     runtime.enableIdempotencyCheck();
-    engine = new Engine(runtime);
+    // Use the runtime's own harness (see test-runner.ts): a second Engine
+    // splits verified-load/source-map state and breaks CFC verified-binding
+    // identities under enforcement.
+    engine = runtime.harness;
 
     const program = await engine.resolve(
       new FileSystemProgramResolver(
@@ -292,7 +300,7 @@ const handlers: Record<
 
   async dispose() {
     stepCells = [];
-    engine?.dispose();
+    // `engine` is the runtime's own harness; runtime.dispose() disposes it.
     await runtime?.dispose();
     await storageManager?.close();
     runtime = undefined;
