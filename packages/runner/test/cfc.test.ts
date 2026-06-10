@@ -23,6 +23,32 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
     expect(result1).toEqual({ type: "string" });
   });
 
+  it("does not collide cached paths whose segments contain NUL bytes", () => {
+    const cfc = new ContextualFlowControl();
+
+    // Deep-frozen so the schemaAtPath memo engages; "a\0b" as a single
+    // property name must not share a cache entry with the nested path
+    // ["a", "b"].
+    const schema: JSONSchema = Object.freeze({
+      type: "object",
+      properties: Object.freeze({
+        "a\0b": Object.freeze({ type: "number" }),
+        a: Object.freeze({
+          type: "object",
+          properties: Object.freeze({
+            b: Object.freeze({ type: "string" }),
+          }),
+        }),
+      }),
+    }) as JSONSchema;
+
+    const flat = cfc.schemaAtPath(schema, ["a\0b"]);
+    const nested = cfc.schemaAtPath(schema, ["a", "b"]);
+
+    expect(flat).toEqual({ type: "number" });
+    expect(nested).toEqual({ type: "string" });
+  });
+
   it("considers a schema with only $defs true'", () => {
     const schema: JSONSchema = {
       $defs: { Test: { type: "array", items: { type: "string" } } },

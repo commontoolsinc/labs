@@ -187,3 +187,47 @@ Follow-up measurement gaps (not covered here): main-thread (page) profile of
 the same flow (the reconciler has a DOM-applying twin), storage server time,
 and a benchmark for per-note pattern instantiation (`startWithTx` in commit
 callbacks; the macro bench uses plain docs, not running patterns).
+
+## Optimization round 1 (June 2026): candidates #3, #5, #2
+
+Landed on `perf/selector-schema-standardization`:
+
+1. **SelectorTracker schema standardization** (candidate #3's top seam,
+   ~210 ms of 574 ms attributable hash/freeze time): content-hash LRU beside
+   the frozen-identity WeakMap in `getStandardSchema` (mutable schemas pay
+   exactly one content hash per call, preserving the edited-in-place contract),
+   memoized `$defs`-stripped comparison hashes, hoisted `findRefs`.
+   `selector-tracker.bench.ts` (new): warm lookup 466→225 µs, subset path
+   1.8→0.8 ms.
+2. **CFC schema-ref memoization** (candidate #5): `resolveCfcSchemaRef` +
+   `findCfcSchemaRefs` cached per deep-frozen schema identity; resolution
+   results are now identity-stable, restoring downstream cache hits.
+   Reconciler mount bench: ~20% faster across sizes (@32: 83.9→67.5 ms).
+3. **`cfc.schemaAtPath` memo** (candidate #2 groundwork): cached per frozen
+   schema identity × path × boolean flags; serves the per-element write-diff
+   calls and selector sub-schema derivations.
+
+**End-to-end (worker busy CPU, notes 2–4 of the integration test):
+1446 ms → 1182 ms (−18%).** `handleVDomMount` 540→406 ms (−25%);
+`feedPlainObject` fell from top frame (92.6 ms in mount) to 20 ms;
+deep-freeze and schema-ref frames left the top-12 entirely.
+
+**Candidate #2 status:** measured single-child update is already O(1) in
+list size (300 updates: ~1.5 s @8 / ~1.6 s @32 / ~2.0 s @128 children); the
+~5 ms/update constant decomposes into commit hashing, `normalizeAndDiff`
+write-diff, sink re-subscription (largely server-side graph re-extension in
+the emulated bench), and read-back traverse/freeze. No single reconciler-side
+lever exists.
+
+**Next levers, in rough order of leverage:**
+- **Intern/freeze cell schemas at the `getCell`/`asSchema` seam.** Several
+  identity-keyed caches (schemaAtPath, value-hash, schema-refs) are gated on
+  `isDeepFrozen` and stay cold because cell schema literals are mutable
+  objects. Interning once at the seam would make them hit everywhere.
+- `decodeJsonPointer` showed up at 23 ms in the post-optimization mount
+  profile — trivially memoizable.
+- Keep reconciler mounts alive across navigation (candidate #1, untouched:
+  re-mount still pays full price by design of `handleVDomMount`).
+- Skip sink re-subscription bookkeeping when the read set is unchanged.
+- Value-graph identity reuse (freeze + reuse query results) — the remaining
+  big hashing/freeze lever.

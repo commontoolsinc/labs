@@ -1,6 +1,7 @@
 import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import type {
   AsCellEntry,
   CellKind,
@@ -310,6 +311,14 @@ export class ContextualFlowControl {
    * While we will handle $ref links as needed while getting to the schema,
    * the returned object will retain those $ref links.
    */
+  // schemaAtPath derivations per deep-frozen schema identity. The derivation
+  // is pure given (schema, path, boolean default flags) when no extra
+  // confidentiality is passed, and it runs per array element / object
+  // property on the write-diff path, so identical lookups repeat constantly.
+  // Mutable schemas are never cached (in-place edits must be observed).
+  // Per-instance because `lub` is an overridable instance method.
+  #schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
@@ -319,14 +328,45 @@ export class ContextualFlowControl {
   ): JSONSchema {
     // Take defs from schema if available
     const defs = isRecord(schema) && schema.$defs ? schema.$defs : undefined;
-    return this.schemaAtPathInternal(
-      schema,
-      path,
-      defs,
-      extraConfidentiality,
-      defaultEmptyProperties,
-      defaultMissingProperty,
-    );
+    const cacheable = extraConfidentiality === undefined &&
+      typeof defaultEmptyProperties === "boolean" &&
+      typeof defaultMissingProperty === "boolean" &&
+      isRecord(schema) && isDeepFrozen(schema);
+    if (!cacheable) {
+      return this.schemaAtPathInternal(
+        schema,
+        path,
+        defs,
+        extraConfidentiality,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      );
+    }
+    let byKey = this.#schemaAtPathCache.get(schema);
+    if (byKey === undefined) {
+      byKey = new Map();
+      this.#schemaAtPathCache.set(schema, byKey);
+    }
+    // Length-prefix each segment so a segment containing the separator (a
+    // NUL-bearing property name) cannot collide with a differently-split
+    // path — same idiom as traverse.ts's pathKey.
+    let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
+    for (const part of path) {
+      key += `|${part.length}:${part}`;
+    }
+    let result = byKey.get(key);
+    if (result === undefined) {
+      result = this.schemaAtPathInternal(
+        schema,
+        path,
+        defs,
+        undefined,
+        defaultEmptyProperties,
+        defaultMissingProperty,
+      );
+      byKey.set(key, result);
+    }
+    return result;
   }
 
   private schemaAtPathInternal(
