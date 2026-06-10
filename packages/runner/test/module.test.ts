@@ -193,8 +193,7 @@ describe("module", () => {
       });
       expect(clickPattern.derivedInternalCells).toEqual([{
         partialCause: { stream: "click" },
-        schema: true,
-        initial: { $stream: true },
+        schema: { default: { $stream: true } },
       }]);
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
@@ -229,8 +228,7 @@ describe("module", () => {
       });
       expect(clickPattern.derivedInternalCells).toEqual([{
         partialCause: generatedStreamCause,
-        schema: true,
-        initial: { $stream: true },
+        schema: { default: { $stream: true } },
       }]);
       const handlerInputs = clickPattern.nodes[0].inputs as {
         $event: unknown;
@@ -250,10 +248,9 @@ describe("module", () => {
         const value = new CellImpl<number>(
           runtime,
           undefined,
-          { path: [], space },
+          { path: [], space, schema: { default: 1 } },
           false,
         );
-        value.setInitialValue(1);
         return {
           value: value.for(["a", "b"], true),
         };
@@ -261,7 +258,12 @@ describe("module", () => {
 
       expect(arrayCausePattern.result).toEqual({
         value: {
-          $alias: { partialCause: ["a", "b"], path: [], scope: "space" },
+          $alias: {
+            partialCause: ["a", "b"],
+            path: [],
+            schema: { default: 1 },
+            scope: "space",
+          },
         },
       });
     });

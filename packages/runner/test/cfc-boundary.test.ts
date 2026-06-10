@@ -218,7 +218,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const pattern = {
         argumentSchema: { type: "object", properties: {} } as const,
         resultSchema,
-        derivedInternalCells: [{ partialCause: "savedTitle", initial: "" }],
+        derivedInternalCells: [{
+          partialCause: "savedTitle",
+          schema: { type: "string", default: "" },
+        }],
         result: {
           savedTitle: { $alias: { partialCause: "savedTitle", path: [] } },
         },
@@ -302,7 +305,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const pattern = {
         argumentSchema: { type: "object", properties: {} } as const,
         resultSchema,
-        derivedInternalCells: [{ partialCause: "savedTitle", initial: "" }],
+        derivedInternalCells: [{
+          partialCause: "savedTitle",
+          schema: { type: "string", default: "" },
+        }],
         result: {
           savedTitle: { $alias: { partialCause: "savedTitle", path: [] } },
         },

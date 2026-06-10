@@ -865,8 +865,11 @@ export class Runner {
       const currentValue = derivedCell.getRawUntyped({
         meta: ignoreReadForScheduling,
       });
-      if (currentValue === undefined && descriptor.initial !== undefined) {
-        derivedCell.setRawUntyped(fabricFromNativeValue(descriptor.initial));
+      const schemaDefault = isRecord(descriptor.schema)
+        ? descriptor.schema.default as JSONValue | undefined
+        : undefined;
+      if (currentValue === undefined && schemaDefault !== undefined) {
+        derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
       }
     }
 

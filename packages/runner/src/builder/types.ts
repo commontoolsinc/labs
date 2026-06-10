@@ -225,7 +225,6 @@ export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
   schema?: JSONSchema;
   scope?: CellScope;
-  initial?: JSONValue;
 };
 
 // Used to get back to original pattern from a JSONified representation.

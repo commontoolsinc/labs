@@ -86,7 +86,7 @@ describe("pattern", () => {
       },
       {
         partialCause: "x",
-        initial: 1,
+        schema: { default: 1 },
       },
     ]);
   });

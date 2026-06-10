@@ -297,9 +297,7 @@ describe("Pattern Runner - Regressions", () => {
       resultSchema: {},
       derivedInternalCells: [{
         partialCause: "recipe",
-        // We have to do some type abuse to allow the initialRecipe,
-        // since it isn't JSONValue.
-        initial: initialRecipe as never,
+        schema: { default: initialRecipe.toJSON() },
       }],
       result: {
         internalRecipe: {

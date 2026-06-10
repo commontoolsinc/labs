@@ -142,9 +142,8 @@ describe("runPattern", () => {
       resultSchema: {},
       derivedInternalCells: [{
         partialCause: "output",
-        schema: { type: "number" },
+        schema: { type: "number", default: 0 },
         scope: "space",
-        initial: 0,
       }],
       result: { output: { $alias: { partialCause: "output", path: [] } } },
       nodes: [
@@ -184,7 +183,7 @@ describe("runPattern", () => {
     expect(derivedLink).toBeDefined();
     expect(derivedLink!.id).not.toBe(resultCell.getAsNormalizedFullLink().id);
     expect(derivedLink!.path).toEqual([]);
-    expect(derivedLink!.schema).toEqual({ type: "number" });
+    expect(derivedLink!.schema).toEqual({ type: "number", default: 0 });
 
     const derivedCell = runtime.getCellFromLink(derivedLink!);
     expect(await derivedCell.get()).toBe(5);
@@ -819,7 +818,10 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      derivedInternalCells: [{ partialCause: "counter", initial: 0 }],
+      derivedInternalCells: [{
+        partialCause: "counter",
+        schema: { default: 0 },
+      }],
       result: {
         [NAME]: "counter",
         counter: { $alias: { partialCause: "counter", path: [] } },
@@ -865,7 +867,10 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      derivedInternalCells: [{ partialCause: "counter", initial: 0 }],
+      derivedInternalCells: [{
+        partialCause: "counter",
+        schema: { default: 0 },
+      }],
       result: {
         [NAME]: "counter",
         counter: { $alias: { partialCause: "counter", path: [] } },
@@ -926,12 +931,12 @@ describe("runPattern", () => {
         {
           partialCause: "nested",
           scope: "space",
-          initial: { value: "initial" },
+          schema: { default: { value: "initial" } },
         },
         {
           partialCause: "counter",
           scope: "space",
-          initial: 10,
+          schema: { default: 10 },
         },
       ],
       resultSchema: {},
@@ -1005,6 +1010,51 @@ describe("runPattern", () => {
     await localRuntime.storageManager.synced();
     await localRuntime.dispose();
     await sm.close();
+  });
+
+  it("materializes derived internal defaults from descriptor schemas", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      derivedInternalCells: [
+        {
+          partialCause: "history",
+          schema: { type: "array", default: [] },
+        },
+        {
+          partialCause: "count",
+          schema: { type: "number", default: 0 },
+        },
+      ],
+      resultSchema: {
+        type: "object",
+        properties: {
+          history: { type: "array" },
+          count: { type: "number" },
+        },
+      },
+      result: {
+        history: { $alias: { partialCause: "history", path: [] } },
+        count: { $alias: { partialCause: "count", path: [] } },
+      },
+      nodes: [],
+    };
+
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      {},
+      runtime.getCell(space, "schema default derived internals"),
+    );
+
+    expect(await result.key("history").pull()).toEqual([]);
+    expect(await result.key("count").pull()).toBe(0);
+    expect(
+      getDerivedInternalCell(result, {
+        partialCause: "history",
+        schema: { type: "array", default: [] },
+      }).getRawUntyped(),
+    ).toEqual([]);
   });
 });
 
@@ -1605,9 +1655,8 @@ describe("runner utils", () => {
         derivedInternalCells: [
           {
             partialCause: { stream: "increment" },
-            schema: true,
+            schema: { default: { $stream: true } },
             scope: "space",
-            initial: { $stream: true },
           },
         ],
         result: {
