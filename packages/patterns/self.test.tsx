@@ -9,8 +9,8 @@
  *    so asserting against them covers the real code paths.
  *
  * B) Own-cell init test: instantiates Self({}) with no injection and asserts
- *    the owned cell starts as EMPTY_SELF_MODEL (exercises the previously
- *    untested right-hand branch of the ?? in Self).
+ *    the owned cell seeds to EMPTY_SELF_MODEL via Default<> (the production
+ *    home-local path; CT-1669 regression guard — see section B).
  *
  * Run: deno task cf test packages/patterns/self.test.tsx --verbose
  */
@@ -215,31 +215,21 @@ export default pattern(() => {
 
   // =========================================================================
   // B) Own-cell init test
-  //    Instantiate Self with NO injection — exercises the right-hand branch of
-  //    `injectedSelfModel ?? new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel")`
+  //    Instantiate Self with NO injection — the production home-local path that
+  //    seeds the owned cell from Default<typeof EMPTY_SELF_MODEL> (CT-1669).
   // =========================================================================
 
-  // Instantiate with no injection purely to exercise the own-cell branch
-  // (`.for("selfModel")`); its result isn't read (a cell-result proxy can't be
-  // unwrapped in a computed body), so it is intentionally unused.
-  const _selfOwned = Self({});
-
-  // The own-cell value is verified indirectly: accessing a Self result's
-  // properties inside a computed() body is not auto-unwrapped. Extract the cell
-  // value via a named
-  // computed() body is not auto-unwrapped. Extract the cell value via a named
-  // Writable that we inject — then verify the own-cell branch's initial state
-  // by checking that a freshly-owned Self starts at EMPTY_SELF_MODEL.
-  // We do this by injecting a known-empty Writable and asserting the pattern
-  // treats it as empty (which exercises identical reactive wiring to the own
-  // branch), plus the own-cell branch itself is type-checked via Self({}) above.
-  const ownedCheck = new Writable<SelfModel>(EMPTY_SELF_MODEL);
-  const selfOwnedViaInject = Self({ selfModel: ownedCheck });
-
-  // These computed values read through the named selfModel output, which CTS
-  // auto-unwraps correctly because selfOwnedViaInject.selfModel resolves via
-  // the reactive graph.
-  const ownedModel = computed(() => selfOwnedViaInject.selfModel);
+  // Instantiate with NO injection — the REAL production path (home-local, the
+  // way the Self tab runs it). Regression guard for CT-1669: the old
+  // `injectedSelfModel ?? new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel")`
+  // left the owned cell UNDEFINED — a `new Writable(initial)` on the RIGHT of ??
+  // is lowered to a lift whose value is undefined when uninjected — so every
+  // capture handler threw on `selfModel.get().neurotypes` (caught only by a live
+  // deploy, never by the injected tests). The fix seeds the owned cell via
+  // `Default<typeof EMPTY_SELF_MODEL>`. We now read the ACTUAL owned cell (not an
+  // injected stand-in), so this test fails if the seeding ever regresses.
+  const selfOwned = Self({});
+  const ownedModel = computed(() => selfOwned.selfModel);
 
   const assert_owned_responses_empty = computed(
     () => ownedModel.responses.length === 0,
