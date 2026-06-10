@@ -25,7 +25,9 @@ const modalTitle = editing ? "Edit Person" : "Add Person";
 ```
 
 This includes JSX expressions, common returned values, variable initializers,
-and many callback-local expressions. If you're debugging a less common site,
+object properties, logical `&&` / `||` forms, and many callback-local
+expressions (pattern-owned sites and supported collection callbacks). If
+you're debugging a less common site,
 inspect the emitted source with
 `deno task cf check <pattern>.tsx --show-transformed` rather than guessing
 about the lowering.
@@ -41,7 +43,9 @@ branch needs `computed()` deferral; see
 
 Inside a `computed()` body, ternaries and logical operators stay plain
 JavaScript even when nested inside returned JSX. That means
-`Writable<boolean>` values are still just truthy objects there.
+`Writable<boolean>` values are still just truthy objects there — the most
+common source of "conditional section always renders" bugs. The recursive
+lowering does not rescue explicit compute callback bodies.
 
 Use plain ternaries in normal pattern code instead of wrapping JSX in
 `computed()`. If you're unsure whether a site lowers the way you expect,

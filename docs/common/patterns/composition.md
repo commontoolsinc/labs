@@ -106,3 +106,4 @@ This pattern is useful when a sub-pattern needs to accept additional configurati
 
 - [View Switching](./view-switching.md) — dynamically switching between sub-patterns
 - [Navigation](./navigation.md) — `navigateTo()` for drill-down to detail views
+- [Self-Reference](../concepts/self-reference.md) — tree/parent-child structures where a pattern composes itself
