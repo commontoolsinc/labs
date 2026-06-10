@@ -1,5 +1,9 @@
 import { computed, handler, pattern, Stream, Writable } from "commonfabric";
 import {
+  SAVE_DRAFT_ACTION,
+  SAVE_TITLE_ACTION,
+  TRUSTED_SAVE_DRAFT_SURFACE,
+  TRUSTED_SAVE_SURFACE,
   TrustedAudiencePublishSurface,
   TrustedConversationSendSurface,
   TrustedDirectCommandSurface,
@@ -33,6 +37,10 @@ export default pattern(() => {
   const savedTitle = new Writable("");
   const draftBody = new Writable("");
   const savedBody = new Writable("");
+  // The save-draft surface needs its OWN saved-title cell: a cell's CFC
+  // uiContract must remain stable, so one cell cannot be claimed by both
+  // TrustedSaveSurface and TrustedSaveDraftSurface.
+  const savedDraftTitle = new Writable("");
 
   const forwardSource = new Writable(
     "Guest arrives late and needs the bell desk to hold room access after midnight. Raw inbox context stays in the note.",
@@ -98,7 +106,7 @@ export default pattern(() => {
   const trustedSaveDraft = TrustedSaveDraftSurface({
     draftTitle,
     draftBody,
-    savedTitle,
+    savedTitle: savedDraftTitle,
     savedBody,
   });
   const trustedForward = TrustedForwardSurface({
@@ -173,12 +181,10 @@ export default pattern(() => {
     value: draftTitle,
     next: "Saved from trusted surface",
   });
-  const action_save = trigger({ stream: trustedSave.save });
   const action_set_draft_body = setString({
     value: draftBody,
     next: "Draft body",
   });
-  const action_save_draft = trigger({ stream: trustedSaveDraft.saveDraft });
   const action_set_recipient = setString({
     value: forwardRecipient,
     next: "night-audit@hotel.example",
@@ -307,7 +313,7 @@ export default pattern(() => {
     savedTitle.get() === "Saved from trusted surface"
   );
   const assert_saved_draft = computed(() =>
-    savedTitle.get() === "Saved from trusted surface" &&
+    savedDraftTitle.get() === "Saved from trusted surface" &&
     savedBody.get() === "Draft body"
   );
   const assert_forward_prepared = computed(() =>
@@ -386,10 +392,25 @@ export default pattern(() => {
   return {
     tests: [
       { action: action_set_title },
-      { action: action_save },
+      // The `savedTitle` / `savedBody` writes carry TrustedAction UI
+      // contracts: send the renderer-trusted gesture for the reviewed surface
+      // directly to the surface's stream.
+      {
+        action: trustedSave.save,
+        trustedUi: {
+          surface: TRUSTED_SAVE_SURFACE,
+          action: SAVE_TITLE_ACTION,
+        },
+      },
       { assertion: assert_saved },
       { action: action_set_draft_body },
-      { action: action_save_draft },
+      {
+        action: trustedSaveDraft.saveDraft,
+        trustedUi: {
+          surface: TRUSTED_SAVE_DRAFT_SURFACE,
+          action: SAVE_DRAFT_ACTION,
+        },
+      },
       { assertion: assert_saved_draft },
       { action: action_set_recipient },
       { action: action_prepare_forward },
