@@ -280,9 +280,15 @@ a dependency-scheduled rerun defines its trigger set (SC-3).
 - **Label-bearing txs**: J is one pass over the consumed set with memoized
   per-doc metadata reads (piggyback the per-tx read cache from PR #3899);
   atom dedup via the existing structural-dedup helpers.
-- **Churn control**: skip-if-unchanged (D2) plus `["cfc"]`-writes-don't-wake-
-  value-readers (verified) keeps reactive load flat; storage/network sees
-  labelMap writes only when taint actually changes.
+- **Churn control**: skip-if-unchanged comes for free — the storage
+  journal's novelty diffing elides value-identical writes before they
+  become commit ops (verified: an identical recomputed labelMap produces
+  zero `["cfc"]` write details; pinned in
+  `cfc-labelmap-components.test.ts`). Plus `["cfc"]`-writes-don't-wake-
+  value-readers (verified): reactive load stays flat; storage/network sees
+  labelMap writes only when taint actually changes. The prepare-side cost
+  of recomputing + serializing the candidate metadata each relevant tx
+  remains (acceptable; revisit only if profiling says otherwise).
 - **Blast-radius metrics before enforcement**: extend `cfcInstrumentation`
   (the `onRelevantTx` seam exists, `extended-storage-transaction.ts:161-170`)
   with: relevant-tx %, J size distribution, labeled-doc count growth,

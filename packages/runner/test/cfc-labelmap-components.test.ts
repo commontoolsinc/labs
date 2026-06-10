@@ -75,6 +75,65 @@ describe("CFC labelMap component origins", () => {
     }
   });
 
+  it("skips the labelMap write when recomputed metadata is unchanged", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const guarded = internSchema(
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string", ifc: { confidentiality: ["secret"] } },
+          },
+          required: ["secret"],
+        } satisfies JSONSchema,
+        true,
+      );
+
+      const seed = runtime.edit();
+      const seedCell = runtime.getCell(
+        signer.did(),
+        "cfc-components-unchanged",
+        guarded.schema,
+        seed,
+      );
+      seedCell.set({ secret: "v1" });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      // Re-write the labeled path through the same schema: the recomputed
+      // labelMap is identical, so persistence must be a no-op — reactive
+      // re-runs re-derive labels constantly and must not churn storage.
+      // The mechanism is the journal's novelty diffing (value-identical
+      // writes never become write details / commit ops); this pins that
+      // end-to-end so a future persistence change can't regress it.
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-components-unchanged",
+        guarded.schema,
+        tx,
+      );
+      cell.set({ secret: "v2" });
+      tx.prepareCfc();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const cfcWrites = [...(tx.getWriteDetails?.(signer.did()) ?? [])]
+        .filter((write) =>
+          write.address.id === persistedId && write.address.path[0] === "cfc"
+        );
+      expect(cfcWrites).toEqual([]);
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("tags link-write entries as link", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
