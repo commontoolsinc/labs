@@ -478,8 +478,26 @@ export class RuntimeProcessor {
         { as: this.identity, space: target },
         this.runtime,
       );
-      ctx = { pieceManager, cc: new PiecesController(pieceManager) };
+      const created: SpaceContext = {
+        pieceManager,
+        cc: new PiecesController(pieceManager),
+      };
+      ctx = created;
       this.spaces.set(target, ctx);
+      // The constructor kicks the space-cell sync into `ready` without
+      // awaiting it. Observe the failure and evict, so a transient
+      // error (unreachable host, bad space) doesn't poison this space
+      // for the worker's lifetime — the next request rebuilds the
+      // context — and doesn't surface as an unhandled rejection.
+      pieceManager.ready.catch((error: unknown) => {
+        if (this.spaces.get(target) === created) {
+          this.spaces.delete(target);
+        }
+        console.error(
+          `[RuntimeProcessor] Space context for ${target} failed to sync:`,
+          error instanceof Error ? error.message : error,
+        );
+      });
     }
     return ctx;
   }
@@ -707,9 +725,27 @@ export class RuntimeProcessor {
     };
   }
 
+  /**
+   * Root-pattern ensure/recreate stays home-space only. Both can WRITE
+   * (create + start the default pattern), and they seed the pattern URL
+   * from the requesting user's home `defaultAppUrl` — the right
+   * semantics for your own space, wrong for a foreign one. Mounting an
+   * existing foreign pattern (`PageGet`) doesn't need either. Lift this
+   * when federation defines who provisions a space's root pattern.
+   */
+  private checkRootPatternSpace(space?: DID): void {
+    if (space !== undefined && space !== this.space) {
+      throw new Error(
+        "Root-pattern operations are home-space only; " +
+          `got space ${space}`,
+      );
+    }
+  }
+
   async handleGetSpaceRootPattern(
     request: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
+    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
     return {
@@ -720,6 +756,7 @@ export class RuntimeProcessor {
   async handleRecreateSpaceRootPattern(
     request: RecreateSpaceRootPatternRequest,
   ): Promise<PageResponse> {
+    this.checkRootPatternSpace(request.space);
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.recreateDefaultPattern();
     return {

@@ -1641,6 +1641,8 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       pieceManager,
       cc,
       getSpaceCtx,
+      checkRootPatternSpace:
+        (RuntimeProcessor.prototype as any).checkRootPatternSpace,
     };
     return { processor, runtime, homeSpace };
   }
@@ -1696,6 +1698,29 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       });
       expect(resHome.page.cell.space).toBe(homeSpace);
       expect(resB.page.cell.space).toBe(spaceB);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("rejects root-pattern operations for foreign spaces", async () => {
+    const { processor, runtime, homeSpace } = await makeProcessorState();
+    const spaceB = (await Identity.fromPassphrase(
+      "runtime-processor-space-b",
+    )).did();
+    const handleGetSpaceRootPattern =
+      (RuntimeProcessor.prototype as any).handleGetSpaceRootPattern;
+    try {
+      await expect(handleGetSpaceRootPattern.call(processor, {
+        type: RequestType.GetSpaceRootPattern,
+        space: spaceB,
+      })).rejects.toThrow("home-space only");
+      // The home space (explicit or absent) stays permitted: the guard
+      // itself passes and the call proceeds into ensureDefaultPattern.
+      (processor as { checkRootPatternSpace: (s?: string) => void })
+        .checkRootPatternSpace(homeSpace);
+      (processor as { checkRootPatternSpace: (s?: string) => void })
+        .checkRootPatternSpace();
     } finally {
       await runtime.dispose();
     }

@@ -268,6 +268,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Wait for the PieceManager to be synced with storage.
+   *
+   * Note: storage sync is connection-wide, so this awaits all open
+   * spaces; `space` only selects which space's piece context (and its
+   * space-cell sync) to await — and lazily opens that context if this
+   * is the first operation to touch the space.
    */
   async synced(space?: DID): Promise<void> {
     await this.#conn.request<RequestType.PageSynced>({

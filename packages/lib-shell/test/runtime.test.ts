@@ -374,10 +374,9 @@ describe("RuntimeInternals", () => {
     });
   });
 
-  // §federation PR2: one worker serves patterns from many spaces. The
-  // two-arg getPattern(space, id) form addresses another space; the
-  // cache is keyed per (space, id) with the no-space form aliasing the
-  // home space.
+  // §federation PR2: one worker serves patterns from many spaces.
+  // options.space addresses another space; the cache is keyed per
+  // (space, id) with the no-space form aliasing the bound space.
   describe("getPattern multi-space", () => {
     const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
     const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
@@ -398,7 +397,7 @@ describe("RuntimeInternals", () => {
     it("passes the space through to the client", async () => {
       const { client, runtime } = await makeRuntime();
       try {
-        await runtime.getPattern(otherDid, "piece-1");
+        await runtime.getPattern("piece-1", { space: otherDid });
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true, space: otherDid },
         ]);
@@ -411,8 +410,8 @@ describe("RuntimeInternals", () => {
       const { client, runtime } = await makeRuntime();
       try {
         await runtime.getPattern("piece-1");
-        await runtime.getPattern(otherDid, "piece-1");
-        await runtime.getPattern(otherDid, "piece-1");
+        await runtime.getPattern("piece-1", { space: otherDid });
+        await runtime.getPattern("piece-1", { space: otherDid });
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true },
           { pageId: "piece-1", runIt: true, space: otherDid },
@@ -426,7 +425,7 @@ describe("RuntimeInternals", () => {
       const { client, runtime } = await makeRuntime();
       try {
         await runtime.getPattern("piece-1");
-        await runtime.getPattern(homeDid, "piece-1");
+        await runtime.getPattern("piece-1", { space: homeDid });
         expect(client.getPageCalls.length).toBe(1);
       } finally {
         await runtime.dispose();
@@ -437,10 +436,10 @@ describe("RuntimeInternals", () => {
       const { client, runtime } = await makeRuntime();
       try {
         await runtime.getPattern("piece-1");
-        await runtime.getPattern(otherDid, "piece-1");
+        await runtime.getPattern("piece-1", { space: otherDid });
         runtime.invalidatePattern("piece-1", otherDid);
         await runtime.getPattern("piece-1"); // still cached
-        await runtime.getPattern(otherDid, "piece-1"); // re-fetched
+        await runtime.getPattern("piece-1", { space: otherDid }); // re-fetched
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: true },
           { pageId: "piece-1", runIt: true, space: otherDid },

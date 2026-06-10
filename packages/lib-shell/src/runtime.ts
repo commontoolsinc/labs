@@ -269,32 +269,17 @@ export class RuntimeInternals extends EventTarget {
    * is upgraded (re-fetched with start) when a starting caller asks for
    * the same pattern.
    *
-   * The two-arg form addresses a pattern in another space, served by
-   * the same worker over the same connection. The no-space form is the
-   * home space, unchanged.
+   * Pass `space` to address a pattern in another space, served by the
+   * same worker over the same connection. Absent ⇒ this runtime's
+   * bound space, unchanged.
    */
   getPattern(
     id: string,
-    options?: { start?: boolean },
-  ): Promise<PageHandle<NameSchema>>;
-  getPattern(
-    space: DID,
-    id: string,
-    options?: { start?: boolean },
-  ): Promise<PageHandle<NameSchema>>;
-  getPattern(
-    idOrSpace: string,
-    idOrOptions?: string | { start?: boolean },
-    maybeOptions?: { start?: boolean },
+    options?: { start?: boolean; space?: DID },
   ): Promise<PageHandle<NameSchema>> {
     this.#check();
-    const hasSpace = typeof idOrOptions === "string";
-    const space = hasSpace ? idOrSpace as DID : undefined;
-    const id = hasSpace ? idOrOptions : idOrSpace;
-    const options = hasSpace ? maybeOptions : idOrOptions as
-      | { start?: boolean }
-      | undefined;
     const start = options?.start ?? true;
+    const space = options?.space;
     const key = this.#patternKey(id, space);
     const cached = this.#patternCache.get(key);
     if (cached && (cached.started || !start)) {
@@ -313,8 +298,8 @@ export class RuntimeInternals extends EventTarget {
 
   /**
    * Cache key for a pattern. Always space-qualified so the no-space
-   * (home) form and an explicit `getPattern(homeDid, id)` share one
-   * entry.
+   * form and an explicit `space` equal to this runtime's bound space
+   * share one entry.
    */
   #patternKey(id: string, space?: DID): string {
     return `${space ?? this.#space}:${id}`;
@@ -329,9 +314,7 @@ export class RuntimeInternals extends EventTarget {
     space?: DID,
   ): Promise<PageHandle<NameSchema>> {
     this.invalidatePattern(id, space);
-    return space === undefined
-      ? await this.getPattern(id)
-      : await this.getPattern(space, id);
+    return await this.getPattern(id, { space });
   }
 
   async getSlugCell(slug: string): Promise<CellHandle<unknown>> {
