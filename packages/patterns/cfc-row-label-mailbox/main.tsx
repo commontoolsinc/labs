@@ -41,6 +41,16 @@ interface MailRow {
   body: string;
 }
 
+/** The inbox projection: `from_addr` is aliased to `sender`, so the returned
+ *  rows carry `sender` and NOT `from_addr`. */
+interface InboxRow {
+  id: number;
+  sender: string;
+  to_addrs: string;
+  auth: string;
+  body: string;
+}
+
 interface MailboxInput {
   draftFrom: PerSession<Writable<string | Default<"">>>;
   draftTo: PerSession<Writable<string | Default<"">>>;
@@ -132,7 +142,7 @@ export default pattern<MailboxInput, MailboxOutput>(
 
     // The full inbox. `from_addr AS sender` also demonstrates that the rule's
     // inputs resolve by TRUE column origin, never by output name.
-    const inbox = db.query<MailRow & { sender: string }>(
+    const inbox = db.query<InboxRow>(
       "SELECT id, from_addr AS sender, to_addrs, auth, body FROM emails " +
         "ORDER BY id",
       { reactOn: db },
@@ -161,9 +171,7 @@ export default pattern<MailboxInput, MailboxOutput>(
       { reactOn: db },
     );
 
-    const inboxRows = computed<(MailRow & { sender: string })[]>(() =>
-      inbox.result ?? []
-    );
+    const inboxRows = computed<InboxRow[]>(() => inbox.result ?? []);
     const sliceRows = computed<MailRow[]>(() => aliceBobSlice.result ?? []);
     const countError = computed<string>(() => String(mailCount.error ?? ""));
 
