@@ -306,19 +306,25 @@ inside the child pattern or handler.
 ## Testing Multi-User Behavior
 
 Use pattern tests for deterministic state transitions and browser/integration
-tests for identity behavior.
+tests for identity behavior. A single runtime (or one page that switches
+identities) cannot catch cross-user leaks or fails-to-propagate bugs.
 
-For headless multi-user coverage, use the multi-runtime harness
-(`packages/patterns/integration/multi-runtime-harness.ts`): it opens the same
-piece in several worker-isolated runtimes (distinct identities, or one
-identity in two sessions) against one shared in-process storage server, so
-`PerUser`/`PerSession` partitioning and cross-client propagation are actually
-exercised — no toolshed or browser needed. See
-`cfc-group-chat-demo-multi-runtime.test.ts` for usage, and
-`cfc-group-chat-demo-two-browsers.test.ts` for the two-simultaneous-browser
-variant that guards the real DOM/event stack. A single runtime (or one page
-that switches identities) cannot catch cross-user leaks or
-fails-to-propagate bugs.
+Three escalating options:
+
+1. **Multi-user pattern tests (`cf test`)** — the default for pattern
+   authors. Export a `multiUserTest({ setup, participants })` descriptor;
+   each participant pattern runs in its own isolated runtime against one
+   shared space, coordinating via `{ label }` / `{ await }` markers. See the
+   "Multi-User Tests" section of `docs/common/ai/pattern-testing-guide.md`
+   and the example `packages/patterns/cfc-group-chat-demo/multi-user.test.tsx`.
+2. **Multi-runtime integration harness**
+   (`packages/patterns/integration/multi-runtime-harness.ts`): opens an
+   existing piece in several worker-isolated runtimes (distinct identities,
+   or one identity in two sessions); supports trusted-surface CFC events
+   headlessly. See `cfc-group-chat-demo-multi-runtime.test.ts`.
+3. **Two simultaneous browsers**
+   (`cfc-group-chat-demo-two-browsers.test.ts`): guards the real DOM input
+   binding / event-provenance / login stack.
 
 Expected visibility:
 

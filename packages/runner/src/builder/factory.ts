@@ -170,6 +170,11 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     navigateTo,
     wish,
 
+    // Multi-user test descriptor tag (see api MultiUserTestDescriptor):
+    // identity at runtime; the call expression keeps the descriptor's pattern
+    // factories out of module-level plain-data hardening.
+    multiUserTest: <T>(descriptor: T): T => descriptor,
+
     // Cell creation
     cell: cellConstructorFactory<AsCell>("cell").of,
     equals: cellConstructorFactory<AsCell>("cell").equals,

@@ -16,12 +16,12 @@
  * runtimes (verified-load registries, frame stacks and similar module-level
  * state cross-talk), and production never does — every browser tab or CLI
  * process is its own realm. The storage server is self-hosted in-process
- * (see multi-runtime-memory-server.ts), so no toolshed is needed; pass
+ * (@commonfabric/memory/v2/standalone), so no toolshed is needed; pass
  * `apiUrl` to target a running toolshed instead.
  */
 
 import { Identity } from "@commonfabric/identity";
-import { StandaloneMemoryServer } from "./multi-runtime-memory-server.ts";
+import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import type {
   TrustedUiDescriptor,
   WorkerRequest,
