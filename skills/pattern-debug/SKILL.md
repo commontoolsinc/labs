@@ -13,10 +13,9 @@ piece issues.
 
 - `docs/development/debugging/workflow.md` - 5-step debugging process
 - `docs/development/debugging/README.md` - Error reference matrix
-- `docs/common/concepts/reactivity.md` - reactive values, Cell behavior, and
-  `.get()` / `.set()` boundaries
-- `docs/common/patterns/new-cells.md` - `new Writable()` and local cell
-  initialization rules
+- `docs/common/concepts/reactivity.md` and `docs/common/patterns/new-cells.md`
+  — as mandated by pattern-dev; re-consult for Cell, Writable, or
+  reactive-value failures
 
 ## Process
 
@@ -58,13 +57,10 @@ piece issues.
 
 **`new Cell() only accepts static data`:**
 
-- Do not pass input props, mapped fields, or computed/reactive values into
-  `new Writable()` / `new Cell()`
-- Use an input writable cell directly when the caller owns the state
-- For pattern-owned draft state, initialize from a static value and copy from
-  input state inside an action or another valid reactive/event context
-- See `docs/common/patterns/new-cells.md` and
-  `docs/common/concepts/reactivity.md`
+- A reactive value (input prop, mapped field, computed value) was passed into
+  `new Writable()` / `new Cell()`. See the static-only rule and field-decision
+  guidance in the pattern-implement skill, plus
+  `docs/common/patterns/new-cells.md`
 
 **String helper throws, such as `.trim()` / `.replace()` / `.includes()` is not
 a function:**
@@ -108,15 +104,10 @@ a function:**
 
 **Transient UI state carries over when it should not:**
 
-- Check whether navigation, active tab, selected item, selected room, modal,
-  filter, or other ephemeral UI state is unscoped or space scoped.
-- Ask whether the state should carry over if the user opens the same instance in
-  a new tab. If not, it is probably session state.
-- Use `PerSession<>` for per-session UI state and `PerUser<>` for user-owned
-  durable state.
-- Use data-shaped scoped inputs for simple APIs. Use scoped `Writable` aliases
-  when handlers need stable cell handles, `.key(...)`, `.equals(...)`, or
-  per-item bindings.
+- Check whether navigation, active tab, selected item, modal, filter, or other
+  ephemeral UI state is unscoped or space scoped, then apply the PerSession
+  new-tab test from the pattern-dev skill (`PerSession<>` for per-session UI
+  state, `PerUser<>` for user-owned durable state).
 - Confirm the generated schema and transformed source with
   `deno task cf check pattern.tsx --show-transformed`.
 - If a value unexpectedly becomes `undefined`, check for schema-scope traversal
@@ -200,4 +191,5 @@ await commonfabric.detectNonIdempotent();
 
 - Root cause identified
 - Error fixed
-- Tests pass again
+- Tests pass again — or, if no tests exist yet, `deno task cf check` succeeds
+  and the failing repro behaves correctly

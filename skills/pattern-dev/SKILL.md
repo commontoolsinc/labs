@@ -1,6 +1,6 @@
 ---
 name: pattern-dev
-description: Guide for developing Common Fabric patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this piece/patch", or questions about handlers and reactive patterns.
+description: Guide for developing Common Fabric patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this piece", or questions about handlers and reactive patterns.
 ---
 
 Start with the shared pattern development guidance in:
@@ -104,11 +104,12 @@ Also inspect the emitted source when a composed pattern result is assigned to a
 should lower into the factory call; if they do not, the pattern may instantiate
 state at the wrong sharing boundary.
 
-Current main handles plain ternaries well in normal pattern code. Prefer direct
-authored expressions first; if an unusual site seems ambiguous, inspect the
-emitted source rather than guessing.
+Prefer direct authored expressions, including plain ternaries, first; if a
+conditional site behaves unexpectedly or seems ambiguous, inspect the emitted
+source with `--show-transformed` rather than guessing.
 
-Pay special attention to its SES authoring section before adding module-scope
+Pay special attention to the SES authoring section of
+`docs/common/ai/pattern-development-guide.md` before adding module-scope
 setup, timers, or time/random helpers. The current authored escape hatches are
 `safeDateNow()` and `nonPrivateRandom()`. Also follow its binding guidance: when
 a control is already bound to a cell, usually via `$value` or `$checked`, do not
@@ -124,6 +125,10 @@ Runtime notes:
 ## Runtime-Specific Notes
 
 ### Claude Code
+
+Interactive labs sessions only. In a Pattern Factory workspace, the factory
+orchestrator owns delegation, critique, and finalization — do not Task these
+subagents, run a separate critic pass, or offer commits there.
 
 - Use `EnterPlanMode` before building.
 - Scale the plan to the problem:
