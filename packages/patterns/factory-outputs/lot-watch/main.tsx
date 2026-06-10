@@ -16,6 +16,7 @@ import {
   Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 import {
@@ -480,8 +481,30 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       LotWatchAdminManagerCredential | null
     >(null);
 
-    // PerUser: who is reporting
+    // PerUser: who is reporting. Set from the viewer's shared profile (the
+    // `#profile` wish's built-in UI covers profile create/pick); tests and
+    // headless callers set it via the `setReporterName` stream.
     const reporterName = new Writable.perUser("");
+
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    const profileName = computed(() => (profileNameWish.result ?? "").trim());
+    const profileAvatar = computed(() =>
+      (profileAvatarWish.result ?? "").trim()
+    );
+    const hasProfile = computed(() =>
+      (profileNameWish.result ?? "").trim() !== ""
+    );
+    const reporterLabel = computed(() => (reporterName.get() || "").trim());
+    const hasReporter = computed(() => reporterLabel !== "");
+    // Show the profile avatar only while the reporter IS the profile (an
+    // explicit setReporterName override keeps initials-only rendering).
+    const reporterAvatar = computed(() =>
+      reporterLabel !== "" && reporterLabel === profileName ? profileAvatar : ""
+    );
 
     // PerSession: tab navigation
     const selectedTab = new Writable.perSession<
@@ -683,10 +706,17 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       captureStep.set("review");
     });
 
-    // Programmatic setter for the perUser `reporterName`. The UI binds the
-    // capture tab's "Your name" cf-input directly via `$value={reporterName}`,
-    // but tests (and any non-UI caller) need a Stream seam to set it.
+    // Programmatic setter for the perUser `reporterName`. The capture tab's
+    // "Report as <profile>" button adopts the resolved profile name; tests
+    // (and any non-UI caller) use this Stream seam to set an explicit name.
     const setReporterName = action<{ name: string }>(({ name }) => {
+      reporterName.set(name);
+    });
+
+    // Adopt the viewer's resolved shared-profile name as the reporter name.
+    const adoptProfileName = action(() => {
+      const name = (profileNameWish.result ?? "").trim();
+      if (!name) return;
       reporterName.set(name);
     });
 
@@ -1477,7 +1507,12 @@ export default pattern<LotWatchInput, LotWatchOutput>(
               {isCaptureTab
                 ? (
                   <cf-vstack gap="3">
-                    {/* Persistent reporter banner (always visible, small) */}
+                    {
+                      /* Persistent reporter banner (always visible, small).
+                        Identity comes from the viewer's shared profile: the
+                        wish UI handles create/pick, then one click adopts the
+                        resolved name as the reporter. */
+                    }
                     <cf-card style="padding: 0.5rem 0.75rem;">
                       <cf-hstack
                         justify="between"
@@ -1488,11 +1523,33 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                         <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); white-space: nowrap;">
                           Reporting as
                         </span>
-                        <cf-input
-                          $value={reporterName}
-                          placeholder="your name"
-                          style="flex: 1; min-width: 120px;"
-                        />
+                        {hasReporter
+                          ? (
+                            <cf-hstack gap="2" align="center">
+                              <cf-avatar
+                                src={reporterAvatar}
+                                name={reporterLabel}
+                                size="xs"
+                              />
+                              <span style="font-size: 0.875rem;">
+                                {reporterLabel}
+                              </span>
+                            </cf-hstack>
+                          )
+                          : hasProfile
+                          ? (
+                            <cf-button
+                              size="sm"
+                              onClick={() => adoptProfileName.send()}
+                            >
+                              Report as {profileName}
+                            </cf-button>
+                          )
+                          : (
+                            <div style="flex: 1; min-width: 160px;">
+                              {profileWish[UI]}
+                            </div>
+                          )}
                       </cf-hstack>
                     </cf-card>
 

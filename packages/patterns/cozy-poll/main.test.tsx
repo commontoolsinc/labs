@@ -4,10 +4,11 @@
  * Exercises the scope idioms (per-space directory, per-user identity,
  * derived admin) and the core voting flows.
  *
- * Single-identity caveat (CT-1598): the test framework dispatches every
- * action from one identity, so we cannot simulate a second user. Admin
- * gating is exercised by attempting admin actions *before* any join
- * (myName empty → handler bails).
+ * Single-identity caveat (CT-1598): this file runs in one runtime with one
+ * identity, so admin gating is exercised by attempting admin actions *before*
+ * any join (myName empty → handler bails). The real second-user cases —
+ * gating against a non-host user, host takeover, cross-runtime visibility —
+ * are covered by multi-user.test.tsx.
  */
 
 import { action, computed, pattern } from "commonfabric";
@@ -75,8 +76,8 @@ export default pattern(() => {
     if (first) poll.removeOption.send({ optionId: first.id });
   });
 
-  // Single-identity caveat (CT-1598): we can't simulate a *second* user, so
-  // host *takeover* can't be exercised. This just confirms claimHost is wired
+  // Single-identity caveat (CT-1598): host *takeover* needs a second user and
+  // is covered by multi-user.test.tsx. This just confirms claimHost is wired
   // and is a harmless no-op when the caller already holds the role.
   const action_claim_host = action(() => {
     poll.claimHost.send({});

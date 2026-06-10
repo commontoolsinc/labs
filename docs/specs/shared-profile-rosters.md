@@ -39,11 +39,12 @@ contribute their own entry when they join**:
 - Every other user renders names and avatars straight from `participants`. No
   cross-user profile enumeration is ever required.
 
-This is the same shape already used by `packages/patterns/scrabble/scrabble.tsx`
+This is the same shape used by `packages/patterns/scrabble/scrabble.tsx`
 (a `PerSpace` `players` roster + a join handler that `push`es the current
-player) and `packages/patterns/scoped-user-directory/main.tsx` (a `PerSpace`
-`directory` + a `PerUser` `me` pointer). The only addition here is sourcing the
-display name/avatar from the shared profile instead of a free-text field.
+player — its join now sources name/avatar from the shared profile this way) and
+`packages/patterns/scoped-user-directory/main.tsx` (a `PerSpace` `directory` +
+a `PerUser` `me` pointer). The only addition here is sourcing the display
+name/avatar from the shared profile instead of a free-text field.
 
 ## Why links vs snapshots
 
@@ -117,8 +118,10 @@ reachable. Every API used below is exercised elsewhere in the repo:
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
 - `safeDateNow()` for timestamps in handlers —
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
-- `<img src={...}>` avatar rendering —
-  `packages/patterns/group-chat-room.tsx`.
+- avatar rendering from snapshot strings — `<img src={...}>` here for
+  self-containment; production patterns use `<cf-avatar src name>`
+  (`packages/patterns/group-chat-room.tsx`,
+  `packages/patterns/profile-group-chat/main.tsx`).
 
 ```tsx
 import {

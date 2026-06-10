@@ -196,6 +196,17 @@ remember which entry is theirs. For simpler demos where names are immutable and
 unique enough for the domain, a `PerUser<string>` display name plus shared
 records that carry that name can also be acceptable.
 
+Source the display name and avatar from the viewer's **shared profile** rather
+than a free-text field: `wish({ query: "#profile" })` resolves the current
+viewer's profile, and its built-in `[UI]` covers the whole lifecycle (create
+surface when the user has no profile, a picker with inline create when they
+have several). Snapshot the resolved `#profileName` / `#profileAvatar` strings
+into the shared entry on join. See `docs/specs/shared-profile-rosters.md`;
+worked examples: `packages/patterns/profile-group-chat/main.tsx`,
+`packages/patterns/scrabble/scrabble.tsx`,
+`packages/patterns/battleship/multiplayer/lobby.tsx`,
+`packages/patterns/lunch-poll/main.tsx`.
+
 Do not store user DIDs, session ids, or generated ids only to simulate scoped
 visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage
 instance. When comparing object or cell identity, use `equals()` instead of
