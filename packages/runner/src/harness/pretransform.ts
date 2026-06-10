@@ -23,7 +23,9 @@ export function transformInjectHelperModule(
       name: source.name,
       contents: source.name.endsWith(".d.ts")
         ? source.contents
-        : normalizeMixedModuleImports(transformCfDirective(source.contents)),
+        : normalizeMixedModuleImports(
+          transformCfDirective(source.contents, source.name),
+        ),
     })),
     mainExport: program.mainExport,
   };

@@ -46,6 +46,14 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     allowJs: true,
+    // Authored `.js` sources emit their compiled body under the SAME name
+    // (`/math.js` in → `/math.js` out). TypeScript vetoes that as an input
+    // overwrite, but compilation runs against `VirtualFs`, which keeps reads
+    // (`fsRead`) and writes (`fsWrite`) in separate stores — the input is never
+    // clobbered. Suppress the check so `allowJs` works on the per-module emit
+    // path. (`compileToModules` still fails loudly when two DIFFERENT sources
+    // collide on one output, e.g. `/a.ts` + `/a.js`.)
+    suppressOutputPathCheck: true,
 
     /**
      * Interop

@@ -83,6 +83,48 @@ describe("TypeScriptCompiler", () => {
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
   });
 
+  it("Compiles programs that include authored .js sources", async () => {
+    // `allowJs` on the per-module emit path: a `.js` source emits its compiled
+    // body under its own name (`/math.js` → `/math.js`), which TypeScript
+    // normally vetoes as an input overwrite. The VirtualFs keeps reads and
+    // writes separate, so the veto is suppressed (`suppressOutputPathCheck`).
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx":
+        "import { add } from './math.js';export const run = () => add(1,2);export default run;",
+      "/math.js": "export const add = (x, y) => x + y;",
+    });
+    const modules = await resolveAndCompileToModules(compiler, program);
+
+    expect(new Set(modules.keys())).toEqual(
+      new Set(["/main.tsx", "/math.js"]),
+    );
+    const main = modules.get("/main.tsx")!;
+    expect(main.js).toContain('require("./math.js")');
+    const math = modules.get("/math.js")!;
+    expect(math.js).toContain("exports.add");
+    expect(math.sourceMap).toBeDefined();
+  });
+
+  it("Throws when a .ts and .js source collide on one emit target", () => {
+    const compiler = new TypeScriptCompiler(types);
+    const artifact = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents:
+            "import { a } from './a.ts';import { b } from './a.js';export default [a, b];",
+        },
+        { name: "/a.ts", contents: "export const a = 1;" },
+        { name: "/a.js", contents: "export const b = 2;" },
+      ],
+    };
+    expect(() => compiler.compileToModules(artifact)).toThrow(
+      "Ambiguous emit target",
+    );
+  });
+
   it("Typechecks a runtime dependency, providing typedefs", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {
