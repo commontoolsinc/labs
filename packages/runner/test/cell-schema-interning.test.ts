@@ -69,6 +69,29 @@ describe("cell link schema interning", () => {
     expect(schema).toBe(viaGetCell.getAsNormalizedFullLink().schema);
   });
 
+  it("getCellFromLink interns a schema already embedded in the link", () => {
+    // Sigil/normalized links can carry schemas through parseLink; without an
+    // explicit schema argument the embedded one must be interned too, or
+    // schema-bearing links bypass the seam (review finding on #3982).
+    const base = runtime.getCell(space, "intern-link-embed", undefined, tx);
+    const link = { ...base.getAsNormalizedFullLink(), schema: makeSchema() };
+
+    const cell = runtime.getCellFromLink(link, undefined, tx);
+
+    const schema = cell.getAsNormalizedFullLink().schema;
+    expect(isInternedSchema(schema!)).toBe(true);
+    // Explicit parameter still takes precedence over the embedded schema.
+    const override = { type: "object" } as JSONSchema;
+    const cellWithOverride = runtime.getCellFromLink(
+      { ...base.getAsNormalizedFullLink(), schema: makeSchema() },
+      override,
+      tx,
+    );
+    const overrideSchema = cellWithOverride.getAsNormalizedFullLink().schema;
+    expect(isInternedSchema(overrideSchema!)).toBe(true);
+    expect(overrideSchema).not.toBe(schema);
+  });
+
   it("getImmutableCell interns the schema onto the link", () => {
     const cell = runtime.getImmutableCell(space, { title: "x" }, makeSchema());
     expect(isInternedSchema(cell.getAsNormalizedFullLink().schema!)).toBe(true);

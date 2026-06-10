@@ -892,11 +892,15 @@ export class Runtime {
     // Intern the schema so the link carries the canonical deep-frozen
     // instance: all downstream identity-keyed schema caches (schemaAtPath,
     // schema-ref memos, SelectorTracker standardization, value-hash) key off
-    // deep-frozen identity and stay cold for mutable schema literals. Note
-    // that this deep-freezes the caller's schema object in place — see
-    // `internCellLinkSchema` for the contract and the proxy exception.
-    if (schema !== undefined) {
-      link = { ...link, schema: internCellLinkSchema(schema) };
+    // deep-frozen identity and stay cold for mutable schema literals. The
+    // explicit parameter takes precedence; a schema already embedded in the
+    // link (sigil links preserve them through parseLink) is interned too, so
+    // schema-bearing links don't bypass the seam. Note that this deep-freezes
+    // the schema object in place — see `internCellLinkSchema` for the
+    // contract and the proxy exception.
+    const effectiveSchema = schema !== undefined ? schema : link.schema;
+    if (effectiveSchema !== undefined) {
+      link = { ...link, schema: internCellLinkSchema(effectiveSchema) };
     }
     return createCell(
       this,
