@@ -194,7 +194,12 @@ function transactionReadInvariants(
   for (const space of spaces) {
     try {
       for (const detail of getTransactionReadDetails(tx, space)) {
-        invariants.set(makeAddressKey(detail.address), {
+        // makeAddressKey ignores scope; include it so same id+path reads
+        // under different cell scopes don't collide.
+        const key = `${detail.address.scope ?? ""}|${
+          makeAddressKey(detail.address)
+        }`;
+        invariants.set(key, {
           address: detail.address,
           value: detail.value,
         });
