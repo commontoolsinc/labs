@@ -1935,7 +1935,9 @@ const gateRuntimeMintedIntegrity = (
   if (integrity === undefined || integrity.length === 0) {
     return label;
   }
-  const filtered = integrity.filter((atom) => !isRuntimeMintedIntegrityAtom(atom));
+  const filtered = integrity.filter((atom) =>
+    !isRuntimeMintedIntegrityAtom(atom)
+  );
   if (filtered.length === integrity.length) {
     return label;
   }

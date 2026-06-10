@@ -38,7 +38,12 @@ describe("CFC integrity mint gate", () => {
           integrity: [INJECTION_SAFE_ATOM],
         },
       } as const satisfies JSONSchema;
-      const src = runtime.getCell(signer.did(), "mint-gate-src", srcSchema, seed);
+      const src = runtime.getCell(
+        signer.did(),
+        "mint-gate-src",
+        srcSchema,
+        seed,
+      );
       src.set("attacker-controlled");
       seed.prepareCfc();
       expect((await seed.commit()).ok).toBeDefined();
