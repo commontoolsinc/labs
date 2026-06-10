@@ -18,7 +18,10 @@ describe("CFC sqlite aggregate column integrity", () => {
       notes: {
         properties: {
           body: {
-            ifc: { confidentiality: ["secret-body"], integrity: ["trusted-body"] },
+            ifc: {
+              confidentiality: ["secret-body"],
+              integrity: ["trusted-body"],
+            },
           },
         },
       },
@@ -27,7 +30,8 @@ describe("CFC sqlite aggregate column integrity", () => {
     const columns: any = [{ output: "cnt", table: null, column: null }];
 
     const { schema } = labelResultSchema(columns, tables);
-    const ifc = (schema as any)?.properties?.result?.items?.properties?.cnt?.ifc;
+    const ifc = (schema as any)?.properties?.result?.items?.properties?.cnt
+      ?.ifc;
 
     expect(ifc).toBeDefined();
     expect(ifc.confidentiality).toEqual(["secret-body"]);
