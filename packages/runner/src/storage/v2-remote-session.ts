@@ -44,8 +44,7 @@ export const createStorageAddressResolver = (
   defaultApiUrl: URL,
   spaceHostMap?: Record<string, string>,
 ): (space: MemorySpace) => URL =>
-(space) =>
-  new URL(MEMORY_STORAGE_PATH, spaceHostMap?.[space] ?? defaultApiUrl);
+(space) => new URL(MEMORY_STORAGE_PATH, spaceHostMap?.[space] ?? defaultApiUrl);
 
 class WebSocketTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
