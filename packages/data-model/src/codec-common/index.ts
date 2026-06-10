@@ -7,11 +7,17 @@ export {
 } from "./interface.ts";
 
 export { codecOf } from "./codecOf.ts";
-export { WIRE_META_TAGS } from "./wire-meta-tags.ts";
-export { WIRE_TYPE_TAGS } from "./wire-type-tags.ts";
+export { CODEC_META_TAGS } from "./codec-meta-tags.ts";
+export { CODEC_TYPE_TAGS } from "./codec-type-tags.ts";
 export { BaseFabricCodec } from "./BaseFabricCodec.ts";
 export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 export {
   EMPTY_RECONSTRUCTION_CONTEXT,
   EmptyReconstructionContext,
 } from "./EmptyReconstructionContext.ts";
+
+// Standalone codecs for JS primitives (no owned class to host a `[CODEC]`).
+export { UndefinedCodec } from "./UndefinedCodec.ts";
+export { BigIntCodec } from "./BigIntCodec.ts";
+export { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
+export { SymbolCodec } from "./SymbolCodec.ts";

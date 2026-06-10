@@ -1,4 +1,4 @@
-import type { FabricClassWithCodec } from "@/wire-common/interface.ts";
+import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricMap } from "./FabricMap.ts";
 import { FabricSet } from "./FabricSet.ts";

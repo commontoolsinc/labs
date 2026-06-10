@@ -1,14 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { JsonEncodingContext } from "@/json-wire/JsonEncodingContext.ts";
+import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
 import {
   DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import type { JsonWireValue } from "@/json-wire/interface.ts";
+import type { JsonWireValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
@@ -17,7 +17,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
-import { BaseReconstructionContext } from "@/wire-common/BaseReconstructionContext.ts";
+import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test

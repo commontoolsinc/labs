@@ -18,7 +18,6 @@ import {
 } from "./profile-create.tsx";
 import ProfilePicker from "./profile-picker.tsx";
 import type { ProfileHomeOutput } from "./profile-home.tsx";
-import { EMPTY_LEARNED, type LearnedSection } from "../profile.tsx";
 
 // Types from favorites-manager.tsx
 type Favorite = {
@@ -50,7 +49,6 @@ type HomeOutput = {
   [UI]: unknown;
   favorites: Writable<Favorite[]>;
   journal: Writable<JournalEntry[]>;
-  learned: Writable<LearnedSection>;
   spaces: Writable<SpaceEntry[]>;
   defaultAppUrl: Writable<string>;
   profiles: TrustedProfileList;
@@ -131,7 +129,6 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   // OWN the data cells (.for for id stability)
   const favorites = new Writable<Favorite[]>([]).for("favorites");
   const journal = new Writable<JournalEntry[]>([]).for("journal");
-  const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
   const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
   const defaultAppUrl = new Writable("").for("defaultAppUrl");
   // NOTE(CT-1628): the `as any` casts around the profile cells below are
@@ -185,35 +182,6 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
               <h2 style={{ margin: 0, fontSize: "16px" }}>Profile</h2>
 
               <div id="home-profile-summary">{profilePicker}</div>
-
-              {
-                /*
-                Free-form summary lives on learned.summary, independent of the
-                shared profile space. It is intentionally not resolved by the
-                #profile wish (which targets the profile pattern).
-              */
-              }
-              <cf-vstack gap="1">
-                <h3 style={{ margin: 0, fontSize: "14px" }}>Profile Summary</h3>
-                <cf-textarea
-                  $value={learned.key("summary")}
-                  placeholder="Write a short profile summary about yourself..."
-                  rows={6}
-                  style={{
-                    width: "100%",
-                    fontFamily: "system-ui, sans-serif",
-                    fontSize: "14px",
-                    lineHeight: "1.5",
-                    padding: "12px",
-                    border: "1px solid #e5e5e7",
-                    borderRadius: "8px",
-                    resize: "vertical",
-                  }}
-                />
-                <span style={{ fontSize: "11px", color: "#888" }}>
-                  Edit your profile summary above.
-                </span>
-              </cf-vstack>
             </cf-vstack>
           </cf-tab-panel>
           <cf-tab-panel value="spaces">
@@ -304,7 +272,6 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
     // Exported data
     favorites,
     journal,
-    learned,
     spaces,
     defaultAppUrl,
     profiles: profiles as any,

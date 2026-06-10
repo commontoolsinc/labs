@@ -9,9 +9,9 @@ import {
 import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /**
@@ -29,7 +29,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  */
 export class BigIntCodec extends BaseFabricCodec {
   constructor() {
-    super(WIRE_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
+    super(CODEC_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
   }
 
   /** @inheritDoc */

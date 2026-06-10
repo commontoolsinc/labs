@@ -1,4 +1,4 @@
-import type { FabricClassWithCodec } from "@/wire-common/interface.ts";
+import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";

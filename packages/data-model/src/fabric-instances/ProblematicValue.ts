@@ -3,8 +3,8 @@ import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from "@/wire-common/interface.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+} from "@/codec-common/interface.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 

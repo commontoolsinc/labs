@@ -2,9 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { CODEC } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { CODEC } from "@/codec-common/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 
 /** A fixed 32-byte hash for deterministic tests. */
@@ -153,7 +153,7 @@ describe("FabricHash", () => {
 
     describe("[CODEC]", () => {
       const codec = FabricHash[CODEC];
-      const expectedTag = WIRE_TYPE_TAGS.Hash;
+      const expectedTag = CODEC_TYPE_TAGS.Hash;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("recognizedTypeTag", () => {

@@ -7,7 +7,7 @@ import {
 import {
   jsonFromValue,
   valueFromJson,
-} from "@commonfabric/data-model/json-wire";
+} from "@commonfabric/data-model/codec-json";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue, MIME, URI } from "@commonfabric/memory/interface";
@@ -18,7 +18,7 @@ import {
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/wire-common";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import type {
   ClientCommit,
   ConfirmedRead,

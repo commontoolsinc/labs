@@ -1,13 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { UndefinedCodec } from "@/json-wire/UndefinedCodec.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { UndefinedCodec } from "@/codec-common/UndefinedCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 
 describe("UndefinedCodec", () => {
   const codec = new UndefinedCodec();
-  const expectedTag = WIRE_TYPE_TAGS.Undefined;
+  const expectedTag = CODEC_TYPE_TAGS.Undefined;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
   describe("instance members", () => {

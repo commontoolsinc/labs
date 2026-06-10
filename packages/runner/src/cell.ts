@@ -11,7 +11,7 @@ import {
   type FabricValue,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import { codecOf } from "@commonfabric/data-model/wire-common";
+import { codecOf } from "@commonfabric/data-model/codec-common";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";

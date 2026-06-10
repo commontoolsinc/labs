@@ -7,9 +7,9 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
 } from "@/interface.ts";
-import { CODEC } from "@/wire-common/interface.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/wire-common/EmptyReconstructionContext.ts";
+import { CODEC } from "@/codec-common/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {
@@ -177,7 +177,7 @@ describe("FabricError", () => {
 
         const state = FabricError[CODEC].encode(se);
         const restored = FabricError[CODEC].decode(
-          WIRE_TYPE_TAGS.Error,
+          CODEC_TYPE_TAGS.Error,
           state,
           dummyContext,
         ) as unknown as FabricError;
@@ -200,7 +200,7 @@ describe("FabricError", () => {
         expect(state.name).toBe("SpecialType");
 
         const restored = FabricError[CODEC].decode(
-          WIRE_TYPE_TAGS.Error,
+          CODEC_TYPE_TAGS.Error,
           state,
           dummyContext,
         ) as unknown as FabricError;
@@ -317,7 +317,7 @@ describe("FabricError", () => {
   describe("static members", () => {
     describe("[CODEC]", () => {
       const codec = FabricError[CODEC];
-      const expectedTag = WIRE_TYPE_TAGS.Error;
+      const expectedTag = CODEC_TYPE_TAGS.Error;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
       describe("recognizedTypeTag", () => {

@@ -3,12 +3,12 @@ import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from "@/wire-common/interface.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+} from "@/codec-common/interface.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import { EmptyReconstructionContext } from "@/wire-common/EmptyReconstructionContext.ts";
+import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 import { errorClassFromType, UNSAFE_KEYS } from "@/native-conversion.ts";
 
@@ -325,7 +325,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
       "no runtime context (FabricError deep-clone path).",
     );
     const result = codec.decode(
-      WIRE_TYPE_TAGS.Error,
+      CODEC_TYPE_TAGS.Error,
       codec.encode(this),
       reconstructContext,
     ) as FabricError;
@@ -335,7 +335,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   static #codec = Object.freeze(
     new (class FabricErrorCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.Error, FabricError);
+        super(CODEC_TYPE_TAGS.Error, FabricError);
       }
 
       /** @inheritDoc */

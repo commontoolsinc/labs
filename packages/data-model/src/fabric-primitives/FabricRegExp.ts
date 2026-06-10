@@ -1,13 +1,13 @@
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/wire-common/BaseFabricCodec.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from "@/wire-common/interface.ts";
+} from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { WIRE_TYPE_TAGS } from "@/wire-common/wire-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
@@ -128,7 +128,7 @@ export class FabricRegExp extends BaseFabricPrimitive {
   static #codec = Object.freeze(
     new (class RegExpCodec extends BaseFabricCodec {
       constructor() {
-        super(WIRE_TYPE_TAGS.RegExp, FabricRegExp);
+        super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
       }
 
       /** @inheritDoc */
