@@ -165,37 +165,8 @@ export function parseWriteParamColumns(
   }
 
   if (kw === "UPDATE") {
-    // Isolate the SET region: between the first top-level `SET` and the first
-    // top-level boundary keyword (WHERE/RETURNING/FROM) or end. Track paren depth
-    // so a subquery's own WHERE/comma doesn't end the region prematurely.
-    const setIdx = blanked.search(/\bset\b/i);
-    if (setIdx === -1) return undefined;
-    let i = setIdx + 3;
-    let depth = 0;
-    let region = "";
-    for (; i < blanked.length; i++) {
-      const c = blanked[i];
-      if (c === "(") depth++;
-      else if (c === ")") depth--;
-      if (depth === 0) {
-        const rest = blanked.slice(i);
-        if (/^\s*\b(where|returning|from)\b/i.test(rest)) break;
-      }
-      region += c;
-    }
-    if (depth !== 0) return undefined; // unbalanced → fail closed
-    // The SET region must be ONLY simple `ident = ?` assignments (top-level
-    // commas). A parenthesis, subquery, or non-`?` value → fail closed.
-    if (region.includes("(") || region.includes(")")) return undefined;
-    const assignments = region.split(",");
-    const setCols: string[] = [];
-    for (const a of assignments) {
-      const m = a.match(
-        /^\s*("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)\s*=\s*\?\s*$/,
-      );
-      if (!m) return undefined; // not exactly `ident = ?` → fail closed
-      setCols.push(unquoteIdent(m[1]));
-    }
+    const setCols = parseUpdateSetColumns(sql, blanked);
+    if (setCols === undefined) return undefined;
     // SET params come first (one `?` each, before WHERE); remaining params (in
     // WHERE/RETURNING) write no column.
     if (setCols.length > count) return undefined;
@@ -206,4 +177,50 @@ export function parseWriteParamColumns(
   }
 
   return undefined; // unknown write shape → fail closed
+}
+
+/**
+ * The column names an UPDATE's SET clause writes — independent of bind params,
+ * so a LITERAL assignment (`SET col = 'x'`, zero placeholders) is still
+ * attributed. Only the strict `ident = ?` form is accepted; any literal,
+ * expression, subquery, or tuple assignment ⟹ undefined (fail closed). Used by
+ * the param→column mapper above and by the CFC row-label write gate, which
+ * must reject an UPDATE it cannot attribute on a rule-bearing table.
+ */
+export function parseUpdateSetColumns(
+  sql: string,
+  blanked: string = blankStringsAndComments(sql),
+): string[] | undefined {
+  // Isolate the SET region: between the first top-level `SET` and the first
+  // top-level boundary keyword (WHERE/RETURNING/FROM) or end. Track paren depth
+  // so a subquery's own WHERE/comma doesn't end the region prematurely.
+  const setIdx = blanked.search(/\bset\b/i);
+  if (setIdx === -1) return undefined;
+  let i = setIdx + 3;
+  let depth = 0;
+  let region = "";
+  for (; i < blanked.length; i++) {
+    const c = blanked[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    if (depth === 0) {
+      const rest = blanked.slice(i);
+      if (/^\s*\b(where|returning|from)\b/i.test(rest)) break;
+    }
+    region += c;
+  }
+  if (depth !== 0) return undefined; // unbalanced → fail closed
+  // The SET region must be ONLY simple `ident = ?` assignments (top-level
+  // commas). A parenthesis, subquery, or non-`?` value → fail closed.
+  if (region.includes("(") || region.includes(")")) return undefined;
+  const assignments = region.split(",");
+  const setCols: string[] = [];
+  for (const a of assignments) {
+    const m = a.match(
+      /^\s*("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)\s*=\s*\?\s*$/,
+    );
+    if (!m) return undefined; // not exactly `ident = ?` → fail closed
+    setCols.push(unquoteIdent(m[1]));
+  }
+  return setCols;
 }

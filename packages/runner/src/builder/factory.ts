@@ -46,6 +46,18 @@ import {
   wish,
 } from "./built-in.ts";
 import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
+import {
+  all as rowLabelAll,
+  any as rowLabelAny,
+  authoredBy as rowLabelAuthoredBy,
+  constant as rowLabelConstant,
+  dbOwner as rowLabelDbOwner,
+  endorsedBy as rowLabelEndorsedBy,
+  intersect as rowLabelIntersect,
+  match as rowLabelMatch,
+  principal as rowLabelPrincipal,
+  whenMatches as rowLabelWhenMatches,
+} from "@commonfabric/memory/sqlite/row-label";
 import { cellConstructorFactory } from "../cell.ts";
 import { getEntityId } from "../create-ref.ts";
 import { getPatternEnvironment } from "./env.ts";
@@ -167,6 +179,26 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     sqliteQuery,
     table,
     cfLink,
+    // The SQLite helper namespace — one import for the growing vocabulary:
+    // `const { table, all, principal, match, … } = cfSqlite`. The row-label
+    // helpers (CFC Phase 3) live only here. There is deliberately no bare
+    // `when`/`matches`: the builder's control-flow `when` lowering matches by
+    // NAME and would mangle a local so named — the fused `whenMatches` avoids
+    // the collision class entirely.
+    cfSqlite: {
+      table,
+      cfLink,
+      match: rowLabelMatch,
+      principal: rowLabelPrincipal,
+      all: rowLabelAll,
+      any: rowLabelAny,
+      intersect: rowLabelIntersect,
+      whenMatches: rowLabelWhenMatches,
+      dbOwner: rowLabelDbOwner,
+      endorsedBy: rowLabelEndorsedBy,
+      authoredBy: rowLabelAuthoredBy,
+      constant: rowLabelConstant,
+    },
     navigateTo,
     wish,
 
