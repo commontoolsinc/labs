@@ -109,6 +109,42 @@ export class ContextualFlowControl {
     if (schema.ifc) {
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
+    // A value validates against one (anyOf/oneOf) or all (allOf) branches, so the
+    // confidentiality LUB must union every branch's atoms; otherwise branch-local
+    // confidentiality is silently dropped (under-tainting fail-open, audit 1.6).
+    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+      const branches = (schema as Record<string, unknown>)[key];
+      if (Array.isArray(branches)) {
+        for (const branch of branches) {
+          if (branch !== undefined && typeof branch === "object") {
+            ContextualFlowControl.joinSchema(
+              joined,
+              branch as JSONSchema,
+              ContextualFlowControl.childFullSchema(
+                branch as JSONSchema,
+                fullSchema,
+              ),
+              cycleTracker,
+            );
+          }
+        }
+      }
+    }
+    // Tuple element schemas carry their own confidentiality too.
+    if (Array.isArray((schema as Record<string, unknown>).prefixItems)) {
+      for (
+        const item of (schema as { prefixItems: JSONSchema[] }).prefixItems
+      ) {
+        if (item !== undefined && typeof item === "object") {
+          ContextualFlowControl.joinSchema(
+            joined,
+            item,
+            ContextualFlowControl.childFullSchema(item, fullSchema),
+            cycleTracker,
+          );
+        }
+      }
+    }
     if (schema.properties && typeof schema.properties === "object") {
       for (const value of Object.values(schema.properties)) {
         ContextualFlowControl.joinSchema(
