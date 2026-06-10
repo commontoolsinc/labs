@@ -223,7 +223,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // NOTE: Auto-fetch labels was removed because having side effects (writes to
   // Writable cells, sending to streams) inside computed() caused infinite reactive
   // loops that kept CPU at 88%. Users can click "Load Labels" button when needed.
-  // See docs/common/concepts/computed/side-effects.md for why computed() with
+  // See docs/common/concepts/computed/computed.md for why computed() with
   // side effects is problematic.
 
   // Directly instantiate GmailExtractor with task-current filter (raw mode)

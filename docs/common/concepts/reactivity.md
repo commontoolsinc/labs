@@ -1,3 +1,16 @@
+# Reactivity and Write Access
+
+## How Reactivity Works
+
+Everything a pattern receives as input or derives with `computed()` is
+reactive: when a value changes, everything that reads it updates
+automatically. JSX references subscribe automatically — `{count}` re-renders
+when `count` changes, with no wrapper needed. Inside `computed()`, `lift()`,
+`action()`, and `handler()` bodies, read current values with `.get()`; those
+reads are tracked as dependencies (in computed/lift). Derive data with
+[computed()](./computed/computed.md) and gate UI with plain ternaries
+([Conditional Rendering](../patterns/conditional.md)).
+
 ## Core Principle: Writable<> is About Write Access, Not Reactivity
 
 **The most important thing to understand:** Everything in Common Fabric is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
@@ -8,7 +21,7 @@
 - **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
 
 ```tsx
-import { Default, Writable, UI, pattern } from 'commonfabric'
+import { action, Default, Writable, UI, pattern } from 'commonfabric'
 
 interface Item {}
 
@@ -39,6 +52,15 @@ interface WritableInput {
 }
 
 export default pattern<WritableInput>(({ count, items, title }) => {
+  // action() closes over pattern state - the preferred way to mutate
+  const increment = action(() => {
+    count.set(count.get() + 1);
+  });
+
+  const addItem = action(() => {
+    items.push({ title: "New" });
+  });
+
   return {
     [UI]: (
       <div>
@@ -46,17 +68,13 @@ export default pattern<WritableInput>(({ count, items, title }) => {
         <div>Count: {count}</div>
 
         {/* Can also mutate */}
-        <cf-button onClick={() => count.set(count.get() + 1)}>
-          Increment
-        </cf-button>
+        <cf-button onClick={increment}>Increment</cf-button>
 
         {/* Bidirectional binding */}
         <cf-input $value={title} />
 
         {/* Can also mutate */}
-        <cf-button onClick={() => items.push({ title: "New" })}>
-          Add Item
-        </cf-button>
+        <cf-button onClick={addItem}>Add Item</cf-button>
       </div>
     ),
   };

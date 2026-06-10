@@ -36,7 +36,7 @@ testability.
   limits and escape-hatch guidance), `docs/common/concepts/reactivity.md`,
   `docs/common/patterns/new-cells.md`, and — in a Pattern Factory Build
   workspace — `docs/common/ai/pattern-factory-build-guide.md`
-- `docs/common/patterns/` - especially `meta/` for generalizable idioms
+- `docs/common/patterns/` - generalizable pattern idioms
 - `docs/common/concepts/action.md` - action() for local state
 - `docs/common/concepts/handler.md` - handler() for reusable logic
 - `docs/common/concepts/identity.md` - equals() for object comparison
