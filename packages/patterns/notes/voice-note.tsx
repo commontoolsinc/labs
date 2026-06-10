@@ -28,7 +28,7 @@ type Input = {
   title?: Writable<string | Default<"Voice Note">>;
 };
 
-type Output = {
+export type Output = {
   transcription: TranscriptionData | null | Default<null>;
   notes: TranscriptionData[] | Default<[]>;
 };

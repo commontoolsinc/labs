@@ -2,7 +2,7 @@ import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 // deno-lint-ignore no-empty-interface
 interface HeadingStoryInput {}
-interface HeadingStoryOutput {
+export interface HeadingStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

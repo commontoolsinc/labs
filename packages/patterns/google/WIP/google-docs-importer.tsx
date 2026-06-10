@@ -66,7 +66,7 @@ interface Input {
 }
 
 /** Google Docs Markdown Importer. Import Google Docs as Markdown with comments. #googleDocsImporter */
-interface Output {
+export interface Output {
   docUrl: string;
   markdown: string;
   docTitle: string;

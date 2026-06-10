@@ -550,7 +550,7 @@ interface PatternInput {
 }
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
-interface PatternOutput {
+export interface PatternOutput {
   trackedItems: TrackedItem[];
   holdsReady: TrackedItem[];
   overdueCount: number;

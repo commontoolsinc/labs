@@ -2,7 +2,7 @@ import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 // deno-lint-ignore no-empty-interface
 interface CollapsibleStoryInput {}
-interface CollapsibleStoryOutput {
+export interface CollapsibleStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

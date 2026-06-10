@@ -161,7 +161,7 @@ interface ClassifierInput {
 }
 
 /** Self-improving binary classifier with LLM + regex rules. #classifier #learning */
-interface ClassifierOutput {
+export interface ClassifierOutput {
   config: ClassifierConfig;
   examples: LabeledExample[];
   rules: ClassificationRule[];

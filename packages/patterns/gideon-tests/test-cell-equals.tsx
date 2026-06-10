@@ -46,7 +46,7 @@ interface TestCellEqualsInput {
   selectedItem: Writable<Item | null>;
 }
 
-interface TestCellEqualsOutput extends TestCellEqualsInput {}
+export interface TestCellEqualsOutput extends TestCellEqualsInput {}
 
 // Handler to add a new item at the END of the list
 // (Adding at end keeps indices stable for existing items)

@@ -43,7 +43,7 @@ interface Input {
 }
 
 /** Shopping list with AI-powered aisle sorting. #shoppingList */
-interface Output {
+export interface Output {
   items: ShoppingItem[];
   summary: string;
   totalCount: number;

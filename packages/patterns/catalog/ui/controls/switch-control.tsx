@@ -7,7 +7,7 @@ interface SwitchControlInput {
   checked: Writable<boolean>;
 }
 
-interface SwitchControlOutput {
+export interface SwitchControlOutput {
   [NAME]: string;
   [UI]: VNode;
 }

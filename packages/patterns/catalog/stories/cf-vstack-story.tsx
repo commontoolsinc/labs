@@ -8,7 +8,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface VStackStoryInput {}
-interface VStackStoryOutput {
+export interface VStackStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

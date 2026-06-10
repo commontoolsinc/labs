@@ -55,7 +55,7 @@ interface Input {
   initialized: Cell<boolean | Default<false>>;
 }
 
-interface Output {
+export interface Output {
   tripName: string;
   stops: TripStop[];
   areasOfInterest: AreaOfInterest[];

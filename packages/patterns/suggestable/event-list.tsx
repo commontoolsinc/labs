@@ -11,7 +11,7 @@ type Event = {
   notes: string;
 };
 
-type EventListOutput = {
+export type EventListOutput = {
   [NAME]: string;
   [UI]: VNode;
   events: Event[];

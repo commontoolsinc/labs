@@ -45,7 +45,7 @@ interface Input {
   groups: Writable<ContactGroup[] | Default<[]>>;
 }
 
-interface Output {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   contacts: ContactPiece[];

@@ -8,7 +8,7 @@ interface SelectControlInput {
   items: { label: string; value: unknown }[];
 }
 
-interface SelectControlOutput {
+export interface SelectControlOutput {
   [NAME]: string;
   [UI]: VNode;
 }

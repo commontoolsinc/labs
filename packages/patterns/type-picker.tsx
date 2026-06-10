@@ -55,7 +55,7 @@ interface TypePickerInput {
   dismissed?: boolean | Default<false>;
 }
 
-interface TypePickerOutput {
+export interface TypePickerOutput {
   dismissed?: boolean | Default<false>;
 }
 

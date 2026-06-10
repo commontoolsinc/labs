@@ -36,7 +36,7 @@ interface Input {
 }
 
 /** Import records from an Airtable base. #airtableImporter */
-interface Output {
+export interface Output {
   records: readonly AirtableRecordData[];
   bases: readonly BaseInfo[];
   tables: readonly TableInfo[];

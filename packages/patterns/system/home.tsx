@@ -45,7 +45,7 @@ type SpaceEntry = {
   did?: string;
 };
 
-type HomeOutput = {
+export type HomeOutput = {
   [NAME]: string;
   [UI]: unknown;
   favorites: Writable<Favorite[]>;

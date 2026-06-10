@@ -39,7 +39,7 @@ interface Input {
   toggleCount: number | Default<0>;
 }
 
-interface Output {
+export interface Output {
   condition: boolean;
   trueBranchEvalCount: number;
   falseBranchEvalCount: number;

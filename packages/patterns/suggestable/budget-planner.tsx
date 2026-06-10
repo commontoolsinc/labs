@@ -22,7 +22,7 @@ type BudgetItem = {
   amount: number | Default<0>;
 };
 
-type BudgetOutput = {
+export type BudgetOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;

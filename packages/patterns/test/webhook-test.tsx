@@ -21,7 +21,7 @@ interface WebhookPatternInput {
   webhookConfig: Writable<WebhookConfig | null | Default<null>>;
 }
 
-interface WebhookPatternOutput {
+export interface WebhookPatternOutput {
   [NAME]: string;
   [UI]: VNode;
   webhookInbox: Stream<unknown>;

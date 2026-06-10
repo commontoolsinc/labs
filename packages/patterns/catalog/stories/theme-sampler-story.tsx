@@ -11,7 +11,7 @@ import { Controls, SelectControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface ThemeSamplerStoryInput {}
-interface ThemeSamplerStoryOutput {
+export interface ThemeSamplerStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

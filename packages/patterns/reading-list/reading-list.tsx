@@ -26,7 +26,7 @@ interface ReadingListInput {
   items?: Writable<ReadingItemPiece[] | Default<[]>>;
 }
 
-interface ReadingListOutput {
+export interface ReadingListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: ReadingItemPiece[];

@@ -22,7 +22,7 @@ interface ProjectListInput {
   >;
 }
 
-interface ProjectListOutput {
+export interface ProjectListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: Writable<ProjectItem[]>;

@@ -40,7 +40,7 @@ const sectionLabel = {
 
 // deno-lint-ignore no-empty-interface
 interface ProfileBadgeStoryInput {}
-interface ProfileBadgeStoryOutput {
+export interface ProfileBadgeStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

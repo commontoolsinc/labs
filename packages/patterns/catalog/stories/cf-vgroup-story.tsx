@@ -4,7 +4,7 @@ import { Controls, SelectControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface VGroupStoryInput {}
-interface VGroupStoryOutput {
+export interface VGroupStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

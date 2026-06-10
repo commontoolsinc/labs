@@ -29,7 +29,7 @@ interface BookmarksInput {
   bookmarks?: Writable<Bookmark[] | Default<[]>>;
 }
 
-interface BookmarksOutput {
+export interface BookmarksOutput {
   [NAME]: string;
   [UI]: VNode;
   bookmarks: Bookmark[];

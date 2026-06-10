@@ -16,7 +16,7 @@ type DiagramInput = {
   context?: Record<string, any> | Default<Record<string, never>>;
 };
 
-type DiagramOutput = {
+export type DiagramOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;

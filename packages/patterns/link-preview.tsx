@@ -1,6 +1,6 @@
 import { computed, type Default, NAME, pattern, UI } from "commonfabric";
 
-interface LinkPreviewInput {
+export interface LinkPreviewInput {
   url: string | Default<"https://github.com">;
 }
 

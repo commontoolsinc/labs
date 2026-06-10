@@ -76,7 +76,7 @@ interface Input {
 }
 
 /** Gmail label manager with confirmation. #gmailLabelManager */
-interface Output {
+export interface Output {
   messageIds: string[];
   labelsToAdd: string[];
   labelsToRemove: string[];

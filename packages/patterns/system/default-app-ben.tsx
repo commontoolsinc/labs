@@ -40,7 +40,7 @@ type MinimalPiece = {
 type PiecesListInput = void;
 
 // Pattern returns only UI, no data outputs (only symbol properties)
-interface PiecesListOutput {
+export interface PiecesListOutput {
   [key: string]: unknown;
   backlinksIndex: {
     mentionable: MentionablePiece[] | undefined;

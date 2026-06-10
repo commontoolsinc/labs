@@ -13,7 +13,7 @@ interface CheckboxDemoInput {
   trackedEnabled: Writable<boolean | Default<false>>;
 }
 
-interface CheckboxDemoOutput extends CheckboxDemoInput {}
+export interface CheckboxDemoOutput extends CheckboxDemoInput {}
 
 // Handler for checkbox changes - only needed when you want additional logic
 // Defined at module scope as required by the pattern system

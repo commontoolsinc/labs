@@ -21,7 +21,7 @@ type ChecklistItem = {
   done: boolean | Default<false>;
 };
 
-type ChecklistOutput = {
+export type ChecklistOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;

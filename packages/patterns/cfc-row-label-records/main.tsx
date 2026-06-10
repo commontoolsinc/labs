@@ -32,7 +32,7 @@ interface DiagnosisRow {
   diagnosis: string;
 }
 
-interface RecordsOutput {
+export interface RecordsOutput {
   [NAME]: string;
   [UI]: VNode;
   seed: Stream<void>;

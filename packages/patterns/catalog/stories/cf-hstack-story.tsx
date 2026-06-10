@@ -8,7 +8,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface HStackStoryInput {}
-interface HStackStoryOutput {
+export interface HStackStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

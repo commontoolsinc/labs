@@ -11,7 +11,7 @@ interface Item {
   subItems: SubItem[] | Default<[]>;
 }
 
-interface Input {
+export interface Input {
   title: string | Default<"Render Test">;
   globalCounter: number | Default<0>;
   items: Item[] | Default<[]>;

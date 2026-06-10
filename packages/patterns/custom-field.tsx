@@ -92,7 +92,7 @@ export interface CustomFieldModuleInput {
 }
 
 // Output interface with unknown for UI properties to prevent OOM (CT-1148)
-interface CustomFieldModuleOutput {
+export interface CustomFieldModuleOutput {
   [NAME]: unknown;
   [UI]: unknown;
   name: string;

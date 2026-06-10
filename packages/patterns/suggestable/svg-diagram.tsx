@@ -16,7 +16,7 @@ type SvgDiagramInput = {
   context?: Record<string, any> | Default<Record<string, never>>;
 };
 
-type SvgDiagramOutput = {
+export type SvgDiagramOutput = {
   [NAME]: string;
   [UI]: VNode;
   topic: string;

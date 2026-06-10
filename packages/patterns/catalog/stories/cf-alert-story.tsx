@@ -9,7 +9,7 @@ import {
 
 // deno-lint-ignore no-empty-interface
 interface AlertStoryInput {}
-interface AlertStoryOutput {
+export interface AlertStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

@@ -65,7 +65,7 @@ interface Input {
   isHidden?: boolean | Default<false>;
 }
 
-interface Output {
+export interface Output {
   title: string;
   events: EventPiece[];
   mentionable: EventPiece[];

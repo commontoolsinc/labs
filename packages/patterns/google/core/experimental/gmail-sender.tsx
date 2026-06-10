@@ -78,7 +78,7 @@ interface Input {
 }
 
 /** Gmail email sender with confirmation dialog. #gmailSender */
-interface Output {
+export interface Output {
   [UI]: VNode;
   draft: EmailDraft;
   result: SendResult | null;

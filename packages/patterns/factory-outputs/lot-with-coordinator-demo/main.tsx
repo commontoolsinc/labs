@@ -18,7 +18,7 @@ import type { ParkingSpot, Person } from "../parking-coordinator/main.tsx";
 
 import LotWatch from "../lot-watch/main.tsx";
 
-interface Out {
+export interface Out {
   // Re-expose the shared cells so the host can inspect/debug.
   people: readonly Person[];
   spots: readonly ParkingSpot[];

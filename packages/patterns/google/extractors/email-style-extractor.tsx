@@ -143,7 +143,7 @@ const triggerReanalyze = handler<
 // =============================================================================
 
 /** Personal email writing style extracted from sent emails. #emailStyle */
-interface PatternOutput {
+export interface PatternOutput {
   style: EmailStyle | null;
   stylePrompt: string;
   emailsAnalyzed: number;

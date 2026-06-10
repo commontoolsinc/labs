@@ -7,7 +7,7 @@ interface TextControlInput {
   value: Writable<string>;
 }
 
-interface TextControlOutput {
+export interface TextControlOutput {
   [NAME]: string;
   [UI]: VNode;
 }

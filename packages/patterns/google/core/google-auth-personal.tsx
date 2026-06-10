@@ -42,7 +42,7 @@ interface Input {
 }
 
 /** Personal Google account. #googleAuth #googleAuthPersonal */
-interface Output {
+export interface Output {
   auth: Auth;
   accountType: "personal";
   /** Minimal preview for picker display with PERSONAL badge */

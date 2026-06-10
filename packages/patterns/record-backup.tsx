@@ -77,7 +77,7 @@ interface Input {
   importJson: string | Default<"">;
 }
 
-interface Output {
+export interface Output {
   exportedJson: string;
   importJson: string;
   recordCount: number;

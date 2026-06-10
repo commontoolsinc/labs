@@ -409,7 +409,7 @@ interface PatternInput {
 }
 
 /** Email ticket finder for tracking upcoming events. #emailTickets */
-interface PatternOutput {
+export interface PatternOutput {
   tickets: TrackedTicket[];
   todayTickets: TrackedTicket[];
   upcomingTickets: TrackedTicket[];

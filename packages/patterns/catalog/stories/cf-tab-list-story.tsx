@@ -4,7 +4,7 @@ import { Controls, SelectControl } from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface TabListStoryInput {}
-interface TabListStoryOutput {
+export interface TabListStoryOutput {
   [NAME]: string;
   [UI]: VNode;
   controls: VNode;

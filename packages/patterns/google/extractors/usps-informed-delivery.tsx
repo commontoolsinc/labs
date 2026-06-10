@@ -269,7 +269,7 @@ interface PatternInput {
 }
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
-interface PatternOutput {
+export interface PatternOutput {
   mailPieces: MailAnalysis[];
   householdMembers: HouseholdMember[];
   mailCount: number;

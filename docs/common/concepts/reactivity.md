@@ -101,6 +101,17 @@ interface CounterOutput {
 }
 ```
 
+**Export your result type.** Because the factory's result type references your
+declared interface by name (`pattern<Input, Output>` produces a
+`PatternFactory<…, Output>`), a non-exported `Output` interface fails
+compilation with "Default export of the module has or is using private name
+'Output'". The result type is your public contract — export it:
+
+```tsx
+export interface CounterOutput { /* ... */ }
+export default pattern<CounterInput, CounterOutput>(/* ... */);
+```
+
 Consumers see exactly what the author returned — the factory's result type is
 not stripped. A consumer that receives `Writable<GameState>` reads current
 values with `.get()` inside `computed()`/`lift()`/handler bodies, just like a

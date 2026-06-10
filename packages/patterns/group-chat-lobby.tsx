@@ -36,7 +36,7 @@ interface LobbyInput {
   sessionId: Writable<string | Default<"">>;
 }
 
-interface LobbyOutput {
+export interface LobbyOutput {
   chatName: string | Default<"Group Chat">;
   messages: Writable<Message[] | Default<[]>>;
   users: Writable<User[] | Default<[]>>;

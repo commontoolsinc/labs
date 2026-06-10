@@ -16,7 +16,7 @@ interface ContactDetailInput {
 }
 
 /** #contact #person */
-interface ContactDetailOutput {
+export interface ContactDetailOutput {
   contact: Contact;
   summary: string;
 }

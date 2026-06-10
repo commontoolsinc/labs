@@ -28,7 +28,7 @@ interface Input {
 }
 
 /** A #cross-piece-test-server that exposes a stream for testing cross-piece invocation. */
-interface Output {
+export interface Output {
   counter: number;
   invocationLog: string[];
 

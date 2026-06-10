@@ -36,18 +36,18 @@ export default pattern(() => {
 
   const assert_added_room_is_selected = computed(() =>
     chat.roomCount === 1 &&
-    chat.selectedRoom.get().room?.name === "Garden" &&
+    chat.selectedRoom.room?.name === "Garden" &&
     chat.messageCount === 0
   );
 
   const assert_second_room_is_selected = computed(() =>
     chat.roomCount === 2 &&
-    chat.selectedRoom.get().room?.name === "Library" &&
+    chat.selectedRoom.room?.name === "Library" &&
     chat.messageCount === 0
   );
 
   const assert_selected_room_reference_changed = computed(() =>
-    chat.selectedRoom.get().room?.name === "Garden"
+    chat.selectedRoom.room?.name === "Garden"
   );
 
   return {
