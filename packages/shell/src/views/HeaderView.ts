@@ -863,7 +863,8 @@ export class XHeaderView extends BaseView {
   private async handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    if (!this.rt || !this.space || !this.pieceId || this._isFavoriteLoading) {
+    const space = this.space;
+    if (!this.rt || !space || !this.pieceId || this._isFavoriteLoading) {
       return;
     }
 
@@ -873,11 +874,11 @@ export class XHeaderView extends BaseView {
 
     try {
       if (currentlyFavorite) {
-        await this.rt.favorites().removeFavorite(this.space!, this.pieceId);
+        await this.rt.favorites().removeFavorite(space, this.pieceId);
       } else {
         await this.rt
           .favorites()
-          .addFavorite(this.space!, this.pieceId, undefined, this.spaceName);
+          .addFavorite(space, this.pieceId, undefined, this.spaceName);
       }
     } catch (err) {
       console.error("[HeaderView] Error toggling favorite:", err);

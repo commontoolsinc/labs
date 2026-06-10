@@ -149,7 +149,6 @@ export function createRuntimeClientOptions({
 export class RuntimeInternals extends EventTarget {
   #client: RuntimeClient;
   #disposed = false;
-  #homeSpaceDID: DID;
   #favorites: FavoritesManager;
   #callbacks: RuntimeInternalsCallbacks;
   #spaceRootPatterns: Map<DID, Promise<PageHandle<NameSchema>>> = new Map();
@@ -162,12 +161,10 @@ export class RuntimeInternals extends EventTarget {
 
   constructor(
     client: RuntimeClient,
-    homeSpaceDID: DID,
     callbacks: RuntimeInternalsCallbacks = {},
   ) {
     super();
     this.#client = client;
-    this.#homeSpaceDID = homeSpaceDID;
     this.#callbacks = callbacks;
     this.#favorites = new FavoritesManager(client);
     this.#client.on("console", this.#onConsole);
@@ -184,21 +181,18 @@ export class RuntimeInternals extends EventTarget {
     return this.#telemetryMarkers;
   }
 
-  homeSpaceDID(): DID {
-    return this.#homeSpaceDID;
-  }
-
   favorites(): FavoritesManager {
     this.#check();
     return this.#favorites;
   }
 
   async createPiece<T>(
+    space: DID,
     source: URL | Program | string,
     options?: { argument?: JSONValue; run?: boolean },
   ): Promise<PageHandle<T>> {
     this.#check();
-    const page = await this.#client.createPage<T>(source, options);
+    const page = await this.#client.createPage<T>(source, space, options);
     if (!page) {
       throw new Error("Could not create piece");
     }
@@ -216,6 +210,13 @@ export class RuntimeInternals extends EventTarget {
     if (cached) return cached;
     const pattern = this.#client.getSpaceRootPattern(space);
     this.#spaceRootPatterns.set(space, pattern);
+    // Evict on rejection: a transient failure (unreachable host, authz)
+    // must not poison the space for the runtime's lifetime.
+    pattern.catch(() => {
+      if (this.#spaceRootPatterns.get(space) === pattern) {
+        this.#spaceRootPatterns.delete(space);
+      }
+    });
     return pattern;
   }
 
@@ -260,7 +261,14 @@ export class RuntimeInternals extends EventTarget {
       }
       return page;
     })();
-    this.#patternCache.set(key, { promise, started: start });
+    const entry = { promise, started: start };
+    this.#patternCache.set(key, entry);
+    // Evict on rejection so the next request retries.
+    promise.catch(() => {
+      if (this.#patternCache.get(key) === entry) {
+        this.#patternCache.delete(key);
+      }
+    });
     return promise;
   }
 
@@ -434,7 +442,6 @@ export class RuntimeInternals extends EventTarget {
       identity,
       spaceDid: identity.did(),
     });
-    session.spaceName = "<home>";
 
     // Log user identity for debugging
     identityLogger.log(
@@ -470,7 +477,6 @@ export class RuntimeInternals extends EventTarget {
     // explicitly.
     return new RuntimeInternals(
       client,
-      identity.did(), // homeSpaceDID is always identity.did()
       { navigate, onConsole, onError },
     );
   }

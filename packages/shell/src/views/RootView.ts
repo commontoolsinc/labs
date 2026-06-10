@@ -3,7 +3,6 @@ import {
   applyCommand,
   AppState,
   AppUpdateEvent,
-  AppView,
   clone,
   Command,
   isAppViewEqual,
@@ -17,6 +16,7 @@ import { Task } from "@lit/task";
 import { type RuntimeClient } from "@commonfabric/runtime-client";
 import { type DID } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
+import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
 import { createVDomDebugHelpers } from "@commonfabric/html/debug";
 import { createDebugUtils } from "../lib/debug-utils.ts";
 import { runtimeContext, spaceContext } from "@commonfabric/ui";
@@ -79,12 +79,12 @@ export class XRootView extends BaseView {
   @state()
   private accessor space: DID | undefined = undefined;
 
-  // The runtime task runs when AppState changes, and determines
-  // if a new RuntimeInternals must be created, like when
-  // identity or space change. This is manually run in `updated()`
-  // because we want to compare to previous values, leaving this
-  // function responsible for cleaning up previous runtimes, and
-  // creating a new one.
+  // The runtime task runs when AppState changes, and determines if a
+  // new RuntimeInternals must be created — only when identity or host
+  // (apiUrl) change; one runtime serves every space. This is manually
+  // run in `updated()` because we want to compare to previous values,
+  // leaving this function responsible for cleaning up previous
+  // runtimes, and creating a new one.
   private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
@@ -115,19 +115,10 @@ export class XRootView extends BaseView {
           identity: app.identity,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
-          // lib-shell emits address-shaped targets ({spaceDid, pieceId}).
-          // Mapping a DID back to the human-readable spaceName URL is view
-          // state, so it happens here.
-          navigate: (target) => {
-            const view = this.app?.view;
-            if (
-              target.spaceDid === this.space && view && "spaceName" in view
-            ) {
-              navigate({ spaceName: view.spaceName, pieceId: target.pieceId });
-            } else {
-              navigate(target);
-            }
-          },
+          // lib-shell emits address-shaped targets ({spaceDid, pieceId});
+          // mapNavigationView (shared/navigate.ts) maps a DID back to the
+          // human-readable spaceName URL at the Navigation layer.
+          navigate,
         });
 
         if (signal.aborted) {
@@ -213,12 +204,8 @@ export class XRootView extends BaseView {
     const flipState = (!previous && current) ||
       !current;
 
-    // One runtime per (identity, host): only those changes recreate it.
-    // A view/space change is pure view state — the same runtime serves
-    // every space (space is part of the address, nothing special).
     const stateChanged = !!previous &&
-      (previous.apiUrl !== current.apiUrl ||
-        previous.identity !== current.identity);
+      shouldRecreateRuntime(previous, current);
 
     if (flipState || stateChanged) {
       this._rt.run([current]);
@@ -245,7 +232,12 @@ export class XRootView extends BaseView {
       } else if ("spaceDid" in view) {
         space = view.spaceDid;
       } else if ("spaceName" in view) {
-        space = await resolveSpaceDid(identity, view.spaceName);
+        try {
+          space = await resolveSpaceDid(identity, view.spaceName);
+        } catch (error) {
+          console.error("[RootView] Failed to resolve space name:", error);
+          space = undefined;
+        }
       }
     }
     if (token !== this.#resolveSpaceToken) return;

@@ -77,8 +77,8 @@ export class XFavoriteButtonElement extends LitElement {
   }
 
   protected override willUpdate(changedProperties: PropertyValues): void {
-    // Reset local state when pieceId changes
-    if (changedProperties.has("pieceId")) {
+    // Reset local state when the piece's address changes — either part.
+    if (changedProperties.has("pieceId") || changedProperties.has("space")) {
       this._localIsFavorite = undefined;
     }
 

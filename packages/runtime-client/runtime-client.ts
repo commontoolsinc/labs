@@ -162,6 +162,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   async createPage<T = unknown>(
     input: string | URL | Program,
+    space: DID,
     options?: { argument?: JSONValue; run?: boolean },
   ): Promise<PageHandle<T>> {
     const source = input instanceof URL
@@ -182,6 +183,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       RequestType.PageCreate
     >({
       type: RequestType.PageCreate,
+      space,
       source,
       argument: options?.argument,
       run: options?.run,

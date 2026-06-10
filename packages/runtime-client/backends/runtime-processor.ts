@@ -717,9 +717,10 @@ export class RuntimeProcessor {
   async handlePieceCreate(
     request: PageCreateRequest,
   ): Promise<PageResponse> {
+    const { cc } = this.getSpaceCtx(request.space);
     let program: Program | undefined;
     if ("url" in request.source && request.source.url) {
-      program = await this.cc.manager().runtime.harness.resolve(
+      program = await cc.manager().runtime.harness.resolve(
         new HttpProgramResolver(request.source.url),
       );
     } else if ("program" in request.source) {
@@ -728,7 +729,7 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
-    const piece = await this.cc.create<NameSchema>(program, {
+    const piece = await cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
       start: request.run ?? true,
     }, request.cause);

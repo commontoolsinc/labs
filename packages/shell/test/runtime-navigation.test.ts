@@ -68,10 +68,7 @@ describe("RuntimeInternals navigation", () => {
     const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     client.slugByPageId.set("piece-789", "demo");
-    const runtime = new (RuntimeInternals as any)(
-      client,
-      spaceDid,
-    );
+    const runtime = new (RuntimeInternals as any)(client);
 
     try {
       await expect(runtime.getSlug(spaceDid, "piece-789")).resolves.toBe(
@@ -106,10 +103,7 @@ describe("RuntimeInternals navigation", () => {
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
     const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
-    const runtime = new (RuntimeInternals as any)(
-      client,
-      spaceDid,
-    );
+    const runtime = new (RuntimeInternals as any)(client);
 
     let registrations = 0;
     const registrationStarted = deferred<void>();
@@ -184,10 +178,7 @@ describe("RuntimeInternals navigation", () => {
     const currentSpace = "did:key:z6Mk-shell-runtime-did-nav-current" as DID;
     const nextSpace = "did:key:z6Mk-shell-runtime-did-nav-next" as DID;
     const client = new MockRuntimeClient();
-    const runtime = new (RuntimeInternals as any)(
-      client,
-      currentSpace,
-    );
+    const runtime = new (RuntimeInternals as any)(client);
 
     let navigation: NavigationDetail | undefined;
     const navigationReceived = deferred<NavigationDetail>();

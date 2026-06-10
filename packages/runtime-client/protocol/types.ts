@@ -434,6 +434,8 @@ export type LoggerFlagsData = Record<
 
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
+  /** The space the piece is created in — part of its address. */
+  space: DID;
   source: {
     url: string;
   } | {

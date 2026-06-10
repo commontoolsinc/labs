@@ -112,8 +112,9 @@ export class XAppView extends BaseView {
         try {
           const pieceId = slugIdForSpace(space, app.view.pieceSlug);
           const pattern = await rt.getPattern(space, pieceId);
-          // Track as recently visited (fire-and-forget)
-          rt.trackRecentPiece(space, pieceId);
+          // Track as recently visited (fire-and-forget) — but not after
+          // the view moved on, or the write lands in the wrong space.
+          if (!signal.aborted) rt.trackRecentPiece(space, pieceId);
           return pattern;
         } catch (e) {
           if (!signal.aborted) {
@@ -129,7 +130,7 @@ export class XAppView extends BaseView {
             this.#replacePieceUrlWithSlug(app.view, slug);
           }
           // Track as recently visited (fire-and-forget)
-          rt.trackRecentPiece(space, app.view.pieceId);
+          if (!signal.aborted) rt.trackRecentPiece(space, app.view.pieceId);
           return pattern;
         } catch (e) {
           if (!signal.aborted) {
@@ -444,7 +445,6 @@ export class XAppView extends BaseView {
     const authenticated = html`
       <x-body-view
         .rt="${this.rt}"
-        .space="${this.space}"
         .activePattern="${activePattern}"
         .spaceRootPattern="${spaceRootPattern}"
         .patternError="${this._patternError}"
@@ -500,6 +500,7 @@ export class XAppView extends BaseView {
             .visible="${config.showQuickJumpView ?? false}"
             .rt="${this.rt}"
             .space="${this.space}"
+            .spaceName="${spaceName}"
           ></x-quick-jump-view>
         `
         : ""}

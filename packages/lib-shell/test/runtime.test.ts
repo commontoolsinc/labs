@@ -50,6 +50,16 @@ class MockRuntimeClient {
     return Promise.resolve(this.slugByPageId.get(pageId));
   }
 
+  /** Records which space each root-pattern request targeted. */
+  spaceRootCalls: DID[] = [];
+
+  getSpaceRootPattern(space: DID): Promise<never> {
+    this.spaceRootCalls.push(space);
+    // Reject so registerNavigatedPiece's try/catch absorbs it — the
+    // tests only assert WHERE the registration was addressed.
+    return Promise.reject(new Error("no root pattern in mock"));
+  }
+
   /** Records every (pageId, runIt, space) so tests can assert which calls
    * START the piece (CT-1623: name listings must not start every piece) and
    * which space each call targets. */
@@ -95,10 +105,7 @@ describe("RuntimeInternals", () => {
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     client.slugByPageId.set("piece-789", "demo");
-    const runtime = new RuntimeInternals(
-      client as any,
-      spaceDid,
-    );
+    const runtime = new RuntimeInternals(client as any);
 
     try {
       await expect(runtime.getSlug(spaceDid, "piece-789")).resolves.toBe(
@@ -113,10 +120,7 @@ describe("RuntimeInternals", () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
-    const runtime = new RuntimeInternals(
-      client as any,
-      spaceDid,
-    );
+    const runtime = new RuntimeInternals(client as any);
 
     await runtime.dispose();
 
@@ -129,10 +133,7 @@ describe("RuntimeInternals", () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav-current" as DID;
     const client = new MockRuntimeClient();
-    const runtime = new RuntimeInternals(
-      client as any,
-      spaceDid,
-    );
+    const runtime = new RuntimeInternals(client as any);
 
     runtime.registerNavigatedPiece = async () => {};
 
@@ -173,7 +174,6 @@ describe("RuntimeInternals", () => {
     const navigationReceived = deferred<NavigationDetail>();
     const runtime = new RuntimeInternals(
       client as any,
-      currentSpace,
       {
         navigate: (navigation: unknown) => {
           navigationReceived.resolve(navigation as NavigationDetail);
@@ -343,10 +343,7 @@ describe("RuntimeInternals", () => {
     async function makeRuntime() {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(
-        client as any,
-        spaceDid,
-      );
+      const runtime = new RuntimeInternals(client as any);
       return { client, runtime };
     }
 
@@ -416,6 +413,28 @@ describe("RuntimeInternals", () => {
     });
   });
 
+  // A navigated piece registers in ITS OWN space's root pattern — the
+  // cell's space, not any notion of a current space.
+  describe("registerNavigatedPiece", () => {
+    it("targets the navigated cell's space", async () => {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      const cellSpace = "did:key:z6Mk-lib-shell-runtime-foreign" as DID;
+      try {
+        await runtime.registerNavigatedPiece(
+          {
+            id: () => "piece-9",
+            space: () => cellSpace,
+          } as any,
+        );
+        expect(client.spaceRootCalls).toEqual([cellSpace]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
   // One runtime serves every space; a pattern's address is (space, id)
   // and the cache is keyed by that address.
   describe("getPattern multi-space", () => {
@@ -425,10 +444,7 @@ describe("RuntimeInternals", () => {
     async function makeRuntime() {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const client = new MockRuntimeClient();
-      const runtime = new RuntimeInternals(
-        client as any,
-        homeDid,
-      );
+      const runtime = new RuntimeInternals(client as any);
       return { client, runtime };
     }
 
