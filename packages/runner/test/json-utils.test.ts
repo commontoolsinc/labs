@@ -17,6 +17,7 @@ import {
 } from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import { Engine } from "../src/harness/engine.ts";
@@ -909,22 +910,17 @@ describe("moduleToJSON", () => {
     expect(targetModule).toBeDefined();
 
     runtime.patternManager.registerPattern(pattern);
-    const patternId = runtime.patternManager.getPatternId(pattern);
 
-    expect(
-      runtime.harness.getExecutableFunction(
-        targetModule.implementationRef,
-        patternId,
-      ),
-    ).toBe(targetModule.implementation);
+    // The implementation became verified during the standalone Engine's
+    // evaluation, so it carries content-addressed provenance (recorded by
+    // Engine.recordModuleProvenance — module-global, not per-engine). That is
+    // what lets `moduleToJSON` emit a `$implRef` and OMIT the stringified body
+    // even though this pattern was registered without going through the
+    // runtime harness's own evaluation (the cross-engine path that the deleted
+    // `associatePattern` bridge used to cover).
+    expect(getVerifiedProvenance(targetModule.implementation)).toBeDefined();
 
-    const frame = pushFrame({
-      runtime,
-      verifiedLoadId: runtime.harness.getVerifiedLoadId(
-        targetModule.implementationRef,
-        patternId,
-      ),
-    });
+    const frame = pushFrame({ runtime });
     let serialized: ReturnType<typeof moduleToJSON>;
     try {
       serialized = moduleToJSON(targetModule);
@@ -935,6 +931,7 @@ describe("moduleToJSON", () => {
       type: "javascript",
       implementationRef: targetModule.implementationRef,
     });
+    expect(serialized).toHaveProperty("$implRef");
     expect("implementation" in serialized).toBe(false);
   });
 });

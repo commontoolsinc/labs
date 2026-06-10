@@ -2341,15 +2341,10 @@ export class Runner {
 
   private resolveJavaScriptFunction(
     module: Module,
-    pattern: Pattern,
   ): ResolvedJavaScriptModule {
     let fn: (...args: any[]) => any;
-    const patternId = this.runtime.patternManager.getPatternId(pattern);
     const verifiedLoadId = module.implementationRef
-      ? this.runtime.harness.getVerifiedLoadId?.(
-        module.implementationRef,
-        patternId,
-      )
+      ? this.runtime.harness.getVerifiedLoadId?.(module.implementationRef)
       : undefined;
 
     const cached = this.functionCache.get(module);
@@ -2368,7 +2363,6 @@ export class Runner {
         (module.implementationRef
           ? this.runtime.harness.getExecutableFunction(
             module.implementationRef,
-            patternId,
           ) as (...args: any[]) => any | undefined
           : undefined) ??
         this.getFallbackJavaScriptImplementation(module);
@@ -3479,7 +3473,6 @@ export class Runner {
     );
     const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
       module,
-      pattern,
     );
     const context: JavaScriptNodeContext = {
       tx,

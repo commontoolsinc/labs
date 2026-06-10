@@ -440,10 +440,15 @@ export function moduleToJSON(module: Module) {
           module.implementationRef,
         )
       : undefined;
+    // Omit the stringified body when the implementation is resolvable on load —
+    // either content-addressed (it carries a `$implRef` → resolves via the
+    // identity index) or admitted by the legacy verified-function registry.
+    // Only stringify as a last-resort fallback for an unresolvable function.
+    const hasImplRef = "$implRef" in implRef;
     return {
       ...rest,
       ...implRef,
-      ...(module.type === "javascript" &&
+      ...(module.type === "javascript" && !hasImplRef &&
           admittedImplementation !== implementation
         ? {
           implementation: Function.prototype.toString.call(implementation),

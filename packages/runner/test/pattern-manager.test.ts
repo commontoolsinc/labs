@@ -9,6 +9,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { patternMetaSchema } from "../src/pattern-manager.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { getVerifiedLoadId } from "../src/builder/pattern-metadata.ts";
 import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -303,10 +304,15 @@ describe("PatternManager.compileOrGetPattern", () => {
       simpleProgram,
     );
 
-    const initialLoadId = runtime.harness.getVerifiedLoadId?.(
-      "__missing__",
-      patternId,
-    );
+    // The established verified-load id is first-write-wins in the
+    // PatternManager's patternToVerifiedLoadId map (the channel that survived
+    // the pattern-scoped-registry deletion); a later registration under a
+    // different frame load id must not overwrite it.
+    // deno-lint-ignore no-explicit-any
+    const readEstablished = () =>
+      (runtime.patternManager as any).patternToVerifiedLoadId.get(compiled) ??
+        getVerifiedLoadId(compiled);
+    const initialLoadId = readEstablished();
     expect(initialLoadId).toBeDefined();
 
     const frame = pushFrame({ verifiedLoadId: "wrong-load-id" });
@@ -318,8 +324,7 @@ describe("PatternManager.compileOrGetPattern", () => {
       popFrame(frame);
     }
 
-    expect(runtime.harness.getVerifiedLoadId?.("__missing__", patternId))
-      .toEqual(initialLoadId);
+    expect(readEstablished()).toEqual(initialLoadId);
   });
 
   it("propagates verified load ids to nested compiled subpatterns", async () => {
@@ -343,26 +348,19 @@ describe("PatternManager.compileOrGetPattern", () => {
       nestedProgram,
     );
     const compiled = main?.default as any;
-    const patternId = runtime.patternManager.registerPattern(
-      compiled,
-      nestedProgram,
-    );
-    const initialLoadId = runtime.harness.getVerifiedLoadId?.(
-      "__missing__",
-      patternId,
-    );
+    runtime.patternManager.registerPattern(compiled, nestedProgram);
+    const initialLoadId = getVerifiedLoadId(compiled);
     expect(initialLoadId).toBeDefined();
 
     const nestedPattern = (compiled.nodes.find((node: any) => node.inputs?.op)
       ?.inputs as { op?: unknown }).op;
     expect(nestedPattern).toBeDefined();
 
-    const nestedPatternId = runtime.patternManager.registerPattern(
-      nestedPattern as any,
-    );
+    runtime.patternManager.registerPattern(nestedPattern as any);
 
-    expect(runtime.harness.getVerifiedLoadId?.("__missing__", nestedPatternId))
-      .toEqual(initialLoadId);
+    // The nested subpattern inherits the parent's verified-load id through the
+    // seed walk (same per-value side table).
+    expect(getVerifiedLoadId(nestedPattern as object)).toEqual(initialLoadId);
   });
 
   it("compiles different patterns for different programs", async () => {

@@ -23,11 +23,6 @@ import type {
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
-import {
-  identityFromCanonicalSource,
-  readBindingIdentity,
-  recordVerifiedProvenance,
-} from "./harness/verified-provenance.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   COMPILE_CACHE_RUNTIME_VERSION,
@@ -406,7 +401,6 @@ export class PatternManager {
     // If this pattern object was already registered, return its id
     const existingId = this.patternToIdMap.get(pattern);
     if (existingId) {
-      this.associateVerifiedFunctions(existingId, pattern);
       return existingId;
     }
 
@@ -424,8 +418,6 @@ export class PatternManager {
       // Pattern exists - touch to mark as recently used
       this.touchPattern(generatedId);
     }
-
-    this.associateVerifiedFunctions(generatedId, pattern);
 
     return generatedId;
   }
@@ -1003,35 +995,9 @@ export class PatternManager {
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
     setArtifactEntryRef(value, { identity, symbol });
-    // Content-addressed CFC provenance for the artifact's implementation
-    // function: registering through this (trust-gated) indexing path is what
-    // makes a function "verified" under the by-identity model. The factory
-    // carries the CT-1665 binding annotation when present.
-    const implementation =
-      (value as { implementation?: unknown }).implementation ?? value;
-    // Skip a CONFIRMED cross-module mismatch: a re-exporting module surfaces a
-    // function defined elsewhere under its OWN identity, but the function's
-    // canonical `fn.src` names the defining module. Provenance is
-    // first-write-wins and CFC fails closed on an identity/`fn.src` mismatch,
-    // so a re-exporter (possibly indexed first) stamping its identity would
-    // make a valid verified artifact resolve as `unsupported`. Recording only
-    // when the src doesn't name a different module leaves the defining
-    // module's matching record to stick. A non-canonical src is left alone.
-    const srcIdentity = identityFromCanonicalSource(
-      (implementation as { src?: string }).src,
-    );
-    if (
-      typeof implementation === "function" &&
-      (srcIdentity === undefined || srcIdentity === identity)
-    ) {
-      recordVerifiedProvenance(implementation, {
-        identity,
-        symbol,
-        ...(readBindingIdentity(value) === undefined
-          ? {}
-          : { bindingIdentity: readBindingIdentity(value)! }),
-      });
-    }
+    // Note: content-addressed CFC provenance is recorded by the engine at
+    // evaluation time (Engine.recordModuleProvenance) — the single home, so it
+    // covers every load path, not only ones routed through this indexing.
   }
 
   /**
@@ -1224,7 +1190,6 @@ export class PatternManager {
           this.patternIdMap.set(patternId, pattern);
           this.evictIfNeeded();
         }
-        this.associateVerifiedFunctions(patternId, pattern);
         return pattern;
       })
       .finally(() => {
@@ -1284,7 +1249,6 @@ export class PatternManager {
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
     this.patternMetaCellById.set(patternId, metaCell.withTx());
-    this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
     // Persist the entry identity once learned (cold compile) so the next load
     // takes the by-identity fast path. Fire-and-forget — never blocks the load,
@@ -1350,7 +1314,6 @@ export class PatternManager {
     if (!pattern) return undefined;
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
-    this.associateVerifiedFunctions(patternId, pattern);
     this.evictIfNeeded();
     return pattern;
   }
@@ -1374,21 +1337,5 @@ export class PatternManager {
       const pending = this.pendingMetaById.get(patternId) ?? {};
       this.pendingMetaById.set(patternId, { ...pending, ...fields });
     }
-  }
-
-  private associateVerifiedFunctions(
-    patternId: URI,
-    value: Pattern | Module,
-  ): void {
-    const originalPattern = this.findOriginalPattern(value as Pattern);
-    const verifiedLoadId = this.patternToVerifiedLoadId.get(originalPattern);
-    if (!getPatternProgram(originalPattern) && !verifiedLoadId) {
-      return;
-    }
-    this.runtime.harness.associatePattern(
-      patternId,
-      value,
-      verifiedLoadId,
-    );
   }
 }
