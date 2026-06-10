@@ -16,9 +16,8 @@ import {
   authoredBy,
   dbOwner,
   match,
-  matches,
   principal,
-  when,
+  whenMatches,
 } from "@commonfabric/memory/sqlite/row-label";
 
 const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
@@ -33,8 +32,9 @@ const emailTables = {
         principal("mailto", match(f.to, ADDR)),
         dbOwner(),
       ),
-      integrity: when(
-        matches(f.auth, /dmarc=pass/),
+      integrity: whenMatches(
+        f.auth,
+        /dmarc=pass/,
         authoredBy(principal("mailto", match(f.from, ADDR, { min: 1 }))),
       ),
     }),

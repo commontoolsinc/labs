@@ -15,11 +15,10 @@ import {
   evaluateRowLabel,
   intersect,
   match,
-  matches,
   principal,
   type RowLabelSpec,
   validateRowLabelSpec,
-  when,
+  whenMatches,
 } from "../v2/sqlite/row-label.ts";
 
 const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
@@ -41,8 +40,9 @@ function emailRule(f: Record<string, { field: string }>) {
       principal("mailto", match(f.cc, ADDR)),
       dbOwner(),
     ),
-    integrity: when(
-      matches(f.auth, /dmarc=pass/),
+    integrity: whenMatches(
+      f.auth,
+      /dmarc=pass/,
       authoredBy(principal("mailto", match(f.from, ADDR, { min: 1 }))),
     ),
   };

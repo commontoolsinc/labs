@@ -44,6 +44,7 @@ import type {
   SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
+  CfSqliteHelpers,
   SqliteCfLinkFunction,
   SqliteDatabaseFunction,
   SqliteQueryFunction,
@@ -317,6 +318,7 @@ export interface BuilderFunctionsAndConstants {
   sqliteQuery: SqliteQueryFunction;
   table: SqliteTableFunction;
   cfLink: SqliteCfLinkFunction;
+  cfSqlite: CfSqliteHelpers;
   navigateTo: NavigateToFunction;
   wish: WishFunction;
 

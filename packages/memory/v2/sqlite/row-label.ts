@@ -79,19 +79,29 @@ export function match(
   return { match: node };
 }
 
-/** Regex TEST over a column (for `when` gates). Not a split — a boolean. */
-export function matches(
+/**
+ * Include `then` only when the regex TESTS true against the column (gate
+ * trust, or a data-dependent conjunct, on extracted metadata). One fused
+ * helper — a bare `when(matches(…))` pair would collide with the builder's
+ * control-flow `when`, whose transformer lowering matches by NAME and mangles
+ * any local so named.
+ */
+export function whenMatches(
   field: FieldRef,
   re: RegExp,
-): { match: Record<string, unknown> } {
-  assertField(field, "matches()");
-  assertRegExp(re, "matches()");
+  then: unknown,
+): { when: unknown; then: unknown } {
+  assertField(field, "whenMatches()");
+  assertRegExp(re, "whenMatches()");
   return {
-    match: {
-      field: field.field,
-      source: re.source,
-      flags: re.flags.replace("g", ""),
+    when: {
+      match: {
+        field: field.field,
+        source: re.source,
+        flags: re.flags.replace("g", ""),
+      },
     },
+    then,
   };
 }
 
@@ -141,18 +151,6 @@ export function any(...terms: unknown[]): { anyOf: unknown[] } {
  *  Integrity only — confidentiality combines by all()/any(). */
 export function intersect(...terms: unknown[]): { intersect: unknown[] } {
   return { intersect: terms };
-}
-
-/** Include `then` only if the regex test matches the row (gate trust or a
- *  data-dependent conjunct on extracted metadata). */
-export function when(
-  test: { match: Record<string, unknown> },
-  then: unknown,
-): { when: unknown; then: unknown } {
-  if (!isRecord(test) || !isRecord(test.match)) {
-    throw new TypeError("when() takes a matches(...) test");
-  }
-  return { when: test, then };
 }
 
 /** Integrity claim: the row was authored by the extracted principal. Minted as
@@ -325,7 +323,7 @@ function validateConfTerm(
     const test = (node as { when?: unknown }).when;
     const r = isRecord(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
-      : "when() takes a matches(...) test";
+      : "malformed when gate (use whenMatches())";
     if (r) return r;
     return validateConfTerm((node as { then?: unknown }).then, columns);
   }
@@ -383,7 +381,7 @@ function validateIntegTerm(
     const test = node.when;
     const r = isRecord(test) && "match" in test
       ? validateMatchNode(test.match, columns, "when")
-      : "when() takes a matches(...) test";
+      : "malformed when gate (use whenMatches())";
     if (r) return r;
     return validateIntegTerm((node as { then?: unknown }).then, columns);
   }
@@ -538,7 +536,7 @@ function evalTest(
   row: Record<string, unknown>,
 ): boolean {
   if (!isRecord(test) || !isRecord(test.match)) {
-    return fail("malformed when() test");
+    return fail("malformed when gate (use whenMatches())");
   }
   const { field, source, flags } = test.match as Record<string, unknown>;
   if (typeof field !== "string" || !(field in row)) {

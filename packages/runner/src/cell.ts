@@ -1943,6 +1943,8 @@ export class CellImpl<T extends FabricValue>
     options?: {
       params?: ReadonlyArray<unknown> | Record<string, unknown>;
       reactOn?: unknown;
+      maxConfidentiality?: ReadonlyArray<unknown>;
+      onExceed?: "fail" | "skip";
     },
   ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: unknown }> {
     return sqliteQueryNodeFactory({
@@ -1950,6 +1952,9 @@ export class CellImpl<T extends FabricValue>
       sql,
       params: options?.params,
       reactOn: options?.reactOn,
+      // CFC Phase 3 read surface: the declared output ceiling + exceed mode.
+      maxConfidentiality: options?.maxConfidentiality,
+      onExceed: options?.onExceed,
       // Forward the transformer-injected `<Row>` schema (lowered into the
       // options object) to the node so the builtin can decode `_cf_link`
       // columns. Read loosely — it is not part of the public options type.
