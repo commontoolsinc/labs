@@ -232,13 +232,13 @@ export class RuntimeInternals extends EventTarget {
 
   getPiecesListCell<T>(): Promise<CellHandle<T[]>> {
     this.#check();
-    return this.#client.getPiecesListCell<T>();
+    return this.#client.getPiecesListCell<T>(this.#space);
   }
 
   getSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
     this.#check();
     if (this.#spaceRootPattern) return this.#spaceRootPattern;
-    this.#spaceRootPattern = this.#client.getSpaceRootPattern();
+    this.#spaceRootPattern = this.#client.getSpaceRootPattern(this.#space);
     return this.#spaceRootPattern;
   }
 
@@ -246,7 +246,7 @@ export class RuntimeInternals extends EventTarget {
     this.#check();
     // Clear cached pattern since we're recreating it
     this.#spaceRootPattern = undefined;
-    const pattern = await this.#client.recreateSpaceRootPattern();
+    const pattern = await this.#client.recreateSpaceRootPattern(this.#space);
     this.#spaceRootPattern = Promise.resolve(pattern);
     return pattern;
   }
@@ -281,7 +281,11 @@ export class RuntimeInternals extends EventTarget {
       return cached.promise;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, start, space);
+      const page = await this.#client.getPage<NameSchema>(
+        id,
+        space ?? this.#space,
+        start,
+      );
       if (!page) {
         throw new Error(`Pattern not found: ${id}`);
       }
@@ -321,17 +325,17 @@ export class RuntimeInternals extends EventTarget {
 
   async getSlug(id: string): Promise<string | undefined> {
     this.#check();
-    return await this.#client.getPageSlug(id);
+    return await this.#client.getPageSlug(id, this.#space);
   }
 
   async removePage(id: string): Promise<boolean> {
     this.#check();
-    return await this.#client.removePage(id);
+    return await this.#client.removePage(id, this.#space);
   }
 
   async synced(): Promise<void> {
     this.#check();
-    await this.#client.synced();
+    await this.#client.synced(this.#space);
   }
 
   async idle(): Promise<void> {
@@ -361,7 +365,7 @@ export class RuntimeInternals extends EventTarget {
       // `trackRecent` handler accepting `{ piece }`.
       const spaceRoot = await this.getSpaceRootPattern();
       const trackRecent = spaceRoot.cell().key("trackRecent" as any);
-      const page = await this.#client.getPage(pieceId);
+      const page = await this.#client.getPage(pieceId, this.#space);
       if (!page) return;
       await (trackRecent as any).send({ piece: page.cell() });
     } catch (e) {
@@ -390,7 +394,7 @@ export class RuntimeInternals extends EventTarget {
   async #waitForNavigationConvergence(): Promise<void> {
     this.#check();
     await this.#client.idle();
-    await this.#client.synced();
+    await this.#client.synced(this.#space);
   }
 
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {

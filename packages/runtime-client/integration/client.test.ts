@@ -347,7 +347,7 @@ describe("RuntimeClient", () => {
       const page = await rt.createPage(TEST_PROGRAM, {
         run: true,
       });
-      const retrieved = await rt.getPage(page.id(), true);
+      const retrieved = await rt.getPage(page.id(), session.space, true);
       assertExists(retrieved);
 
       const cell = retrieved.cell();
@@ -378,8 +378,8 @@ describe("RuntimeClient", () => {
       const page = await rt.createPage(TEST_PROGRAM, {
         run: false,
       });
-      await rt.removePage(page.id());
-      await rt.synced();
+      await rt.removePage(page.id(), session.space);
+      await rt.synced(session.space);
 
       // Note: getPage may still return a reference to a removed page
       // because the ID still maps to a cell that existed. The removal
@@ -390,7 +390,7 @@ describe("RuntimeClient", () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
 
-      const piecesListCell = await rt.getPiecesListCell();
+      const piecesListCell = await rt.getPiecesListCell(session.space);
       assertExists(piecesListCell);
 
       await piecesListCell.sync();
@@ -1158,6 +1158,6 @@ async function createRuntimeClient(session: Session): Promise<RuntimeClient> {
     spaceName: session.spaceName,
   });
 
-  await worker.synced();
+  await worker.synced(session.space);
   return worker;
 }

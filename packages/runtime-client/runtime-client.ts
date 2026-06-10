@@ -190,12 +190,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
-  // Page operations accept an optional space DID. Absent ⇒ the space
-  // this client was initialized with (unchanged behavior); present ⇒
-  // the worker resolves the operation against that space's piece
-  // context over the same connection.
+  // Page operations name their space explicitly — there is no
+  // implicit/default space at this layer. The worker resolves each
+  // operation against that space's piece context over the same
+  // connection.
 
-  async getSpaceRootPattern(space?: DID): Promise<PageHandle<NameSchema>> {
+  async getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.GetSpaceRootPattern
     >({
@@ -206,7 +206,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   async recreateSpaceRootPattern(
-    space?: DID,
+    space: DID,
   ): Promise<PageHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.RecreateSpaceRootPattern
@@ -219,8 +219,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   async getPage<T = unknown>(
     pageId: string,
+    space: DID,
     runIt?: boolean,
-    space?: DID,
   ): Promise<PageHandle<T> | null> {
     const response = await this.#conn.request<RequestType.PageGet>({
       type: RequestType.PageGet,
@@ -234,7 +234,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
-  async getPageSlug(pageId: string, space?: DID): Promise<string | undefined> {
+  async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
     const response = await this.#conn.request<RequestType.PageGetSlug>({
       type: RequestType.PageGetSlug,
       pageId,
@@ -243,7 +243,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.slug;
   }
 
-  async removePage(pageId: string, space?: DID): Promise<boolean> {
+  async removePage(pageId: string, space: DID): Promise<boolean> {
     const res = await this.#conn.request<RequestType.PageRemove>({
       type: RequestType.PageRemove,
       pageId: pageId,
@@ -256,7 +256,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Get the pieces list cell.
    * Subscribe to this cell to get reactive updates of all pieces in the space.
    */
-  async getPiecesListCell<T>(space?: DID): Promise<CellHandle<T[]>> {
+  async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({
       type: RequestType.PageGetAll,
       space,
@@ -273,7 +273,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * space-cell sync) to await — and lazily opens that context if this
    * is the first operation to touch the space.
    */
-  async synced(space?: DID): Promise<void> {
+  async synced(space: DID): Promise<void> {
     await this.#conn.request<RequestType.PageSynced>({
       type: RequestType.PageSynced,
       space,

@@ -54,19 +54,15 @@ class MockRuntimeClient {
    * START the piece (CT-1623: name listings must not start every piece) and
    * which space each call targets. */
   getPageCalls: Array<
-    { pageId: string; runIt: boolean | undefined; space?: DID }
+    { pageId: string; runIt: boolean | undefined; space: DID }
   > = [];
 
   getPage(
     pageId: string,
+    space: DID,
     runIt?: boolean,
-    space?: DID,
   ): Promise<{ id: () => string }> {
-    this.getPageCalls.push({
-      pageId,
-      runIt,
-      ...(space !== undefined ? { space } : {}),
-    });
+    this.getPageCalls.push({ pageId, runIt, space });
     return Promise.resolve({ id: () => pageId });
   }
 
@@ -373,7 +369,7 @@ describe("RuntimeInternals", () => {
       try {
         await runtime.getPattern("piece-1");
         expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -385,7 +381,7 @@ describe("RuntimeInternals", () => {
       try {
         await runtime.getPattern("piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: false },
+          { pageId: "piece-1", runIt: false, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -398,8 +394,8 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern("piece-1", { start: false });
         await runtime.getPattern("piece-1");
         expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: false },
-          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: false, space: spaceDid },
+          { pageId: "piece-1", runIt: true, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -413,7 +409,7 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern("piece-1");
         await runtime.getPattern("piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -426,7 +422,7 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern("piece-1", { start: false });
         await runtime.getPattern("piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: false },
+          { pageId: "piece-1", runIt: false, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -473,7 +469,7 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern("piece-1", { space: otherDid });
         await runtime.getPattern("piece-1", { space: otherDid });
         expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: homeDid },
           { pageId: "piece-1", runIt: true, space: otherDid },
         ]);
       } finally {
@@ -501,7 +497,7 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern("piece-1"); // still cached
         await runtime.getPattern("piece-1", { space: otherDid }); // re-fetched
         expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: homeDid },
           { pageId: "piece-1", runIt: true, space: otherDid },
           { pageId: "piece-1", runIt: true, space: otherDid },
         ]);

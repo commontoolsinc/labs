@@ -468,15 +468,22 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Resolve the piece context for a space. No space (or the home
-   * space) ⇒ the context built at initialize; any other space lazily
-   * gets its own PieceManager/PiecesController, sharing this worker's
-   * runtime/scheduler/storage (the storage layer is already
-   * multi-space). The per-space session authenticates as the user —
-   * no per-space signer, matching the storage connections.
+   * Resolve the piece context for a space. The space the worker was
+   * initialized with gets the context built at initialize; any other
+   * space lazily gets its own PieceManager/PiecesController, sharing
+   * this worker's runtime/scheduler/storage (the storage layer is
+   * already multi-space). The per-space session authenticates as the
+   * user — no per-space signer, matching the storage connections.
+   *
+   * `space` is required: page operations carry their space explicitly,
+   * with no implicit default at this layer. (The runtime guard catches
+   * out-of-date callers that still omit it.)
    */
-  private getSpaceCtx(space?: DID): SpaceContext {
-    const target = space ?? this.space;
+  private getSpaceCtx(space: DID): SpaceContext {
+    const target = space;
+    if (!target) {
+      throw new Error("Page operations must name a space explicitly.");
+    }
     let ctx = this.spaces.get(target);
     if (!ctx) {
       const pieceManager = new PieceManager(
@@ -738,8 +745,8 @@ export class RuntimeProcessor {
    * existing foreign pattern (`PageGet`) doesn't need either. Lift this
    * when federation defines who provisions a space's root pattern.
    */
-  private checkRootPatternSpace(space?: DID): void {
-    if (space !== undefined && space !== this.space) {
+  private checkRootPatternSpace(space: DID): void {
+    if (space !== this.space) {
       throw new Error(
         "Root-pattern operations are home-space only; " +
           `got space ${space}`,
