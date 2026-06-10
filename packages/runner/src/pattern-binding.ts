@@ -3,7 +3,6 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   isPattern,
   type JSONSchema,
-  type Pattern,
   unsafe_originalPattern,
 } from "./builder/types.ts";
 import {
