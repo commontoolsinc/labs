@@ -89,6 +89,32 @@ const labelAtPath = (
   return match?.label;
 };
 
+// Effective label of a consumed read. A recursive read materializes the
+// whole subtree under `path`, so its label is the most-specific
+// ancestor-or-equal entry (§4.6.3 replace-down resolution) joined with
+// every labelMap entry strictly below the read path — an ancestor read
+// must not shadow descendant labels out of the consumed set (audit S7;
+// e.g. `getRaw()` records one recursive root read and hands over labeled
+// children with no further journal entries). Non-recursive reads observe
+// only the node itself and keep ancestor-or-equal resolution.
+const effectiveReadLabel = (
+  metadata: CfcMetadata | undefined,
+  path: readonly string[],
+  nonRecursive: boolean | undefined,
+): IFCLabel | undefined => {
+  const base = labelAtPath(metadata, path);
+  if (nonRecursive === true || metadata === undefined) {
+    return base;
+  }
+  let joined = base;
+  for (const entry of metadata.labelMap.entries) {
+    if (entry.path.length <= path.length) continue;
+    if (!isPrefix(path, entry.path)) continue;
+    joined = mergeLabels(joined, entry.label);
+  }
+  return joined;
+};
+
 const mergeLabelValues = (
   ...sources: Array<readonly unknown[] | undefined>
 ) => {
@@ -1715,7 +1741,7 @@ const verifyInputRequirements = (
   ).map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
-    label: labelAtPath(
+    label: effectiveReadLabel(
       storedMetadataFor(
         tx,
         read.space,
@@ -1724,6 +1750,7 @@ const verifyInputRequirements = (
         read.type ?? "application/json",
       ),
       canonicalizeLogicalPath(read.path),
+      read.nonRecursive,
     ),
   })).filter((read) => read.label !== undefined);
 

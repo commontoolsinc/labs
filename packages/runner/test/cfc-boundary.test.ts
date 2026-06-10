@@ -4520,6 +4520,85 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("rejects maxConfidentiality when a labeled child is consumed via a schema-less parent read", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-max-conf-parent-read-input",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "seed" },
+        cfc: {
+          version: 1,
+          schemaHash: "seed-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: ["secret"] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      // Raw parent read: the journal records one recursive read at the value
+      // root — no per-leaf reads — yet the raw value hands the labeled child
+      // to the handler. The child's label must enter the consumed set via
+      // subtree join, not vanish behind the ancestor-only lookup.
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-max-conf-parent-read-input",
+        undefined,
+        tx,
+      );
+      const raw = source.getRaw() as { secret?: string };
+      expect(raw.secret).toBe("seed");
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-max-conf-parent-read-output",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { maxConfidentiality: ["internal"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      output.set({ value: "result" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("maxConfidentiality");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not let helper source-cell reads affect the prepared digest", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

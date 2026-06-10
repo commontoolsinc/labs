@@ -324,10 +324,28 @@ default and tightened over time (SC-16 specs the profile).
 
 ## 11. Phasing and prerequisites
 
-- **A0 (prerequisites, from audit waves)**: Wave 0 #1-2 (S2/S3 bypass
-  closure — a propagation layer below a switchable gate is theater);
-  Wave 2 #14 subtree-join read resolution (S7); labelMap v2 component
-  schema (subsumes Wave 2 #18/S9); skip-if-unchanged plumbing.
+Status update (2026-06-10, post-design): audit Waves 0–3 landed on main
+(#3970, #3972, #3973, #3975) — S2/S3 closed, Wave 2 shipped exactCopyOf
+gating, CT-1668, joinSchema descent, and **S9 as a grow-only union ratchet**
+(prior + ancestor confidentiality unioned into every re-written path's
+label — a deliberate stand-in for the missing default transition). W2.14
+(S7) did NOT land; implemented in this branch as `effectiveReadLabel`
+(recursive reads join descendant labelMap entries; non-recursive reads keep
+ancestor-or-equal). Verified read-granularity ground truth: schema'd
+traversal records leaf reads *plus* a recursive root read; `getRaw()` and
+uninspected schema-less gets record only the recursive root read — that was
+the live S7 hole. Consequence of the root read: any doc read joins the
+doc's full label set (within-doc precision deferred to observation classes,
+SC-8). Sequencing constraint: the Wave 2 grow-only ratchet must be replaced
+by component update rules **in the same arc as J** — removing it earlier
+reopens a laundering window, since the ratchet is currently the only thing
+carrying taint across value overwrites.
+
+- **A0 (prerequisites)**: ~~S2/S3~~ (landed, Wave 0); subtree-join read
+  resolution (S7 — **done**, this branch); labelMap v2 component schema
+  (refactors the Wave 2 ratchet into components); skip-if-unchanged
+  plumbing (verified absent: persistence writes `["cfc"]` whenever entries
+  exist, `prepare.ts` persist block).
 - **A1 (core)**: computed relevance + fast path; J computation; derived
   component persistence (replace + descendant clear + collapse); dials
   (§12); instrumentation + benches. Red-green: the laundering repro
