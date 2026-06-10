@@ -131,7 +131,9 @@ const handlers: Record<
     storageManager = StorageManager.open({
       as: session.as,
       spaceIdentity: session.spaceIdentity,
-      address: new URL("/api/storage/memory", args.apiUrl as string),
+      // Host only — the storage path (/api/storage/memory) is joined
+      // internally (see createStorageAddressResolver).
+      memoryHost: new URL(args.apiUrl as string),
     });
     runtime = new Runtime({
       storageManager: storageManager as never,
