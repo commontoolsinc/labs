@@ -278,8 +278,8 @@ const handlers: Record<
   },
 
   /** Runtime health for end-of-run reporting. */
-  async health() {
-    return {
+  health() {
+    return Promise.resolve({
       runtimeErrors: [...runtimeErrors],
       nonIdempotent:
         rt().getIdempotencyViolations?.()?.map((violation) =>
@@ -287,7 +287,7 @@ const handlers: Record<
             (violation as { actionId?: string }).actionId ?? violation,
           )
         ) ?? [],
-    };
+    });
   },
 
   async dispose() {

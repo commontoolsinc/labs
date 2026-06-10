@@ -100,6 +100,10 @@ class BuildConfig {
     return this.path("packages", "cli", "mod.ts");
   }
 
+  cliMultiUserTestWorkerPath() {
+    return this.path("packages", "cli", "lib", "multi-user-test-worker.ts");
+  }
+
   fusePackagePath() {
     return this.path("packages", "fuse");
   }
@@ -300,6 +304,10 @@ async function buildCli(config: BuildConfig): Promise<void> {
       config.docsCommonPath(),
       "--include",
       config.fusePackagePath(),
+      // Worker module spawned by cf test's multi-user mode — workers are not
+      // followed by compile's static analysis, so include it explicitly.
+      "--include",
+      config.cliMultiUserTestWorkerPath(),
       config.cliEntryPath(),
     ],
     cwd: config.root,

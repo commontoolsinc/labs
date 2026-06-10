@@ -21,7 +21,6 @@ import {
 } from "commonfabric";
 import {
   messagesValue,
-  type MyProfileCell,
   profilesValue,
   type SharedMessagesCell,
   type SharedProfilesCell,
