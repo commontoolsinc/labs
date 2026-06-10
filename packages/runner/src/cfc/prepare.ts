@@ -1,5 +1,8 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  internSchema,
+  internSchemaAsTaggedHashString,
+} from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import {
   cloneForMutation,
@@ -2056,6 +2059,15 @@ const ensureSchemaDocument = (
   schemaHash: string,
   schema: JSONSchema,
 ): void => {
+  // Defense in depth: the content address must be the canonical hash of the
+  // schema it names. A mismatch is a programming error in the caller; refuse it
+  // rather than write a self-inconsistent cid: document (audit S5).
+  const actualHash = internSchemaAsTaggedHashString(schema);
+  if (actualHash !== schemaHash) {
+    throw new Error(
+      `cid schema document hash mismatch: claimed ${schemaHash}, actual ${actualHash}`,
+    );
+  }
   const id = `cid:${schemaHash}`;
   // Do not pre-read the content-addressed schema document here. A read-before-
   // write can make otherwise idempotent schema persistence fail with stale-read
@@ -2072,7 +2084,8 @@ const ensureSchemaDocument = (
   });
 };
 
-const loadSchemaDocument = (
+// Exported for unit testing of the read-side content-address verification (S5).
+export const loadSchemaDocument = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   schemaHash: string,
@@ -2089,7 +2102,19 @@ const loadSchemaDocument = (
   if (!isRecord(existing) || existing.value === undefined) {
     throw new Error(`stored schemaHash ${schemaHash} is missing or unreadable`);
   }
-  return existing.value as JSONSchema;
+  const schema = existing.value as JSONSchema;
+  // The cid: document is content-addressed but stored on an unverified write
+  // path that any same-space writer can reach. Re-derive its canonical hash and
+  // reject a value that does not match the address it was loaded from; the
+  // loaded schema drives label derivation for other principals' writes, so a
+  // poisoned schema must not be trusted (audit S5).
+  const actualHash = internSchemaAsTaggedHashString(schema);
+  if (actualHash !== schemaHash) {
+    throw new Error(
+      `cid schema document hash mismatch for ${schemaHash}: content hashes to ${actualHash}`,
+    );
+  }
+  return schema;
 };
 
 export const prepareBoundaryCommit = (
