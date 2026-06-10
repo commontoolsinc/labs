@@ -2207,22 +2207,30 @@ const collectConsumedConfidentiality = (
   tx: IExtendedStorageTransaction,
 ): readonly unknown[] => {
   const atoms: unknown[] = [];
+  const addAtom = (atom: unknown): void => {
+    if (!atoms.some((existing) => deepEqual(existing, atom))) atoms.push(atom);
+  };
   for (const read of tx.getReadActivities?.() ?? []) {
     if (isInternalVerifierRead(read.meta)) continue;
-    const label = labelAtPath(
-      storedMetadataFor(
-        tx,
-        read.space,
-        read.id,
-        normalizeCellScope(read.scope),
-        read.type ?? "application/json",
-      ),
-      canonicalizeLogicalPath(read.path),
+    const metadata = storedMetadataFor(
+      tx,
+      read.space,
+      read.id,
+      normalizeCellScope(read.scope),
+      read.type ?? "application/json",
     );
-    for (const atom of label?.confidentiality ?? []) {
-      if (!atoms.some((existing) => deepEqual(existing, atom))) {
-        atoms.push(atom);
-      }
+    if (metadata === undefined) continue;
+    const path = canonicalizeLogicalPath(read.path);
+    // A read at `path` observes the value at `path` and everything below it, so
+    // its confidentiality is the union of every labelMap entry that is an
+    // ancestor-or-equal of `path` (a label that applies to it) OR a DESCENDANT
+    // of `path` (a label on a field inside the value just read). labelAtPath
+    // alone would only see the ancestor — so reading a whole object and sending
+    // one confidential field would slip the ceiling (review on #3993).
+    for (const entry of metadata.labelMap.entries) {
+      const entryPath = canonicalizeLogicalPath(entry.path);
+      if (!isPrefix(entryPath, path) && !isPrefix(path, entryPath)) continue;
+      for (const atom of entry.label.confidentiality ?? []) addAtom(atom);
     }
   }
   return atoms;

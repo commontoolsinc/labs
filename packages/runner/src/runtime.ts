@@ -405,8 +405,16 @@ export class Runtime {
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
       "enforce-explicit";
-    this.cfcSinkMaxConfidentiality = options.cfcSinkMaxConfidentiality ??
-      DEFAULT_SINK_MAX_CONFIDENTIALITY;
+    // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
+    // be able to mutate it (per-sink array or the map) after construction to
+    // change what egresses are allowed (review on #3993).
+    this.cfcSinkMaxConfidentiality = Object.freeze(
+      Object.fromEntries(
+        Object.entries(
+          options.cfcSinkMaxConfidentiality ?? DEFAULT_SINK_MAX_CONFIDENTIALITY,
+        ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
+      ),
+    );
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(

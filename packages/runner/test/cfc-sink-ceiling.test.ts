@@ -132,6 +132,43 @@ describe("CFC sink-request confidentiality ceiling", () => {
     );
   });
 
+  it("rejects when the confidential field is a descendant of the read path", async () => {
+    // Reading the WHOLE object (path []) and building a request from it must
+    // still see the confidentiality on a child field (/secret) — labelAtPath
+    // alone only matches ancestor-or-equal entries and would miss it, letting
+    // `cell.get()` then sending `value.secret` slip a public-only ceiling
+    // (review on #3993).
+    await withRuntime(
+      { mode: "enforce-explicit", ceilings: { fetchData: [] } },
+      async (runtime) => {
+        await seedConfidentialCell(runtime, "sink-ceiling-descendant");
+        const tx = runtime.edit();
+        const cell = runtime.getCell(
+          signer.did(),
+          "sink-ceiling-descendant",
+          CONFIDENTIAL_SCHEMA.schema,
+          tx,
+        );
+        // Read the whole object, not cell.key("secret").
+        expect(cell.get()).toEqual({ secret: "rosebud" });
+        enqueueSinkRequestPostCommitEffect(
+          tx,
+          "fetchData",
+          "fetchData:descendant",
+          createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+          "fetchData-start",
+          () => {},
+        );
+        tx.prepareCfc();
+        const result = await tx.commit();
+        expect(result.error).toBeDefined();
+        expect(String((result.error as Error).message)).toContain(
+          "exceeds ceiling for fetchData",
+        );
+      },
+    );
+  });
+
   it("allows the same flow in observe mode but records the diagnostic", async () => {
     await withRuntime(
       { mode: "observe", ceilings: { fetchData: [] } },
