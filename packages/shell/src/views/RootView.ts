@@ -106,6 +106,7 @@ export class XRootView extends BaseView {
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
+            global.commonfabric.space = undefined;
           }
           return undefined;
         }
@@ -125,6 +126,7 @@ export class XRootView extends BaseView {
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
+            global.commonfabric.space = undefined;
           }
           return;
         }
@@ -138,6 +140,9 @@ export class XRootView extends BaseView {
         const global = getCommonfabricGlobal();
         global.commonfabric ??= {};
         global.commonfabric.rt = this.runtime;
+        // Page operations on rt require an explicit space; expose the
+        // bound one for console/evaluated callers.
+        global.commonfabric.space = rt.space();
         global.commonfabric.vdom = createVDomDebugHelpers();
         global.commonfabric.detectNonIdempotent = async (
           durationMs = 5000,
