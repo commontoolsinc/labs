@@ -361,6 +361,16 @@ const selectorPathKey = (path: readonly string[]): string => {
   return key;
 };
 
+/**
+ * Sweep threshold for a per-schema path map: schemas that never die (interned
+ * canonical schemas, the boolean/no-schema sentinels) would otherwise
+ * accumulate `pathKey -> dead WeakRef` entries forever, since the lazy
+ * cleanup below only fires when the exact same path is looked up again.
+ * Sweeping on insert once the map is large bounds growth to live selectors
+ * (plus the threshold).
+ */
+const SELECTOR_CACHE_SWEEP_THRESHOLD = 2048;
+
 export function internPathSelector(
   selector: SchemaPathSelector,
 ): SchemaPathSelector {
@@ -388,6 +398,12 @@ export function internPathSelector(
       return existing;
     }
     byPath.delete(pathK);
+  }
+
+  if (byPath.size >= SELECTOR_CACHE_SWEEP_THRESHOLD) {
+    for (const [k, ref] of byPath) {
+      if (ref.deref() === undefined) byPath.delete(k);
+    }
   }
 
   // First instance with this content becomes the canonical one. Keep the
