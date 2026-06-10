@@ -1727,6 +1727,40 @@ const ifcEntryAppliesToAttemptedWrite = (
   );
 };
 
+// Structural-link provenance atoms the runtime mints when a value is
+// dereferenced / fetched. They describe HOW a value was obtained, never an
+// endorsement an author can require via requiredIntegrity.
+const STRUCTURAL_LINK_PROVENANCE_ATOM_TYPES = new Set<string>([
+  CFC_ATOM_TYPE.LinkReference,
+  CFC_ATOM_TYPE.Origin,
+]);
+
+const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
+  (isRecord(atom) && typeof atom.type === "string" &&
+    STRUCTURAL_LINK_PROVENANCE_ATOM_TYPES.has(atom.type)) ||
+  // The current-principal claim family (authored-by / represents-principal) is
+  // an identity provenance claim gated separately by
+  // currentPrincipalIntegrityReason, never a requiredIntegrity target.
+  isCurrentPrincipalClaimAtom(atom);
+
+// A consumed read whose label carries no confidentiality and whose integrity is
+// ENTIRELY non-endorsement provenance (a link reference / origin / a
+// current-principal claim) is structural plumbing, not a data input. It must
+// not gate a requiredIntegrity write: the transaction-global quantification
+// would otherwise false-reject an unrelated protected write (audit S7 — e.g.
+// cfc-group-chat-demo's admin grant reads adminRegistry.bootstrapAdmin.subject,
+// label [represents-principal, LinkReference], and that lookup fails the admins
+// list's requiredIntegrity:[group-chat-admin]). A read carrying ANY
+// confidentiality, or any genuine endorsement integrity atom, stays in the gate
+// — that keeps the cross-cell prompt-injection screen sound (its briefing reads
+// carry confidentiality; its endorsement reads carry real integrity).
+const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
+  if ((label.confidentiality?.length ?? 0) > 0) return false;
+  const integrity = label.integrity ?? [];
+  return integrity.length > 0 &&
+    integrity.every(isNonEndorsementProvenanceAtom);
+};
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -1759,7 +1793,15 @@ const verifyInputRequirements = (
       ),
       canonicalizeLogicalPath(read.path),
     ),
-  })).filter((read) => read.label !== undefined);
+  })).filter((read) =>
+    read.label !== undefined &&
+    // Provenance-only reads (link/origin/current-principal, no confidentiality)
+    // are structural plumbing, not endorsable inputs — excluding them stops the
+    // transaction-global quantification from false-rejecting unrelated
+    // protected writes (audit S7). Confidentiality- or endorsement-bearing
+    // reads stay, keeping the prompt-injection screen sound.
+    !isProvenanceOnlyConsumedLabel(read.label)
+  );
 
   for (const entry of walkIfcSchema(schema)) {
     if (
