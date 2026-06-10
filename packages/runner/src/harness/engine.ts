@@ -696,6 +696,12 @@ export class Engine extends EventTarget implements Harness {
           globals,
           verify: false, // already verified at compile time
         });
+      } catch (error) {
+        // Module evaluation runs outside an isolate `exec`, so errors thrown
+        // at module scope would otherwise surface with a censored (empty) or
+        // raw-coordinate stack. Materialize + source-map it here (once),
+        // matching how invoked-function errors are mapped.
+        throw this.getSESRuntime().mapThrownError(error);
       } finally {
         popFrame(frame);
         restoreVerifiedFunctionRegistrar();
