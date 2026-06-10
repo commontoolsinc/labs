@@ -16,32 +16,22 @@ transitive import graph, and (2) ES-module loading into SES compartments. The
 motivating consumer is [persistent scheduler state](persistent-scheduler-state.md),
 whose action implementation fingerprint is currently unstable across reloads.
 
-Implemented so far (see the implementation plan for the per-phase status):
-identity decoupling (Phase 1, live behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`)
-is merged. The module-loading mechanism (Phases 2–4), behind the default-off
-`CF_ESM_MODULE_LOADER` flag, is implemented and Engine-integrated: a synchronous
-SES virtual-module-record loader, a TS→record adapter that runs the full CF
+All phases are complete. Identity decoupling (Phase 1, formerly behind
+`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`) is merged. The module-loading
+mechanism (Phases 2–4) is the production path: a synchronous SES
+virtual-module-record loader, a TS→record adapter that runs the full CF
 transformer pipeline, per-load/per-module source maps with CFC verified-source
 identity (#3785, #3787), per-module SES classification wired into the compile
-path, and a structural graph verifier. (A per-module `ModuleRecordCache` exists
-but is **bypassed on the production ESM path** — precompiled CF-transformed
-bodies are authoritative — so flag-on compiles are not yet cached; see Phase 4.)
-Security
-hardening landed alongside (frozen exported patterns #3777, import-edge
-validation #3778, provenance brand #3779), and the flag is plumbed through to the
-browser client (#3796). The `cfc-group-chat-demo` end-to-end integration test
-passes flag-on (#3797).
-
-Remaining before default-on: the full-corpus verifier **parity oracle** (ESM
-verdicts must match AMD across the whole pattern corpus — the current parity test
-covers crafted fixtures only), a green **full-suite flag-on sweep**, **making the
-production ESM path cacheable and persisting it** as content-addressed cells
-(Phase 4), benchmarks, and the **default-on/AMD-removal rollout** (Phase 5). The
-AMD bundle path remains the default throughout.
+path, and a structural graph verifier. Security hardening landed alongside
+(frozen exported patterns #3777, import-edge validation #3778, provenance brand
+#3779). Compiled modules persist as content-addressed cells (Phase 4, the
+`cell-cache` compile cache). The default-on/AMD-removal rollout (Phase 5) is
+done: the flag was flipped, then the flag, the AMD bundle pipeline, and the AMD
+compilation cache were deleted.
 
 ## Last Updated
 
-2026-06-02
+2026-06-10
 
 ## Summary
 

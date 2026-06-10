@@ -12,7 +12,7 @@ steps with the files each touches, exit criteria, and validation commands.
 
 ## Last Updated
 
-2026-06-02
+2026-06-10
 
 ## Current status
 
@@ -20,17 +20,18 @@ steps with the files each touches, exit criteria, and validation commands.
 | --- | --- | --- |
 | 0 — Loader shape confirmation | Done | SES `importNow` + virtual (third-party) module records load synchronously, incl. cycles. `ModuleSource`/`StaticModuleRecord` are not exposed by this `ses` build, so the loader uses `{ imports, exports, execute }` records. |
 | 1 — Decouple identity | Done (merged) | Per-module Merkle hash; scheduler implementation fingerprint is content-addressed and entry-point/TCB independent. Shipped behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`. |
-| 2 — ESM emission + SES module loading | Done (behind `CF_ESM_MODULE_LOADER`, default off) | `compileToRecordGraph` + `evaluateRecordGraph` (`engine.ts`) run the full `CommonFabricTransformerPipeline` (not bare `transpileModule`), assemble content-addressed records, register per-load/per-module source maps, and load multi-module programs end-to-end. Engine integration, `export *` re-exports, live module-namespace bindings (#3797), and CFC verified-source location resolution (#3785, #3787) are all wired. The flag is now also plumbed to the browser client (#3796). |
-| 3 — Verifier port | Classification ported + wired; corpus parity oracle pending | The deep SES_SANDBOXING module-item classification (`verifyCompiledModuleBody`, reusing the shared `classifyModuleItems` core) runs **per module** in the ESM compile path (`engine.ts`). `verifyModuleGraph` validates graph shape/wiring. Additional hardening landed beyond the original plan: import-edge target validation (#3778), pattern provenance brand (#3779), frozen exported patterns (#3777). **Remaining (release gate):** the full-corpus differential parity oracle — `esm-verifier-parity.test.ts` currently covers crafted CF-shaped fixtures only, not every pattern-corpus verdict. |
-| 4 — Per-module compilation cache | Done (behind `CF_ESM_MODULE_LOADER`, default off) | Content-addressed cell cache built and wired into the ESM `PatternManager` load path (`compilation-cache/cell-cache.ts`, `pattern-manager.ts`). Per space: source set `pattern:<identity>` (self-verifying via Merkle recompute) + compiled set `compileCache:<runtimeVersion>/<identity>` (CFC `addIntegrity` on write, fail-closed on read). A warm full hit feeds cached bodies back through `compileToRecordGraph` and skips the TypeScript compile / transformer pipeline; a miss compiles and writes both sets back on a fresh transaction. Gated on `cfcEnforcementMode !== "disabled"`. **Divergence from the original design:** the plan assumed the per-module `cf:module/<hash>` identity was already entry-point independent, but the ESM compile path resolved a `/<computeId>/`-prefixed program, leaking the whole-program prefix into the identity — so cross-program dedup and the spec's entry-point-independence guarantee did not actually hold. Step 5a (`computeModuleIdentities` in `module-record-compiler.ts`) strips the prefix for identity computation only, making identities prefix-free/dedupable while leaving source maps + `fn.src` resolution on the prefixed path untouched. Full runner suite green flag-on and flag-off. |
-| 5 — Default-on + AMD removal | Not started (intentionally) | Gated on the Phase 3 corpus parity oracle + a green full-suite flag-on sweep + benchmarks. The canary PR (#3782) is the standing CI signal for flag-on. The flag stays **off** by default. |
+| 2 — ESM emission + SES module loading | Done (shipped; the only loader) | `compileToRecordGraph` + `evaluateRecordGraph` (`engine.ts`) run the full `CommonFabricTransformerPipeline` (not bare `transpileModule`), assemble content-addressed records, register per-load/per-module source maps, and load multi-module programs end-to-end. Engine integration, `export *` re-exports, live module-namespace bindings (#3797), and CFC verified-source location resolution (#3785, #3787) are all wired. The flag is now also plumbed to the browser client (#3796). |
+| 3 — Verifier port | Done (the ESM verifier is the enforcement path) | The deep SES_SANDBOXING module-item classification (`verifyCompiledModuleBody`, reusing the shared `classifyModuleItems` core) runs **per module** in the ESM compile path (`engine.ts`). `verifyModuleGraph` validates graph shape/wiring. Additional hardening landed beyond the original plan: import-edge target validation (#3778), pattern provenance brand (#3779), frozen exported patterns (#3777). **Remaining (release gate):** the full-corpus differential parity oracle — `esm-verifier-parity.test.ts` currently covers crafted CF-shaped fixtures only, not every pattern-corpus verdict. |
+| 4 — Per-module compilation cache | Done (shipped) | Content-addressed cell cache built and wired into the ESM `PatternManager` load path (`compilation-cache/cell-cache.ts`, `pattern-manager.ts`). Per space: source set `pattern:<identity>` (self-verifying via Merkle recompute) + compiled set `compileCache:<runtimeVersion>/<identity>` (CFC `addIntegrity` on write, fail-closed on read). A warm full hit feeds cached bodies back through `compileToRecordGraph` and skips the TypeScript compile / transformer pipeline; a miss compiles and writes both sets back on a fresh transaction. Gated on `cfcEnforcementMode !== "disabled"`. **Divergence from the original design:** the plan assumed the per-module `cf:module/<hash>` identity was already entry-point independent, but the ESM compile path resolved a `/<computeId>/`-prefixed program, leaking the whole-program prefix into the identity — so cross-program dedup and the spec's entry-point-independence guarantee did not actually hold. Step 5a (`computeModuleIdentities` in `module-record-compiler.ts`) strips the prefix for identity computation only, making identities prefix-free/dedupable while leaving source maps + `fn.src` resolution on the prefixed path untouched. Full runner suite green flag-on and flag-off. |
+| 5 — Default-on + AMD removal | Done | The flag was flipped on by default, then the flag itself, the AMD bundle pipeline (bundler, whole-bundle verifier, `Engine.compile`/`evaluate`), and the AMD compilation cache (`CachedCompiler`) were removed. |
 
-Phases 0–1 merged earlier. Phases 2–4 mechanism merged behind the default-off
-flag (#3763), then substantially completed by follow-up work: ESM source-location
-/ CFC verified-source identity (#3785, #3787), security hardening (#3777–#3779),
-module-namespace live bindings (#3797), and client flag plumbing (#3796). The
-`cfc-group-chat-demo` integration test — the original end-to-end blocker — passes
-flag-on as of #3797.
+Phases 0–1 merged earlier. Phases 2–4 mechanism merged behind the (since
+removed) default-off flag (#3763), then substantially completed by follow-up
+work: ESM source-location / CFC verified-source identity (#3785, #3787),
+security hardening (#3777–#3779), module-namespace live bindings (#3797), and
+client flag plumbing (#3796). The `cfc-group-chat-demo` integration test — the
+original end-to-end blocker — passed flag-on as of #3797, the flag was flipped
+on by default, and Phase 5 finished by deleting the flag and the AMD path.
 
 ## Guiding constraints
 
