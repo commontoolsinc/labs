@@ -117,12 +117,14 @@ export function map(
     // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
     // identity) or, on the legacy path, the embedded pattern graph itself.
     const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
+    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
         tx.getCfcState().implementationIdentity,
         "map",
         opPattern.resultSchema,
+        argumentUsage,
       );
       // CT-1623: identify the result container by the reserved output spot —
       // the fully-resolved write-redirect target the runner supplies as the
@@ -152,7 +154,6 @@ export function map(
     }
     const resultWithLog = result.withTx(tx);
 
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
