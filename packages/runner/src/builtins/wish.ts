@@ -1,3 +1,4 @@
+import { LRUCache } from "@commonfabric/utils/cache";
 import {
   type VNode,
   type WishParams,
@@ -31,12 +32,18 @@ import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
 
-const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
-  "api/patterns/system/suggestion.tsx";
-const PROFILE_CREATE_TSX_PATH = getPatternEnvironment().apiUrl +
-  "api/patterns/system/profile-create.tsx";
-const PROFILE_PICKER_TSX_PATH = getPatternEnvironment().apiUrl +
-  "api/patterns/system/profile-picker.tsx";
+// Resolved lazily (not at module load): in the browser worker this module is
+// imported before the runtime calls `setPatternEnvironment` with the real API
+// URL, so a module-level const would capture the default — the worker's own
+// origin, i.e. the frontend server. That is only correct when the shell is
+// served by the API host (as in CI); against a separate frontend the fetch
+// gets the SPA index.html fallback and pattern compilation fails.
+const suggestionTsxPath = () =>
+  getPatternEnvironment().apiUrl + "api/patterns/system/suggestion.tsx";
+const profileCreateTsxPath = () =>
+  getPatternEnvironment().apiUrl + "api/patterns/system/profile-create.tsx";
+const profilePickerTsxPath = () =>
+  getPatternEnvironment().apiUrl + "api/patterns/system/profile-picker.tsx";
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
   level: "warn",
@@ -1140,7 +1147,7 @@ async function fetchSuggestionPattern(
 ): Promise<Pattern | undefined> {
   try {
     const program = await runtime.harness.resolve(
-      new HttpProgramResolver(SUGGESTION_TSX_PATH),
+      new HttpProgramResolver(suggestionTsxPath()),
     );
 
     if (!program) {
@@ -1166,7 +1173,7 @@ async function fetchProfileCreatePattern(
 ): Promise<Pattern | undefined> {
   try {
     const program = await runtime.harness.resolve(
-      new HttpProgramResolver(PROFILE_CREATE_TSX_PATH),
+      new HttpProgramResolver(profileCreateTsxPath()),
     );
 
     if (!program) {
@@ -1192,7 +1199,7 @@ async function fetchProfilePickerPattern(
 ): Promise<Pattern | undefined> {
   try {
     const program = await runtime.harness.resolve(
-      new HttpProgramResolver(PROFILE_PICKER_TSX_PATH),
+      new HttpProgramResolver(profilePickerTsxPath()),
     );
 
     if (!program) {
@@ -1252,20 +1259,36 @@ function createWishCandidatesCell(
   return runtime.getImmutableCell(space, values, undefined, tx);
 }
 
+// asCell-wrapped schemas per serialized content. The stringify itself is one
+// unavoidable walk (through the query-result proxy when the input is one),
+// but parse + intern repeat for the same content on every wish send.
+const schemaAsCellCache = new LRUCache<string, JSONSchema>({ capacity: 256 });
+
 function schemaAsCell(schema: unknown): JSONSchema {
   if (schema && typeof schema === "object") {
-    return {
-      ...(JSON.parse(JSON.stringify(schema)) as Record<string, unknown>),
-      asCell: ["cell"],
-    };
+    const json = JSON.stringify(schema);
+    let result = schemaAsCellCache.get(json);
+    if (result === undefined) {
+      result = internSchema({
+        ...(JSON.parse(json) as Record<string, unknown>),
+        asCell: ["cell"],
+      });
+      schemaAsCellCache.put(json, result);
+    }
+    return result;
   }
   return { asCell: ["cell"] };
 }
 
 function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
   if (schema === undefined) return undefined;
+  // schemaAsCell JSON-round-trips its input, and `schema` is typically a
+  // query-result proxy where every property access during stringify pays the
+  // full cell-read machinery (~7ms for a large search schema in profiles).
+  // Materialize once and share the instance for both slots — internSchema
+  // canonicalizes the wrapper, so the duplicate reference is fine.
   const resultSchema = schemaAsCell(schema);
-  const candidateSchema = schemaAsCell(schema);
+  const candidateSchema = resultSchema;
   return internSchema({
     type: "object",
     properties: {

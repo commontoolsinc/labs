@@ -2176,6 +2176,10 @@ export interface ISqliteQueryable {
     options?: {
       params?: ReadonlyArray<unknown> | Record<string, unknown>;
       reactOn?: unknown;
+      /** CFC Phase 3: declared output ceiling (see SqliteQueryParams). */
+      maxConfidentiality?: ReadonlyArray<unknown>;
+      /** `"fail"` (default) | `"skip"` when a row exceeds the ceiling. */
+      onExceed?: "fail" | "skip";
     },
   ): OpaqueRef<{ pending: boolean; result?: Row[]; error?: any }>;
 }
@@ -2222,6 +2226,17 @@ export type SqliteQueryParams = {
   sql: string;
   params?: ReadonlyArray<unknown> | Record<string, unknown>;
   reactOn?: unknown;
+  /** CFC Phase 3: the declared output ceiling — the maximum confidentiality
+   *  the RESULT may carry (a consumer contract, not reader clearance).
+   *  Placeholder atoms `{__ctCurrentPrincipal: true}` (the acting user) and
+   *  `{__ctDbOwner: true}` (the db's owner) resolve at prepare time. The
+   *  typed alternative is `MaxConfidentiality<Row, …>` on the Row schema —
+   *  declare the ceiling once, not both ways. */
+  maxConfidentiality?: ReadonlyArray<unknown>;
+  /** What to do when a row's label exceeds the ceiling: `"fail"` (default —
+   *  refuse the whole query) or `"skip"` (drop the offending rows; a declared
+   *  existence release, row-returning queries only — never aggregates). */
+  onExceed?: "fail" | "skip";
 };
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: Opaque<SqliteQueryParams>,
@@ -2233,9 +2248,60 @@ export type SqliteQueryFunction = <Row = Record<string, unknown>>(
 
 /** Column spec for `table()`: a shorthand SQL type string or a column schema. */
 export type SqliteColumnSpec = string | JSONSchema;
+
+/** A reference to a declared column, handed to a row-label rule as `f.<col>`
+ *  (CFC Phase 3; see `@commonfabric/memory/sqlite/row-label`). */
+export type SqliteRowFieldRef = { readonly field: string };
+
+/** A per-row CFC label rule: a pure declarative projection over the row's
+ *  columns, built from the closed helper set (match/principal/all/whenMatches/
+ *  dbOwner/endorsedBy/…). Validated and serialized at `table()` time;
+ *  evaluated identically at the write gate, server commit, and read. */
+export type SqliteRowLabelRule = (
+  f: Record<string, SqliteRowFieldRef>,
+) => { confidentiality?: unknown; integrity?: unknown };
+
 export type SqliteTableFunction = (
   columns: Record<string, SqliteColumnSpec>,
+  rule?: SqliteRowLabelRule,
 ) => JSONSchema;
+
+/**
+ * The SQLite helper namespace: one import for the table/label vocabulary —
+ * `const { table, all, principal, match, dbOwner } = cfSqlite`. The row-label
+ * helpers (CFC Phase 3) build the declarative per-row rule passed to
+ * `table(columns, rule)`; each returns a serialized AST node. `any(...)`
+ * (one authored OR-clause) errors at `table()` time until the clause-aware
+ * label profile lands. There is deliberately no bare `when`: the builder's
+ * control-flow `when` lowering matches by name, so the gate is the fused
+ * `whenMatches`.
+ */
+export interface CfSqliteHelpers {
+  table: SqliteTableFunction;
+  cfLink: SqliteCfLinkFunction;
+  /** Regex (forced global) over a column ⟹ ordered match list (split+clean). */
+  match(
+    field: SqliteRowFieldRef,
+    re: RegExp,
+    opts?: { group?: number; min?: number },
+  ): unknown;
+  /** `did:<protocol>:<v>` per extracted value (protocol-implied normalization). */
+  principal(protocol: string, of: unknown): unknown;
+  /** Conjunctive clauses — every term an independent requirement. */
+  all(...terms: unknown[]): unknown;
+  /** ONE authored OR-clause (reserved: errors until OR-clause support). */
+  any(...terms: unknown[]): unknown;
+  /** Integrity meet (set ∩). Integrity-only. */
+  intersect(...terms: unknown[]): unknown;
+  /** Include `then` only when the regex tests true against the column. */
+  whenMatches(field: SqliteRowFieldRef, re: RegExp, then: unknown): unknown;
+  /** The db's owner (fixed, from the db ref — never the acting reader). */
+  dbOwner(): unknown;
+  endorsedBy(p: unknown): unknown;
+  authoredBy(p: unknown): unknown;
+  /** A literal atom (escape hatch). */
+  constant(atom: unknown): unknown;
+}
 export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
 
 export type WishTag = `/${string}` | `#${string}`;
@@ -2500,6 +2566,25 @@ export type EqualsFunction = (
   b: AnyCell<any> | object | undefined,
 ) => boolean;
 
+/**
+ * Multi-user pattern test descriptor (`cf test`). Export it as the test
+ * file's default export to run each participant pattern in its own isolated
+ * runtime (own identity) against one shared space. The optional `setup`
+ * pattern instantiates shared state once; each participant pattern receives
+ * its result as the `setup` input. Participants coordinate through
+ * `{ label: "name" }` / `{ await: "name" }` entries in their `tests` arrays.
+ * Use `{ pattern, user: "other" }` to run a second session of an existing
+ * user's identity.
+ */
+export interface MultiUserTestDescriptor {
+  setup?: (...args: never[]) => unknown;
+  participants: Record<
+    string,
+    | ((...args: never[]) => unknown)
+    | { pattern: (...args: never[]) => unknown; user?: string }
+  >;
+}
+
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
@@ -2525,8 +2610,17 @@ export declare const sqliteDatabase: SqliteDatabaseFunction;
 export declare const sqliteQuery: SqliteQueryFunction;
 export declare const table: SqliteTableFunction;
 export declare const cfLink: SqliteCfLinkFunction;
+export declare const cfSqlite: CfSqliteHelpers;
 export declare const navigateTo: NavigateToFunction;
 export declare const wish: WishFunction;
+/**
+ * Tag a multi-user test descriptor for `cf test` (identity at runtime; a
+ * call expression keeps the descriptor's pattern factories out of the
+ * plain-data hardening that module-level data literals receive).
+ */
+export declare const multiUserTest: <T extends MultiUserTestDescriptor>(
+  descriptor: T,
+) => T;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];

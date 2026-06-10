@@ -41,7 +41,7 @@ async function test() {
     apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", API_URL),
+      memoryHost: new URL(API_URL),
     }),
   });
   const addressSchema = {
@@ -113,7 +113,7 @@ async function test() {
     apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", API_URL),
+      memoryHost: new URL(API_URL),
     }),
   });
 

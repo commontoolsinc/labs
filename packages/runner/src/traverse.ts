@@ -1,9 +1,11 @@
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   hashSchema,
   internSchema,
   internSchemaAsTaggedHashString,
+  isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type {
@@ -150,6 +152,377 @@ function internSet(
   cache.set(key, result);
   return result;
 }
+
+/**
+ * Memo-key fragment for a schema: `hashSchema()` for objects, small
+ * constants for value-like schemas. The memo gates only admit interned or
+ * deep-frozen schemas, whose structural hash is computed once and
+ * WeakMap-cached by value-hash — so this is an O(1) lookup after first
+ * touch, with no separate token bookkeeping. Structural keying also lets
+ * distinct-but-equal frozen schemas share memo entries, which identity
+ * tokens could not.
+ */
+function schemaKeyPart(schema: JSONSchema | undefined): string {
+  if (schema === undefined) return "u";
+  if (typeof schema === "boolean") return schema ? "t" : "f";
+  return hashSchema(schema);
+}
+
+/**
+ * True when a schema input can safely feed an identity-keyed memo:
+ * value-like (`undefined`/boolean), interned, or deep-frozen. Frozen
+ * suffices — the identity cannot go stale through later mutation. The
+ * distinction matters on the server: doc values arrive deep-frozen from the
+ * wire-decode boundary, so their embedded link schemas are frozen but never
+ * interned, and an interned-only gate would bypass every seam memo there.
+ */
+function isMemoizableSchemaInput(schema: JSONSchema | undefined): boolean {
+  return schema === undefined || typeof schema === "boolean" ||
+    isInternedSchema(schema) || isDeepFrozen(schema);
+}
+
+/**
+ * Injective string key for a path: each component is length-prefixed, so a
+ * component containing a separator byte (e.g. a `"\0"`-bearing property
+ * name) cannot collide with a differently-split path.
+ */
+function pathKey(path: readonly string[]): string {
+  let key = "";
+  for (const part of path) key += `${part.length}:${part}`;
+  return key;
+}
+
+/**
+ * Memoized `narrowSchema()` + `combineOptionalSchema()` for link hops
+ * (`followPointer` / `isLinkedDocumentCovered`).
+ *
+ * Without this, every pointer follow mints a fresh selector (and often a
+ * fresh combined schema), so each downstream structural hash — the
+ * schemaTracker `MapSet` add, coverage checks, `traverseWithSchema` memo
+ * keys — re-walks a brand-new object. Memoizing returns one canonical
+ * `internPathSelector`-interned (deep-frozen) selector per repeat hop, so
+ * those hashes hit the existing identity-keyed `WeakMap` caches in O(1).
+ * The output is structurally identical to the un-memoized computation
+ * (interning only substitutes the canonical instance of an equal schema).
+ *
+ * Keyed on content (injective `pathKey()` encodings) plus cached schema
+ * hashes (`schemaKeyPart()`), in one module-level capped `Map`: callers
+ * like `traversePointerWithSchema` mint a fresh selector object per call
+ * (only its `schema` is identity-stable), so a cache rooted on selector
+ * identity would never hit, and every miss would mint yet another distinct
+ * frozen selector for downstream code to full-hash. Memoization requires
+ * both schemas to be `isMemoizableSchemaInput` (immutable identities, hash
+ * cached after first touch); otherwise the exact un-memoized computation
+ * runs. The capped string-keyed `Map` follows the `_combineSchemaCache`
+ * precedent for bounding growth.
+ */
+const _linkHopSelectorCache = new Map<string, SchemaPathSelector>();
+
+/** See `BaseObjectTraverser.internCoverageSelector()`. */
+const _coverageSelectorCache = new Map<string, SchemaPathSelector>();
+
+function narrowAndCombineSelectorForLink(
+  docPath: readonly string[],
+  selector: SchemaPathSelector,
+  targetPath: readonly string[],
+  linkSchema: JSONSchema | undefined,
+  cfc: ContextualFlowControl,
+): SchemaPathSelector {
+  const key = isMemoizableSchemaInput(selector.schema) &&
+      isMemoizableSchemaInput(linkSchema)
+    ? `${pathKey(selector.path)}|${pathKey(docPath)}|${pathKey(targetPath)}|${
+      schemaKeyPart(selector.schema)
+    }|${schemaKeyPart(linkSchema)}`
+    : undefined;
+  if (key !== undefined) {
+    const cached = _linkHopSelectorCache.get(key);
+    if (cached !== undefined) return cached;
+  }
+  const narrowed = narrowSchema(docPath, selector, targetPath, cfc);
+  narrowed.schema = combineOptionalSchema(narrowed.schema, linkSchema);
+  const interned = internPathSelector(narrowed);
+  if (key !== undefined) {
+    if (_linkHopSelectorCache.size >= INTERN_CACHE_MAX) {
+      _linkHopSelectorCache.clear();
+    }
+    _linkHopSelectorCache.set(key, interned);
+  }
+  return interned;
+}
+
+/**
+ * Memoized, canonicalizing wrapper around `cfc.schemaAtPath()` for the hot
+ * traversal seams (object properties, array items). `schemaAtPath()` mints a
+ * fresh schema object on every call, which defeats every identity-keyed hash
+ * cache downstream (most notably the `traverseWithSchema` memo key). This
+ * returns one interned (canonical, deep-frozen) result per (schema identity,
+ * path, marker variant).
+ *
+ * Only memoizes when `schema` is a memoizable input (interned or deep-frozen
+ * — see `isMemoizableSchemaInput()`), so the identity key cannot go stale.
+ * (`schemaAtPath()` is deterministic — `ContextualFlowControl` carries no
+ * instance state — so a module-level cache across cfc instances is sound.)
+ * Mutable input falls back to the exact un-memoized computation.
+ *
+ * `markers` selects the `$comment` marker pair `traverseObjectWithSchema`
+ * uses to detect properties it should not descend into.
+ */
+const EMPTY_PROPERTIES_MARKER: JSONSchema = Object.freeze(
+  { $comment: "emptyProperties" },
+);
+const MISSING_PROPERTY_MARKER: JSONSchema = Object.freeze(
+  { $comment: "missingProperty" },
+);
+const _schemaAtPathCache = new WeakMap<
+  JSONSchemaObj,
+  Map<string, JSONSchema>
+>();
+
+function schemaAtPathCanonical(
+  cfc: ContextualFlowControl,
+  schema: JSONSchema,
+  path: readonly string[],
+  markers = false,
+): JSONSchema {
+  const compute = () =>
+    markers
+      ? cfc.schemaAtPath(
+        schema,
+        path,
+        undefined,
+        EMPTY_PROPERTIES_MARKER,
+        MISSING_PROPERTY_MARKER,
+      )
+      : cfc.schemaAtPath(schema, path);
+  if (typeof schema === "boolean" || !isMemoizableSchemaInput(schema)) {
+    return compute();
+  }
+  let byPath = _schemaAtPathCache.get(schema);
+  if (byPath === undefined) {
+    byPath = new Map();
+    _schemaAtPathCache.set(schema, byPath);
+  }
+  const key = (markers ? "m|" : "d|") + pathKey(path);
+  const cached = byPath.get(key);
+  if (cached !== undefined) return cached;
+  // `schemaAtPath()`'s object results are freshly-spread tops over the (deep-
+  // frozen, since `schema` is interned) children, so interning here freezes
+  // only owned objects.
+  const result = internSchema(compute());
+  if (byPath.size >= INTERN_CACHE_MAX) byPath.clear();
+  byPath.set(key, result);
+  return result;
+}
+
+/**
+ * Returns `schema` minus the given combinator keyword, interned and memoized
+ * per (schema identity, keyword). anyOf/oneOf/allOf handling destructures
+ * `const { anyOf, ...restSchema } = resolved` on every visit; that fresh
+ * `restSchema` made every `mergeSchemaOption()` cache lookup re-hash it from
+ * scratch. Canonicalizing it once per resolved-schema identity lets those
+ * lookups hit the interned-schema hash cache in O(1).
+ *
+ * Like the other seam memos, only a memoizable (interned or deep-frozen,
+ * hence identity-stable) `schema` is memoized; otherwise this is exactly the
+ * old inline destructure.
+ */
+const _restSchemaCache = new WeakMap<
+  JSONSchemaObj,
+  Map<string, JSONSchemaObj>
+>();
+
+function combinatorRestSchema(
+  schema: JSONSchemaObj,
+  keyword: "anyOf" | "oneOf" | "allOf",
+): JSONSchemaObj {
+  if (!isMemoizableSchemaInput(schema)) {
+    const { [keyword]: _dropped, ...rest } = schema;
+    return rest as JSONSchemaObj;
+  }
+  let byKeyword = _restSchemaCache.get(schema);
+  if (byKeyword === undefined) {
+    byKeyword = new Map();
+    _restSchemaCache.set(schema, byKeyword);
+  }
+  const cached = byKeyword.get(keyword);
+  if (cached !== undefined) return cached;
+  const { [keyword]: _dropped, ...rest } = schema;
+  const interned = internSchema(rest as JSONSchema) as JSONSchemaObj;
+  byKeyword.set(keyword, interned);
+  return interned;
+}
+
+/**
+ * Per-branch precomputation for an anyOf schema. The per-node loop in
+ * `_traverseWithSchemaInner` previously re-did, on EVERY visited node, work
+ * that depends only on the schema: sorting branches (two `hasAsCell` filter
+ * passes), merging rest+option per branch, and `canBranchMatch`'s static
+ * derivations ($ref resolution, type-list normalization, required-props
+ * applicability). Tail-latency motivated: anyOf-heavy vnode docs evaluate
+ * thousands of branches per traversal, so the per-branch constant dominates
+ * p99/max traversal time. Prepared once per identity, the per-node check
+ * collapses to a few field reads.
+ *
+ * Semantics are exactly `canBranchMatch(mergeSchemaOption(rest, option))`
+ * in the exact pre-existing branch order, including counter accounting for
+ * `false` options.
+ */
+type PreparedAnyOfBranch = {
+  /** Original option was the `false` schema: counted, never matched. */
+  optionIsFalse: boolean;
+  merged: JSONSchema;
+  /** Prefilter verdict known statically (boolean merged / unresolved $ref). */
+  constant: boolean | undefined;
+  hasAsCell: boolean;
+  /** Normalized type list of the resolved merged schema, if constrained. */
+  types: readonly string[] | undefined;
+  /** Required property names, when the resolved type admits objects. */
+  required: readonly string[] | undefined;
+};
+
+const _preparedAnyOfCache = new WeakMap<
+  JSONSchemaObj,
+  readonly PreparedAnyOfBranch[]
+>();
+
+function prepareAnyOfBranch(
+  restSchema: JSONSchemaObj,
+  option: JSONSchema,
+): PreparedAnyOfBranch {
+  const rejected: PreparedAnyOfBranch = {
+    optionIsFalse: true,
+    merged: false,
+    constant: false,
+    hasAsCell: false,
+    types: undefined,
+    required: undefined,
+  };
+  if (ContextualFlowControl.isFalseSchema(option)) return rejected;
+  const merged = mergeSchemaOption(restSchema, option);
+  if (typeof merged === "boolean") {
+    // canBranchMatch's first check: boolean schemas decide immediately.
+    return {
+      optionIsFalse: false,
+      merged,
+      constant: merged,
+      hasAsCell: false,
+      types: undefined,
+      required: undefined,
+    };
+  }
+  const hasAsCell = SchemaObjectTraverser.hasAsCell(merged);
+  let resolved: JSONSchema | undefined = merged;
+  if ("$ref" in merged) {
+    resolved = resolveSchemaRefsCanonical(merged);
+    if (typeof resolved === "boolean") {
+      return {
+        optionIsFalse: false,
+        merged,
+        constant: resolved,
+        hasAsCell,
+        types: undefined,
+        required: undefined,
+      };
+    } else if (resolved === undefined) {
+      // Unresolved $ref: pass the prefilter; traversal complains properly.
+      return {
+        optionIsFalse: false,
+        merged,
+        constant: true,
+        hasAsCell,
+        types: undefined,
+        required: undefined,
+      };
+    }
+  }
+  const types = resolved.type !== undefined
+    ? (Array.isArray(resolved.type) ? resolved.type : [resolved.type])
+    : undefined;
+  const typeIncludesObject = resolved.type === undefined ||
+    resolved.type === "object" ||
+    (Array.isArray(resolved.type) && resolved.type.includes("object"));
+  const required = typeIncludesObject && Array.isArray(resolved.required)
+    ? resolved.required as readonly string[]
+    : undefined;
+  return {
+    optionIsFalse: false,
+    merged,
+    constant: undefined,
+    hasAsCell,
+    types,
+    required,
+  };
+}
+
+/**
+ * Callers must gate on `isMemoizableSchemaInput(resolved)`: for mutable
+ * schemas the preparation cannot be cached, and rebuilding it per visited
+ * node costs more than the legacy inline loop (a measured ~25% regression
+ * on dynamic-schema patterns) — those take the legacy path instead.
+ */
+function prepareAnyOf(
+  resolved: JSONSchemaObj,
+  anyOf: readonly JSONSchema[],
+): readonly PreparedAnyOfBranch[] {
+  const cached = _preparedAnyOfCache.get(resolved);
+  if (cached !== undefined) return cached;
+  const restSchema = combinatorRestSchema(resolved, "anyOf");
+  // Consider items without asCell or asStream first, since if we aren't
+  // traversing cells, we consider them a match.
+  const sortedAnyOf = [
+    ...anyOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
+    ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
+  ];
+  const prepared = sortedAnyOf.map((option) =>
+    prepareAnyOfBranch(restSchema, option)
+  );
+  _preparedAnyOfCache.set(resolved, prepared);
+  return prepared;
+}
+
+/**
+ * Per-call doc-visit/unique-path diagnostics in `traverseWithSchema` build a
+ * string and touch a Map+Set on EVERY schema visit — measurable in tail
+ * traversals (thousands of visits each). They only feed the slow-traverse
+ * log, so they are collected only when explicitly enabled.
+ */
+const TRAVERSE_DIAGNOSTICS: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      typeof Deno.env?.get === "function" &&
+      Deno.env.get("CF_TRAVERSE_DIAGNOSTICS") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * Identity-memoized `ContextualFlowControl.resolveSchemaRefs()` with an
+ * interned result. `$ref` resolution mints a fresh schema per call, which
+ * de-canonicalizes the whole subtree below it: every identity-keyed hash
+ * cache downstream (memo keys, cycle-tracker keys, pair-merge keys) misses
+ * and re-walks. Only memoizes memoizable (interned or deep-frozen, hence
+ * identity-stable) inputs; the un-memoized fallback is byte-identical to
+ * the direct call.
+ * `null` records a failed resolution (`undefined` result).
+ */
+const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
+
+function resolveSchemaRefsCanonical(
+  schema: JSONSchemaObj,
+): JSONSchema | undefined {
+  if (!isMemoizableSchemaInput(schema)) {
+    return ContextualFlowControl.resolveSchemaRefs(schema);
+  }
+  let cached = _resolvedRefCache.get(schema);
+  if (cached === undefined) {
+    const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+    cached = resolved === undefined ? null : internSchema(resolved);
+    _resolvedRefCache.set(schema, cached);
+  }
+  return cached === null ? undefined : cached;
+}
+
 /**
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
@@ -207,6 +580,20 @@ export class MapSet<K, V> {
       return m ? new Set(m.values()) : undefined;
     }
     return this.setMap!.get(key);
+  }
+
+  /**
+   * Iterate the values for a key without materializing a `Set` (unlike
+   * `get()`, which copies in hash mode). Yields nothing for an absent key.
+   */
+  public *values(key: K): IterableIterator<V> {
+    if (this.hashMap) {
+      const m = this.hashMap.get(key);
+      if (m) yield* m.values();
+    } else {
+      const s = this.setMap!.get(key);
+      if (s) yield* s;
+    }
   }
 
   public add(key: K, value: V) {
@@ -305,8 +692,62 @@ export class MapSetStringToPathSelectors extends MapSet<
   string,
   SchemaPathSelector
 > {
+  /**
+   * Per-key index of selectors carrying a `true` schema — the only ones that
+   * can grant prefix coverage in `schemaTrackerCoversSelector()`. Keeping
+   * them separately turns each coverage check from a scan over every
+   * selector for the key into a scan over the (typically tiny) permissive
+   * subset. May hold structurally-equal duplicates under distinct
+   * identities; that only costs a redundant scan step, never correctness.
+   */
+  private trueSchemaIndex = new Map<string, Set<SchemaPathSelector>>();
+
   constructor(hashValues: boolean = false) {
     super(hashValues ? (v) => hashStringOf(v) : undefined);
+  }
+
+  trueSchemaSelectors(key: string): Iterable<SchemaPathSelector> {
+    return this.trueSchemaIndex.get(key) ?? [];
+  }
+
+  private isIndexable(value: SchemaPathSelector): boolean {
+    return value.schema !== undefined &&
+      ContextualFlowControl.isTrueSchema(value.schema);
+  }
+
+  public override add(key: string, value: SchemaPathSelector) {
+    super.add(key, value);
+    if (this.isIndexable(value)) {
+      let indexed = this.trueSchemaIndex.get(key);
+      if (indexed === undefined) {
+        indexed = new Set();
+        this.trueSchemaIndex.set(key, indexed);
+      }
+      indexed.add(value);
+    }
+  }
+
+  public override deleteValue(
+    key: string,
+    value: SchemaPathSelector,
+  ): boolean {
+    const rv = super.deleteValue(key, value);
+    // Dedup in the base map is structural while the index is by identity, so
+    // a removal can't be mirrored directly; rebuild the (small) key's index.
+    if (rv && this.trueSchemaIndex.has(key)) {
+      const rebuilt = new Set<SchemaPathSelector>();
+      for (const existing of this.values(key)) {
+        if (this.isIndexable(existing)) rebuilt.add(existing);
+      }
+      if (rebuilt.size > 0) this.trueSchemaIndex.set(key, rebuilt);
+      else this.trueSchemaIndex.delete(key);
+    }
+    return rv;
+  }
+
+  public override delete(key: string) {
+    super.delete(key);
+    this.trueSchemaIndex.delete(key);
   }
 }
 
@@ -353,12 +794,12 @@ export const schemaTrackerCoversSelector = (
     return true;
   }
 
-  const existingSelectors = schemaTracker.get(key);
-  if (existingSelectors === undefined) {
-    return false;
-  }
-
-  for (const existing of existingSelectors) {
+  // Only true-schema selectors can grant prefix coverage; scan just those
+  // when the tracker indexes them.
+  const candidates = schemaTracker instanceof MapSetStringToPathSelectors
+    ? schemaTracker.trueSchemaSelectors(key)
+    : schemaTracker.values(key);
+  for (const existing of candidates) {
     if (
       existing.schema !== undefined &&
       ContextualFlowControl.isTrueSchema(existing.schema) &&
@@ -766,7 +1207,6 @@ export abstract class BaseObjectTraverser {
     this.tx = wrapTxForTraverseCapture(tx);
   }
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
-  private coverageSelectorCache = new Map<string, SchemaPathSelector>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
@@ -1045,15 +1485,12 @@ export abstract class BaseObjectTraverser {
       return false;
     }
 
-    const targetSelector = narrowSchema(
+    const targetSelector = narrowAndCombineSelectorForLink(
       doc.address.path,
       selector,
       ["value", ...(link.path as readonly string[])],
-      this.cfc,
-    );
-    targetSelector.schema = combineOptionalSchema(
-      targetSelector.schema,
       link.schema,
+      this.cfc,
     );
 
     return schemaTrackerCoversSelector(
@@ -1080,6 +1517,12 @@ export abstract class BaseObjectTraverser {
    * on link-heavy refreshes. The cache key joins the path with a single schema
    * hash rather than hashing the whole selector: hashing the path array (vs a
    * string join) is pure added cost on the hot cache-hit path.
+   *
+   * Module-level (capped, see `_coverageSelectorCache`) rather than
+   * per-instance: short-lived traversers are created per query, and a
+   * per-instance memo would re-mint (and re-full-hash) the same coverage
+   * selectors for every one of them. Validity is global — the key is pure
+   * content, and interning is process-wide.
    */
   private internCoverageSelector(
     selector: SchemaPathSelector,
@@ -1089,7 +1532,7 @@ export abstract class BaseObjectTraverser {
       ? String(schema)
       : hashSchema(schema);
     const cacheKey = `${selector.path.join("\0")}\0${schemaKey}`;
-    const cached = this.coverageSelectorCache.get(cacheKey);
+    const cached = _coverageSelectorCache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
@@ -1098,7 +1541,10 @@ export abstract class BaseObjectTraverser {
     const interned = internPathSelector(
       selector.schema === undefined ? { ...selector, schema } : selector,
     );
-    this.coverageSelectorCache.set(cacheKey, interned);
+    if (_coverageSelectorCache.size >= INTERN_CACHE_MAX) {
+      _coverageSelectorCache.clear();
+    }
+    _coverageSelectorCache.set(cacheKey, interned);
     return interned;
   }
 
@@ -1378,14 +1824,16 @@ function followPointer(
     // Also insert the portions of target.path, so selector is relative to
     // new target doc. We do this even if the target doc is the same doc, since
     // we want the selector path to match.
-    selector = narrowSchema(
+    // When traversing links, we also combine in the link's schema. Memoized
+    // (returning one interned selector per repeat hop) so downstream hashing
+    // stays identity-cached; see narrowAndCombineSelectorForLink.
+    selector = narrowAndCombineSelectorForLink(
       doc.address.path,
       selector,
       target.path,
+      link.schema,
       context.cfc,
     );
-    // When traversing links, we combine the schema
-    selector.schema = combineOptionalSchema(selector.schema, link.schema);
   }
   // Check to see if we've already included this link with this schema context
   using t = context.tracker.include(doc.value!, selector?.schema, null, doc);
@@ -2225,7 +2673,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         `maxDepth=${this.maxDepth}`,
         `schemaMemo=${this.activeMemo.size}`,
         `schemaMemoHits=${this.schemaMemoHits}`,
-        `topDocs=${topDocs}`,
+        TRAVERSE_DIAGNOSTICS
+          ? `topDocs=${topDocs}`
+          : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
       ]);
     }
     if (error !== undefined) {
@@ -2330,11 +2780,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
-    // Track doc visits
     const docId = doc.address.id;
-    this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
-    // Track unique doc+path combos
-    this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+    if (TRAVERSE_DIAGNOSTICS) {
+      // Per-visit doc/path tracking for the slow-traverse log; the string
+      // building is too hot to leave on by default (see TRAVERSE_DIAGNOSTICS).
+      this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
+      this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+    }
     try {
       // Memoize by doc address + schema for the query path (traverseCells=true).
       // In the query path, StandardObjectCreator ignores the link param,
@@ -2368,7 +2820,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     let resolved: JSONSchema | undefined = schema;
     if (isRecord(schema) && "$ref" in schema) {
       // Handle any top-level $ref in the schema
-      resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+      resolved = resolveSchemaRefsCanonical(schema);
       if (resolved === undefined) {
         logger.warn(
           "traverse",
@@ -2387,31 +2839,101 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
-        const { anyOf, ...restSchema } = resolved;
-        // Consider items without asCell or asStream first, since if we aren't
-        // traversing cells, we consider them a match.
-        const sortedAnyOf = [
-          ...anyOf.filter((option) => !SchemaObjectTraverser.hasAsCell(option)),
-          ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
-        ];
-
-        // Branch-by-branch traversal; fast-reject after merge so canBranchMatch
-        // sees the full merged constraints (type/required from restSchema too).
         const matches: Immutable<FabricValue>[] = [];
-        for (const optionSchema of sortedAnyOf) {
+        if (typeof resolved === "boolean" || !isInternedSchema(resolved)) {
+          // Non-interned schema: identity reuse is not guaranteed (frozen
+          // schemas can be freshly minted per evaluation), so the prepared
+          // form would be rebuilt per node - slower than this legacy loop.
+          const anyOf = resolved.anyOf;
+          const restSchema = combinatorRestSchema(resolved, "anyOf");
+          // Consider items without asCell or asStream first, since if we
+          // aren't traversing cells, we consider them a match.
+          const sortedAnyOf = [
+            ...anyOf.filter((option) =>
+              !SchemaObjectTraverser.hasAsCell(option)
+            ),
+            ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
+          ];
+          for (const optionSchema of sortedAnyOf) {
+            this.anyOfBranches++;
+            if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+              continue;
+            }
+            const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+            if (!canBranchMatch(mergedSchema, doc.value)) {
+              this.anyOfFastRejects++;
+              continue;
+            }
+            const { ok: val, error } = this.traverseWithSchema(
+              doc,
+              mergedSchema,
+              link,
+            );
+            if (error === undefined) {
+              matches.push(val);
+            }
+          }
+          const merged = this.objectCreator.mergeMatches(
+            matches as FabricValue[],
+            resolved,
+          );
+          if (matches.length > 0) {
+            return { ok: merged };
+          }
+          logger.info(
+            "traverse",
+            () => [
+              "No matching anyOf",
+              doc,
+              sortedAnyOf,
+              this.getDebugValue(doc),
+            ],
+          );
+          return fail(TRAVERSE_FAILURES.noMatchingAnyOf);
+        }
+        // Branch order, merges, and canBranchMatch's static derivations are
+        // precomputed per schema identity; the inlined prefilter below is
+        // semantically identical to canBranchMatch(merged, doc.value).
+        const prepared = prepareAnyOf(resolved, resolved.anyOf);
+        const valueIsLink = isPrimitiveCellLink(doc.value);
+        const actualType = getJsonType(doc.value);
+        const valueIsRecord = isRecord(doc.value);
+        for (const branch of prepared) {
           this.anyOfBranches++;
-          if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+          if (branch.optionIsFalse) {
             continue;
           }
-          const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
-          if (!canBranchMatch(mergedSchema, doc.value)) {
+          let match: boolean;
+          if (branch.constant !== undefined) {
+            match = branch.constant;
+          } else if (branch.hasAsCell || valueIsLink) {
+            // Never reject asCell/asStream branches; link values reveal
+            // nothing until dereferenced during traversal.
+            match = true;
+          } else if (
+            branch.types !== undefined && actualType !== null &&
+            !branch.types.includes(actualType)
+          ) {
+            match = false;
+          } else if (branch.required !== undefined && valueIsRecord) {
+            match = true;
+            for (const req of branch.required) {
+              if (!(req in (doc.value as Record<string, unknown>))) {
+                match = false;
+                break;
+              }
+            }
+          } else {
+            match = true;
+          }
+          if (!match) {
             this.anyOfFastRejects++;
             continue;
           }
           // TODO(@ubik2): do i need to merge the link schema?
           const { ok: val, error } = this.traverseWithSchema(
             doc,
-            mergedSchema,
+            branch.merged,
             link,
           );
           if (error === undefined) {
@@ -2435,13 +2957,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
           () => [
             "No matching anyOf",
             doc,
-            sortedAnyOf,
+            prepared,
             this.getDebugValue(doc),
           ],
         );
         return fail(TRAVERSE_FAILURES.noMatchingAnyOf);
       } else if (resolved.oneOf) {
-        const { oneOf, ...restSchema } = resolved;
+        const oneOf = resolved.oneOf;
+        const restSchema = combinatorRestSchema(resolved, "oneOf");
         // Consider items without asCell or asStream first, since if we aren't
         // traversing cells, we consider them a match.
         const sortedOneOf = [
@@ -2493,7 +3016,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return fail(TRAVERSE_FAILURES.multipleMatchingOneOf);
       } else if (resolved.allOf) {
         const matches: Immutable<FabricValue>[] = [];
-        const { allOf, ...restSchema } = resolved;
+        const allOf = resolved.allOf;
+        const restSchema = combinatorRestSchema(resolved, "allOf");
         for (const optionSchema of allOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             logger.debug(
@@ -2698,7 +3222,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     let resolved: JSONSchema | undefined = schema;
     if (isRecord(schema) && "$ref" in schema) {
       // Handle any top-level $ref in the schema
-      resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+      resolved = resolveSchemaRefsCanonical(schema);
       if (resolved === undefined) {
         logger.warn(
           "traverse",
@@ -2855,7 +3379,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
     // We use `every` here so if our input is a sparse array, so is our output.
     const valid = docArray.every((item, index) => {
-      const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);
+      const itemSchema = schemaAtPathCanonical(this.cfc, schema, [
+        index.toString(),
+      ]);
       let curDoc: IMemorySpaceValueAttestation = {
         address: {
           ...doc.address,
@@ -3073,12 +3599,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
       // schema behavior
-      const propSchema = this.cfc.schemaAtPath(
+      const propSchema = schemaAtPathCanonical(
+        this.cfc,
         schema,
         [propKey],
-        undefined,
-        { $comment: "emptyProperties" },
-        { $comment: "missingProperty" },
+        true,
       );
       // Normally, if additionalProperties is not specified, it would
       // default to true. However, if we provided the `properties` field, we
@@ -3443,7 +3968,7 @@ export function canBranchMatch(
 
   let resolved: JSONSchema | undefined = branch;
   if ("$ref" in branch) {
-    resolved = ContextualFlowControl.resolveSchemaRefs(branch);
+    resolved = resolveSchemaRefsCanonical(branch);
     if (typeof resolved === "boolean") return resolved;
     else if (resolved === undefined) return true; // we'll properly complain later
   }

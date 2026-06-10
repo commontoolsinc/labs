@@ -14,13 +14,13 @@ const type = "application/json" as const;
 
 class TestEmulatedStorageManager extends EmulatedStorageManager {
   static emulateWithServerFactory(
-    options: Omit<V2StorageOptions, "address">,
+    options: Omit<V2StorageOptions, "memoryHost" | "spaceHostMap">,
     serverFactory: () => MemoryV2Server.Server,
   ): TestEmulatedStorageManager {
     return new this(
       {
         ...options,
-        address: new URL("memory://"),
+        memoryHost: new URL("memory://"),
       },
       serverFactory,
     );
@@ -52,7 +52,7 @@ describe("Memory v2 lazy session creation", () => {
     let sessionCreates = 0;
     const storage = TestStorageManager.create({
       as: signer,
-      address: new URL("memory://"),
+      memoryHost: new URL("memory://"),
     }, {
       create(_space: MemorySpace) {
         sessionCreates += 1;
@@ -96,7 +96,7 @@ describe("Memory v2 lazy session creation", () => {
     let closes = 0;
     const storage = TestStorageManager.create({
       as: signer,
-      address: new URL("memory://"),
+      memoryHost: new URL("memory://"),
     }, {
       create(_space: MemorySpace) {
         sessionCreates += 1;
@@ -146,7 +146,7 @@ describe("Memory v2 lazy session creation", () => {
     let closes = 0;
     const storage = TestStorageManager.create({
       as: signer,
-      address: new URL("memory://"),
+      memoryHost: new URL("memory://"),
     }, {
       create(_space: MemorySpace) {
         sessionCreates += 1;

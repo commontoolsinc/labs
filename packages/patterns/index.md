@@ -767,10 +767,12 @@ type ChatOutput = {
 
 ## `group-chat-lobby.tsx`
 
-Multiplayer group chat lobby where users join, pick colors, and enter a shared
-chat room. Uses `navigateTo()` to transition into `group-chat-room.tsx`.
+Multiplayer group chat lobby where users join with their shared profile
+(`wish({ query: "#profile" })` — the wish UI covers profile create/pick) and
+enter a shared chat room. Uses `navigateTo()` to transition into
+`group-chat-room.tsx`.
 
-**Keywords:** multiplayer, chat, lobby, navigateTo
+**Keywords:** multiplayer, chat, lobby, navigateTo, profile, wish
 
 ### Input Schema
 
@@ -788,8 +790,8 @@ interface Message {
 interface User {
   name: string;
   joinedAt: number;
-  color: string;
-  avatarImage?: { url: string };
+  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
+  avatar?: string;
 }
 
 interface LobbyInput {
@@ -1455,5 +1457,70 @@ interface LinkPreviewInput {
 ```ts
 interface LinkPreviewInput {
   url: string;
+}
+```
+
+---
+
+## `cfc-row-label-mailbox/main.tsx`
+
+Demo of CFC Phase 3 per-row, data-derived SQLite labels: each email row's
+confidentiality is computed from the row's own columns (sender ∧ regex-split
+recipients ∧ the db owner), with claimed-authored-by integrity gated on the
+row's dmarc evidence. Shows the declared output ceiling with onExceed:"skip" (a
+skim view that drops rows the ceiling does not admit), the fail-closed COUNT(*)
+refusal, and the db.exec write gate (a draft without a sender is rejected by the
+rule's min anchor).
+
+**Keywords:** cfc, sqlite, per-row, label, confidentiality, integrity, rowLabel,
+cfSqlite, ceiling, maxConfidentiality, onExceed, mailbox, email
+
+### Input Schema
+
+```ts
+interface MailboxInput {
+  draftFrom: PerSession<Writable<string | Default<"">>>;
+  draftTo: PerSession<Writable<string | Default<"">>>;
+  draftBody: PerSession<Writable<string | Default<"">>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface MailboxOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  seed: Stream<void>;
+}
+```
+
+---
+
+## `cfc-row-label-records/main.tsx`
+
+Demo of per-row (Phase 3) and per-column (Phase 2) CFC labels COMPOSING on one
+row entity: a patient-records table whose row rule derives the patient from the
+row's own data while the ssn column carries a static "pii" label. The same rows
+flow as a diagnosis projection under a declared ceiling but are REFUSED as an
+ssn projection (the per-column pii label exceeds the ceiling) — fail-closed
+composition of both label sources.
+
+**Keywords:** cfc, sqlite, per-row, per-column, ifc, pii, label, composition,
+ceiling, maxConfidentiality, fail-closed, records
+
+### Input Schema
+
+```ts
+type RecordsInput = Record<string, never>;
+```
+
+### Output Schema
+
+```ts
+interface RecordsOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  seed: Stream<void>;
 }
 ```

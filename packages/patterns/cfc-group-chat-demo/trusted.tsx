@@ -411,19 +411,19 @@ export const applyTrustedProfileSave = (
     trimmedName,
     existingProfile,
   ) as TrustedProfile;
-  // Each user's profile must be its OWN cell. The previous
-  // `Writable.for("profile")` used a constant cause, so every user sharing the
-  // space derived the *same* underlying entity: all message `authorProfile`
-  // links redirected to one shared profile cell holding whoever saved last.
-  // Authorship verification then compared each message's signature against that
-  // single (current-user) profile, so genuine messages from other users read
-  // as unverified while imported "fake" messages read as verified — a
-  // nondeterministic outcome that made the integration test flaky. A
-  // per-user-scoped cell is isolated by active DID (see
-  // docs/common/patterns/multi-user-patterns.md), giving each user a distinct
-  // profile entity.
+  // Each user's profile must be its OWN cell, but it must stay SPACE-scoped:
+  // the cell is shared through the registry and through message
+  // `authorProfile` links, and a user/session-scoped instance is isolated by
+  // reader (docs/specs/scoped-cell-instances.md) — other participants would
+  // dereference it to their own empty instance and see "Unnamed user".
+  // Distinctness per user comes from creation, not scope: the cell is minted
+  // on each user's FIRST save (per-invocation cause) and remembered in the
+  // PerUser `myProfile` pointer, so later saves update the same entity. (The
+  // earlier `Writable.for("profile")` variant used a constant cause, which
+  // collapsed every user onto one shared entity and broke authorship
+  // verification.)
   const profile = currentProfileCell(myProfile) ??
-    Writable.perUser.of<TrustedProfile>(nextSnapshot);
+    Writable.perSpace.of<TrustedProfile>(nextSnapshot);
   profile.set(nextSnapshot);
   myProfile.set({ profile });
   registerProfile(profiles, profile);

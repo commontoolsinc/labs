@@ -195,7 +195,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
         experimental: experimentalOptionsFromEnv(),
         storageManager: StorageManager.open({
           as: session.as,
-          address: new URL("/api/storage/memory", config.apiUrl),
+          memoryHost: new URL(config.apiUrl),
           spaceIdentity: session.spaceIdentity,
         }),
         errorHandlers: [

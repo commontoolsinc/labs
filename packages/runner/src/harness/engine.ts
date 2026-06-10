@@ -69,7 +69,10 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
-import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
+import {
+  setVerifiedBindingCandidateRegistrar,
+  setVerifiedFunctionRegistrar,
+} from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
 import { CompiledBundleValidator } from "../sandbox/compiled-bundle-validation.ts";
@@ -770,6 +773,24 @@ export class Engine extends EventTarget implements Harness {
 
       const main = loaded.namespace as Exports;
       this.executableRegistry.captureVerifiedValue(loadId, main);
+      // CT-1665: register verified binding metadata for NON-exported trusted
+      // handlers. The export-namespace capture above only reaches exported
+      // builders; a non-exported `const setName = handler(...)` is surfaced
+      // instead by the transformer's trailing `__cfReg({...})` into
+      // `graph.registrationSink` — the same registrations pattern-manager indexes
+      // for `{identity, symbol}` addressing. We reuse that ESM channel rather than
+      // a parallel registrar. The `__cfBindVerifiedBinding` annotations are already
+      // attached (it runs in the module body, ahead of the trailing `__cfReg`), so
+      // each registered factory carries its `__cfVerifiedBindingIdentity`.
+      const registrationCandidates: unknown[] = [];
+      for (const entries of graph.registrationSink.values()) {
+        for (const value of entries.values()) {
+          registrationCandidates.push(value);
+        }
+      }
+      this.executableRegistry.captureVerifiedBindingCandidates(
+        registrationCandidates,
+      );
 
       // Build the per-module export map (keyed by normalized source path) from
       // the SAME load, and map each exported value back to its RuntimeProgram
@@ -978,6 +999,18 @@ export class Engine extends EventTarget implements Harness {
       const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
         this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
       );
+      // CT-1665: on the legacy/AMD eval path `__cfReg` is a no-op (identity
+      // addressing is ESM-only), so the ESM sink-based capture used by
+      // `evaluateGraph` does not apply here. Collect the trusted-binding factories
+      // the builder surfaces during evaluation directly, so non-exported handlers
+      // still resolve their verified binding metadata under the default (non-ESM)
+      // loader. (Removable with the registrar + builder hook once the ESM loader
+      // is the default and this path is retired.)
+      const bindingCandidates: unknown[] = [];
+      const restoreBindingCandidateRegistrar =
+        setVerifiedBindingCandidateRegistrar((candidate) => {
+          bindingCandidates.push(candidate);
+        });
       const sourceLocationFrame = pushFrame({
         runtime: this.ctRuntime,
         verifiedLoadId: loadId,
@@ -993,6 +1026,7 @@ export class Engine extends EventTarget implements Harness {
       } finally {
         popFrame(sourceLocationFrame);
         restoreVerifiedFunctionRegistrar();
+        restoreBindingCandidateRegistrar();
       }
       if (
         result && typeof result === "object" && "main" in result &&
@@ -1002,6 +1036,9 @@ export class Engine extends EventTarget implements Harness {
         const exportMap = result.exportMap as Record<string, Exports>;
         this.executableRegistry.captureVerifiedValue(loadId, main);
         this.executableRegistry.captureVerifiedValue(loadId, exportMap);
+        this.executableRegistry.captureVerifiedBindingCandidates(
+          bindingCandidates,
+        );
 
         // Create a map from exported values to `RuntimeProgram` that can
         // generate them and pass to the callback from the exports.

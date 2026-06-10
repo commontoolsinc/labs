@@ -1870,7 +1870,11 @@ function toolAllowsObservedConfidentiality(
   const maxConfidentiality = isRecord(toolSchema) && isRecord(toolSchema.ifc)
     ? toolSchema.ifc.maxConfidentiality
     : undefined;
-  if (!Array.isArray(maxConfidentiality) || maxConfidentiality.length === 0) {
+  // A non-array ceiling means none was declared. A declared (even empty) ceiling
+  // is enforced: an empty array is "public only". Delegate to
+  // cfcObservationFitsCeiling rather than special-casing empty as allow-all,
+  // which would skip the empty-ceiling protection (review follow-up to W0.7).
+  if (!Array.isArray(maxConfidentiality)) {
     return true;
   }
 

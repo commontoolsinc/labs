@@ -13,6 +13,7 @@
  *   they exist so benchmarks can attribute wins (e.g. anyOfBranches -80%).
  */
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { SchemaPathSelector } from "../../src/storage/interface.ts";
 import {
@@ -92,10 +93,53 @@ export type ReplayMetrics = {
   reads: number;
 };
 
+/** Per-invocation latency sample, for tail analysis. */
+export type ReplayLatencySample = {
+  index: number;
+  ms: number;
+  selector: number;
+  docId: string;
+  /** Counter deltas for this single invocation. */
+  schemaCalls: number;
+  anyOfBranches: number;
+  dagCalls: number;
+  pointerCalls: number;
+};
+
+export type ReplayLatencyReport = {
+  p50: number;
+  p90: number;
+  p99: number;
+  p999: number;
+  max: number;
+  mean: number;
+  /** The N slowest invocations, slowest first. */
+  slowest: ReplayLatencySample[];
+};
+
 export type ReplayResult = {
   oracle: ReplayOracle | undefined;
   metrics: ReplayMetrics;
+  latency?: ReplayLatencyReport;
 };
+
+function buildLatencyReport(
+  samples: ReplayLatencySample[],
+  topN: number,
+): ReplayLatencyReport {
+  const sorted = [...samples].sort((a, b) => a.ms - b.ms);
+  const at = (q: number) =>
+    sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))].ms;
+  return {
+    p50: at(0.5),
+    p90: at(0.9),
+    p99: at(0.99),
+    p999: at(0.999),
+    max: sorted[sorted.length - 1].ms,
+    mean: sorted.reduce((a, s) => a + s.ms, 0) / sorted.length,
+    slowest: sorted.slice(-topN).reverse(),
+  };
+}
 
 /**
  * ObjectStorageManager over a fixture's doc corpus. Space/scope-aware
@@ -124,7 +168,11 @@ export class FixtureObjectManager implements ObjectStorageManager {
     if (value === undefined) return null;
     const attestation: IAttestation = {
       address: { ...address, path: [] },
-      value: value as Immutable<FabricValue>,
+      // Live storage deep-freezes every doc at the wire-decode boundary
+      // (decodeMemoryBoundary), so frozen corpus values are the faithful
+      // replay shape — without this, frozen-identity fast paths in traverse
+      // can never engage during replay even though they do in production.
+      value: deepFreeze(value) as Immutable<FabricValue>,
     };
     this.attestations.set(key, attestation);
     return attestation;
@@ -170,9 +218,16 @@ function makeContext(includeMeta: boolean): TraversalContext {
 
 export function replayFixture(
   fixture: TraverseFixture,
-  options: { collectOracle?: boolean; limit?: number } = {},
+  options: {
+    collectOracle?: boolean;
+    limit?: number;
+    /** Collect per-invocation latency samples (slight timing overhead). */
+    collectLatency?: boolean;
+  } = {},
 ): ReplayResult {
   const collectOracle = options.collectOracle ?? false;
+  const collectLatency = options.collectLatency ?? false;
+  const latencySamples: ReplayLatencySample[] = [];
   const invocations = options.limit !== undefined
     ? fixture.invocations.slice(0, options.limit)
     : fixture.invocations;
@@ -205,7 +260,9 @@ export function replayFixture(
     reads: 0,
   };
 
+  let invocationIndex = -1;
   for (const invocation of invocations) {
+    invocationIndex++;
     let context = contexts.get(invocation.context);
     if (context === undefined) {
       context = makeContext(invocation.includeMeta);
@@ -252,7 +309,20 @@ export function replayFixture(
       undefined,
       memo,
     );
+    const t0 = collectLatency ? performance.now() : 0;
     const rv = traverser.traverse(doc, link);
+    if (collectLatency) {
+      latencySamples.push({
+        index: invocationIndex,
+        ms: performance.now() - t0,
+        selector: invocation.selector,
+        docId: invocation.address.id,
+        schemaCalls: traverser.traverseWithSchemaCalls,
+        anyOfBranches: traverser.anyOfBranches,
+        dagCalls: traverser.traverseDAGCalls,
+        pointerCalls: traverser.traversePointerCalls,
+      });
+    }
 
     metrics.traverseWithSchemaCalls += traverser.traverseWithSchemaCalls;
     metrics.traversePointerCalls += traverser.traversePointerCalls;
@@ -298,7 +368,12 @@ export function replayFixture(
     };
   }
 
-  return { oracle, metrics };
+  return {
+    oracle,
+    metrics,
+    ...(collectLatency &&
+      { latency: buildLatencyReport(latencySamples, 12) }),
+  };
 }
 
 export async function loadFixture(path: string): Promise<TraverseFixture> {

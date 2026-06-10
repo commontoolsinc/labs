@@ -1,8 +1,12 @@
 /**
  * Battleship Multiplayer
  *
- * A single shared game surface. Shared match state is scoped to the space, while
- * each viewer's name and assigned player slot are scoped per user.
+ * A single shared game surface. Shared match state is scoped to the space,
+ * while each viewer's assigned player slot is scoped per user. The viewer's
+ * name and avatar come from their shared profile
+ * (`wish({ query: "#profile" })`): the wish's built-in UI lets them pick an
+ * existing profile or create a new one, and joining snapshots the resolved
+ * values into the shared player slot.
  */
 
 import {
@@ -15,6 +19,7 @@ import {
   Stream,
   UI,
   type VNode,
+  wish,
 } from "commonfabric";
 
 import BattleshipRoom from "./room.tsx";
@@ -36,7 +41,7 @@ import {
   trimmedName,
 } from "./schemas.tsx";
 
-interface LobbyOutput {
+export interface LobbyOutput {
   [UI]: PerSession<VNode>;
   gameName: string;
   player1: PlayerData | null;
@@ -73,6 +78,7 @@ const startIfReady = (
 const joinSlot = (
   slot: 1 | 2,
   name: string,
+  avatar: string,
   player1: PlayerCell,
   player2: PlayerCell,
   shots: ShotsCell,
@@ -80,6 +86,7 @@ const joinSlot = (
 ) => {
   const playerData: PlayerData = {
     name,
+    avatar,
     ships: generateRandomShips(),
     color: getRandomColor(slot - 1),
     joinedAt: safeDateNow(),
@@ -96,6 +103,7 @@ const joinSlot = (
 
 const joinAvailableSlot = (
   name: string,
+  avatar: string,
   myName: PlayerNameCell,
   myPlayerNumber: PlayerNumberCell,
   player1: PlayerCell,
@@ -116,16 +124,19 @@ const joinAvailableSlot = (
   const slot = !player1.get() ? 1 : !player2.get() ? 2 : null;
   if (slot === null) return false;
 
-  joinSlot(slot, name, player1, player2, shots, gameState);
+  joinSlot(slot, name, avatar, player1, player2, shots, gameState);
   myName.set(name);
   myPlayerNumber.set(slot);
   return true;
 };
 
+// Join with the viewer's resolved profile. `name`/`avatar` arrive as plain
+// strings (named `computed` values auto-unwrap as handler state).
 const joinGame = handler<
   void,
   {
-    joinName: PlayerNameCell;
+    name: string;
+    avatar: string;
     myName: PlayerNameCell;
     myPlayerNumber: PlayerNumberCell;
     player1: PlayerCell;
@@ -135,24 +146,21 @@ const joinGame = handler<
   }
 >((
   _event,
-  { joinName, myName, myPlayerNumber, player1, player2, shots, gameState },
+  { name, avatar, myName, myPlayerNumber, player1, player2, shots, gameState },
 ) => {
-  const name = trimmedName(joinName.get());
-  if (!name) return;
+  const trimmed = trimmedName(name);
+  if (!trimmed) return; // No resolved profile name yet.
 
-  if (
-    joinAvailableSlot(
-      name,
-      myName,
-      myPlayerNumber,
-      player1,
-      player2,
-      shots,
-      gameState,
-    )
-  ) {
-    joinName.set("");
-  }
+  joinAvailableSlot(
+    trimmed,
+    (avatar ?? "").trim(),
+    myName,
+    myPlayerNumber,
+    player1,
+    player2,
+    shots,
+    gameState,
+  );
 });
 
 const joinWithName = handler<
@@ -173,6 +181,7 @@ const joinWithName = handler<
   if (!trimmed) return;
   joinAvailableSlot(
     trimmed,
+    "",
     myName,
     myPlayerNumber,
     player1,
@@ -194,7 +203,7 @@ const joinPlayer = handler<
 >(({ name }, { slot, player1, player2, shots, gameState }) => {
   const trimmed = trimmedName(name);
   if (!trimmed) return;
-  joinSlot(slot, trimmed, player1, player2, shots, gameState);
+  joinSlot(slot, trimmed, "", player1, player2, shots, gameState);
 });
 
 const resetGame = handler<
@@ -206,11 +215,10 @@ const resetGame = handler<
     gameState: GameStateCell;
     myName: PlayerNameCell;
     myPlayerNumber: PlayerNumberCell;
-    joinName: PlayerNameCell;
   }
 >((
   _event,
-  { player1, player2, shots, gameState, myName, myPlayerNumber, joinName },
+  { player1, player2, shots, gameState, myName, myPlayerNumber },
 ) => {
   player1.set(null);
   player2.set(null);
@@ -218,7 +226,6 @@ const resetGame = handler<
   gameState.set(INITIAL_GAME_STATE);
   myName.set("");
   myPlayerNumber.set(null);
-  joinName.set("");
 });
 
 const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
@@ -231,12 +238,31 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       gameState,
       myName,
       myPlayerNumber,
-      joinName,
     },
   ) => {
+    // Resolve THIS viewer's shared profile. The `#profile` wish's built-in UI
+    // covers the whole lifecycle: a create surface when the viewer has no
+    // profile, a link when they have one, and a picker (with inline create)
+    // when they have several. The field targets give the snapshot strings.
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+
+    const profileName = computed(() => profileNameWish.result ?? "");
+    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+    const hasProfile = computed(() =>
+      (profileNameWish.result ?? "").trim() !== ""
+    );
+    const joinLabel = computed(() =>
+      hasProfile ? `Join as ${profileName}` : "Create a profile to join"
+    );
+
     const sharedCells = { player1, player2, shots, gameState };
     const join = joinGame({
-      joinName,
+      name: profileName,
+      avatar: profileAvatar,
       myName,
       myPlayerNumber,
       ...sharedCells,
@@ -258,7 +284,6 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       ...sharedCells,
       myName,
       myPlayerNumber,
-      joinName,
     } as any);
 
     const room = BattleshipRoom({
@@ -329,10 +354,32 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                     marginBottom: "20px",
                   }}
                 >
-                  <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <cf-avatar
+                      src={player1Data?.avatar}
+                      name={player1Data?.name ?? "?"}
+                      size="xs"
+                    />
                     Player 1: {player1Data?.name ?? "Open"}
                   </div>
-                  <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <cf-avatar
+                      src={player2Data?.avatar}
+                      name={player2Data?.name ?? "?"}
+                      size="xs"
+                    />
                     Player 2: {player2Data?.name ?? "Open"}
                   </div>
                 </div>
@@ -346,18 +393,21 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                   : (
                     <div
                       style={{
-                        display: "flex",
+                        display: "grid",
                         gap: "10px",
-                        alignItems: "center",
                       }}
                     >
-                      <cf-input
-                        $value={joinName}
-                        placeholder="Your name"
-                        timing-strategy="immediate"
-                        style="flex: 1;"
-                      />
-                      <cf-button onClick={join}>Join</cf-button>
+                      {
+                        /* Built-in profile UI: create a profile when there is
+                          none, pick between existing profiles otherwise. */
+                      }
+                      <div>{profileWish[UI]}</div>
+                      <cf-button
+                        onClick={join}
+                        disabled={computed(() => !hasProfile)}
+                      >
+                        {joinLabel}
+                      </cf-button>
                     </div>
                   )}
 
@@ -378,7 +428,11 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       player2: player2Data,
       shots: computed(() => shots.get()),
       gameState: computed(() => gameState.get()),
-      myName: computed(() => myName.get()),
+      // Normalize like myPlayerNumber below: an unwritten PerUser cell reads
+      // as undefined in runtimes that didn't create the instance, and a
+      // computed that RETURNS undefined is indistinguishable from "not yet
+      // computed" for cross-runtime readers.
+      myName: computed(() => trimmedName(myName.get())),
       myPlayerNumber: computed(() =>
         normalizePlayerNumber(myPlayerNumber.get())
       ),

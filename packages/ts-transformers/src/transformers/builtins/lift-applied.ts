@@ -184,12 +184,15 @@ function createLiftAppliedInputArgs(
   ];
 }
 
+// Caller must pass a non-empty refs array.
 export function createLiftAppliedCall(
   expression: ts.Expression,
   refs: readonly ts.Expression[],
   options: LiftAppliedCallOptions,
 ): ts.Expression | undefined {
-  if (refs.length === 0) return undefined;
+  if (refs.length === 0) {
+    throw new Error("createLiftAppliedCall requires a non-empty refs array");
+  }
 
   const { factory, tsContext, cfHelpers, context } = options;
   const { captureTree, fallbackEntries, refToParamName } =

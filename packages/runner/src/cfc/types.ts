@@ -30,6 +30,31 @@ export const isCfcEnforcementMode = (
 
 export const DEFAULT_CFC_ENFORCEMENT_MODE: CfcEnforcementMode = "disabled";
 
+/**
+ * Strictness ranking used to forbid weakening a transaction's enforcement mode
+ * after it has been raised (audit S3). Higher = stricter. `disabled`/`observe`
+ * impose no enforcement floor; the two `enforce-*` levels do.
+ */
+export const cfcEnforcementStrictness = (
+  mode: CfcEnforcementMode,
+): number => {
+  switch (mode) {
+    case "disabled":
+      return 0;
+    case "observe":
+      return 1;
+    case "enforce-explicit":
+      return 2;
+    case "enforce-strict":
+      return 3;
+  }
+};
+
+/** Lowest strictness considered "enforcing" (establishes a non-lowerable floor). */
+export const CFC_ENFORCING_STRICTNESS = cfcEnforcementStrictness(
+  "enforce-explicit",
+);
+
 export type CfcSandboxJsonValue =
   | null
   | boolean

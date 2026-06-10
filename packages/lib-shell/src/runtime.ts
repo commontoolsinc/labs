@@ -58,6 +58,11 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
   view: RuntimeView;
   apiUrl: URL;
+  /**
+   * Optional space DID → host base URL map forwarded to the worker.
+   * Spaces absent from the map resolve to `apiUrl` (the default host).
+   */
+  spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
@@ -111,6 +116,7 @@ export function fetchBuildHash(): Promise<string | undefined> {
 export function createRuntimeClientOptions({
   session,
   apiUrl,
+  spaceHostMap,
   buildHash,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
@@ -118,6 +124,7 @@ export function createRuntimeClientOptions({
 }: {
   session: Session;
   apiUrl: URL;
+  spaceHostMap?: Record<string, string>;
   buildHash?: string;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
@@ -132,6 +139,7 @@ export function createRuntimeClientOptions({
 
   return {
     apiUrl,
+    spaceHostMap,
     identity: session.as,
     spaceIdentity: session.spaceIdentity,
     spaceDid: session.space,
@@ -157,7 +165,10 @@ export class RuntimeInternals extends EventTarget {
   #favorites: FavoritesManager;
   #callbacks: RuntimeInternalsCallbacks;
   #spaceRootPattern?: Promise<PageHandle<NameSchema>>;
-  #patternCache: Map<string, Promise<PageHandle<NameSchema>>> = new Map();
+  #patternCache: Map<
+    string,
+    { promise: Promise<PageHandle<NameSchema>>; started: boolean }
+  > = new Map();
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
 
@@ -245,20 +256,36 @@ export class RuntimeInternals extends EventTarget {
     return pattern;
   }
 
-  getPattern(id: string): Promise<PageHandle<NameSchema>> {
+  /**
+   * Get a piece's page handle. By default this also STARTS the piece
+   * (instantiates its pattern in the worker) — appropriate for the piece
+   * about to be displayed. Pass `start: false` for read-only consumers
+   * (e.g. listing piece names): the persisted result cell is synced and
+   * readable without paying pattern instantiation for every piece
+   * (CT-1623: starting all pieces on reload cost ~10s of dependency
+   * collection, either in the reload wall or on the first interaction).
+   *
+   * Cached per id. A cache entry created with `start: false` is upgraded
+   * (re-fetched with start) when a starting caller asks for the same id.
+   */
+  getPattern(
+    id: string,
+    options?: { start?: boolean },
+  ): Promise<PageHandle<NameSchema>> {
     this.#check();
+    const start = options?.start ?? true;
     const cached = this.#patternCache.get(id);
-    if (cached) {
-      return cached;
+    if (cached && (cached.started || !start)) {
+      return cached.promise;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, true);
+      const page = await this.#client.getPage<NameSchema>(id, start);
       if (!page) {
         throw new Error(`Pattern not found: ${id}`);
       }
       return page;
     })();
-    this.#patternCache.set(id, promise);
+    this.#patternCache.set(id, { promise, started: start });
     return promise;
   }
 
@@ -421,6 +448,7 @@ export class RuntimeInternals extends EventTarget {
     identity,
     view,
     apiUrl,
+    spaceHostMap,
     experimental,
     cfcEnforcementMode,
     trustSnapshot,
@@ -503,6 +531,7 @@ export class RuntimeInternals extends EventTarget {
       createRuntimeClientOptions({
         session,
         apiUrl,
+        spaceHostMap,
         buildHash,
         experimental,
         cfcEnforcementMode,

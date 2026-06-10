@@ -10,11 +10,11 @@ self-contained, implementable specification.
 This spec covers:
 
 - **Fabric values** (Sections 1-2) -- the type universe for all persistent and
-  in-flight data, and the fabric protocol (`[DECONSTRUCT]`/`[RECONSTRUCT]`)
-  for custom type participation in serialization
+  in-flight data, and the fabric protocol (per-class `[CODEC]` /
+  `FabricCodec`) for custom type participation in serialization
 - **Unknown types** (Section 3) -- forward-compatibility via `UnknownValue`
 - **Serialization contexts** (Section 4) -- boundary-crossing serialization
-  strategy, the `serialize()`/`deserialize()` functions, and boundary inventory
+  strategy, the `encode()`/`decode()` boundary, and boundary inventory
 - **JSON encoding** -- the `fvj1:` encoding prefix, the `/<Type>@<Version>`
   wire format for special types, escaping, detection rules, and the `/`-key
   reservation rule

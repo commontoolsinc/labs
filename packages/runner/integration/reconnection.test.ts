@@ -24,7 +24,7 @@ const createRuntime = (identity: Identity, base: URL) =>
     apiUrl: base,
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", base),
+      memoryHost: new URL(base),
     }),
   });
 

@@ -11,6 +11,9 @@ export const TRUSTED_BUILDERS = Object.freeze(
     "derive",
     "handler",
     "lift",
+    // Identity tag for multi-user test descriptors (`cf test`); its
+    // arguments are trusted-builder results, never event-carrying closures.
+    "multiUserTest",
     "pattern",
   ] as const,
 );

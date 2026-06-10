@@ -87,6 +87,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   ): Promise<RuntimeClient> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
+      spaceHostMap: options.spaceHostMap,
       identity: options.identity.serialize(),
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,

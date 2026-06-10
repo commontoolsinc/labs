@@ -230,7 +230,7 @@ intermediate representation.
 
 This proposal pairs with [Late Serialization](#late-serialization-rich-types-within-the-runtime):
 if rich types flow through the runtime, hashing should operate on those
-types directly (via their deconstructed state for `FabricInstance`s), not
+types directly (via their codec-encoded state for `FabricInstance`s), not
 on JSON-encoded forms. The hash becomes encoding-independent — the same
 identity whether later serialized to JSON, CBOR, or Automerge.
 
@@ -315,28 +315,42 @@ serialization context must recognize these types directly.
 
 #### The Fabric Protocol
 
-Types *we control* opt into storability by implementing methods keyed by
+Types *we control* opt into storability by implementing members keyed by
 well-known symbols:
 
 ```typescript
-const DECONSTRUCT = Symbol.for('common.deconstruct');
-const RECONSTRUCT = Symbol.for('common.reconstruct');
+const CODEC = Symbol.for('data-model.codec');
 const DEEP_FREEZE = Symbol.for('common.deepFreeze');
 const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
-// If protocol evolution is needed: Symbol.for('common.deconstruct@2')
+// If protocol evolution is needed: Symbol.for('data-model.codec@2')
 
-// Instance protocol: "here's my essential state, here's how to freeze
-// me deeply, and here's how to clone me."
+// Instance protocol: "here's how to freeze me deeply, and here's how to
+// clone me." (In-process lifecycle only -- serialization is class-level.)
 abstract class FabricInstance {
-  abstract [DECONSTRUCT](): FabricValue;
   abstract [DEEP_FREEZE](subFreeze: (v: FabricValue) => FabricValue): FabricValue;
   abstract [IS_DEEP_FROZEN](subIsDeepFrozen: (v: FabricValue) => boolean): boolean;
   abstract deepClone(frozen: boolean): FabricInstance;
+  abstract shallowClone(frozen: boolean): FabricInstance;
 }
 
-// Class protocol: "here's how to bring one back"
-interface FabricClass<T extends FabricInstance> {
-  [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
+// Codec protocol: each class hosts an encoder-decoder object -- the
+// single source of truth for how its instances serialize -- as a static
+// getter keyed by `CODEC`.
+interface FabricCodec {
+  get uniqueHandledClass(): Constructor | undefined;
+  get recognizedTypeTag(): string | undefined;
+  canEncode(value: FabricValue): boolean;
+  tagForValue(value: FabricValue): string;
+  encode(value: FabricValue): FabricValue;   // shallow
+  decode(                                    // shallow
+    typeTag: string,
+    state: FabricValue,
+    context: ReconstructionContext,
+  ): FabricValue;
+}
+
+interface FabricClassWithCodec {
+  get [CODEC](): FabricCodec;
 }
 ```
 
@@ -349,8 +363,8 @@ cycle. See `space-model-formal-spec/1-fabric-values.md` Section 8.6 for
 the full protocol, dispatch shape, and boundary-crossing egress
 contracts.
 
-`[RECONSTRUCT]` is a dedicated static method rather than using the class
-constructor for two reasons:
+`decode()` lives on the codec rather than being a constructor for two
+reasons:
 
 1. **Reconstruction-specific context**: It receives a `ReconstructionContext`
    (and potentially other context) which shouldn't be mandated in a regular
@@ -371,12 +385,26 @@ Example implementation:
 
 ```typescript
 class Cell<T> extends FabricInstance {
-  [DECONSTRUCT]() {
-    return { id: this.entityId, path: this.path, space: this.space };
-  }
+  static #codec = new (class extends BaseFabricCodec {
+    constructor() {
+      super('Cell@1', Cell);
+    }
 
-  static [RECONSTRUCT](state: CellState, context: ReconstructionContext): Cell<unknown> {
-    return context.getCell(state);
+    encode(value: Cell<unknown>): FabricValue {
+      return { id: value.entityId, path: value.path, space: value.space };
+    }
+
+    decode(
+      _typeTag: string,
+      state: FabricValue,
+      context: ReconstructionContext,
+    ): Cell<unknown> {
+      return context.getCell(state as CellState);
+    }
+  })();
+
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
 ```
@@ -384,24 +412,27 @@ class Cell<T> extends FabricInstance {
 This approach:
 - **Open for extension**: New fabric types don't require modifying a central
   type definition
-- **Co-located logic**: Each type knows how to deconstruct/reconstruct itself
+- **Co-located logic**: Each type's codec lives with the type itself
+- **Explicit, curated wire surface**: which classes participate is
+  determined by curated codec lists, and an unregistered fabric class
+  reaching the encoder is a hard error — not an implicit fallback
 - **Symbol-based brands**: Unique symbols prevent collision with user data keys
   and provide reliable runtime type discrimination
 
-#### Deconstructed State and Recursion
+#### Encoded State and Recursion
 
-The value returned by `[DECONSTRUCT]()` can contain any value that is itself
-deconstructable — including other `FabricInstance`s, built-in types like
-`Error` or `Map`, and of course primitives and plain objects/arrays.
+The value returned by a codec's `encode()` can contain any value that is
+itself a `FabricValue` — including other `FabricInstance`s, primitives,
+and plain objects/arrays.
 
-The **serialization system handles recursion**, not the individual deconstructor
-methods. A `[DECONSTRUCT]` implementation simply returns its essential state; it
-does not (and should not) recursively deconstruct nested values. The
-deconstructor methods won't have access to the serialization machinery required
+The **serialization system handles recursion**, not the individual codecs.
+An `encode()` implementation simply returns one shallow layer of essential
+state; it does not (and should not) recursively encode nested values. The
+codecs won't have access to the serialization machinery required
 for that — by design, as it would be a layering violation.
 
-Similarly, `[RECONSTRUCT]` receives state where nested values have already been
-reconstructed by the serialization system.
+Similarly, `decode()` receives state where nested values have already been
+decoded by the serialization system.
 
 #### Reconstruction Guarantees
 
@@ -431,53 +462,72 @@ class UnknownValue extends FabricInstance {
     readonly state: FabricValue,  // the raw state, already recursively processed
   ) { super(); }
 
-  [DECONSTRUCT]() {
-    return { type: this.wireTypeTag, state: this.state };
-  }
+  static #codec = new (class extends BaseFabricCodec {
+    constructor() {
+      // No recognized tag: the instance carries its own.
+      super(undefined, UnknownValue);
+    }
 
-  static [RECONSTRUCT](
-    state: { type: string; state: FabricValue },
-    _context: ReconstructionContext,
-  ): UnknownValue {
-    return new UnknownValue(state.type, state.state);
+    override tagForValue(value: UnknownValue): string {
+      return value.wireTypeTag;
+    }
+
+    encode(value: UnknownValue): FabricValue {
+      return value.state; // the preserved bare state -- not an envelope
+    }
+
+    decode(typeTag: string, state: FabricValue): UnknownValue {
+      return new UnknownValue(typeTag, state);
+    }
+  })();
+
+  static get [CODEC](): FabricCodec {
+    return this.#codec;
   }
 }
 ```
 
 The serialization system has special knowledge of `UnknownValue`: when it
-encounters an unknown type tag during deserialization, it wraps the original
-tag and state into `{ type, state }` and passes that to `[RECONSTRUCT]`. When
-re-serializing, it uses the preserved type tag to produce the original wire
-format, allowing data to round-trip through systems that don't understand it.
+encounters an unknown type tag during deserialization, it constructs an
+`UnknownValue` directly from the original tag and state. When
+re-serializing, the codec's `tagForValue()` reads back the preserved tag
+and `encode()` re-emits the preserved bare state, reproducing the original
+wire format and allowing data to round-trip through systems that don't
+understand it.
 
 #### Serialization Contexts
 
-Classes provide the *capability* to serialize but don't own the wire format.
-A **serialization context** owns the mapping between classes and tags:
+Classes provide the *capability* to serialize (via their codecs) but don't
+own the wire format. A **serialization context** owns the format-specific
+pipeline, dispatching per-type work to the codecs through a registry:
 
 ```typescript
-interface SerializationContext {
-  // Maps fabric types to wire format tags
-  getTagFor(value: FabricInstance): string;
-  getClassFor(tag: string): FabricClass<FabricInstance>;
-
-  // Format-specific wrapping
-  wrap(tag: string, state: unknown): SerializedForm;
-  unwrap(data: SerializedForm): { tag: string; state: unknown };
+// The public boundary (formal spec Section 4.3):
+interface SerializationContext<SerializedForm = unknown> {
+  readonly lenient: boolean;
+  encode(value: FabricValue): SerializedForm;
+  decode(data: SerializedForm, context: ReconstructionContext): FabricValue;
 }
+
+// Internally, a registry maps classes -> codecs (for encoding) and
+// tags -> codecs (for decoding); see formal spec Section 4.5.
 ```
 
 This separation enables:
 - **Protocol versioning**: Same class, different tags in v1 vs v2
 - **Format flexibility**: JSON context vs CBOR context vs Automerge context
-- **Migration paths**: Old context reads legacy format, new context writes modern format
+- **Migration paths**: A registry can route a legacy decode-only tag to an
+  equivalent codec without touching the owning class
 - **Testing**: Mock contexts for unit tests
 
 The flow becomes:
 
 ```
-Serialize:   instance.[DECONSTRUCT]() → state → context.wrap(tag, state) → wire
-Deserialize: wire → context.unwrap() → { tag, state } → Class[RECONSTRUCT](state) → instance
+Serialize:   codec.encode(instance) → state
+             → wrap(codec.tagForValue(instance), state) → wire
+Deserialize: wire → unwrap() → { tag, state }
+             → registry.codecFromTag(tag).decode(tag, state, ctx)
+             → instance
 ```
 
 #### Serialization Boundaries
@@ -492,32 +542,39 @@ The boundaries where serialization occurs in the current architecture:
 | **Network sync** | `toolshed` ↔ remote peers | WebSocket/HTTP |
 | **Cross-space** | space A ↔ space B | if in separate processes |
 
-Each boundary would use a serialization context:
+Each boundary would use a serialization context (sketches of the context's
+internal walkers):
 
 ```typescript
-// At boundary exit
-function serialize(value: FabricValue, context: SerializationContext): SerializedForm {
-  if (value instanceof FabricInstance) {
-    const state = value[DECONSTRUCT]();
-    const tag = context.getTagFor(value);
-    return context.wrap(tag, state);
+// At boundary exit (inside the context's encode walk)
+function encodeValue(value: FabricValue): JsonWireValue {
+  const codec = registry.codecFromValue(value);
+  if (codec) {
+    const state = encodeValue(codec.encode(value)); // context recurses
+    return wrapTag(codec.tagForValue(value), state);
   }
-  // Handle primitives, arrays, plain objects recursively...
+  // Handle self-representing primitives, arrays, plain objects...
 }
 
-// At boundary entry
-function deserialize(data: SerializedForm, context: SerializationContext, runtime: Runtime): FabricValue {
-  const { tag, state } = context.unwrap(data);
-  if (tag) {
-    const cls = context.getClassFor(tag);
-    return cls[RECONSTRUCT](state, runtime);
+// At boundary entry (inside the context's decode walk)
+function decodeValue(
+  data: JsonWireValue,
+  ctx: ReconstructionContext,
+): FabricValue {
+  const unwrapped = unwrapTag(data);
+  if (unwrapped) {
+    const { tag, state } = unwrapped;
+    const codec = registry.codecFromTag(tag);
+    if (codec) return codec.decode(tag, decodeValue(state, ctx), ctx);
+    return new UnknownValue(tag, decodeValue(state, ctx));
   }
   // Handle primitives, arrays, plain objects recursively...
 }
 ```
 
-The `deserialize` function needs runtime context to reconstitute rich types
-(e.g., looking up existing Cell instances rather than creating duplicates).
+The decode path needs runtime context (`ReconstructionContext`) to
+reconstitute rich types (e.g., looking up existing Cell instances rather
+than creating duplicates).
 
 #### Benefits
 
@@ -531,7 +588,7 @@ The `deserialize` function needs runtime context to reconstitute rich types
 #### Relationship to Hashing
 
 This proposal pairs with [Simplified Hashing](#simplified-hashing):
-hashes can be computed over rich types directly, using deconstructed
+hashes can be computed over rich types directly, using codec-encoded
 state for `FabricInstance`s and type-specific handling for built-in JS types.
 This makes identity hashing independent of any particular wire encoding.
 
@@ -540,7 +597,7 @@ This makes identity hashing independent of any particular wire encoding.
 - **Migration complexity**: Existing code assumes JSON forms internally
 - **Runtime context required**: Deserialization needs access to the runtime
 - **Comparison semantics**: Must define equality for rich types (by identity?
-  by deconstructed state?)
+  by encoded state?)
 - **Not "zero transformations"**: Late serialization eliminates serialization
   copies within the runtime, but does not eliminate all transformations.
   Schema-driven reads still select and shape data (resolving links, projecting
@@ -553,16 +610,16 @@ This makes identity hashing independent of any particular wire encoding.
 
 - What is the migration path from early to late conversion?
 - How do rich types participate in change detection and diffing?
-- Should cycles in deconstructed state be detected and rejected, or is this
+- Should cycles in encoded state be detected and rejected, or is this
   left to the serialization system?
 - How are serialization contexts configured and selected at each boundary?
 - How is the type registry within a context managed? (Static registration?
   Dynamic discovery? Who owns the registry?)
-- What happens when `[DECONSTRUCT]` or `[RECONSTRUCT]` fails partway through?
-  (Might want a `ProblematicValue` with similar structure/use to
-  `UnknownValue`.)
+- What happens when a codec's `encode()` or `decode()` fails partway
+  through? (Answered in the formal spec: a `ProblematicValue`, with
+  similar structure/use to `UnknownValue`, plus a lenient context mode.)
 - How do schemas integrate with the fabric protocol? Each `FabricInstance`
-  type implies a schema for its deconstructed state. The fabric layer should
+  type implies a schema for its encoded state. The fabric layer should
   provide serialization contexts access to these schemas. What changes to the
   schema language are required? (See [Schemas](./7-schemas.md).)
 - Which built-in JS types should be included?

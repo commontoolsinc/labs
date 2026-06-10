@@ -36,6 +36,7 @@
     "./v2/client": "./v2/client.ts",
     "./v2/engine": "./v2/engine.ts",
     "./v2/server": "./v2/server.ts",
+    "./v2/standalone": "./v2/standalone.ts",
     "./v2/storage-path": "./v2/storage-path.ts",
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
@@ -44,6 +45,7 @@
     "./sqlite/columns": "./v2/sqlite/columns.ts",
     "./sqlite/guard": "./v2/sqlite/guard.ts",
     "./sqlite/schema": "./v2/sqlite/schema.ts",
+    "./sqlite/row-label": "./v2/sqlite/row-label.ts",
     "./sqlite/exec": "./v2/sqlite/exec.ts"
   },
   "imports": {

@@ -20,6 +20,11 @@
 // this read path.
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
+import { parseLink } from "../link-utils.ts";
+import {
+  computeRowLabelRead,
+  resolveCeilingPlaceholders,
+} from "./sqlite/row-label-read.ts";
 import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
@@ -27,7 +32,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { narrowestScope } from "../scope.ts";
+import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
@@ -41,6 +46,10 @@ type SqliteDbRef = {
   // server folds this into the on-disk filename so user/session-scoped dbs get
   // a per-user / per-session file. Absent ⇒ "space" (the default, unqualified).
   scope?: CellScope;
+  // The db's owner — the principal that created the SqliteDb cell, captured
+  // once at handle creation (CFC Phase 3: resolves the row rule's dbOwner()
+  // and the ceiling's __ctDbOwner placeholder; never the acting reader).
+  owner?: string;
 };
 type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
 
@@ -83,9 +92,46 @@ function readDbRef(value: unknown): SqliteDbRef {
     typeof (value as SqliteDbRef).id === "string"
   ) {
     const ref = value as SqliteDbRef;
-    return { id: ref.id, tables: ref.tables, scope: ref.scope };
+    return {
+      id: ref.id,
+      // Materialize to plain JSON: a rowLabel rule's term LISTS (arrays of
+      // objects) split into per-element entity docs when the handle value is
+      // stored, so the stored form holds doc LINKS — the wire (server
+      // provenance gate) and every local consumer need the resolved spec.
+      tables: ref.tables
+        ? cloneIfNecessary(
+          ref.tables as Parameters<typeof cloneIfNecessary>[0],
+          { frozen: false },
+        ) as Record<string, unknown>
+        : undefined,
+      // Validate at the boundary: an invalid scope value must not flow into
+      // query execution / on-disk filename derivation.
+      scope: isCellScope(ref.scope) ? ref.scope : undefined,
+      owner: typeof ref.owner === "string" ? ref.owner : undefined,
+    };
   }
   throw new TypeError("sqlite: invalid database handle");
+}
+
+/** Union of the per-column (Phase 2) confidentiality atoms a labeled result
+ *  schema attaches — they ride every row, so a declared output ceiling must
+ *  admit them too. */
+function staticConfidentialityOf(
+  labelSchema: Record<string, unknown> | undefined,
+): unknown[] {
+  const props = (labelSchema as {
+    properties?: {
+      result?: { items?: { properties?: Record<string, unknown> } };
+    };
+  })?.properties?.result?.items?.properties;
+  if (!props) return [];
+  const out: unknown[] = [];
+  for (const p of Object.values(props)) {
+    const conf = (p as { ifc?: { confidentiality?: unknown[] } })?.ifc
+      ?.confidentiality;
+    if (Array.isArray(conf)) out.push(...conf);
+  }
+  return out;
 }
 
 /**
@@ -172,8 +218,14 @@ function deriveNullOriginIfc(tables: LabelTables): IFCLabel | undefined {
       if (ifc && typeof ifc === "object") merged = mergeLabel(merged, ifc);
     }
   }
-  return (merged.confidentiality?.length || merged.integrity?.length)
-    ? merged
+  // Confidentiality unions across contributors (a sound over-approximation: the
+  // aggregate could depend on any column). Integrity does NOT: an aggregate /
+  // expression / literal is a new computed value and inherits no integrity
+  // evidence. Unioning integrity would let it falsely claim an atom held by a
+  // single column (§8.17.1: class-aware meet, never union; propagation classes
+  // pending, so conservatively empty). [CT-1668]
+  return merged.confidentiality?.length
+    ? { confidentiality: merged.confidentiality }
     : undefined;
 }
 
@@ -292,7 +344,17 @@ export function sqliteDatabase(
         | { tables?: Record<string, unknown> }
         | undefined;
       const id = handle.entityId?.["/"] ?? JSON.stringify(handle.getAsLink());
-      handle.withTx(tx).set({ id, tables: options?.tables, scope });
+      // The db's owner: the principal creating this handle (CFC Phase 3 —
+      // resolves the row rule's dbOwner(); a FIXED property of the db, not
+      // the acting reader). "creator" would be wrong for linked dbs; the
+      // handle's creation is where ownership is minted.
+      const owner = runtime.trustSnapshotProvider()?.actingPrincipal;
+      handle.withTx(tx).set({
+        id,
+        tables: options?.tables,
+        scope,
+        ...(owner !== undefined && { owner }),
+      });
       sendResult(tx, handle);
       initialized = true;
     }
@@ -331,6 +393,11 @@ export function sqliteQuery(
       // Transformer-injected from `db.query<Row>` / `sqliteQuery<Row>`; absent
       // for untyped queries.
       rowSchema?: unknown;
+      // CFC Phase 3: declared output ceiling + what to do when a row's label
+      // exceeds it ("fail" default | "skip"). The typed alternative is
+      // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
+      maxConfidentiality?: unknown[];
+      onExceed?: unknown;
     } | undefined;
 
     // The query result holds rows from a scope-partitioned db, so it must be at
@@ -372,6 +439,10 @@ export function sqliteQuery(
       sql: inputs.sql,
       params: params ?? null,
       reactOn: inputs.reactOn ?? null,
+      // Phase 3 read-surface options join the request identity so changing
+      // them re-issues the query (pre-existing queries re-hash once — benign).
+      maxConfidentiality: inputs.maxConfidentiality ?? null,
+      onExceed: inputs.onExceed ?? null,
     });
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
@@ -429,6 +500,59 @@ export function sqliteQuery(
             }
             labelSchema = schema;
           }
+          // CFC Phase 3: per-row data-derived labels + the declared output
+          // ceiling. The pure half (row-label-read.ts) re-validates the wire
+          // spec, locates rule inputs by TRUE origin, evaluates the rule per
+          // row, and decides fail/skip under the ceiling — every unresolvable
+          // case refuses the query (fail closed), never under-labels.
+          const rowSchemaCeiling = (inputs.rowSchema as {
+            ifc?: { maxConfidentiality?: unknown[] };
+          } | undefined)?.ifc?.maxConfidentiality;
+          if (
+            inputs.maxConfidentiality !== undefined &&
+            rowSchemaCeiling !== undefined
+          ) {
+            await failQuery(
+              "sqlite: declare the output ceiling once — either the Row " +
+                "schema's MaxConfidentiality or the query's maxConfidentiality " +
+                "option, not both",
+            );
+            return;
+          }
+          let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
+          if (ceiling !== undefined) {
+            const resolved = resolveCeilingPlaceholders(ceiling, {
+              actingPrincipal: runtime.trustSnapshotProvider()
+                ?.actingPrincipal,
+              owner: db.owner,
+            });
+            if ("error" in resolved) {
+              await failQuery(resolved.error);
+              return;
+            }
+            ceiling = resolved.atoms;
+          }
+          const rowLabels = computeRowLabelRead({
+            tables: db.tables,
+            columns: res.columns,
+            rows,
+            owner: db.owner,
+            staticConfidentiality: staticConfidentialityOf(labelSchema),
+            ceiling,
+            onExceed: inputs.onExceed,
+          });
+          if ("error" in rowLabels) {
+            await failQuery(rowLabels.error);
+            return;
+          }
+          // onExceed:"skip" — drop rows the declared ceiling does not admit
+          // (a declared, observable existence release; design §7b).
+          const keep = rowLabels.keep;
+          const keptRows = keep ? rows.filter((_, i) => keep[i]) : rows;
+          const perRow = keep
+            ? rowLabels.labels.filter((_, i) => keep[i])
+            : rowLabels.labels;
+          const anyPerRow = perRow.some((l) => l !== undefined);
           // On the labeled path, write the rows UNDER the label schema: the
           // schema-aware write is what attaches the per-path `ifc` to each row's
           // entity doc (recording the policy alone does not). The provider rows
@@ -437,12 +561,12 @@ export function sqliteQuery(
           // plain extensible JSON copy. `editWithRetry` runs
           // `prepareTxForCommit`, so the CFC-relevant labeled write commits and
           // the label persists.
-          const resultRows = labelSchema
+          const resultRows = ((labelSchema || anyPerRow)
             ? cloneIfNecessary(
-              rows as Parameters<typeof cloneIfNecessary>[0],
+              keptRows as Parameters<typeof cloneIfNecessary>[0],
               { frozen: false },
             )
-            : rows;
+            : keptRows) as unknown[];
           const wrote = await runtime.editWithRetry((wtx) => {
             // Stale-writeback guard: a newer query (different inputs -> different
             // hash) may have superseded this one while the RPC was in flight.
@@ -456,6 +580,45 @@ export function sqliteQuery(
               result: resultRows,
               requestHash: hash,
             });
+            // Per-row label attachment (CFC Phase 3): each row split into its
+            // own entity doc above; write each labeled row doc DIRECTLY (its
+            // own id, root path) under a root-`ifc` schema. Keyed by the row
+            // doc's id, so there is no collision with the array write's items
+            // schema, and the per-row root label coexists with the per-column
+            // field labels on the same doc (design §7, spike 3.0).
+            if (anyPerRow) {
+              const base = result.getAsNormalizedFullLink();
+              for (let i = 0; i < resultRows.length; i++) {
+                const ifc = perRow[i];
+                if (!ifc) continue;
+                const raw = result.key("result").key(i).withTx(wtx).getRaw();
+                const link = parseLink(raw);
+                if (!link?.id) {
+                  // Fail closed: a labeled row MUST carry its label; aborting
+                  // the tx surfaces as wrote.error -> q.error below.
+                  throw new Error(
+                    `sqlite: result row ${i} did not split into its own ` +
+                      "entity doc — cannot attach its per-row label",
+                  );
+                }
+                createCell(
+                  runtime,
+                  {
+                    ...link,
+                    space: link.space ?? base.space,
+                    scope: link.scope ?? base.scope,
+                    path: [],
+                  },
+                  wtx,
+                ).asSchema(
+                  {
+                    type: "object",
+                    additionalProperties: true,
+                    ifc,
+                  } as Parameters<Cell<unknown>["asSchema"]>[0],
+                ).withTx(wtx).set(resultRows[i]);
+              }
+            }
           });
           // Surface a write-back failure as `q.error` rather than leaving the
           // query stuck `pending` (editWithRetry returns the error, not throws).

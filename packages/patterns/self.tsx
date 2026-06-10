@@ -12,6 +12,7 @@
  */
 import {
   computed,
+  type Default,
   handler,
   ifElse,
   NAME,
@@ -297,7 +298,7 @@ interface SelfInput {
    * and for parent patterns that want to own the storage).
    * When omitted the pattern creates and owns its own durable cell.
    */
-  selfModel?: Writable<SelfModel>;
+  selfModel?: Writable<SelfModel | Default<typeof EMPTY_SELF_MODEL>>;
 }
 
 /** Private self-model — the user's values, neurotype, and reflective answers. #self-model */
@@ -440,13 +441,13 @@ export const removeValueCardByIndex = handler<
 // ============================================================================
 
 const Self = pattern<SelfInput, SelfOutput>(
-  ({ selfModel: injectedSelfModel }) => {
-    // Use the injected cell when provided (e.g. from tests); otherwise own one.
-    // The explicit .for("selfModel") is required here: `new Writable(...)` sits
-    // on the RIGHT of ??, so the CTS transformer does NOT auto-inject a .for
-    // cause for it. Without this call the owned cell has no stable id.
-    const selfModel = injectedSelfModel ??
-      new Writable<SelfModel>(EMPTY_SELF_MODEL).for("selfModel");
+  ({ selfModel }) => {
+    // `selfModel` is seeded with EMPTY_SELF_MODEL via Default<> when the pattern
+    // owns its cell (home-local, no injection) and may be injected by tests or
+    // parent patterns. Previously this used `injected ?? new Writable(...).for()`,
+    // but a `new Writable(initial)` on the RIGHT of ?? is lowered to a lift whose
+    // value is undefined when uninjected — so the owned cell never seeded and
+    // every capture handler threw on `selfModel.get().neurotypes` (CT-1669).
 
     // Local form field cells — neurotype
     const systemField = new Writable<NeurotypeSystem>("mbti").for(
@@ -511,12 +512,12 @@ const Self = pattern<SelfInput, SelfOutput>(
               <cf-select
                 $value={systemField}
                 items={neurotypeSystemItems}
-                style="min-width: 130px;"
+                style="flex: 0 0 150px;"
               />
               <cf-input
                 $value={resultField}
                 placeholder="e.g. INTJ, 5w4…"
-                style="flex: 1;"
+                style="flex: 1 1 auto; min-width: 0;"
               />
               <cf-button
                 onClick={recordNeurotypeFromForm({

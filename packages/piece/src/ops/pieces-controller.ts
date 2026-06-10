@@ -154,7 +154,7 @@ export class PiecesController<T = unknown> {
       apiUrl: new URL(apiUrl),
       storageManager: StorageManager.open({
         as: session.as,
-        address: new URL("/api/storage/memory", apiUrl),
+        memoryHost: new URL(apiUrl),
         spaceIdentity: session.spaceIdentity,
       }),
       cfcEnforcementMode: "enforce-explicit",

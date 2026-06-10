@@ -1,4 +1,10 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import {
+  CdpWorkerProfiler,
+  env,
+  Page,
+  renderProfileReport,
+  waitFor,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
@@ -147,6 +153,25 @@ const CAPTURE_EVENT_INVOCATION_SERIES = (() => {
     return 0;
   }
 })();
+// CPU-profile the runtime worker for the first N note-create iterations,
+// writing .cpuprofile + ranked self-time reports to CF_CPUPROFILE_DIR
+// (default /tmp).
+const CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES = (() => {
+  try {
+    return parseCaptureSeriesCount(
+      Deno.env.get("CF_CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES"),
+    );
+  } catch {
+    return 0;
+  }
+})();
+const CPUPROFILE_DIR = (() => {
+  try {
+    return Deno.env.get("CF_CPUPROFILE_DIR") ?? "/tmp";
+  } catch {
+    return "/tmp";
+  }
+})();
 const SCHEDULER_PULL_MODE = (() => {
   try {
     const raw = Deno.env.get("CF_SCHEDULER_PULL_MODE");
@@ -286,7 +311,18 @@ describe("default-app flow test", () => {
       NOTE_CREATE_TIMING_SERIES,
       CAPTURE_NOTE_CREATE_PROFILE_SERIES,
       CAPTURE_EVENT_INVOCATION_SERIES,
+      // Profiled notes start at note 2 (note 1 is compile-dominated).
+      CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES > 0
+        ? 1 + CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES
+        : 0,
     );
+
+    let cpuProfiler: CdpWorkerProfiler | undefined;
+    if (CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES > 0) {
+      console.log("Connect CDP worker profiler...");
+      cpuProfiler = await CdpWorkerProfiler.connect(shell.wsEndpoint());
+      await cpuProfiler.waitForWorker("worker-runtime");
+    }
 
     if (CAPTURE_HOME_LOAD_SERIES > 0) {
       const homeLoadSummary = await collectHomeLoadSummaryFromFreshPage(
@@ -336,6 +372,24 @@ describe("default-app flow test", () => {
         await waitFor(async () => {
           return await resetEventInvocationTrace(page);
         });
+      }
+
+      // Skip note 1: its profile is dominated by first-use pattern compile
+      // (out of scope for steady-state measurement) and is large enough to
+      // break the CDP websocket message limit.
+      let profileThisNote = cpuProfiler !== undefined && noteIndex >= 2 &&
+        noteIndex <= 1 + CAPTURE_NOTE_CREATE_CPUPROFILE_SERIES;
+      if (profileThisNote) {
+        console.log(`Start worker CPU profile (note ${noteIndex})...`);
+        try {
+          await cpuProfiler!.start("worker-runtime");
+        } catch (error) {
+          console.warn(
+            `Worker CPU profile start failed (note ${noteIndex}):`,
+            error,
+          );
+          profileThisNote = false;
+        }
       }
 
       console.log(`Click notes drop down (note ${noteIndex})...`);
@@ -485,6 +539,29 @@ describe("default-app flow test", () => {
         JSON.stringify(noteCreateTiming, null, 2),
       );
 
+      if (profileThisNote) {
+        try {
+          const profile = await cpuProfiler!.stop();
+          const outPrefix = `${CPUPROFILE_DIR}/default-app-note-${noteIndex}`;
+          await Deno.writeTextFile(
+            `${outPrefix}.cpuprofile`,
+            JSON.stringify(profile),
+          );
+          const report = renderProfileReport(
+            profile,
+            `note-create iteration ${noteIndex}`,
+          );
+          await Deno.writeTextFile(`${outPrefix}.report.txt`, report);
+          console.log(`Worker CPU profile written: ${outPrefix}.cpuprofile`);
+        } catch (error) {
+          // Profiling is best-effort instrumentation; don't fail the test.
+          console.warn(
+            `Worker CPU profile capture failed (note ${noteIndex}):`,
+            error,
+          );
+        }
+      }
+
       if (noteIndex <= CAPTURE_NOTE_CREATE_PROFILE_SERIES) {
         const noteCreateProfile = await collectNoteCreateProfile(page);
         assert(
@@ -541,6 +618,8 @@ describe("default-app flow test", () => {
         );
       }
     }
+
+    cpuProfiler?.close();
 
     const noteFound = await findNoteInList(page);
     assert(

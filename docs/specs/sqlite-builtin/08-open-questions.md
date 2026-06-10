@@ -159,12 +159,21 @@ during design are marked **[resolved]** with the decision.
 ## CFC (future)
 
 16. **Row-label projection language.** Section [06](./06-cfc.md) proposes a pure
-    declarative projection (`principal(field)`, `jsonArray(field)`) so the
-    server can evaluate row labels at commit. Is that expressive enough for real
-    policies (e.g. recipients stored as a join table rather than a JSON column)?
-17. **Read-time filtering vs. fail-closed.** When a reader lacks clearance for
-    some rows, do we silently filter them out of the result set, or fail the
-    whole query closed? Filtering leaks row counts; failing closed is coarse.
+    declarative projection (now `match(f.col, /re/)` / `principal(protocol, …)`
+    with explicit `any`/`all` clause combinators —
+    [plans/cfc-phase3-per-row.md](./plans/cfc-phase3-per-row.md) §4) so the
+    server can evaluate row labels at commit. Still open: is that expressive
+    enough for real policies (e.g. recipients stored as a join table rather
+    than a JSON column)?
+17. **Read-time filtering vs. fail-closed.** *(Adjudicated at the CFC spec
+    level — CFC spec §8.17.2 and invariant 14.)* Fail-closed is the required
+    default for any row-set read. Filtering ("skip") is a per-row release of
+    one presence bit and is permitted only as a declared opt-in
+    (`onExceed: "skip"`), with the table's policy permitting the existence
+    release and skips auditable; it never applies to aggregates. Per-user
+    views become useful with reader-enumeration ceilings (`any([...])`) once
+    OR-clause labels land (CFC spec §3.1.8, §8.10.3). What remains here is
+    implementation (phase 3.b), not the principle.
 
 ## Authorization of the SQLite verbs
 

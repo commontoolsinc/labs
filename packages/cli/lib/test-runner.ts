@@ -43,6 +43,10 @@ import { basename } from "@std/path";
 import { timeout } from "@commonfabric/utils/sleep";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 import {
+  multiUserDescriptorMeta,
+  runMultiUserTestPattern,
+} from "./multi-user-test-runner.ts";
+import {
   type CDFPoint,
   getLogger,
   getLoggerCountsBreakdown,
@@ -884,6 +888,18 @@ export async function runTestPattern(
     if (!main?.default) {
       throw new Error(
         `Test pattern must export a pattern function as default`,
+      );
+    }
+
+    // Multi-user tests export a descriptor ({ setup?, participants }) as the
+    // default export. They run in worker-isolated runtimes against a shared
+    // storage server — hand off to the multi-user orchestrator (this local
+    // runtime is only used for detection; the try/finally below disposes it).
+    const multiUserMeta = multiUserDescriptorMeta(main.default);
+    if (multiUserMeta) {
+      return await withPhase(
+        ["runTestPattern", "multiUser"],
+        () => runMultiUserTestPattern(testPath, multiUserMeta, options),
       );
     }
 

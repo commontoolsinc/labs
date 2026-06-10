@@ -1,3 +1,5 @@
+import { LRUCache } from "@commonfabric/utils/cache";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { hashSchema, internSchema } from "@commonfabric/data-model/schema-hash";
 import { schemaWithProperties } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue } from "@commonfabric/memory/interface";
@@ -6,7 +8,6 @@ import type {
   SchemaPathSelector,
   Unit,
 } from "@commonfabric/memory/interface";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -30,9 +31,35 @@ const fromKey = (key: string): BaseMemoryAddress => {
   };
 };
 
-// Only cache against already-deep-frozen inputs. Mutable schemas can be edited
-// in place, and keying the cache by their identity would return stale results.
+// Only cache by identity against already-deep-frozen inputs. Mutable schemas
+// can be edited in place, and keying this cache by their identity would
+// return stale results.
 const standardizedSchemaCache = new WeakMap<object, JSONSchema>();
+
+// Standardization results for MUTABLE inputs, keyed by content hash. The hash
+// is recomputed per call (hashOf does not identity-cache mutable objects), so
+// in-place edits change the key and stay correct — while structurally-equal
+// fresh objects, the common case on the subscription path, pay one content
+// hash instead of a full rebuild + intern + re-hash each call.
+const standardizedByContentCache = new LRUCache<string, JSONSchema>({
+  capacity: 4096,
+});
+
+// hashSchema(getStandardSchema(schema-without-$defs)) per interned schema
+// instance. getSupersetSelector compares this pair for every tracked selector
+// on every lookup; without the memo each comparison rebuilds the spread and
+// re-hashes both sides.
+const noDefsStandardHashCache = new WeakMap<object, string>();
+
+const noDefsStandardHash = (schema: Record<string, unknown>): string => {
+  let hash = noDefsStandardHashCache.get(schema);
+  if (hash === undefined) {
+    const { $defs: _defs, ...rest } = schema;
+    hash = hashSchema(SelectorTracker.getStandardSchema(rest as JSONSchema));
+    noDefsStandardHashCache.set(schema, hash);
+  }
+  return hash;
+};
 
 const selectorRefFor = (selector: SchemaPathSelector): string =>
   JSON.stringify([
@@ -107,6 +134,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       ? SelectorTracker.getStandardSchema(selector.schema)
       : false;
     const newSchemaHash = newSchema === false ? false : hashSchema(newSchema);
+    const newSchemaObj = isRecord(newSchema) ? newSchema : undefined;
+    // Constant across the candidate loop; hoisted so the $defs-insensitive
+    // comparison below doesn't recompute it per tracked selector.
+    let newSchemaRefCount: number | undefined;
     for (const selectorRef of selectorRefs) {
       const existingSelector = this.standardizedSelector.get(selectorRef)!;
       const existingAddress = { ...address, path: existingSelector.path };
@@ -116,6 +147,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           continue;
         }
         const subPath = newAddress.path.slice(existingAddress.path.length);
+        // Tracked schemas are interned (deep-frozen), so this derivation hits
+        // cfc.schemaAtPath's identity-keyed memo.
         const subSchema = cfc.schemaAtPath(
           existingSchema,
           subPath,
@@ -136,23 +169,19 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           const promiseKey = `${toKey(address)}?${selectorRef}`;
           return [existingSelector, this.selectorPromises.get(promiseKey)!];
         } else {
-          const newSchemaRefs = new Set<string>();
-          ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
-          const newSchemaObj = isRecord(newSchema) ? newSchema : undefined;
           const sortedSubSchemaObj = isRecord(sortedSubSchema)
             ? sortedSubSchema
             : undefined;
-          if (newSchemaObj && sortedSubSchemaObj && newSchemaRefs.size == 0) {
-            const { $defs: _defs1, ...newSchemaNoDefsSpread } = newSchemaObj;
-            const { $defs: _defs2, ...subSchemaNoDefsSpread } =
-              sortedSubSchemaObj;
-            const newSchemaNoDefs = internSchema(newSchemaNoDefsSpread);
-            const subSchemaNoDefs = internSchema(subSchemaNoDefsSpread);
+          if (newSchemaObj && sortedSubSchemaObj) {
+            if (newSchemaRefCount === undefined) {
+              const newSchemaRefs = new Set<string>();
+              ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
+              newSchemaRefCount = newSchemaRefs.size;
+            }
             if (
-              hashSchema(
-                SelectorTracker.getStandardSchema(subSchemaNoDefs),
-              ) ===
-                hashSchema(SelectorTracker.getStandardSchema(newSchemaNoDefs))
+              newSchemaRefCount == 0 &&
+              noDefsStandardHash(sortedSubSchemaObj) ===
+                noDefsStandardHash(newSchemaObj)
             ) {
               const promiseKey = `${toKey(address)}?${selectorRef}`;
               return [existingSelector, this.selectorPromises.get(promiseKey)!];
@@ -220,27 +249,67 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     schemaHash: string | false,
   ): boolean {
     return isRecord(schema) && Array.isArray(schema.anyOf) &&
-      (schema.anyOf.some((item) => {
-        item = SelectorTracker.getStandardSchema(item);
-        if (hashSchema(item) === schemaHash) {
-          return true;
-        }
-        if (schema.$defs !== undefined) {
-          item = schemaWithProperties(item, {
-            $defs: schema.$defs,
-          });
-          item = SelectorTracker.getStandardSchema(item);
-          if (hashSchema(item) === schemaHash) {
-            return true;
-          }
-        }
-        if (item.$ref !== undefined) {
-          item = ContextualFlowControl.resolveSchemaRefs(item, schema);
-          item = SelectorTracker.getStandardSchema(item);
-          return hashSchema(item) === schemaHash;
-        }
-        return false;
-      }));
+      (schema.anyOf.some((item) =>
+        SelectorTracker.#anyOfItemHashes(schema, item).includes(
+          schemaHash as string,
+        )
+      ));
+  }
+
+  /**
+   * The standardized hashes an anyOf item can match under: its plain form,
+   * its `$defs`-grafted form, and its `$ref`-resolved form. Computing these
+   * builds fresh schema objects and re-hashes them, so cache the resulting
+   * hash strings per (parent schema, item) identity when the parent is
+   * deep-frozen (its items then are too).
+   */
+  static #anyOfItemHashesCache = new WeakMap<
+    object,
+    Map<JSONSchema, readonly string[]>
+  >();
+
+  static #anyOfItemHashes(
+    schema: JSONSchema & object,
+    item: JSONSchema,
+  ): readonly string[] {
+    const cacheable = isDeepFrozen(schema);
+    let byItem: Map<JSONSchema, readonly string[]> | undefined;
+    if (cacheable) {
+      byItem = SelectorTracker.#anyOfItemHashesCache.get(schema);
+      const cached = byItem?.get(item);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+    const hashes: string[] = [];
+    let current = SelectorTracker.getStandardSchema(item);
+    hashes.push(hashSchema(current));
+    if (schema.$defs !== undefined) {
+      current = SelectorTracker.getStandardSchema(
+        schemaWithProperties(current, { $defs: schema.$defs }),
+      );
+      hashes.push(hashSchema(current));
+    }
+    if (isRecord(current) && current.$ref !== undefined) {
+      hashes.push(
+        hashSchema(
+          SelectorTracker.getStandardSchema(
+            ContextualFlowControl.resolveSchemaRefs(
+              current,
+              schema,
+            ) as JSONSchema,
+          ),
+        ),
+      );
+    }
+    if (cacheable) {
+      if (byItem === undefined) {
+        byItem = new Map();
+        SelectorTracker.#anyOfItemHashesCache.set(schema, byItem);
+      }
+      byItem.set(item, hashes);
+    }
+    return hashes;
   }
 
   static getStandardSchema(schema: JSONSchema): JSONSchema {
@@ -253,6 +322,18 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       if (cached !== undefined) {
         return cached;
       }
+    }
+    // Content-keyed lookup. For frozen schemas the hash itself is cached by
+    // identity (value-hash WeakMap), so a fresh-but-equal frozen copy costs
+    // one walk ever; mutable schemas re-hash per call, which is what keeps
+    // in-place edits correct.
+    const contentKey = hashSchema(schema);
+    const byContent = standardizedByContentCache.get(contentKey);
+    if (byContent !== undefined) {
+      if (cacheable) {
+        standardizedSchemaCache.set(schema, byContent);
+      }
+      return byContent;
     }
     const traverse = (
       value: Readonly<any>,
@@ -278,6 +359,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     if (cacheable) {
       standardizedSchemaCache.set(schema, standardized);
     }
+    standardizedByContentCache.put(contentKey, standardized);
     return standardized;
   }
 }

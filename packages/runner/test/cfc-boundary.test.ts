@@ -24,7 +24,10 @@ import {
   logicalPathToPointer,
 } from "../src/cfc/mod.ts";
 import { flowPrecisionSchemaForBuiltin } from "../src/cfc/flow-precision.ts";
-import { CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION } from "../src/cfc/types.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  type CfcEnforcementMode,
+} from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
@@ -173,13 +176,14 @@ describe("CFC canonicalization helpers", () => {
 });
 
 describe("ExtendedStorageTransaction CFC gate", () => {
-  const createRuntime = () => {
+  const createRuntime = (cfcEnforcementMode?: CfcEnforcementMode) => {
     const storageManager = StorageManager.emulate({
       as: signer,
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      ...(cfcEnforcementMode ? { cfcEnforcementMode } : {}),
     });
     return { runtime, storageManager };
   };
@@ -781,10 +785,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("allows relevant unprepared commits when enforcement is disabled", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime("disabled");
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("disabled");
       tx.markCfcRelevant("test");
       tx.writeValueOrThrow({
         space: signer.did(),
@@ -803,10 +806,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("allows observe-mode commits without blocking", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime("observe");
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("observe");
       tx.markCfcRelevant("test");
       tx.writeValueOrThrow({
         space: signer.did(),
@@ -1880,11 +1882,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const server = new MemoryV2Server.Server();
     const storageManagerA = new SharedV2StorageManager({
       as: signer,
-      address: new URL("memory://"),
+      memoryHost: new URL("memory://"),
     }, server);
     const storageManagerB = new SharedV2StorageManager({
       as: signer,
-      address: new URL("memory://"),
+      memoryHost: new URL("memory://"),
     }, server);
     const runtimeA = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -2951,10 +2953,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("does not record link-write provenance when a link is collapsed to a snapshot", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime("observe");
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("observe");
       const cell = runtime.getCell(
         signer.did(),
         "cfc-collapsed-link-provenance",
@@ -3769,7 +3770,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const createStorageManager = () =>
       new SharedV2StorageManager({
         as: signer,
-        address: new URL("memory://"),
+        memoryHost: new URL("memory://"),
       }, server);
     const storageManager1 = createStorageManager();
     const runtime1 = new Runtime({
@@ -3850,7 +3851,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const createStorageManager = () =>
       new SharedV2StorageManager({
         as: signer,
-        address: new URL("memory://"),
+        memoryHost: new URL("memory://"),
       }, server);
     const storageManager1 = createStorageManager();
     const runtime1 = new Runtime({
@@ -5440,10 +5441,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("records diagnostics for unsupported trust-sensitive claims in observe mode", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime("observe");
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("observe");
 
       const cell = runtime.getCell(
         signer.did(),

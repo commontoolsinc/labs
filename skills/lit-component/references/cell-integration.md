@@ -280,12 +280,15 @@ mutateCell(this.cell, (cell) => cell.set(newValue));
 repeat(items, (_, index) => index, ...)
 ```
 
-### ✅ Do: Use stable identifiers or composite keys
+### ✅ Do: Use stable identifiers
 
 ```typescript
 // GOOD
-repeat(items, (item, index) => `${index}-${item.title}`, ...)
+repeat(items, (item) => item.id, ...)
 ```
+
+If no stable id exists, add one at creation time; composite keys containing the
+index still break on reorder.
 
 ## Real-World Examples
 
