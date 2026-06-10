@@ -223,7 +223,6 @@ export type Node = {
 
 // Used to get back to original pattern from a JSONified representation.
 export const unsafe_originalPattern = Symbol("unsafe_originalPattern");
-export const unsafe_parentPattern = Symbol("unsafe_parentPattern");
 
 declare module "@commonfabric/api" {
   interface Pattern {
@@ -238,7 +237,6 @@ declare module "@commonfabric/api" {
     // ./pattern-metadata.ts so exported patterns can be frozen. Use
     // get/setPatternProgram and get/setVerifiedLoadId.
     [unsafe_originalPattern]?: Pattern;
-    [unsafe_parentPattern]?: Pattern;
   }
 }
 

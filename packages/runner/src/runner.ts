@@ -34,7 +34,6 @@ import { type Action } from "./scheduler.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
-  unsafe_noteParentOnPatterns,
   unwrapOneLevelAndBindtoDoc,
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -3622,10 +3621,6 @@ export class Runner {
       internalCellLink,
       resultCellLink,
     );
-
-    // For `map` and future other node types that take closures, we need to
-    // note the parent pattern on the closure patterns.
-    unsafe_noteParentOnPatterns(pattern, mappedInputBindings);
 
     // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
     // with a compact `{ $patternRef }` sentinel when its content-addressed entry
