@@ -28,6 +28,7 @@ import type {
   ReadonlyCell,
   SELF,
   Stream,
+  StripCell,
   WriteonlyCell,
 } from "commonfabric";
 
@@ -387,13 +388,28 @@ declare module "commonfabric" {
     ): PatternFactory<SchemaWithoutCell<IS>, any>;
   }
 
-  // Augment LiftFunction with schema-based overload
+  // Augment LiftFunction with schema-based overloads (callback-first, matching
+  // the index.ts ordering and the PatternFunction shape above). The callback's
+  // input/result types are MATERIALIZED from the supplied JSONSchema literals via
+  // Schema<>, so the provided schema and the callback's types can never
+  // contradict — the schema is the single source of truth.
   interface LiftFunction {
-    <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
-      argumentSchema: T,
-      resultSchema: R,
-      implementation: (input: Schema<T>) => Schema<R>,
-    ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
+    // Callback + two schemas: input type from argSchema, result type from resSchema.
+    <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
+      implementation: (input: Schema<IS>) => Schema<OS>,
+      argumentSchema: IS,
+      resultSchema: OS,
+    ): ModuleFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
+
+    // Callback + one schema: input type from argSchema; result type inferred from
+    // the callback's return.
+    <IS extends JSONSchema = JSONSchema>(
+      implementation: (input: Schema<IS>) => any,
+      argumentSchema: IS,
+    ): ModuleFactory<
+      SchemaWithoutCell<IS>,
+      StripCell<ReturnType<typeof implementation>>
+    >;
   }
 
   // Augment HandlerFunction with schema-based overload

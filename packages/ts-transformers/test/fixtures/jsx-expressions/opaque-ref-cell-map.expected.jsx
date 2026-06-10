@@ -57,7 +57,10 @@ const createCellRef = lift(({ isInitialized, storedCellRef }) => {
             items: true
         } as const satisfies __cfHelpers.JSONSchema);
         newCellRef.set([]);
-        storedCellRef.set(newCellRef);
+        // Local cast: the schema types storedCellRef as a cell of a generic object,
+        // but this fixture stores an array cell into it; the schema accuracy isn't
+        // what this transformer fixture exercises.
+        (storedCellRef as Cell<unknown>).set(newCellRef);
         isInitialized.set(true);
         return {
             cellRef: newCellRef,
@@ -76,6 +79,7 @@ const createCellRef = lift(({ isInitialized, storedCellRef }) => {
         isInitialized: { type: "boolean", "default": false, asCell: ["cell"] },
         storedCellRef: { type: "object", asCell: ["cell"] },
     },
+    required: ["isInitialized", "storedCellRef"],
 });
 // Add a charm to the array and navigate to it
 // we get a new isInitialized passed in for each
@@ -101,6 +105,7 @@ const addCharmAndNavigate = lift(({ charm, cellRef, isInitialized }) => {
         cellRef: { type: "array", asCell: ["cell"] },
         isInitialized: { type: "boolean", asCell: ["cell"] },
     },
+    required: ["charm", "isInitialized"],
 });
 // Create a new SimplePattern and add it to the array
 const createSimplePattern = handler({

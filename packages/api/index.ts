@@ -1982,29 +1982,25 @@ export type PatternToolFunction = <
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 
-// Function-first, matching PatternFunction/HandlerFunction convention: the
-// callback leads, schemas trail and are optional. Schemas are plain JSONSchema
-// values and are NOT materialized into the callback input type. The no-input
-// (computed-origin) form is `lift(fn, false)`: argumentSchema:false keeps the
-// no-input application valid (the runner's isValidArgument check passes on
-// `argumentSchema === false`), which the transformer emits as `lift(fn, false)()`.
+// Public (schema-light) surface, matching PatternFunction's index.ts shape: the
+// callback is the only argument and the types come from the callback itself. The
+// schema-bearing, type-materializing overloads (where the callback's input type
+// is derived FROM the supplied JSONSchema) live in `commonfabric/schema`
+// (api/schema.ts) so that schema and type can never contradict each other — the
+// same split pattern already used for pattern()/handler(). Transformer-emitted
+// `__cfHelpers.lift(...)` is untyped (`__cfHelpers: any`), so it does not depend
+// on these overloads; only authored `lift(...)` calls resolve against them.
 export interface LiftFunction {
   <T, R>(
     implementation: (input: T) => R,
-    argumentSchema?: JSONSchema,
-    resultSchema?: JSONSchema,
   ): ModuleFactory<StripCell<T>, StripCell<R>>;
 
   <T>(
     implementation: (input: T) => any,
-    argumentSchema?: JSONSchema,
-    resultSchema?: JSONSchema,
   ): ModuleFactory<StripCell<T>, StripCell<ReturnType<typeof implementation>>>;
 
   <T extends (...args: any[]) => any>(
     implementation: T,
-    argumentSchema?: JSONSchema,
-    resultSchema?: JSONSchema,
   ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
 }
 
