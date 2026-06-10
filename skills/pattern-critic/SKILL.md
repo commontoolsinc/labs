@@ -11,20 +11,19 @@ Read that guide first. It is the canonical reference. Severity definitions
 (`critical`/`major`/`minor`/`info`) live in the guide; use them as defined
 there.
 
-Whatever else happens, honor the output contract: emit the guide's
-[PASS]/[FAIL] categorized checklist and end with the Summary counts and the
-Priority Fixes list. If nothing fails, say so explicitly in two lines. Write
-the review to the output path you were given (in the factory:
-`reviews/critic-NN.md`).
+Whatever else happens, honor the output contract: emit the guide's [PASS]/[FAIL]
+categorized checklist and end with the Summary counts and the Priority Fixes
+list. If nothing fails, say so explicitly in two lines. Write the review to the
+output path you were given (in the factory: `reviews/critic-NN.md`).
 
 Be explicit about SES and determinism issues. Flag direct `Date.now()` or
 `Math.random()`, authored timers, and any call — including `safeDateNow()` /
 `nonPrivateRandom()` — made inside a re-running `computed()`/`lift()` without
-clear intent (non-idempotent use). Also flag
-bound-control self-feedback: if a `cf-*` form control is already bound to a
-cell, usually via `$value` or `$checked`, treat an event handler that writes the
-same value back into that same cell as a reactive-loop hazard unless it is
-clearly necessary and idempotent.
+clear intent (non-idempotent use). Also flag bound-control self-feedback: if a
+`cf-*` form control is already bound to a cell, usually via `$value` or
+`$checked`, treat an event handler that writes the same value back into that
+same cell as a reactive-loop hazard unless it is clearly necessary and
+idempotent.
 
 Then use the detailed references already maintained in the repo for:
 

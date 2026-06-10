@@ -148,10 +148,11 @@ variables, and helper functions.
 ## Cell Integration
 
 For components that work with reactive runtime data, declare the cell as
-`@property({ attribute: false })`, subscribe with `cell.sink(() =>
-this.requestUpdate())` when the `cell` property changes, and read with
-`cell.get()` in `render()` (guarding the no-cell case). The pitfalls that
-matter:
+`@property({ attribute: false })`, subscribe with
+`cell.sink(() =>
+this.requestUpdate())` when the `cell` property changes, and
+read with `cell.get()` in `render()` (guarding the no-cell case). The pitfalls
+that matter:
 
 - Clean up the previous subscription before subscribing to a new cell, and
   unsubscribe in `disconnectedCallback()` (memory leaks)

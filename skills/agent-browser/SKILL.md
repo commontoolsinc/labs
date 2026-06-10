@@ -288,9 +288,9 @@ environment.
 For cf-harness runs, pass a local CDP origin with `--cdp` or set
 `AGENT_BROWSER_CDP`. Note that `AGENT_BROWSER_CDP` is honored by these bundled
 scripts (as the fallback when their `--cdp` flag is omitted), not by the
-`agent-browser` CLI itself. The scripts intentionally avoid browser state, screenshots,
-PDFs, uploads, downloads, and local file output; they print snapshots and
-extracted content to stdout for harness capture.
+`agent-browser` CLI itself. The scripts intentionally avoid browser state,
+screenshots, PDFs, uploads, downloads, and local file output; they print
+snapshots and extracted content to stdout for harness capture.
 
 | Script                                                               | Description                                      |
 | -------------------------------------------------------------------- | ------------------------------------------------ |

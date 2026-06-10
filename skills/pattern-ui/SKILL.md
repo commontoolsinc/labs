@@ -16,10 +16,9 @@ do not write implementation code.
 - `docs/common/components/COMPONENTS.md` - Full component reference; consult on
   demand before assuming a component does or does not exist
 - one vignette story for the closest tone:
-  `packages/patterns/catalog/stories/vignette-recipe-story.tsx` (warm,
-  editorial light) or
-  `packages/patterns/catalog/stories/vignette-finance-story.tsx` (dark,
-  dashboard-style)
+  `packages/patterns/catalog/stories/vignette-recipe-story.tsx` (warm, editorial
+  light) or `packages/patterns/catalog/stories/vignette-finance-story.tsx`
+  (dark, dashboard-style)
 - `docs/common/patterns/style.md` - for deeper rationale behind the theme-first
   guidance this skill already digests
 
@@ -108,10 +107,10 @@ Many more exist — `cf-modal`, `cf-tabs`, `cf-table`, `cf-switch`,
 concluding a component doesn't exist.
 
 If a needed component doesn't exist, name the design-system gap in your output;
-do not create Lit components or use component internals
-(`applyThemeToElement`, `@consume`, shadow selectors) — component authoring is
-the `lit-component` skill's domain, for `packages/ui` work only. In pattern JSX
-the theme is passed as `theme={...}`, not Lit's `.theme=${...}`.
+do not create Lit components or use component internals (`applyThemeToElement`,
+`@consume`, shadow selectors) — component authoring is the `lit-component`
+skill's domain, for `packages/ui` work only. In pattern JSX the theme is passed
+as `theme={...}`, not Lit's `.theme=${...}`.
 
 ## Aesthetic Guidance
 
