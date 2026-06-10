@@ -454,15 +454,18 @@ function prepareAnyOfBranch(
   };
 }
 
+/**
+ * Callers must gate on `isMemoizableSchemaInput(resolved)`: for mutable
+ * schemas the preparation cannot be cached, and rebuilding it per visited
+ * node costs more than the legacy inline loop (a measured ~25% regression
+ * on dynamic-schema patterns) — those take the legacy path instead.
+ */
 function prepareAnyOf(
   resolved: JSONSchemaObj,
   anyOf: readonly JSONSchema[],
 ): readonly PreparedAnyOfBranch[] {
-  const memoizable = isMemoizableSchemaInput(resolved);
-  if (memoizable) {
-    const cached = _preparedAnyOfCache.get(resolved);
-    if (cached !== undefined) return cached;
-  }
+  const cached = _preparedAnyOfCache.get(resolved);
+  if (cached !== undefined) return cached;
   const restSchema = combinatorRestSchema(resolved, "anyOf");
   // Consider items without asCell or asStream first, since if we aren't
   // traversing cells, we consider them a match.
@@ -473,7 +476,7 @@ function prepareAnyOf(
   const prepared = sortedAnyOf.map((option) =>
     prepareAnyOfBranch(restSchema, option)
   );
-  if (memoizable) _preparedAnyOfCache.set(resolved, prepared);
+  _preparedAnyOfCache.set(resolved, prepared);
   return prepared;
 }
 
@@ -492,44 +495,6 @@ const TRAVERSE_DIAGNOSTICS: boolean = (() => {
     return false;
   }
 })();
-
-/**
- * Memoized `createDataCellURI()` for inline array elements. Serializing the
- * element subtree (JSON.stringify + encodeURIComponent + relative-link
- * rebase + asCell schema stripping) on every visit was ~18% of the worst
- * tail traversals. Deep-frozen values are identity-stable, so the URI is
- * cached per (value identity, base address, base schema); mutable values
- * fall back to the direct call.
- */
-const _dataCellURICache = new WeakMap<
-  object,
-  Map<string, ReturnType<typeof createDataCellURI>>
->();
-
-function dataCellURIForElement(
-  value: Immutable<FabricValue>,
-  elementLink: NormalizedFullLink,
-): ReturnType<typeof createDataCellURI> {
-  if (
-    !isRecord(value) || !isDeepFrozen(value) ||
-    !isMemoizableSchemaInput(elementLink.schema)
-  ) {
-    return createDataCellURI(value, elementLink);
-  }
-  let byBase = _dataCellURICache.get(value);
-  if (byBase === undefined) {
-    byBase = new Map();
-    _dataCellURICache.set(value, byBase);
-  }
-  const key = `${elementLink.space}|${elementLink.scope}|${elementLink.id}|${
-    pathKey(elementLink.path)
-  }|${schemaKeyPart(elementLink.schema)}`;
-  const cached = byBase.get(key);
-  if (cached !== undefined) return cached;
-  const uri = createDataCellURI(value, elementLink);
-  byBase.set(key, uri);
-  return uri;
-}
 
 /**
  * Identity-memoized `ContextualFlowControl.resolveSchemaRefs()` with an
@@ -2824,6 +2789,58 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
+        const matches: Immutable<FabricValue>[] = [];
+        if (typeof resolved === "boolean" || !isInternedSchema(resolved)) {
+          // Non-interned schema: identity reuse is not guaranteed (frozen
+          // schemas can be freshly minted per evaluation), so the prepared
+          // form would be rebuilt per node - slower than this legacy loop.
+          const anyOf = resolved.anyOf;
+          const restSchema = combinatorRestSchema(resolved, "anyOf");
+          // Consider items without asCell or asStream first, since if we
+          // aren't traversing cells, we consider them a match.
+          const sortedAnyOf = [
+            ...anyOf.filter((option) =>
+              !SchemaObjectTraverser.hasAsCell(option)
+            ),
+            ...anyOf.filter(SchemaObjectTraverser.hasAsCell),
+          ];
+          for (const optionSchema of sortedAnyOf) {
+            this.anyOfBranches++;
+            if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+              continue;
+            }
+            const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+            if (!canBranchMatch(mergedSchema, doc.value)) {
+              this.anyOfFastRejects++;
+              continue;
+            }
+            const { ok: val, error } = this.traverseWithSchema(
+              doc,
+              mergedSchema,
+              link,
+            );
+            if (error === undefined) {
+              matches.push(val);
+            }
+          }
+          const merged = this.objectCreator.mergeMatches(
+            matches as FabricValue[],
+            resolved,
+          );
+          if (matches.length > 0) {
+            return { ok: merged };
+          }
+          logger.info(
+            "traverse",
+            () => [
+              "No matching anyOf",
+              doc,
+              sortedAnyOf,
+              this.getDebugValue(doc),
+            ],
+          );
+          return fail(TRAVERSE_FAILURES.noMatchingAnyOf);
+        }
         // Branch order, merges, and canBranchMatch's static derivations are
         // precomputed per schema identity; the inlined prefilter below is
         // semantically identical to canBranchMatch(merged, doc.value).
@@ -2831,7 +2848,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const valueIsLink = isPrimitiveCellLink(doc.value);
         const actualType = getJsonType(doc.value);
         const valueIsRecord = isRecord(doc.value);
-        const matches: Immutable<FabricValue>[] = [];
         for (const branch of prepared) {
           this.anyOfBranches++;
           if (branch.optionIsFalse) {
@@ -3422,7 +3438,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           ...curDoc,
           address: {
             ...curDoc.address,
-            id: dataCellURIForElement(curDoc.value, elementLink),
+            id: createDataCellURI(curDoc.value, elementLink),
             path: ["value"],
           },
         };
