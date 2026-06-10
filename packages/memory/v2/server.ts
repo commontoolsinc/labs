@@ -43,6 +43,7 @@ import {
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
+import { ANYONE_USER, type Capability, isACL, isCapable } from "../acl.ts";
 import {
   aliasForDbId,
   attachDatabase,
@@ -190,6 +191,23 @@ const toError = (name: string, message: string): V2Error => ({
   name,
   message,
 });
+
+export type MemoryAclMode = "off" | "observe" | "enforce";
+
+/** Engine doc id of a space's ACL document: the doc whose entity id is the
+ *  space DID itself, as managed by the runner's `ACLManager` / `cf acl`
+ *  (runner `toURI` prefixes bare ids with `of:`). */
+const aclDocId = (space: string): string => `of:${space}`;
+
+const commitTouchesAclDoc = (
+  operations: readonly Operation[],
+  space: string,
+): boolean => {
+  const id = aclDocId(space);
+  return operations.some((operation) =>
+    "id" in operation && operation.id === id
+  );
+};
 
 /** Deterministic, collision-resistant-enough token for a filename component
  *  (FNV-1a 32-bit + length). Used to derive cell-db file names from (space,id). */
@@ -608,10 +626,199 @@ export class Server {
       authorizeSessionOpen?: (
         message: SessionOpenRequest,
       ) => Promise<string | undefined> | string | undefined;
+      /**
+       * Space access control. `off` (default) preserves the historical
+       * any-authenticated-session-may-do-anything behavior. `observe`
+       * evaluates the policy, counts and logs would-denies, but allows.
+       * `enforce` denies.
+       *
+       * Policy: a session principal has implicit OWNER on a space when it
+       * IS the space DID or is listed in `serviceDids`; otherwise the
+       * space's ACL document (entity id == the space DID, as managed by the
+       * runner's `ACLManager` / `cf acl`) grants per-DID or `"*"`
+       * capabilities. On the first-ever open of a commit-less space by a
+       * regular principal, the server seeds that document with
+       * `{ [principal]: "OWNER" }` (creator ownership) in observe and
+       * enforce modes.
+       *
+       * Requirements: session.open, queries, and watches need READ;
+       * transact needs WRITE; ACL-document writes and disk-source
+       * registration need OWNER. Enforcement is only meaningful when
+       * `authorizeSessionOpen` is configured — without it sessions carry no
+       * principal and only `"*"` grants can apply.
+       */
+      acl?: {
+        mode: MemoryAclMode;
+        serviceDids?: readonly string[];
+      };
     } = {},
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+  }
+
+  /** Counters for ACL decisions; `wouldDeny` is the observe-mode rollout
+   *  signal (a nonzero value on a deployment means flipping to `enforce`
+   *  would break that traffic). */
+  readonly aclStats = { seeded: 0, wouldDeny: 0, denied: 0 };
+
+  /** space → (principal key → capability). Invalidated whenever a commit
+   *  touches the space's ACL document. */
+  #aclCapabilities = new Map<string, Map<string, Capability | null>>();
+
+  #aclMode(): MemoryAclMode {
+    return this.options.acl?.mode ?? "off";
+  }
+
+  #isServicePrincipal(principal: string): boolean {
+    return this.options.acl?.serviceDids?.includes(principal) ?? false;
+  }
+
+  #invalidateAclCapabilities(space: string): void {
+    this.#aclCapabilities.delete(space);
+  }
+
+  #resolveCapability(
+    engine: Engine.Engine,
+    space: string,
+    principal: string | undefined,
+  ): Capability | null {
+    if (
+      principal !== undefined &&
+      (principal === space || this.#isServicePrincipal(principal))
+    ) {
+      return "OWNER";
+    }
+    const document = Engine.read(engine, { id: aclDocId(space) });
+    const acl = document?.value;
+    // Missing or malformed ACL document grants nothing (fail closed); the
+    // implicit owners above are unaffected.
+    if (!isACL(acl)) return null;
+    const byPrincipal = acl as Record<string, Capability | undefined>;
+    return (principal !== undefined ? byPrincipal[principal] : undefined) ??
+      byPrincipal[ANYONE_USER] ?? null;
+  }
+
+  #capabilityFor(
+    engine: Engine.Engine,
+    space: string,
+    principal: string | undefined,
+  ): Capability | null {
+    const key = principal ?? "";
+    let bySpace = this.#aclCapabilities.get(space);
+    if (bySpace !== undefined && bySpace.has(key)) {
+      return bySpace.get(key) ?? null;
+    }
+    const capability = this.#resolveCapability(engine, space, principal);
+    if (bySpace === undefined) {
+      bySpace = new Map();
+      this.#aclCapabilities.set(space, bySpace);
+    }
+    bySpace.set(key, capability);
+    return capability;
+  }
+
+  /** Evaluate the ACL policy for a message. Returns `null` when the message
+   *  may proceed and a typed error when it must be rejected; in `observe`
+   *  mode a shortfall is counted and logged but never rejected. */
+  async #authorizeMessage(
+    space: string,
+    principal: string | undefined,
+    requirement: Capability,
+  ): Promise<V2Error | null> {
+    if (this.#aclMode() === "off") return null;
+    const engine = await this.openEngine(space);
+    const capability = this.#capabilityFor(engine, space, principal);
+    if (capability !== null && isCapable(capability, requirement)) {
+      return null;
+    }
+    const principalLabel = principal ?? "<anonymous>";
+    if (this.#aclMode() === "observe") {
+      this.aclStats.wouldDeny += 1;
+      console.warn(
+        `[memory-acl] would deny ${requirement} on ${space} for ` +
+          `${principalLabel} (capability: ${capability ?? "none"})`,
+      );
+      return null;
+    }
+    this.aclStats.denied += 1;
+    return toError(
+      "AuthorizationError",
+      `Principal ${principalLabel} lacks ${requirement} on space ${space}`,
+    );
+  }
+
+  /** After an ACL change, drop live sessions whose principal no longer
+   *  holds READ (enforce mode only): per-message gating alone would still
+   *  let their already-registered subscriptions receive pushes. The owning
+   *  connection gets a session/revoked("unauthorized"), which the client
+   *  treats as a terminal session close (no reopen loop — a reopen attempt
+   *  is denied at session.open). The session that made the triggering ACL
+   *  write (`writerSessionId`) is still dropped from the registry — so it
+   *  receives no further pushes — but is NOT sent the terminal revocation, so
+   *  it gets this transact's response first (a self-removal otherwise reads as
+   *  a failure). Its next message fails closed as an unknown session. */
+  #revokeDeauthorizedSessions(
+    engine: Engine.Engine,
+    space: string,
+    writerSessionId?: string,
+  ): void {
+    if (this.#aclMode() !== "enforce") return;
+    for (const session of this.#sessions.sessionsForSpace(space)) {
+      const capability = this.#capabilityFor(engine, space, session.principal);
+      if (capability !== null && isCapable(capability, "READ")) continue;
+      // Drop the de-authorized session from the registry: the refresh loop
+      // iterates registered sessions, so removal stops all further watch
+      // pushes, and its next message fails closed (Unknown session).
+      this.#sessions.remove(space, session.id);
+      if (session.id === writerSessionId) {
+        // The writer's own session — it just removed its own access. Removal
+        // already stopped its pushes and denies its next message; do NOT also
+        // send the terminal session/revoked, which the client treats as
+        // terminal and would turn this transact's successful self-removal into
+        // a reported failure.
+        continue;
+      }
+      if (session.ownerConnectionId !== null) {
+        this.#connections.get(session.ownerConnectionId)?.revokeSession(
+          space,
+          session.id,
+          "unauthorized",
+        );
+      }
+    }
+  }
+
+  /** On the first-ever open of a commit-less space by a regular principal,
+   *  seed the ACL document with creator ownership. Skipped for service
+   *  principals and the space's own key: they hold implicit OWNER, and
+   *  seeding would wrongly claim the space for them (e.g. the background
+   *  service touching a user's not-yet-created space). */
+  #ensureCreatorSeeded(
+    engine: Engine.Engine,
+    space: string,
+    principal: string | undefined,
+  ): void {
+    if (this.#aclMode() === "off") return;
+    if (principal === undefined) return;
+    if (principal === space || this.#isServicePrincipal(principal)) return;
+    if (Engine.serverSeq(engine) !== 0) return;
+    Engine.applyCommit(engine, {
+      sessionId: "memory-acl-seed",
+      space,
+      principal,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: aclDocId(space),
+          value: { value: { [principal]: "OWNER" } },
+        }],
+      },
+    });
+    this.aclStats.seeded += 1;
+    this.#invalidateAclCapabilities(space);
   }
 
   connect(send: Send): Connection {
@@ -987,6 +1194,16 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    {
+      const deny = await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<SqliteQueryResult>(message.requestId, deny);
+      }
+    }
     try {
       // All reads run unattached on a pooled read-only connection (no ATTACH,
       // real read-only, each file its own `main` namespace). The only
@@ -1060,11 +1277,26 @@ export class Server {
   async sqliteRegisterDiskSource(
     message: SqliteRegisterDiskSourceRequest,
   ): Promise<ResponseMessage<SqliteRegisterDiskSourceResult>> {
-    if (this.#sessions.get(message.space, message.sessionId) === null) {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
       return respondTypedError<SqliteRegisterDiskSourceResult>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       );
+    }
+    {
+      // Maps a server filesystem path into the space — operator surface.
+      const deny = await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        "OWNER",
+      );
+      if (deny) {
+        return respondTypedError<SqliteRegisterDiskSourceResult>(
+          message.requestId,
+          deny,
+        );
+      }
     }
     try {
       await this.registerDiskSource(message.space, message.id, message.path);
@@ -1091,6 +1323,15 @@ export class Server {
     try {
       const engine = await this.openEngine(message.space);
       const principal = await this.options.authorizeSessionOpen?.(message);
+      this.#ensureCreatorSeeded(engine, message.space, principal);
+      const deny = await this.#authorizeMessage(
+        message.space,
+        principal,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<SessionOpenResult>(message.requestId, deny);
+      }
       const opened = this.#sessions.open(
         message.space,
         message.session,
@@ -1184,6 +1425,19 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
+      // ACL-document writes change who may access the space — OWNER only.
+      const aclTouched = commitTouchesAclDoc(
+        message.commit.operations,
+        message.space,
+      );
+      const deny = await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        aclTouched ? "OWNER" : "WRITE",
+      );
+      if (deny) {
+        return respondTypedError<Engine.AppliedCommit>(message.requestId, deny);
+      }
       const schedulerStateEnabled = getPersistentSchedulerStateConfig();
       const commitPayload = schedulerStateEnabled ? message.commit : {
         ...message.commit,
@@ -1236,6 +1490,18 @@ export class Server {
         for (const alias of sqliteAttachments.values()) {
           detachDatabase(engine.database, alias);
         }
+      }
+      if (aclTouched) {
+        this.#invalidateAclCapabilities(message.space);
+        // Pass the writing session so it isn't sent the terminal revocation
+        // before its own transact response (the client treats session/revoked
+        // as terminal). It's still dropped from the registry, so a
+        // self-deauthorized writer receives no further pushes.
+        this.#revokeDeauthorizedSessions(
+          engine,
+          message.space,
+          message.sessionId,
+        );
       }
       await this.runPostCommitSchedulerSideEffects(
         message.space,
@@ -1290,6 +1556,16 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    {
+      const deny = await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<GraphQueryResult>(message.requestId, deny);
+      }
+    }
     if ((message.query as GraphQuery & { subscribe?: boolean }).subscribe) {
       return respondTypedError<GraphQueryResult>(
         message.requestId,
@@ -1335,6 +1611,19 @@ export class Server {
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       );
+    }
+    {
+      const deny = await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<SchedulerSnapshotListResult>(
+          message.requestId,
+          deny,
+        );
+      }
     }
 
     try {
@@ -1398,6 +1687,16 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    {
+      const deny = await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<WatchSetResult>(message.requestId, deny);
+      }
+    }
 
     try {
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
@@ -1448,6 +1747,16 @@ export class Server {
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       );
+    }
+    {
+      const deny = await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<WatchAddResult>(message.requestId, deny);
+      }
     }
 
     try {
