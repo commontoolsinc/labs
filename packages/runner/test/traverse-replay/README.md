@@ -76,13 +76,13 @@ with a counter explanation.
 
 ## Current fixtures
 
-- `notebook-test` — notebook pattern test; 12.8k invocations, 126 docs, 972
-  distinct selectors, anyOf-heavy vnode load (~330k anyOf branch evaluations).
-  The main client-shaped metric (~9s full replay). Notably, ~45% of recorded
-  invocations fail validation (INVALID_TYPE etc.) — real reactive-read load
-  includes heavy fast-fail traffic.
-- `shopping-list-test` — small array/handler-heavy client load; fast inner-loop
-  fixture (~14ms).
+- `notebook-test` — notebook pattern test; 2.4k invocations, 792 docs, 318
+  distinct selectors, anyOf-heavy vnode load (~82k anyOf branch evaluations).
+  The main client-shaped metric (~3s full replay). Some recorded invocations
+  fail validation (INVALID_TYPE etc.) — real reactive-read load includes heavy
+  fast-fail traffic.
+- `shopping-list-test` — small array/handler-heavy client load; 474 invocations,
+  77 docs, fast inner-loop fixture (~20ms).
 - `piece-query-legacy` — the original captured server query dataset (36 docs),
   converted by `convert-legacy-timing-data.ts`; server-shaped (`includeMeta`,
   single big traversal). Note: the old `integration/traverse_timing.test.ts`
