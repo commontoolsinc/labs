@@ -23,7 +23,7 @@ async function test() {
     apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", API_URL),
+      apiUrl: new URL(API_URL),
     }),
   });
 
@@ -54,7 +54,7 @@ async function test() {
     apiUrl: new URL(API_URL),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", API_URL),
+      apiUrl: new URL(API_URL),
     }),
   });
 

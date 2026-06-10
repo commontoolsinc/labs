@@ -26,7 +26,7 @@ async function runTest(base: URL) {
     apiUrl: base,
     storageManager: StorageManager.open({
       as: account,
-      address: new URL("/api/storage/memory", base),
+      apiUrl: new URL(base),
     }),
   });
   const space = account.did();

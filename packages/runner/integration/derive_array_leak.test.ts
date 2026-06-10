@@ -95,7 +95,7 @@ async function runTest() {
   // Create storage manager
   const storageManager = StorageManager.open({
     as: session.as,
-    address: new URL("/api/storage/memory", API_URL),
+    apiUrl: new URL(API_URL),
   });
 
   // Create runtime

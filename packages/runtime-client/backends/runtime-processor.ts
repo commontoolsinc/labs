@@ -330,7 +330,8 @@ export class RuntimeProcessor {
     const storageManager = StorageManager.open({
       as: identity,
       spaceIdentity: spaceIdentity,
-      address: new URL("/api/storage/memory", data.apiUrl),
+      apiUrl: apiUrlObj,
+      spaceHostMap: data.spaceHostMap,
     });
 
     // Construct compilation cache if a build hash was provided (browser path).

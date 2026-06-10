@@ -102,7 +102,7 @@ async function initialize(
     apiUrl: new URL(toolshedUrl),
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", toolshedUrl),
+      apiUrl: new URL(toolshedUrl),
     }),
     patternEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
