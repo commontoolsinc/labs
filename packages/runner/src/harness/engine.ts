@@ -1,8 +1,6 @@
 import { Console } from "./console.ts";
 import {
   type CacheableModule,
-  type CompileResult,
-  type EvaluateOptions,
   type EvaluateResult,
   type Exports,
   type Harness,
@@ -13,7 +11,6 @@ import {
 import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
-  type JsScript,
   type MappedPosition,
   type Program,
   type ProgramResolver,
@@ -28,14 +25,8 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StaticCache } from "@commonfabric/static";
-import {
-  pretransformProgram,
-  pretransformProgramForModules,
-} from "./pretransform.ts";
-import {
-  computeModuleHashes,
-  resolveModuleImports,
-} from "./module-identity.ts";
+import { pretransformProgramForModules } from "./pretransform.ts";
+import { resolveModuleImports } from "./module-identity.ts";
 import {
   buildRecordsFromCompiled,
   type CachedCompiledModule,
@@ -69,15 +60,10 @@ import {
   createModuleCompartmentGlobals,
   createSafeConsoleGlobal,
 } from "../sandbox/compartment-globals.ts";
-import {
-  setVerifiedBindingCandidateRegistrar,
-  setVerifiedFunctionRegistrar,
-} from "../sandbox/function-hardening.ts";
+import { setVerifiedFunctionRegistrar } from "../sandbox/function-hardening.ts";
 import type { UnsafeHostTrustOptions } from "../unsafe-host-trust.ts";
 import { ExecutableRegistry } from "./executable-registry.ts";
-import { CompiledBundleValidator } from "../sandbox/compiled-bundle-validation.ts";
 
-const INJECTED_SCRIPT = "const console = globalThis.console;";
 const logger = getLogger("engine");
 
 // Extends a TypeScript program with 3P module types, if referenced.
@@ -154,7 +140,6 @@ export class Engine extends EventTarget implements Harness {
   private compilerInternals: CompilerInternals | undefined;
   private ctRuntime: Runtime;
   private sesRuntime: SESRuntime | undefined;
-  private loadIds = new WeakMap<JsScript, string>();
   private nextLoadId = 0;
   // Content-addressed module hash per prefixed source path (`/<id>/file.tsx`),
   // populated at evaluate() time. Used to translate an action's bundle-relative
@@ -165,7 +150,6 @@ export class Engine extends EventTarget implements Harness {
   // Used to rewrite a function's `src` into a reload-stable identity that does
   // not depend on which bundle/entry-point compiled the module.
   private canonicalSourceByPrefixed = new Map<string, string>();
-  private readonly bundleValidator = new CompiledBundleValidator();
   private readonly executableRegistry = new ExecutableRegistry();
   private readonly consoleShim = createSafeConsoleGlobal(new Console(this));
 
@@ -212,65 +196,9 @@ export class Engine extends EventTarget implements Harness {
     }
   }
 
-  // Compile source to JS without evaluation.
-  async compile(
-    program: RuntimeProgram,
-    options: TypeScriptHarnessProcessOptions = {},
-  ): Promise<CompileResult> {
-    logger.timeStart("compile");
-    try {
-      const id = options.identifier ?? computeId(program);
-      const filename = options.filename ?? `${id}.js`;
-      const mappedProgram = pretransformProgram(program, id);
-      const resolver = new EngineProgramResolver(
-        mappedProgram,
-        this.ctRuntime.staticCache,
-      );
-
-      const { compiler } = await this.getCompilerInternals();
-      const resolvedProgram = await this.resolve(resolver);
-
-      const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
-        verbose: options.verboseErrors,
-      });
-
-      logger.timeStart("compile", "typescript");
-      let jsScript: JsScript;
-      try {
-        jsScript = await compiler.compile(resolvedProgram, {
-          filename,
-          noCheck: options.noCheck,
-          injectedScript: INJECTED_SCRIPT,
-          runtimeModules: Engine.runtimeModuleNames(),
-          bundleExportAll: true,
-          getTransformedProgram: (nextProgram) => {
-            options.getTransformedProgram?.(nextProgram);
-          },
-          diagnosticMessageTransformer,
-          beforeTransformers: (program) => {
-            const pipeline = new CommonFabricTransformerPipeline();
-            return {
-              factories: pipeline.toFactories(program),
-              getDiagnostics: () => pipeline.getDiagnostics(),
-            };
-          },
-        });
-      } finally {
-        logger.timeEnd("compile", "typescript");
-      }
-
-      this.bundleValidator.verify(jsScript, filename);
-
-      return { id, jsScript, sesValidated: true };
-    } finally {
-      logger.timeEnd("compile");
-    }
-  }
-
   /**
-   * Compile a program to a verified ESM module-record graph (the
-   * `esmModuleLoader` compile path). Runs the same resolution + CF transformer
-   * pipeline as {@link compile}, emits per-module CommonJS via
+   * Compile a program to a verified ESM module-record graph. Runs the program
+   * resolution + CF transformer pipeline, emits per-module CommonJS via
    * `compileToModules`, assembles content-addressed records (plus runtime-
    * module records), and security-verifies every authored module body with
    * the ESM verifier. Returns the graph and the entry specifier for evaluation.
@@ -348,6 +276,12 @@ export class Engine extends EventTarget implements Harness {
         const modules = compiler.compileToModules(resolvedProgram, {
           noCheck: options.noCheck,
           runtimeModules: Engine.runtimeModuleNames(),
+          getTransformedProgram: options.getTransformedProgram
+            ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
+            : undefined,
+          diagnosticMessageTransformer: new OpaqueRefErrorTransformer({
+            verbose: options.verboseErrors,
+          }),
           beforeTransformers: (program) => {
             const pipeline = new CommonFabricTransformerPipeline();
             return {
@@ -571,10 +505,8 @@ export class Engine extends EventTarget implements Harness {
   }
 
   /**
-   * Compile + evaluate a program through the ESM module-record path (the
-   * `esmModuleLoader` route). Returns the same `{ main, exportMap, loadId }`
-   * shape as {@link evaluate}, so callers can branch on the flag and treat the
-   * result identically.
+   * Compile + evaluate a program through the ESM module-record path,
+   * returning `{ main, exportMap, loadId }`.
    */
   async compileAndEvaluateModules(
     program: RuntimeProgram,
@@ -958,117 +890,6 @@ export class Engine extends EventTarget implements Harness {
     });
   }
 
-  // Evaluate pre-compiled JS, returning exports.
-  // `id` is the content-derived prefix from compile(); `files` are the
-  // original source files for the export map.
-  async evaluate(
-    id: string,
-    jsScript: JsScript,
-    files: Source[],
-    options: EvaluateOptions = {},
-  ): Promise<
-    { main?: Exports; exportMap?: Record<string, Exports>; loadId?: string }
-  > {
-    logger.timeStart("evaluate");
-    try {
-      if (!options.skipBundleValidation) {
-        this.bundleValidator.verify(jsScript, `${id}.js`);
-      }
-      this.registerModuleHashes(id, files);
-      const { runtime, runtimeExports, exportsCallback } = await this
-        .getRuntimeInternals();
-      const loadId = this.getLoadId(id, jsScript);
-      this.executableRegistry.beginVerifiedLoad(loadId);
-      this.executableRegistry.setVerifiedLoadBundleId(
-        loadId,
-        hashOf(jsScript.js).toString(),
-      );
-      this.executableRegistry.setVerifiedLoadSources(
-        loadId,
-        // Include canonical `cf:module/<hash>/<path>` forms so CFC recognizes the
-        // reload-stable source locations functions now carry (lockstep).
-        [
-          ...collectVerifiedLoadSources(id, jsScript, files),
-          ...this.canonicalVerifiedSources(id, files).map(
-            normalizeVerifiedSource,
-          ),
-        ],
-      );
-      const isolate = runtime.getIsolate(loadId);
-      const runtimeDeps = this.createRuntimeDeps(runtimeExports ?? {});
-      const restoreVerifiedFunctionRegistrar = setVerifiedFunctionRegistrar(
-        this.executableRegistry.createVerifiedFunctionRegistrar(loadId),
-      );
-      // CT-1665: on the legacy/AMD eval path `__cfReg` is a no-op (identity
-      // addressing is ESM-only), so the ESM sink-based capture used by
-      // `evaluateGraph` does not apply here. Collect the trusted-binding factories
-      // the builder surfaces during evaluation directly, so non-exported handlers
-      // still resolve their verified binding metadata under the default (non-ESM)
-      // loader. (Removable with the registrar + builder hook once the ESM loader
-      // is the default and this path is retired.)
-      const bindingCandidates: unknown[] = [];
-      const restoreBindingCandidateRegistrar =
-        setVerifiedBindingCandidateRegistrar((candidate) => {
-          bindingCandidates.push(candidate);
-        });
-      const sourceLocationFrame = pushFrame({
-        runtime: this.ctRuntime,
-        verifiedLoadId: loadId,
-        sourceLocationContext: {
-          script: jsScript.js,
-          filename: jsScript.filename ?? `${loadId}.js`,
-          nextSearchOffset: 0,
-        },
-      });
-      let result;
-      try {
-        result = isolate.execute(jsScript).invoke(runtimeDeps).inner();
-      } finally {
-        popFrame(sourceLocationFrame);
-        restoreVerifiedFunctionRegistrar();
-        restoreBindingCandidateRegistrar();
-      }
-      if (
-        result && typeof result === "object" && "main" in result &&
-        "exportMap" in result
-      ) {
-        const main = result.main as Exports;
-        const exportMap = result.exportMap as Record<string, Exports>;
-        this.executableRegistry.captureVerifiedValue(loadId, main);
-        this.executableRegistry.captureVerifiedValue(loadId, exportMap);
-        this.executableRegistry.captureVerifiedBindingCandidates(
-          bindingCandidates,
-        );
-
-        // Create a map from exported values to `RuntimeProgram` that can
-        // generate them and pass to the callback from the exports.
-        const exportsByValue = new Map<any, RuntimeProgram>();
-        const prefix = `/${id}`;
-        for (let [fileName, exports] of Object.entries(exportMap)) {
-          if (fileName.startsWith(prefix)) {
-            fileName = fileName.substring(prefix.length);
-          }
-          for (const [exportName, exportValue] of Object.entries(exports)) {
-            exportsByValue.set(exportValue, {
-              main: fileName,
-              mainExport: exportName,
-              // TODO(seefeld): Sending all `files` is sub-optimal, as
-              // it is the super set of files actually needed by main. We should
-              // only send the files actually needed by main.
-              files,
-            });
-          }
-        }
-        exportsCallback(exportsByValue);
-
-        return { main, exportMap, loadId };
-      }
-      return { loadId };
-    } finally {
-      logger.timeEnd("evaluate");
-    }
-  }
-
   // Invokes a function that should've came from this isolate (unverifiable).
   // We use this to hook into the isolate's source mapping functionality.
   invoke(fn: () => any): any {
@@ -1167,31 +988,13 @@ export class Engine extends EventTarget implements Harness {
     this.executableRegistry.trustHostValue(value, options);
   }
 
-  // Record the content-addressed hash of every module in a load, keyed by its
-  // prefixed source path (`/<id>/file.tsx`) so it can be matched against the
-  // source-map `source` that appears in an action's source location.
-  private registerModuleHashes(id: string, files: Source[]): void {
-    // No `runtimeFingerprint` is passed: the scheduler tracks runtime/TCB
-    // changes on its own `runtimeFingerprint` axis, so the implementation
-    // identity is intentionally pure code identity (runtime-module import
-    // leaves hash with the empty fingerprint).
-    const hashes = computeModuleHashes({ main: "", files });
-    for (const [path, hash] of hashes) {
-      // `path` is the authored file path (e.g. `/api/.../notebook.tsx`); the
-      // per-module hash already incorporates it, so the canonical source is a
-      // 1:1, reload-stable identity that keeps the path for debuggability.
-      this.moduleHashByPrefixedSource.set(`/${id}${path}`, hash);
-      this.canonicalSourceByPrefixed.set(
-        `/${id}${path}`,
-        `cf:module/${hash}${path}`,
-      );
-    }
-  }
-
   /**
-   * Like {@link registerModuleHashes}, but takes the RESOLVED per-module
-   * identities straight from the compiled graph (`cf:module/<identity>` in
-   * `graph.specifierByPath`) instead of re-hashing the raw program files.
+   * Record the content-addressed identity of every module in a load, keyed by
+   * its prefixed source path (`/<id>/file.tsx`) so it can be matched against
+   * the source-map `source` that appears in an action's source location. Takes
+   * the RESOLVED per-module identities straight from the compiled graph
+   * (`cf:module/<identity>` in `graph.specifierByPath`) instead of re-hashing
+   * the raw program files.
    *
    * The two must agree: the cache key, the record-graph specifiers, and the
    * source-free by-identity reload (`evaluateCachedModules`) all use the
@@ -1321,10 +1124,8 @@ export class Engine extends EventTarget implements Harness {
     this.sesRuntime = undefined;
     this.runtimeInternals = undefined;
     this.compilerInternals = undefined;
-    this.loadIds = new WeakMap();
     this.nextLoadId = 0;
     this.executableRegistry.clear();
-    this.bundleValidator.clear();
     this.moduleHashByPrefixedSource.clear();
     this.canonicalSourceByPrefixed.clear();
   }
@@ -1343,63 +1144,6 @@ export class Engine extends EventTarget implements Harness {
     return this.sesRuntime;
   }
 
-  private getLoadId(compileId: string, jsScript: JsScript): string {
-    const existing = this.loadIds.get(jsScript);
-    if (existing) {
-      return existing;
-    }
-
-    const loadId = `${compileId}:load:${this.nextLoadId++}`;
-    this.loadIds.set(jsScript, loadId);
-    return loadId;
-  }
-
-  private createRuntimeDeps(
-    runtimeExports: Record<string, unknown>,
-  ): Record<string, unknown> {
-    return Object.freeze({
-      ...runtimeExports,
-      __cfAmdHooks: Object.freeze({
-        define: (moduleId: string) => {
-          if (typeof moduleId !== "string" || moduleId.length === 0) {
-            throw new Error("AMD define() requires a non-empty string id");
-          }
-        },
-        require: (dependency: string[] | string) => {
-          if (Array.isArray(dependency)) {
-            throw new Error("AMD async require() is not allowed in SES mode");
-          }
-        },
-      }),
-    });
-  }
-}
-
-function collectVerifiedLoadSources(
-  id: string,
-  jsScript: JsScript,
-  files: Source[],
-): string[] {
-  const sources = new Set<string>();
-  const addSource = (value: string | undefined) => {
-    if (typeof value !== "string" || value.length === 0) {
-      return;
-    }
-    sources.add(normalizeVerifiedSource(value));
-    const prefixed = `/${id}/`;
-    if (value.startsWith(prefixed)) {
-      sources.add(normalizeVerifiedSource(value.slice(id.length + 1)));
-    }
-  };
-
-  for (const file of files) {
-    addSource(file.name);
-  }
-  for (const source of jsScript.sourceMap?.sources ?? []) {
-    addSource(source);
-  }
-
-  return [...sources];
 }
 
 function normalizeVerifiedSource(source: string): string {

@@ -876,13 +876,9 @@ export async function runTestPattern(
           new FileSystemProgramResolver(testPath, options.root),
         ),
     );
-    const { jsScript, id } = await withPhase(
-      ["runTestPattern", "compile"],
-      () => engine.compile(program),
-    );
     const { main } = await withPhase(
-      ["runTestPattern", "evaluate"],
-      () => engine.evaluate(id, jsScript, program.files),
+      ["runTestPattern", "compile"],
+      () => engine.compileAndEvaluateModules(program),
     );
 
     if (!main?.default) {

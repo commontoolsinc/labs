@@ -33,7 +33,6 @@ export type RuntimeView =
 export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
-  esmModuleLoader?: boolean;
 };
 
 export type RuntimeCfcEnforcementMode = NonNullable<
@@ -66,7 +65,6 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
-  compilationCacheClient?: boolean;
   getBuildHash?: () => Promise<string | undefined>;
   workerUrl?: URL;
 };
@@ -86,9 +84,9 @@ function defaultNavigate(command: RuntimeNavigationTarget) {
 }
 
 /**
- * Fetch the worker bundle hash from the build manifest.
+ * Fetch the worker bundle hash from the build manifest, used to cache-bust the
+ * worker URL (`?v=<hash>`) so a deploy always loads the fresh worker bundle.
  * Cached at module level — the hash doesn't change within a page session.
- * See docs/specs/compilation-cache.md Phase 3.
  */
 let buildHashPromise: Promise<string | undefined> | undefined;
 export function fetchBuildHash(): Promise<string | undefined> {
@@ -117,7 +115,6 @@ export function createRuntimeClientOptions({
   session,
   apiUrl,
   spaceHostMap,
-  buildHash,
   experimental,
   cfcEnforcementMode = "enforce-explicit",
   trustSnapshot,
@@ -125,7 +122,6 @@ export function createRuntimeClientOptions({
   session: Session;
   apiUrl: URL;
   spaceHostMap?: Record<string, string>;
-  buildHash?: string;
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   trustSnapshot?: RuntimeTrustSnapshot | null;
@@ -147,7 +143,6 @@ export function createRuntimeClientOptions({
     experimental,
     cfcEnforcementMode,
     trustSnapshot: resolvedTrustSnapshot,
-    buildHash,
   };
 }
 
@@ -452,7 +447,6 @@ export class RuntimeInternals extends EventTarget {
     experimental,
     cfcEnforcementMode,
     trustSnapshot,
-    compilationCacheClient = false,
     getBuildHash = fetchBuildHash,
     workerUrl,
     navigate,
@@ -501,10 +495,9 @@ export class RuntimeInternals extends EventTarget {
       })`,
     );
 
-    // Fetch the build manifest first so the worker URL and compilation-cache
-    // fingerprint both point at the same worker bundle.
-    // See docs/specs/compilation-cache.md Phase 3.
-    const buildHash = compilationCacheClient ? await getBuildHash() : undefined;
+    // Fetch the build manifest first so the worker URL is cache-busted with
+    // the deployed bundle's hash (a deploy always loads the fresh worker).
+    const buildHash = await getBuildHash();
     const resolvedWorkerUrl = workerUrl ?? new URL(
       "/scripts/worker-runtime.js",
       globalThis.location.origin,
@@ -513,26 +506,12 @@ export class RuntimeInternals extends EventTarget {
     const transport = await WebWorkerRuntimeTransport.connect({
       workerUrl: resolvedWorkerUrl,
     });
-    if (compilationCacheClient) {
-      console.log(
-        buildHash
-          ? `Compilation cache enabled (client), buildHash=${
-            buildHash.substring(0, 8)
-          }`
-          : "Compilation cache disabled (client): no build manifest",
-      );
-    } else {
-      console.log(
-        "Compilation cache disabled (client): COMPILATION_CACHE_CLIENT not set",
-      );
-    }
     const client = await RuntimeClient.initialize(
       transport,
       createRuntimeClientOptions({
         session,
         apiUrl,
         spaceHostMap,
-        buildHash,
         experimental,
         cfcEnforcementMode,
         trustSnapshot,

@@ -1,8 +1,7 @@
-import { type JsScript, Program } from "@commonfabric/js-compiler";
+import { Program } from "@commonfabric/js-compiler";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { Identity } from "@commonfabric/identity";
 import { Engine, Runtime } from "@commonfabric/runner";
-import { basename } from "@std/path";
 import { experimentalOptionsFromEnv } from "./utils.ts";
 
 async function createRuntime() {
@@ -25,7 +24,6 @@ export interface ProcessOptions {
   run: boolean;
   check: boolean;
   output?: string;
-  filename?: string;
   showTransformed?: boolean;
   mainExport?: string;
   verboseErrors?: boolean;
@@ -33,12 +31,7 @@ export interface ProcessOptions {
 
 export async function process(
   options: ProcessOptions,
-): Promise<{ output: JsScript; main?: Record<string, unknown> }> {
-  const filename = options.filename
-    ? basename(options.filename)
-    : options.output
-    ? basename(options.output)
-    : undefined;
+): Promise<{ output: string; main?: Record<string, unknown> }> {
   const runtime = await createRuntime();
   const engine = new Engine(runtime);
   const program = await engine.resolve(
@@ -50,23 +43,35 @@ export async function process(
   const getTransformedProgram = options.showTransformed
     ? renderTransformed
     : undefined;
-  const { jsScript, id } = await engine.compile(program, {
-    noCheck: !options.check,
-    filename,
-    getTransformedProgram,
-    verboseErrors: options.verboseErrors,
-  });
+  const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+    program,
+    {
+      noCheck: !options.check,
+      getTransformedProgram,
+      verboseErrors: options.verboseErrors,
+    },
+  );
 
+  // Concatenated per-module compiled bodies (the same composition the SES
+  // loader evaluates), for inspection via --output.
+  const output = [...graph.compiledBodies.entries()]
+    .map(([specifier, body]) => `// ${specifier}\n${body}`)
+    .join("\n");
   if (options.output) {
-    await Deno.writeTextFile(options.output, jsScript.js);
+    await Deno.writeTextFile(options.output, output);
   }
 
   if (!options.run) {
-    return { output: jsScript };
+    return { output };
   }
 
-  const { main } = await engine.evaluate(id, jsScript, program.files);
-  return { output: jsScript, main };
+  const { main } = engine.evaluateRecordGraph(
+    id,
+    graph,
+    mainSpecifier,
+    program.files,
+  );
+  return { output, main };
 }
 
 function renderTransformed(program: Program) {

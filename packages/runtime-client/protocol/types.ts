@@ -141,7 +141,6 @@ export interface InitializationData {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
-    esmModuleLoader?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -155,10 +154,6 @@ export interface InitializationData {
     actingPrincipal?: string;
     revision?: string;
   };
-  // Content hash of the worker bundle, used for compilation cache
-  // invalidation. If absent, the compilation cache is disabled.
-  // See docs/specs/compilation-cache.md Phase 3.
-  buildHash?: string;
 }
 
 export interface InitializeRequest extends BaseRequest {
