@@ -123,7 +123,6 @@ export {
   type toJSON,
   TYPE,
   UI,
-  unsafe_originalPattern,
   type UnsafeBinding,
   type VNode,
   WebhookConfigSchema,
