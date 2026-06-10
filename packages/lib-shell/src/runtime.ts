@@ -260,37 +260,56 @@ export class RuntimeInternals extends EventTarget {
    * (CT-1623: starting all pieces on reload cost ~10s of dependency
    * collection, either in the reload wall or on the first interaction).
    *
-   * Cached per id. A cache entry created with `start: false` is upgraded
-   * (re-fetched with start) when a starting caller asks for the same id.
+   * Cached per (space, id). A cache entry created with `start: false`
+   * is upgraded (re-fetched with start) when a starting caller asks for
+   * the same pattern.
+   *
+   * Pass `space` to address a pattern in another space, served by the
+   * same worker over the same connection. Absent ⇒ this runtime's
+   * bound space, unchanged.
    */
   getPattern(
     id: string,
-    options?: { start?: boolean },
+    options?: { start?: boolean; space?: DID },
   ): Promise<PageHandle<NameSchema>> {
     this.#check();
     const start = options?.start ?? true;
-    const cached = this.#patternCache.get(id);
+    const space = options?.space;
+    const key = this.#patternKey(id, space);
+    const cached = this.#patternCache.get(key);
     if (cached && (cached.started || !start)) {
       return cached.promise;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, start);
+      const page = await this.#client.getPage<NameSchema>(id, start, space);
       if (!page) {
         throw new Error(`Pattern not found: ${id}`);
       }
       return page;
     })();
-    this.#patternCache.set(id, { promise, started: start });
+    this.#patternCache.set(key, { promise, started: start });
     return promise;
   }
 
-  invalidatePattern(id: string): void {
-    this.#patternCache.delete(id);
+  /**
+   * Cache key for a pattern. Always space-qualified so the no-space
+   * form and an explicit `space` equal to this runtime's bound space
+   * share one entry.
+   */
+  #patternKey(id: string, space?: DID): string {
+    return `${space ?? this.#space}:${id}`;
   }
 
-  async refreshPattern(id: string): Promise<PageHandle<NameSchema>> {
-    this.invalidatePattern(id);
-    return await this.getPattern(id);
+  invalidatePattern(id: string, space?: DID): void {
+    this.#patternCache.delete(this.#patternKey(id, space));
+  }
+
+  async refreshPattern(
+    id: string,
+    space?: DID,
+  ): Promise<PageHandle<NameSchema>> {
+    this.invalidatePattern(id, space);
+    return await this.getPattern(id, { space });
   }
 
   async getSlugCell(slug: string): Promise<CellHandle<unknown>> {

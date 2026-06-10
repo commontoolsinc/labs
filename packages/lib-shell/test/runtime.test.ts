@@ -50,15 +50,23 @@ class MockRuntimeClient {
     return Promise.resolve(this.slugByPageId.get(pageId));
   }
 
-  /** Records every (pageId, runIt) pair so tests can assert which calls START
-   * the piece (CT-1623: name listings must not start every piece). */
-  getPageCalls: Array<{ pageId: string; runIt: boolean | undefined }> = [];
+  /** Records every (pageId, runIt, space) so tests can assert which calls
+   * START the piece (CT-1623: name listings must not start every piece) and
+   * which space each call targets. */
+  getPageCalls: Array<
+    { pageId: string; runIt: boolean | undefined; space?: DID }
+  > = [];
 
   getPage(
     pageId: string,
     runIt?: boolean,
+    space?: DID,
   ): Promise<{ id: () => string }> {
-    this.getPageCalls.push({ pageId, runIt });
+    this.getPageCalls.push({
+      pageId,
+      runIt,
+      ...(space !== undefined ? { space } : {}),
+    });
     return Promise.resolve({ id: () => pageId });
   }
 
@@ -419,6 +427,83 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern("piece-1", { start: false });
         expect(client.getPageCalls).toEqual([
           { pageId: "piece-1", runIt: false },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
+  // §federation PR2: one worker serves patterns from many spaces.
+  // options.space addresses another space; the cache is keyed per
+  // (space, id) with the no-space form aliasing the bound space.
+  describe("getPattern multi-space", () => {
+    const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
+    const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
+
+    async function makeRuntime() {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(
+        client as any,
+        homeDid,
+        undefined,
+        false,
+        homeDid,
+      );
+      return { client, runtime };
+    }
+
+    it("passes the space through to the client", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1", { space: otherDid });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true, space: otherDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("caches per (space, id) — same id in two spaces are distinct", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1", { space: otherDid });
+        await runtime.getPattern("piece-1", { space: otherDid });
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: otherDid },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("treats an explicit home space and the no-space form as one entry", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1", { space: homeDid });
+        expect(client.getPageCalls.length).toBe(1);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("invalidates per space", async () => {
+      const { client, runtime } = await makeRuntime();
+      try {
+        await runtime.getPattern("piece-1");
+        await runtime.getPattern("piece-1", { space: otherDid });
+        runtime.invalidatePattern("piece-1", otherDid);
+        await runtime.getPattern("piece-1"); // still cached
+        await runtime.getPattern("piece-1", { space: otherDid }); // re-fetched
+        expect(client.getPageCalls).toEqual([
+          { pageId: "piece-1", runIt: true },
+          { pageId: "piece-1", runIt: true, space: otherDid },
+          { pageId: "piece-1", runIt: true, space: otherDid },
         ]);
       } finally {
         await runtime.dispose();
