@@ -582,6 +582,14 @@ export interface IStorageTransaction {
   getWriteDetails?(space: MemorySpace): Iterable<TransactionWriteDetail>;
 
   /**
+   * Optional read details for the given space: the values this transaction
+   * observed for its reads (its read invariants). Available after commit or
+   * abort, since the underlying per-document snapshots are pinned for the
+   * transaction's lifetime.
+   */
+  getReadDetails?(space: MemorySpace): Iterable<TransactionReadDetail>;
+
+  /**
    * Describes current status of the transaction. Returns a union type with
    * status field indicating the current state:
    * - `"ready"`: Transaction is being built and ready for operations
@@ -1210,6 +1218,11 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: Immutable<FabricValue>;
   previousValue?: Immutable<FabricValue>;
+}
+
+export interface TransactionReadDetail {
+  address: IMemorySpaceAddress;
+  value?: Immutable<FabricValue>;
 }
 
 export type NativeStorageCommitOperation =
