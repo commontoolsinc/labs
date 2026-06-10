@@ -1186,11 +1186,17 @@ const isSessionEffect = (
 const isSessionRevoked = (
   message: unknown,
 ): message is SessionRevokedMessage => {
-  return typeof message === "object" && message !== null &&
-    (message as { type?: string }).type === "session/revoked" &&
-    typeof (message as { space?: string }).space === "string" &&
-    typeof (message as { sessionId?: string }).sessionId === "string" &&
-    (message as { reason?: string }).reason === "taken-over";
+  if (typeof message !== "object" || message === null) return false;
+  const { type, space, sessionId, reason } = message as {
+    type?: string;
+    space?: string;
+    sessionId?: string;
+    reason?: string;
+  };
+  return type === "session/revoked" &&
+    typeof space === "string" &&
+    typeof sessionId === "string" &&
+    (reason === "taken-over" || reason === "unauthorized");
 };
 
 const isResponse = (message: unknown): message is ResponseMessage<unknown> => {

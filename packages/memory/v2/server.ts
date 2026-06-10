@@ -769,6 +769,28 @@ export class Server {
     );
   }
 
+  /** After an ACL change, drop live sessions whose principal no longer
+   *  holds READ (enforce mode only): per-message gating alone would still
+   *  let their already-registered subscriptions receive pushes. The owning
+   *  connection gets a session/revoked("unauthorized"), which the client
+   *  treats as a terminal session close (no reopen loop — a reopen attempt
+   *  is denied at session.open). */
+  #revokeDeauthorizedSessions(engine: Engine.Engine, space: string): void {
+    if (this.#aclMode() !== "enforce") return;
+    for (const session of this.#sessions.sessionsForSpace(space)) {
+      const capability = this.#capabilityFor(engine, space, session.principal);
+      if (capability !== null && isCapable(capability, "READ")) continue;
+      this.#sessions.remove(space, session.id);
+      if (session.ownerConnectionId !== null) {
+        this.#connections.get(session.ownerConnectionId)?.revokeSession(
+          space,
+          session.id,
+          "unauthorized",
+        );
+      }
+    }
+  }
+
   /** On the first-ever open of a commit-less space by a regular principal,
    *  seed the ACL document with creator ownership. Skipped for service
    *  principals and the space's own key: they hold implicit OWNER, and
@@ -1472,6 +1494,7 @@ export class Server {
       }
       if (aclTouched) {
         this.#invalidateAclCapabilities(message.space);
+        this.#revokeDeauthorizedSessions(engine, message.space);
       }
       await this.runPostCommitSchedulerSideEffects(
         message.space,

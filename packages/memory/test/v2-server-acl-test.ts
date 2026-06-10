@@ -385,7 +385,8 @@ Deno.test("acl enforce: revoking a grant takes effect for subsequent messages", 
     );
     assertExists(first.ok, "grant should allow Bob's first write");
 
-    // Owner revokes Bob.
+    // Owner revokes Bob. Bob's live session is torn down (gating alone
+    // would still let his existing subscriptions receive pushes).
     const revoke = await transactSet(
       alice,
       space,
@@ -395,6 +396,14 @@ Deno.test("acl enforce: revoking a grant takes effect for subsequent messages", 
       2,
     );
     assertExists(revoke.ok);
+
+    const revoked = shiftMessage(bob.messages);
+    assertEquals(revoked, {
+      type: "session/revoked",
+      space,
+      sessionId: bobSession.ok.sessionId,
+      reason: "unauthorized",
+    });
 
     const second = await transactSet(
       bob,
@@ -406,9 +415,13 @@ Deno.test("acl enforce: revoking a grant takes effect for subsequent messages", 
     );
     assertEquals(
       second.error?.name,
-      "AuthorizationError",
-      "revocation must invalidate the cached capability",
+      "SessionError",
+      "the revoked session must be gone",
     );
+
+    // And Bob cannot just open a new one.
+    const reopen = await openSession(bob, space, BOB);
+    assertEquals(reopen.error?.name, "AuthorizationError");
   } finally {
     await server.close();
   }
