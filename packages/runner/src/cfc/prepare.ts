@@ -1508,7 +1508,9 @@ const policySchemaMatchesValue = (
   return true;
 };
 
-const wildcardPolicyMatchesValue = (
+// Exported for unit testing of the unresolvable-link fail-closed branch (S17).
+// Not part of the public CFC surface.
+export const wildcardPolicyMatchesValue = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -1531,9 +1533,11 @@ const wildcardPolicyMatchesValue = (
     return policySchemaMatchesValue(schema, linkedValue);
   }
 
-  const link = parseLink(value, { ...target, path: [] });
-  return link?.schema === undefined ||
-    schemasEqualIgnoringWriterBundleIds(schema, link.schema);
+  // The link's target value is unresolvable, so the policy's value condition
+  // cannot be evaluated against real data. The link's embedded schema is
+  // author-controlled and must not be trusted to exclude the policy (audit
+  // S17): fail closed by treating the entry as applying.
+  return true;
 };
 
 const ifcEntryAppliesToAttemptedWrite = (
