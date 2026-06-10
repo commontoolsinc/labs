@@ -1467,13 +1467,13 @@ interface LinkPreviewInput {
 Demo of CFC Phase 3 per-row, data-derived SQLite labels: each email row's
 confidentiality is computed from the row's own columns (sender ∧ regex-split
 recipients ∧ the db owner), with claimed-authored-by integrity gated on the
-row's dmarc evidence. Shows the declared output ceiling with onExceed:"skip"
-(a skim view that drops rows the ceiling does not admit), the fail-closed
-COUNT(*) refusal, and the db.exec write gate (a draft without a sender is
-rejected by the rule's min anchor).
+row's dmarc evidence. Shows the declared output ceiling with onExceed:"skip" (a
+skim view that drops rows the ceiling does not admit), the fail-closed COUNT(*)
+refusal, and the db.exec write gate (a draft without a sender is rejected by the
+rule's min anchor).
 
-**Keywords:** cfc, sqlite, per-row, label, confidentiality, integrity,
-rowLabel, cfSqlite, ceiling, maxConfidentiality, onExceed, mailbox, email
+**Keywords:** cfc, sqlite, per-row, label, confidentiality, integrity, rowLabel,
+cfSqlite, ceiling, maxConfidentiality, onExceed, mailbox, email
 
 ### Input Schema
 
@@ -1500,11 +1500,11 @@ interface MailboxOutput {
 ## `cfc-row-label-records/main.tsx`
 
 Demo of per-row (Phase 3) and per-column (Phase 2) CFC labels COMPOSING on one
-row entity: a patient-records table whose row rule derives the patient from
-the row's own data while the ssn column carries a static "pii" label. The same
-rows flow as a diagnosis projection under a declared ceiling but are REFUSED
-as an ssn projection (the per-column pii label exceeds the ceiling) —
-fail-closed composition of both label sources.
+row entity: a patient-records table whose row rule derives the patient from the
+row's own data while the ssn column carries a static "pii" label. The same rows
+flow as a diagnosis projection under a declared ceiling but are REFUSED as an
+ssn projection (the per-column pii label exceeds the ceiling) — fail-closed
+composition of both label sources.
 
 **Keywords:** cfc, sqlite, per-row, per-column, ifc, pii, label, composition,
 ceiling, maxConfidentiality, fail-closed, records
