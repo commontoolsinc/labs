@@ -220,6 +220,7 @@ export interface CfcRuntimeStats {
   cfcDigestInvalidations: number;
   cfcOutboxFlushes: number;
   sinkDedupHits: number;
+  sinkReleaseRejects: number;
 }
 
 const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
@@ -229,6 +230,7 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   cfcDigestInvalidations: 0,
   cfcOutboxFlushes: 0,
   sinkDedupHits: 0,
+  sinkReleaseRejects: 0,
 });
 
 /**
@@ -589,6 +591,9 @@ export class Runtime {
       },
       onSinkDedupHit: () => {
         this.cfcStats.sinkDedupHits += 1;
+      },
+      onSinkReleaseReject: () => {
+        this.cfcStats.sinkReleaseRejects += 1;
       },
     });
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);

@@ -79,6 +79,9 @@ type CfcInstrumentationHooks = {
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;
+  onSinkReleaseReject?(
+    info: { sink: string; effectId: string; detail: string },
+  ): void;
 };
 
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
@@ -119,6 +122,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
   ) {}
+
+  noteCfcSinkReleaseReject(
+    info: { sink: string; effectId: string; detail: string },
+  ): void {
+    this.cfcState.diagnostics.push(
+      `sink-request release rejected for ${info.sink} (${info.effectId}): ${info.detail}`,
+    );
+    this.cfcInstrumentation.onSinkReleaseReject?.(info);
+  }
 
   getCfcState(): Readonly<CfcTxState> {
     return this.cfcState;
@@ -846,6 +858,12 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcWritePolicyInput(input: WritePolicyInput): void {
     this.wrapped.recordCfcWritePolicyInput(input);
+  }
+
+  noteCfcSinkReleaseReject(
+    info: { sink: string; effectId: string; detail: string },
+  ): void {
+    this.wrapped.noteCfcSinkReleaseReject(info);
   }
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {

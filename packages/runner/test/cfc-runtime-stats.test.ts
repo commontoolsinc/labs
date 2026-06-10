@@ -37,6 +37,7 @@ describe("CFC runtime stats", () => {
       cfcDigestInvalidations: 0,
       cfcOutboxFlushes: 0,
       sinkDedupHits: 0,
+      sinkReleaseRejects: 0,
     });
 
     const preparedTx = runtime.edit();
@@ -161,6 +162,7 @@ describe("CFC runtime stats", () => {
       cfcDigestInvalidations: 1,
       cfcOutboxFlushes: 2,
       sinkDedupHits: 1,
+      sinkReleaseRejects: 0,
     });
   });
 });

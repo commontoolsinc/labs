@@ -107,12 +107,24 @@ export function enqueueSinkRequestPostCommitEffect(
         policyInput,
       );
       if (reason !== undefined) {
-        console.warn("[CFC sink-request]", {
-          ruleId: "sink-request-release",
-          sink,
-          effectId,
-          detail: reason,
-        });
+        // Fail closed: the effect is not sent. Surface the reject to the
+        // transaction (CFC stats + diagnostics) rather than only console.warn,
+        // so a systematically failing release check is observable (audit W3.23).
+        const noteable = committedTx as {
+          noteCfcSinkReleaseReject?: (
+            info: { sink: string; effectId: string; detail: string },
+          ) => void;
+        };
+        if (typeof noteable.noteCfcSinkReleaseReject === "function") {
+          noteable.noteCfcSinkReleaseReject({ sink, effectId, detail: reason });
+        } else {
+          console.warn("[CFC sink-request]", {
+            ruleId: "sink-request-release",
+            sink,
+            effectId,
+            detail: reason,
+          });
+        }
         return;
       }
       await flush(committedTx as IExtendedStorageTransaction);
