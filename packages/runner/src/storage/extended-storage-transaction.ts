@@ -114,7 +114,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
-  private privilegedSystemWriteDepth = 0;
+  // ECMAScript-private (#) so handler code reaching cell.tx cannot enter the
+  // scope via `(cell.tx as any)` — `as any` cannot touch a `#private` member.
+  #privilegedSystemWriteDepth = 0;
   // Per-transaction cache of `Cell.get()` results, keyed by cell link identity.
   // Replaced wholesale on any write (see `invalidateReadResultCache`), so a hit
   // is only ever served when nothing has been written since the cached read.
@@ -176,18 +178,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   // Runs `fn` with writes to protected system paths (a document's ["cfc"]
   // label-map) permitted. The runtime's own label/schema persistence in
-  // prepareBoundaryCommit is the only legitimate such writer; the commit path
-  // wraps that call in this scope. Internal-only (NOT on the public
-  // IExtendedStorageTransaction interface, and private on the class) so handler
-  // code holding `cell.tx` can't grant itself privilege (audit S3 posture +
-  // S18). prepareCfc invokes it via `this`; tests that stand in for the runtime
-  // reach it through a structural cast.
-  private runPrivilegedSystemWrite<T>(fn: () => T): T {
-    this.privilegedSystemWriteDepth += 1;
+  // prepareBoundaryCommit is the only legitimate such writer; `prepareCfc`
+  // wraps that call in this scope via `this`. ECMAScript-private (#) and absent
+  // from IExtendedStorageTransaction, so handler code reaching `cell.tx` cannot
+  // enter the scope — `(cell.tx as any).#runPrivilegedSystemWrite` is a
+  // TypeError, not a bypass (audit S18 review). Tests that need stored ["cfc"]
+  // metadata seed it instead via an ungated path-[] full-document write (the
+  // same shape hydration delivers), never through this scope.
+  #runPrivilegedSystemWrite<T>(fn: () => T): T {
+    this.#privilegedSystemWriteDepth += 1;
     try {
       return fn();
     } finally {
-      this.privilegedSystemWriteDepth -= 1;
+      this.#privilegedSystemWriteDepth -= 1;
     }
   }
 
@@ -199,7 +202,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // other CFC reason (enforce rejects, observe diagnoses). `disabled` leaves
   // CFC inert, so the guard does nothing there.
   private noteSystemWrite(address: IMemorySpaceAddress): void {
-    if (this.privilegedSystemWriteDepth > 0) return;
+    if (this.#privilegedSystemWriteDepth > 0) return;
     if (this.cfcState.enforcementMode === "disabled") return;
     // The ["cfc"] document field holds the persisted label map. A value-path
     // write (path[0] is a user key) or a path-[] full-document write is not it.
@@ -395,7 +398,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // exactly the protected writes `noteSystemWrite` rejects from untrusted
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
-    const reasons = this.runPrivilegedSystemWrite(() =>
+    const reasons = this.#runPrivilegedSystemWrite(() =>
       prepareBoundaryCommit(this)
     );
     if (reasons.length > 0) {

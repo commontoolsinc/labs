@@ -102,6 +102,32 @@ describe("CFC privileged system write (S18)", () => {
     }
   });
 
+  it("exposes no privilege-escalation method on the transaction (S18 review)", async () => {
+    // The reviewer's scenario: (cell.tx as any).runPrivilegedSystemWrite(() =>
+    // cell.tx.writeOrThrow({ path: ["cfc"] }, forged)). The scope is now an
+    // ECMAScript #private method, so no such property exists on the tx — and a
+    // direct ["cfc"] write therefore still fails closed.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const tx = runtime.edit();
+      const escalate = (tx as unknown as Record<string, unknown>)
+        .runPrivilegedSystemWrite;
+      expect(escalate).toBeUndefined();
+      // And nothing under the tx wrapper exposes it either.
+      const inner = (tx as unknown as { tx?: Record<string, unknown> }).tx;
+      expect(inner?.runPrivilegedSystemWrite).toBeUndefined();
+      await tx.commit();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("permits the runtime's own label persistence (privileged) to commit", async () => {
     // A normal labeled write: the runtime derives + persists ["cfc"] metadata
     // inside prepareBoundaryCommit's privileged scope. This must NOT trip the
