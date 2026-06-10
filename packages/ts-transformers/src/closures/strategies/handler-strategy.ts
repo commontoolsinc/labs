@@ -18,6 +18,7 @@ export class HandlerStrategy implements ClosureTransformationStrategy {
     return false;
   }
 
+  // Caller must pass a JSX attribute node.
   transform(
     node: ts.Node,
     context: TransformationContext,
@@ -26,7 +27,7 @@ export class HandlerStrategy implements ClosureTransformationStrategy {
     if (ts.isJsxAttribute(node)) {
       return transformHandlerJsxAttribute(node, context, visitor);
     }
-    return undefined;
+    throw new Error("HandlerStrategy.transform requires a JSX attribute node");
   }
 }
 

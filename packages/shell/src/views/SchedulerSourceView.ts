@@ -437,7 +437,10 @@ export class XSchedulerSource extends LitElement {
   }
 
   private handleLineClick(entries: ActionEntry[]) {
-    if (entries.length === 0) return;
+    // Caller must pass a non-empty entries array.
+    if (entries.length === 0) {
+      throw new Error("handleLineClick requires a non-empty entries array");
+    }
 
     // If clicking the same line again, cycle to next entry
     const currentId = this.selectedNodeId;
