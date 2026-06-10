@@ -13,7 +13,7 @@ import {
 
 export const TRUSTED_REVIEW_SURFACE = "TrustedReviewSurface";
 
-const REVIEW_SNAPSHOT_ACTION = "TrustedReviewSnapshot";
+export const REVIEW_SNAPSHOT_ACTION = "TrustedReviewSnapshot";
 
 export type TrustedReviewedTitleUiContract = TrustedActionUiContract<
   string,

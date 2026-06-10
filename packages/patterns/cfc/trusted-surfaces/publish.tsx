@@ -13,7 +13,7 @@ import {
 
 export const TRUSTED_PUBLISH_SURFACE = "TrustedPublishSurface";
 
-const PUBLISH_SNAPSHOT_ACTION = "TrustedPublishSnapshot";
+export const PUBLISH_SNAPSHOT_ACTION = "TrustedPublishSnapshot";
 
 export type TrustedPublishedTitleUiContract = TrustedActionUiContract<
   string,
