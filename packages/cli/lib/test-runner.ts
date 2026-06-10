@@ -199,7 +199,9 @@ export interface TestRunResult {
   allowRuntimeErrors?: boolean;
   /** Non-idempotent computation names detected by the idempotency check */
   nonIdempotent: string[];
-  /** If true, non-idempotent computations are expected and should not fail the test */
+  /** If true, non-idempotent computations are expected: detected violations
+   * don't fail the test, and detecting NONE fails it (the flag asserts the
+   * detector fires; it is not a mere tolerance). */
   expectNonIdempotent?: boolean;
 }
 
@@ -1577,6 +1579,13 @@ export async function runTests(
             console.log(`    ${name}`);
           }
         }
+      } else if (result.expectNonIdempotent) {
+        // The flag asserts the detector fires — passing silently here would
+        // let detection regressions defang the non-idempotent fixtures.
+        totalFailed++;
+        console.log(
+          "  ✗ expected non-idempotent computation(s), none detected",
+        );
       }
 
       // Report runtime errors
