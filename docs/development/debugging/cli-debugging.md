@@ -2,6 +2,30 @@
 
 When patterns misbehave, the CLI often provides faster diagnosis than browser DevTools. This approach isolates data logic from UI rendering issues.
 
+## Local Checks Before Deploying
+
+```bash
+# Check syntax only (fast)
+deno task cf check pattern.tsx --no-run
+
+# Run locally
+deno task cf check pattern.tsx
+
+# View transformer output (debug compile issues — see below)
+deno task cf check pattern.tsx --show-transformed
+```
+
+## Deploying a Test Piece
+
+```bash
+# Deploy — returns a piece-id used by all commands below
+deno task cf piece new --identity key.json --api-url URL --space SPACE pattern.tsx
+
+# Set test data
+echo '{"title": "Test", "done": false}' | \
+  deno task cf piece set --identity key.json --api-url URL --space SPACE --piece ID testItem
+```
+
 ## When to Use CLI vs Browser
 
 **Use CLI when:**
@@ -118,5 +142,4 @@ This keeps you working with the same piece instance, preserving any test data yo
 
 ## See Also
 
-- ./testing.md - Local and deployed testing workflows
 - ./workflow.md - General debugging workflow

@@ -416,6 +416,81 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "renderDeclassificationPolicy 'deny' ignores author declassification (S15)",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderDeclassificationPolicy: "deny",
+        });
+        // Same boundary as the 'declassifies that label' step above; under
+        // 'deny' the author's declassifyConfidentiality must NOT release it.
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [],
+            declassifyConfidentiality: [healthRecordAtom],
+          },
+          children: [confidential as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            false,
+          );
+          assertEquals(
+            renderedText.includes("Content hidden by policy"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderDeclassificationPolicy 'deny' still honors a within-bound atom (narrowing intact)",
+      async () => {
+        // 'deny' removes only the fail-open release capability; a boundary whose
+        // maxConfidentiality already admits the atom must still render it.
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+          renderDeclassificationPolicy: "deny",
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [healthRecordAtom],
+          },
+          children: [confidential as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(
+            renderedText.includes("Sensitive diagnosis: migraine"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "matches structured render-policy atoms by structural equality",
       async () => {
         const collector = createOpsCollector();

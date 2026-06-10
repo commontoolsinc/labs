@@ -195,6 +195,16 @@ const EnvSchema = z.object({
   // Path to an identity key.
   IDENTITY: z.string().default(""),
 
+  // Space ACL enforcement on the memory v2 server: off | observe | enforce.
+  // `observe` evaluates the policy and counts/logs would-denies without
+  // blocking (the rollout signal); `enforce` denies. See the `acl` option in
+  // packages/memory/v2/server.ts for the policy.
+  MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
+
+  // Comma-separated DIDs with implicit OWNER on every space (e.g. the
+  // background service operator identity).
+  MEMORY_SERVICE_DIDS: z.string().default(""),
+
   // In development, you can optionally proxy the upstream SHELL
   SHELL_URL: z.string().optional(),
 

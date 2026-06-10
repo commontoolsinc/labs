@@ -34,6 +34,7 @@ import type {
   NodeState,
   PropState,
   ReconcileContext,
+  RenderDeclassificationPolicy,
   RenderPolicy,
   WorkerProps,
   WorkerReconcilerOptions,
@@ -101,10 +102,13 @@ export class WorkerReconciler {
 
   private readonly onOps: (ops: VDomOp[]) => void;
   private readonly onError?: (error: Error) => void;
+  private readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
 
   constructor(options: WorkerReconcilerOptions) {
     this.onOps = options.onOps;
     this.onError = options.onError;
+    this.renderDeclassificationPolicy = options.renderDeclassificationPolicy ??
+      "allow";
   }
 
   /**
@@ -358,15 +362,22 @@ export class WorkerReconciler {
         this.staticPropAsAtomList(props, "maxConfidentiality") ??
           this.staticPropAsAtomList(props, "data-cfc-max-confidentiality"),
       );
-      const declassifyConfidentiality = this.staticPropAsAtomList(
-        props,
-        "declassifyConfidentiality",
-      ) ??
-        this.staticPropAsAtomList(
-          props,
-          "data-cfc-declassify-confidentiality",
-        ) ??
-        [];
+      // Author-supplied declassification is a fail-open capability (it releases
+      // a secret upward). Honor it only when the render policy allows; under
+      // "deny" the boundary keeps its fail-closed power to NARROW the bound but
+      // cannot declassify (audit S15). Narrowing below is unaffected.
+      const declassifyConfidentiality =
+        this.renderDeclassificationPolicy === "deny" ? [] : (
+          this.staticPropAsAtomList(
+            props,
+            "declassifyConfidentiality",
+          ) ??
+            this.staticPropAsAtomList(
+              props,
+              "data-cfc-declassify-confidentiality",
+            ) ??
+            []
+        );
 
       policy = {
         maxConfidentiality: this.narrowMaxConfidentiality(

@@ -57,6 +57,49 @@ const mergeArraySet = (
   return result;
 };
 
+type WriterIdentityClaim = {
+  __ctWriterIdentityOf: Record<string, unknown>;
+};
+
+const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
+  isRecord(value) && isRecord(value.__ctWriterIdentityOf);
+
+/**
+ * Reconcile two `writeAuthorizedBy` writer-identity claims that differ only
+ * by the presence of the `bundleId` provenance stamp (one side recorded under
+ * a verified identity, the other without one). Returns the stamped claim, or
+ * `undefined` when the claims genuinely conflict (different bindings, or two
+ * different stamps).
+ */
+const reconcileWriterClaimStamp = (
+  existing: unknown,
+  candidate: unknown,
+): unknown | undefined => {
+  if (!isWriterIdentityClaim(existing) || !isWriterIdentityClaim(candidate)) {
+    return undefined;
+  }
+  const existingIdentity = existing.__ctWriterIdentityOf;
+  const candidateIdentity = candidate.__ctWriterIdentityOf;
+  const existingStamp = existingIdentity.bundleId;
+  const candidateStamp = candidateIdentity.bundleId;
+  // Exactly one side stamped — otherwise deepEqual already decided (equal
+  // stamps) or this is a genuine conflict (two different stamps).
+  if ((existingStamp === undefined) === (candidateStamp === undefined)) {
+    return undefined;
+  }
+  const { bundleId: _existingBundle, ...existingRest } = existingIdentity;
+  const { bundleId: _candidateBundle, ...candidateRest } = candidateIdentity;
+  if (
+    !deepEqual(
+      { ...existing, __ctWriterIdentityOf: existingRest },
+      { ...candidate, __ctWriterIdentityOf: candidateRest },
+    )
+  ) {
+    return undefined;
+  }
+  return existingStamp !== undefined ? existing : candidate;
+};
+
 const mergeSetLikeIfcArray = (
   key: string,
   existing: unknown,
@@ -96,6 +139,20 @@ const mergeSetLikeIfcArray = (
         !candidate.every((entry) => typeof entry === "string")
       ) {
         if (!deepEqual(existing, candidate)) {
+          // One transaction can record the same protected field through a
+          // schema input whose `writeAuthorizedBy` claim was rebound with the
+          // authoring identity's bundleId and one recorded without an
+          // identity (unstamped). The BINDING (file + path) is what the claim
+          // means; the bundle stamp is provenance added per input. Mirror
+          // prepare's `schemasEqualIgnoringWriterBundleIds` tolerance and
+          // keep the stamped claim. Two DIFFERENT stamps (or different
+          // bindings) still conflict.
+          if (key === "writeAuthorizedBy") {
+            const reconciled = reconcileWriterClaimStamp(existing, candidate);
+            if (reconciled !== undefined) {
+              return reconciled;
+            }
+          }
           throw new Error(`${key} must remain stable at ${path || "/"}`);
         }
         return existing;

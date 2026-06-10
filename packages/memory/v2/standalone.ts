@@ -98,8 +98,20 @@ export class StandaloneMemoryServer {
     this.url = new URL(`http://127.0.0.1:${address.port}/`);
   }
 
-  static start(): StandaloneMemoryServer {
-    const memory = new MemoryServer.Server({ authorizeSessionOpen });
+  static start(
+    options: {
+      /** Space ACL config, passed through to the memory server. Default:
+       *  off (the historical wide-open behavior in-process tests expect). */
+      acl?: {
+        mode: MemoryServer.MemoryAclMode;
+        serviceDids?: readonly string[];
+      };
+    } = {},
+  ): StandaloneMemoryServer {
+    const memory = new MemoryServer.Server({
+      authorizeSessionOpen,
+      acl: options.acl,
+    });
     const http = Deno.serve({
       hostname: "127.0.0.1",
       port: 0,

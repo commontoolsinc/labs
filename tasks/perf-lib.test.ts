@@ -1,5 +1,6 @@
 import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
+  type Artifact,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   extractMetrics,
@@ -7,6 +8,7 @@ import {
   fetchPRBody,
   githubGet,
   type Job,
+  newestArtifactsByName,
   parsePerfMetricsBackfillFile,
   parsePerfMetricsFile,
   serializePerfMetrics,
@@ -731,4 +733,27 @@ Deno.test("githubGet does not retry non-transient GitHub responses", async () =>
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+Deno.test("newestArtifactsByName keeps the latest re-run upload per name", () => {
+  const artifact = (id: number, name: string): Artifact => ({
+    id,
+    name,
+    size_in_bytes: 1,
+    expired: false,
+  });
+  // API order is newest-first; a naive last-write-wins iteration would let
+  // the stale attempt-1 artifact shadow the re-run's upload.
+  const result = newestArtifactsByName([
+    artifact(200, "test-timing-pattern-unit-4"),
+    artifact(150, "test-timing-pattern-unit-1"),
+    artifact(100, "test-timing-pattern-unit-4"),
+  ]);
+  assertEquals(
+    result.map((a) => [a.name, a.id]).sort(),
+    [
+      ["test-timing-pattern-unit-1", 150],
+      ["test-timing-pattern-unit-4", 200],
+    ],
+  );
 });

@@ -15,10 +15,9 @@ import {
   type OpaqueRef,
   type Pattern,
   type toJSON,
-  unsafe_originalPattern,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
-import { getPatternProgram } from "./pattern-metadata.ts";
+import { getPatternProgram, noteDerivedCopy } from "./pattern-metadata.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
@@ -179,8 +178,10 @@ export function toJSONWithLegacyAliases(
     // Restore depth so shared references can be re-serialized
     seen.set(value as object, depth);
 
-    // Retain the original pattern reference for downstream processing.
-    if (isPattern(value)) result[unsafe_originalPattern] = value;
+    // Register the copy's derivation link so trust and the content-addressed
+    // entry ref carry to the serialized copy (side table; symbol keys would be
+    // dropped by JSON anyway).
+    if (isPattern(value)) noteDerivedCopy(result, value);
 
     return result;
   }

@@ -137,6 +137,22 @@ export class SessionRegistry {
     return false;
   }
 
+  sessionsForSpace(space: string): SessionState[] {
+    this.#prune();
+    const sessions: SessionState[] = [];
+    for (const session of this.#sessions.values()) {
+      if (session.space === space) {
+        sessions.push(session);
+      }
+    }
+    return sessions;
+  }
+
+  /** Remove a session outright (e.g. its principal lost access). */
+  remove(space: string, sessionId: string): void {
+    this.#sessions.delete(sessionKey(space, sessionId));
+  }
+
   updateSeenSeq(
     space: string,
     sessionId: string,

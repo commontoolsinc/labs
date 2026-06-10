@@ -213,6 +213,26 @@ export interface ReconcileContext {
 /**
  * Options for the worker reconciler.
  */
+/**
+ * Whether author-supplied `declassifyConfidentiality` on a
+ * `<cf-cfc-render-boundary>` is honored.
+ *
+ * `declassifyConfidentiality` lets a render boundary release a confidentiality
+ * atom so a labeled cell renders despite the active `maxConfidentiality` bound.
+ * It is read from static/reactive VDOM props, so ANY pattern can declassify ANY
+ * secret it can render — the unguarded-release shape ch. 5 forbids (audit S15).
+ *
+ * - `"allow"` (default): honor it — the current behavior, pending a verified-
+ *   authority design / product decision on the default render policy.
+ * - `"deny"`: ignore author-supplied declassification entirely. A boundary may
+ *   still NARROW the confidentiality bound (`maxConfidentiality`), it just can't
+ *   release a secret upward.
+ *
+ * The narrowing-vs-release asymmetry is the point: `deny` removes only the
+ * fail-open capability, never the fail-closed one.
+ */
+export type RenderDeclassificationPolicy = "allow" | "deny";
+
 export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
   onOps: (
@@ -221,6 +241,13 @@ export interface WorkerReconcilerOptions {
 
   /** Optional: callback when an error occurs */
   onError?: (error: Error) => void;
+
+  /**
+   * Policy for honoring author-supplied render-boundary declassification.
+   * Defaults to `"allow"` (no behavior change). See
+   * {@link RenderDeclassificationPolicy}.
+   */
+  renderDeclassificationPolicy?: RenderDeclassificationPolicy;
 }
 
 /**

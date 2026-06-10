@@ -13,7 +13,7 @@ import {
 
 export const TRUSTED_SAVE_SURFACE = "TrustedSaveSurface";
 
-const SAVE_TITLE_ACTION = "TrustedSaveTitle";
+export const SAVE_TITLE_ACTION = "TrustedSaveTitle";
 
 export type TrustedSaveTitleUiContract = TrustedActionUiContract<
   string,
