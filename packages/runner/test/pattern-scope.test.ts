@@ -9,6 +9,7 @@ import {
 } from "../src/link-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type Cell, createCell } from "../src/cell.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import { type Opaque } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -2950,6 +2951,131 @@ Deno.test("schema-less write AT a scoped slot follows the stored redirect", asyn
       { ...baseLink, schema: undefined, scope: "user" },
     );
     assertEquals(userInstance.getRaw(), "Alice");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("sub-pattern binding alias carries the parent slot's declared scope on its serialized schema", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    // A reusable sub-pattern whose input schema is scope-silent: it does not
+    // know its caller stores the value per-user.
+    const Child = pattern<{ profile: { name: string } }>(
+      ({ profile }) => ({ out: profile }),
+      {
+        type: "object",
+        properties: {
+          profile: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            asCell: ["cell"],
+          },
+        },
+        required: ["profile"],
+      },
+    );
+
+    const Root = pattern<{ myProfile: { name: string } }>(
+      ({ myProfile }) => ({ child: Child({ profile: myProfile }) }),
+      {
+        type: "object",
+        properties: {
+          myProfile: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            default: { name: "" },
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+        },
+        required: ["myProfile"],
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "sub-pattern binding alias scope folding",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, Root, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const childResult = result.key("child").resolveAsCell();
+    const childArgument = runtime.getCellFromLink(
+      getMetaLink(childResult, "argument")!,
+    );
+    const storedAliasRaw = createCell<{ profile: unknown }>(
+      runtime,
+      { ...childArgument.getAsNormalizedFullLink(), schema: undefined },
+    ).key("profile").getRaw();
+    const storedAlias = parseLink(
+      storedAliasRaw,
+      childArgument.key("profile"),
+    )!;
+
+    // The alias targets the parent's base-scope slot (which holds the
+    // scoped-instance redirect), so the link itself stays at the inherited
+    // space scope...
+    assertEquals(storedAlias.scope, "space");
+    // ...and the parent's PerUser annotation is folded into the serialized
+    // schema, making the stored link self-describing: a consumer realizes the
+    // scope at read (follow cap) / write (narrowing branch) from the link
+    // alone, without relying on the stored base-slot redirect existing.
+    assertEquals(
+      ContextualFlowControl.getSchemaScopeCap(storedAlias.schema),
+      "user",
+    );
+
+    // End to end: a consumer writing through the stored alias — armed with
+    // nothing but the link's own serialized schema — lands the content in the
+    // user-scoped instance and leaves the base slot holding the redirect.
+    const writeTx = runtime.edit();
+    const consumer = runtime.getCellFromLink(
+      { ...storedAlias, overwrite: undefined },
+      storedAlias.schema,
+      writeTx,
+    );
+    consumer.set({ name: "Ada" });
+    runtime.prepareTxForCommit(writeTx);
+    await writeTx.commit();
+    await runtime.idle();
+
+    const parentArgument = runtime.getCellFromLink(
+      getMetaLink(result, "argument")!,
+    );
+    const parentSlot = createCell<{ myProfile: unknown }>(
+      runtime,
+      { ...parentArgument.getAsNormalizedFullLink(), schema: undefined },
+    ).key("myProfile");
+    assertEquals(
+      parseLink(parentSlot.getRaw(), parentSlot)?.scope,
+      "user",
+      "base-scope slot must keep the scoped-instance redirect",
+    );
+    const userInstance = createCell<{ name: string }>(
+      runtime,
+      {
+        ...parentArgument.getAsNormalizedFullLink(),
+        path: ["myProfile"],
+        schema: undefined,
+        scope: "user",
+      },
+    );
+    assertEquals(userInstance.getRaw(), { name: "Ada" });
   } finally {
     await runtime.dispose();
     await storageManager.close();

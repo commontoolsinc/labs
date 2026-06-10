@@ -40,6 +40,73 @@ type SendValueToBindingOptions = {
 type UnwrapOneLevelOptions = {
   targetSchema?: JSONSchema;
   derivedInternalCells?: readonly DerivedInternalCellDescriptor[];
+  /**
+   * The containing pattern's authored argument schema, used as the source of
+   * declared cell scopes when serializing binding aliases (see
+   * `foldDeclaredScopeIntoLinkSchema`). The argument cell LINK only carries a
+   * sanitized schema (`sanitizeSchemaForLinks` strips `asCell` entries,
+   * taking their scope annotation with them), so a `PerUser<Cell<>>`
+   * declaration is invisible on the link by the time aliases are bound. The
+   * authored pattern schema keeps `asCell` (`keepAsCell: true` in
+   * builder/pattern.ts) and is the ground truth for what each slot declared.
+   * (Internal cells don't need this: each derived internal cell carries its
+   * declared scope on its descriptor, realized directly on its link.)
+   */
+  sourceSchemas?: {
+    argument?: JSONSchema;
+  };
+};
+
+/**
+ * Folds the source slot's declared cell scope into the serialized alias link's
+ * schema, making the stored link self-describing.
+ *
+ * A binding alias serialized into a sub-piece's argument doc carries the
+ * sub-pattern's (typically scope-silent) input schema, not the parent slot's
+ * schema — so the parent's `PerUser`/`PerSession` declaration (emitted as
+ * `asCell: [{kind, scope}]`) is dropped, and any consumer of the stored link
+ * must rely on the stored base-slot redirect existing to land reads and writes
+ * in the scoped instance. Folding the declared scope into the link's schema
+ * (as a top-level `scope`, which survives link-schema sanitization where
+ * `asCell` entries do not) keeps the serialized graph self-describing: writes
+ * through the link take the scope-narrowing branch and reads get the follow
+ * cap, per "scope lives in the schema, realized at read/write".
+ *
+ * The scope is deliberately NOT stamped onto the link's own `scope`: the link
+ * addresses the base-scope slot, where passed-in cell references legitimately
+ * live (see "lift can read session-scoped cell passed from pattern input" in
+ * pattern-scope.test.ts, and the matching guidance on
+ * ContextualFlowControl.getSchemaScopeCap).
+ *
+ * Folding applies exactly when the write-path narrowing branch would fire for
+ * the slot (declared scope narrower than the slot's link scope) and the
+ * emitted schema does not declare a scope of its own (a local declaration
+ * wins). Slots whose emitted link carries no schema at all are left alone so
+ * they keep inheriting the reader's schema during link resolution.
+ */
+const foldDeclaredScopeIntoLinkSchema = (
+  cfc: ContextualFlowControl,
+  link: NormalizedFullLink,
+  authoredRootSchema: JSONSchema | undefined,
+  path: readonly string[],
+): NormalizedFullLink => {
+  if (authoredRootSchema === undefined || !isRecord(link.schema)) return link;
+  if (ContextualFlowControl.getSchemaScopeCap(link.schema) !== undefined) {
+    return link;
+  }
+  const authoredSlotSchema = path.length > 0
+    ? cfc.getSchemaAtPath(authoredRootSchema, [...path])
+    : authoredRootSchema;
+  const declaredCap = ContextualFlowControl.getSchemaScopeCap(
+    authoredSlotSchema,
+  );
+  if (
+    !isCellScope(declaredCap) ||
+    scopeRank(declaredCap) <= scopeRank(link.scope)
+  ) {
+    return link;
+  }
+  return { ...link, schema: { ...link.schema, scope: declaredCap } };
 };
 
 const scopedLinkForPath = (
@@ -359,8 +426,16 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;
+        const authoredRootSchema = alias.cell === "argument"
+          ? options?.sourceSchemas?.argument
+          : undefined;
         return createSigilLinkFromParsedLink(
-          scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+          foldDeclaredScopeIntoLinkSchema(
+            cfc,
+            scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+            authoredRootSchema,
+            path,
+          ),
           { includeSchema: true, overwrite: "redirect" },
         );
       }
