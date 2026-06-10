@@ -10,11 +10,6 @@ import { createModuleCompartmentGlobals } from "../src/sandbox/mod.ts";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import {
-  bundleWithCanonicalLoader,
-  bundleWithGuardedFactory,
-  withFactoryGuards,
-} from "./support/amd-bundles.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -54,7 +49,7 @@ describe("SES security regressions", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow(
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow(
       "Top-level mutable bindings are not allowed in SES mode",
     );
   });
@@ -81,8 +76,7 @@ describe("SES security regressions", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default()).toEqual({
       hasProcess: false,
@@ -134,7 +128,7 @@ describe("SES security regressions", () => {
       ],
     };
 
-    await expect(engine.compile(program)).rejects.toThrow();
+    await expect(engine.compileToRecordGraph(program)).rejects.toThrow();
   });
 
   it("exposes compatibility fetch in callback compartments without host internals", () => {
@@ -329,8 +323,7 @@ describe("SES security regressions", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main, loadId } = await engine.evaluate(id, jsScript, program.files);
+    const { main, loadId } = await engine.compileAndEvaluateModules(program);
     const countVerifiedFunctionsForLoad = () =>
       ((engine as unknown as {
         executableRegistry: {
@@ -482,8 +475,7 @@ describe("SES security regressions", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default()).toEqual({
       fetchWrite: "TypeError",
@@ -517,8 +509,7 @@ describe("SES security regressions", () => {
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    const { main } = await engine.evaluate(id, jsScript, program.files);
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default()).toEqual({
       hasConsole: true,
@@ -575,8 +566,7 @@ describe("SES security regressions", () => {
         ],
       };
 
-      const { jsScript, id } = await engine.compile(program);
-      const { main } = await engine.evaluate(id, jsScript, program.files);
+      const { main } = await engine.compileAndEvaluateModules(program);
 
       expect(main?.default()).toBe("TypeError");
       expect(Headers.prototype.append).toBe(originalAppend);
@@ -622,20 +612,10 @@ describe("SES security regressions", () => {
       ],
     };
 
-    const poisoned = await engine.compile(poisonProgram);
-    const poisonResult = await engine.evaluate(
-      poisoned.id,
-      poisoned.jsScript,
-      poisonProgram.files,
-    );
+    const poisonResult = await engine.compileAndEvaluateModules(poisonProgram);
     expect(poisonResult.main?.default()).toBe("TypeError");
 
-    const probed = await engine.compile(probeProgram);
-    const probeResult = await engine.evaluate(
-      probed.id,
-      probed.jsScript,
-      probeProgram.files,
-    );
+    const probeResult = await engine.compileAndEvaluateModules(probeProgram);
     expect(probeResult.main?.default()).toBe(0);
   });
 
@@ -672,116 +652,47 @@ describe("SES security regressions", () => {
       ],
     };
 
-    const poisoned = await engine.compile(poisonProgram);
-    const poisonResult = await engine.evaluate(
-      poisoned.id,
-      poisoned.jsScript,
-      poisonProgram.files,
-    );
+    const poisonResult = await engine.compileAndEvaluateModules(poisonProgram);
     expect(poisonResult.main?.default()).toBe("https://evil.example/");
 
-    const probed = await engine.compile(probeProgram);
-    const probeResult = await engine.evaluate(
-      probed.id,
-      probed.jsScript,
-      probeProgram.files,
-    );
+    const probeResult = await engine.compileAndEvaluateModules(probeProgram);
     expect(probeResult.main?.default()).toBe(expectedApiUrl);
   });
 
-  it("shadows wrapper-local loader bindings inside compiled callbacks", async () => {
-    const { main } = await engine.evaluate(
-      "guarded-loader-bindings",
-      {
-        js: bundleWithGuardedFactory(
-          "    function probe() {\n" +
-            "      return {\n" +
-            "        defineType: typeof define,\n" +
-            "        runtimeDepsType: typeof runtimeDeps,\n" +
-            "        hooksType: typeof __cfAmdHooks,\n" +
-            "      };\n" +
-            "    }\n" +
-            "    exports.default = (0, commonfabric_1.lift)(probe);",
-        ),
-        filename: "guarded-loader-bindings.js",
-      },
-      [],
-    );
-    const implementation = (main?.default as {
-      implementation: () => {
-        defineType: string;
-        runtimeDepsType: string;
-        hooksType: string;
-      };
-    }).implementation;
-
-    expect(implementation()).toEqual({
-      defineType: "undefined",
-      runtimeDepsType: "undefined",
-      hooksType: "undefined",
-    });
-  });
-
-  it("prevents loader-backed state from surviving across callback invocations", async () => {
-    const { main } = await engine.evaluate(
-      "guarded-loader-state",
-      {
-        js: bundleWithGuardedFactory(
-          "    function hiddenState() {\n" +
-            '      try { define("__cf_hidden_state", ["exports"], function () { return { value: 1 }; }); return 1; }\n' +
-            "      catch { return 2; }\n" +
-            "    }\n" +
-            "    exports.default = (0, commonfabric_1.lift)(hiddenState);",
-        ),
-        filename: "guarded-loader-state.js",
-      },
-      [],
-    );
-    const implementation = (main?.default as {
-      implementation: () => number;
-    }).implementation;
-
-    expect(implementation()).toBe(2);
-    expect(implementation()).toBe(2);
-  });
-
-  it("makes authored AMD require inert even when called indirectly", async () => {
-    const bundle = bundleWithCanonicalLoader(`
-  define("dep", ["require", "exports"], function (require, exports) {
-    "use strict";
-    exports.default = 42;
-  });
-  define("main", ["require", "exports"], function (require, exports) {
-    "use strict";
-    exports.default = function probe() {
-      const alias = ({ call: require }).call;
-      try {
-        return alias("dep");
-      } catch (error) {
-        return {
-          name: error && error.name,
-          message: String(error && error.message ? error.message : error),
-        };
-      }
+  // The AMD loader (and with it the hand-injected-bundle attack surface that
+  // the old wrapper-guard tests exercised: callable `define`, loader-backed
+  // hidden state, indirect authored `require`) is gone — programs now compile
+  // from TS sources and every module body is verified. The loader-agnostic
+  // invariant that remains is that no loader machinery leaks into the module
+  // compartment's global surface.
+  it("does not expose loader machinery on the module compartment globals", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "export default function probe() {",
+            "  const host = globalThis as Record<string, unknown>;",
+            "  return {",
+            "    defineType: typeof host.define,",
+            "    requireType: typeof host.require,",
+            "    runtimeDepsType: typeof host.runtimeDeps,",
+            "    hooksType: typeof host.__cfAmdHooks,",
+            "  };",
+            "}",
+          ].join("\n"),
+        },
+      ],
     };
-  });
-  const main = require("main");
-  const exportMap = Object.create(null);
-  return { main, exportMap };
-`);
 
-    const { main } = await engine.evaluate(
-      "authored-require-probe",
-      {
-        js: withFactoryGuards(bundle),
-        filename: "authored-require-probe.js",
-      },
-      [],
-    );
+    const { main } = await engine.compileAndEvaluateModules(program);
 
     expect(main?.default()).toEqual({
-      name: "Error",
-      message: "Authored AMD require() is unavailable in SES mode",
+      defineType: "undefined",
+      requireType: "undefined",
+      runtimeDepsType: "undefined",
+      hooksType: "undefined",
     });
   });
 

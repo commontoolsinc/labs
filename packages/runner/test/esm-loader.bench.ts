@@ -4,10 +4,10 @@ import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
-// Benchmark: AMD bundle compile+evaluate vs the ESM module-record loader, for a
-// representative multi-file pattern. Informs the eventual default-on decision
-// (compartment construction + per-module importNow vs one bundled eval). The
-// `esmModuleLoader` flag stays off in production regardless.
+// Benchmark: the ESM module-record loader (compile + evaluate) for a
+// representative multi-file pattern — compartment construction plus per-module
+// importNow. This is the runtime's only module-load path since the AMD bundle
+// loader was removed.
 
 const signer = await Identity.fromPassphrase("bench operator");
 
@@ -45,23 +45,15 @@ const program: RuntimeProgram = {
   ],
 };
 
-// Warm the engines once (compiler + runtime init) so the bench measures
+// Warm the engine once (compiler + runtime init) so the bench measures
 // steady-state compile+evaluate, not first-call initialization.
-const amd = makeEngine();
-await amd.engine.initialize();
 const esm = makeEngine();
 await esm.engine.initialize();
-
-Deno.bench("AMD: compile + evaluate", { group: "loader" }, async () => {
-  const { id, jsScript } = await amd.engine.compile(program);
-  await amd.engine.evaluate(id, jsScript, program.files);
-});
 
 Deno.bench("ESM: compileAndEvaluateModules", { group: "loader" }, async () => {
   await esm.engine.compileAndEvaluateModules(program);
 });
 
 globalThis.addEventListener("unload", () => {
-  void amd.dispose();
   void esm.dispose();
 });

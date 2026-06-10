@@ -90,7 +90,7 @@ const handleShutdown = async () => {
 };
 
 // Start server with the abort controller
-async function startServer() {
+function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
   initializeRuntime();
 

@@ -89,12 +89,12 @@ describe("op-pattern-ref helpers", () => {
   });
 });
 
-// End-to-end: under the ESM module loader, the `op` pattern of a `.map` node is
+// End-to-end: the `op` pattern of a `.map` node is
 // passed by its content-addressed `{ identity, symbol }` reference (a
 // `{ $patternRef }` sentinel) and resolved synchronously at runtime via
 // `artifactFromIdentitySync`, instead of being deserialized from an embedded
 // pattern graph.
-describe("map op passed by identity (esmModuleLoader)", () => {
+describe("map op passed by identity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -104,7 +104,6 @@ describe("map op passed by identity (esmModuleLoader)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { esmModuleLoader: true },
     });
     tx = runtime.edit();
   });

@@ -223,12 +223,10 @@ describe("RuntimeInternals", () => {
     const experimental = {
       modernCellRep: true,
       persistentSchedulerState: false,
-      esmModuleLoader: true,
     };
     const options = createRuntimeClientOptions({
       session,
       apiUrl: new URL("http://shell.test/"),
-      buildHash: "build-hash",
       experimental,
     });
 
@@ -239,7 +237,6 @@ describe("RuntimeInternals", () => {
     });
     expect(options.spaceDid).toBe(session.space);
     expect(options.spaceName).toBe(session.spaceName);
-    expect(options.buildHash).toBe("build-hash");
     expect(options.experimental).toBe(experimental);
   });
 
@@ -278,6 +275,69 @@ describe("RuntimeInternals", () => {
       trustSnapshot: null,
     });
     expect(withoutTrust.trustSnapshot).toBeUndefined();
+  });
+
+  // A deploy must always load the fresh worker bundle: the worker URL is
+  // cache-busted with `?v=<buildHash>` whenever the build manifest provides
+  // a hash (no feature gate).
+  describe("worker URL versioning", () => {
+    async function workerUrlFromCreate(
+      getBuildHash: () => Promise<string | undefined>,
+    ): Promise<URL> {
+      const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+      const { Identity } = await import("@commonfabric/identity");
+      const identity = await Identity.generate({ implementation: "noble" });
+
+      const capturedUrls: string[] = [];
+      class StubWorker extends EventTarget {
+        constructor(url: URL | string) {
+          super();
+          capturedUrls.push(String(url));
+          // Error out before READY so create() aborts right after the worker
+          // URL is built — this test only covers URL construction, not the
+          // worker protocol.
+          queueMicrotask(() => {
+            this.dispatchEvent(
+              new ErrorEvent("error", { message: "stub worker" }),
+            );
+          });
+        }
+        postMessage(): void {}
+        terminate(): void {}
+      }
+
+      const OriginalWorker = globalThis.Worker;
+      (globalThis as { Worker: unknown }).Worker = StubWorker;
+      try {
+        await expect(RuntimeInternals.create({
+          identity,
+          view: { spaceName: "lib-shell-worker-url" },
+          apiUrl: new URL("http://shell.test/"),
+          workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
+          getBuildHash,
+        })).rejects.toThrow("stub worker");
+      } finally {
+        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+      }
+      expect(capturedUrls).toHaveLength(1);
+      return new URL(capturedUrls[0]);
+    }
+
+    it("always consults getBuildHash and sets ?v= when a hash is present", async () => {
+      let calls = 0;
+      const url = await workerUrlFromCreate(() => {
+        calls += 1;
+        return Promise.resolve("hash-123");
+      });
+      expect(calls).toBe(1);
+      expect(url.pathname).toBe("/scripts/worker-runtime.js");
+      expect(url.searchParams.get("v")).toBe("hash-123");
+    });
+
+    it("omits ?v= when the build manifest provides no hash", async () => {
+      const url = await workerUrlFromCreate(() => Promise.resolve(undefined));
+      expect(url.searchParams.has("v")).toBe(false);
+    });
   });
 
   // CT-1623: starting a piece is expensive (pattern instantiation + eager

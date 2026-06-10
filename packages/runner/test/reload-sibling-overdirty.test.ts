@@ -57,7 +57,7 @@ function newRuntime(sm: ReturnType<typeof StorageManager.emulate>) {
   return new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: sm,
-    experimental: { persistentSchedulerState: true, esmModuleLoader: true },
+    experimental: { persistentSchedulerState: true },
   });
 }
 

@@ -393,8 +393,7 @@ describe("module", () => {
         files: [{ name: "/main.tsx", contents: source }],
       };
 
-      const { id, jsScript } = await runtime.harness.compile(program);
-      return await runtime.harness.evaluate(id, jsScript, program.files);
+      return await runtime.harness.compileAndEvaluateModules(program);
     };
 
     const findNodeByPreview = (

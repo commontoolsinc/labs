@@ -1594,7 +1594,6 @@ describe("runtimeOptionsFromInitializationData", () => {
       },
       storageManager,
       telemetry,
-      undefined,
     );
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");

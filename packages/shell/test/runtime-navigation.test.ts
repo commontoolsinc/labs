@@ -90,7 +90,6 @@ describe("RuntimeInternals navigation", () => {
       $COMMIT_SHA?: string;
       $MEMORY_VERSION?: string;
       $EXPERIMENTAL_MODERN_CELL_REP?: string;
-      $COMPILATION_CACHE_CLIENT?: string;
     };
     const originalEnv = {
       $API_URL: env.$API_URL,
@@ -98,14 +97,12 @@ describe("RuntimeInternals navigation", () => {
       $COMMIT_SHA: env.$COMMIT_SHA,
       $MEMORY_VERSION: env.$MEMORY_VERSION,
       $EXPERIMENTAL_MODERN_CELL_REP: env.$EXPERIMENTAL_MODERN_CELL_REP,
-      $COMPILATION_CACHE_CLIENT: env.$COMPILATION_CACHE_CLIENT,
     };
     env.$API_URL = "http://shell.test/";
     env.$ENVIRONMENT = "development";
     env.$COMMIT_SHA = undefined;
     env.$MEMORY_VERSION = undefined;
     env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
-    env.$COMPILATION_CACHE_CLIENT = undefined;
 
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
     const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
@@ -162,7 +159,6 @@ describe("RuntimeInternals navigation", () => {
       env.$MEMORY_VERSION = originalEnv.$MEMORY_VERSION;
       env.$EXPERIMENTAL_MODERN_CELL_REP =
         originalEnv.$EXPERIMENTAL_MODERN_CELL_REP;
-      env.$COMPILATION_CACHE_CLIENT = originalEnv.$COMPILATION_CACHE_CLIENT;
       await runtime.dispose();
     }
   });
@@ -174,7 +170,6 @@ describe("RuntimeInternals navigation", () => {
       $COMMIT_SHA?: string;
       $MEMORY_VERSION?: string;
       $EXPERIMENTAL_MODERN_CELL_REP?: string;
-      $COMPILATION_CACHE_CLIENT?: string;
     };
     const originalEnv = {
       $API_URL: env.$API_URL,
@@ -182,14 +177,12 @@ describe("RuntimeInternals navigation", () => {
       $COMMIT_SHA: env.$COMMIT_SHA,
       $MEMORY_VERSION: env.$MEMORY_VERSION,
       $EXPERIMENTAL_MODERN_CELL_REP: env.$EXPERIMENTAL_MODERN_CELL_REP,
-      $COMPILATION_CACHE_CLIENT: env.$COMPILATION_CACHE_CLIENT,
     };
     env.$API_URL = "http://shell.test/";
     env.$ENVIRONMENT = "development";
     env.$COMMIT_SHA = undefined;
     env.$MEMORY_VERSION = undefined;
     env.$EXPERIMENTAL_MODERN_CELL_REP = undefined;
-    env.$COMPILATION_CACHE_CLIENT = undefined;
 
     const { RuntimeInternals } = await import("../src/lib/runtime.ts");
     const currentSpace = "did:key:z6Mk-shell-runtime-did-nav-current" as DID;
@@ -235,7 +228,6 @@ describe("RuntimeInternals navigation", () => {
       env.$MEMORY_VERSION = originalEnv.$MEMORY_VERSION;
       env.$EXPERIMENTAL_MODERN_CELL_REP =
         originalEnv.$EXPERIMENTAL_MODERN_CELL_REP;
-      env.$COMPILATION_CACHE_CLIENT = originalEnv.$COMPILATION_CACHE_CLIENT;
       await runtime.dispose();
     }
   });
@@ -257,7 +249,6 @@ describe("RuntimeInternals navigation", () => {
     const options = createRuntimeClientOptions({
       session,
       apiUrl: new URL("http://shell.test/"),
-      buildHash: "build-hash",
     });
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
@@ -267,6 +258,5 @@ describe("RuntimeInternals navigation", () => {
     });
     expect(options.spaceDid).toBe(session.space);
     expect(options.spaceName).toBe(session.spaceName);
-    expect(options.buildHash).toBe("build-hash");
   });
 });

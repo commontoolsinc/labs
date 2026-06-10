@@ -21,16 +21,19 @@ describe("cli dev", () => {
     expect(code).toBe(0);
   });
 
-  it("Generates output file with correct filename", async () => {
+  it("Generates output file with the compiled module bodies", async () => {
     const temp = await Deno.makeTempFile();
     const { code, stdout, stderr } = await cf(
-      `dev fixtures/pattern.tsx --no-run --filename test-file.js --output ${temp}`,
+      `dev fixtures/pattern.tsx --no-run --output ${temp}`,
     );
     checkStderr(stderr);
     expect(stdout.length).toBe(0);
     expect(code).toBe(0);
     const rendered = bytesToLines(await Deno.readFile(temp));
-    expect(rendered[rendered.length - 1]).toEqual("//# sourceURL=test-file.js");
+    // Concatenated per-module compiled bodies, each headed by its
+    // content-addressed specifier.
+    expect(rendered[0]).toMatch(/^\/\/ cf:module\//);
+    expect(rendered.some((line) => line.includes('"use strict"'))).toBe(true);
   });
 
   it("Uses default export when no --main-export specified", async () => {
