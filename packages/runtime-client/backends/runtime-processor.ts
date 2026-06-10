@@ -349,6 +349,7 @@ export class RuntimeProcessor {
       : undefined;
 
     let pieceManager: PieceManager | undefined = undefined;
+    let processor: RuntimeProcessor | undefined = undefined;
     const runtime = new Runtime({
       ...runtimeOptionsFromInitializationData(
         data,
@@ -381,7 +382,12 @@ export class RuntimeProcessor {
 
       pieceCreatedCallback: (piece) => {
         const writeContext = runtime.getWriteDebugContext();
-        const manager = pieceManager;
+        // Register the piece in ITS space's list: a piece created by a
+        // running foreign-space pattern routes to that space's manager
+        // (the context exists — it started the pattern). Fallback to
+        // the home manager, the sole pre-multi-space behavior.
+        const manager = (piece.space && processor?.managerFor(piece.space)) ??
+          pieceManager;
         if (!manager) return;
         void runtime.withWriteDebugContext(
           writeContext,
@@ -420,7 +426,7 @@ export class RuntimeProcessor {
     pieceManager = new PieceManager(session, runtime);
     const cc = new PiecesController(pieceManager);
 
-    return new RuntimeProcessor(
+    processor = new RuntimeProcessor(
       runtime,
       pieceManager,
       cc,
@@ -429,6 +435,17 @@ export class RuntimeProcessor {
       identity,
       telemetry,
     );
+    return processor;
+  }
+
+  /**
+   * The PieceManager already serving a space, if any. Used by the
+   * piece-created callback to register a piece in its own space's
+   * list; deliberately does NOT create a context (a piece can only be
+   * created by a pattern some existing context started).
+   */
+  managerFor(space: DID): PieceManager | undefined {
+    return this.spaces.get(space)?.pieceManager;
   }
 
   dispose(): Promise<void> {

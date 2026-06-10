@@ -1703,6 +1703,24 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     }
   });
 
+  it("managerFor returns only existing contexts (no lazy create)", async () => {
+    const { processor, runtime, homeSpace } = await makeProcessorState();
+    const spaceB = (await Identity.fromPassphrase(
+      "runtime-processor-space-b",
+    )).did();
+    const managerFor = (RuntimeProcessor.prototype as any).managerFor;
+    try {
+      expect(managerFor.call(processor, homeSpace)).toBe(
+        processor.pieceManager,
+      );
+      expect(managerFor.call(processor, spaceB)).toBeUndefined();
+      const ctxB = processor.getSpaceCtx(spaceB);
+      expect(managerFor.call(processor, spaceB)).toBe(ctxB.pieceManager);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("rejects root-pattern operations for foreign spaces", async () => {
     const { processor, runtime, homeSpace } = await makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
