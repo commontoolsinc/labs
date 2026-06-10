@@ -2198,6 +2198,85 @@ export const loadSchemaDocument = (
   return schema;
 };
 
+// Union of confidentiality atoms across every non-internal labeled read in the
+// transaction, resolved from stored labels the same way verifyInputRequirements
+// resolves them. Transaction-global by design: a sink request is built from
+// whatever the handler read, and the sink-request input does not record its own
+// read provenance, so the whole consumed set is the sound over-approximation.
+const collectConsumedConfidentiality = (
+  tx: IExtendedStorageTransaction,
+): readonly unknown[] => {
+  const atoms: unknown[] = [];
+  const addAtom = (atom: unknown): void => {
+    if (!atoms.some((existing) => deepEqual(existing, atom))) atoms.push(atom);
+  };
+  for (const read of tx.getReadActivities?.() ?? []) {
+    if (isInternalVerifierRead(read.meta)) continue;
+    const metadata = storedMetadataFor(
+      tx,
+      read.space,
+      read.id,
+      normalizeCellScope(read.scope),
+      read.type ?? "application/json",
+    );
+    if (metadata === undefined) continue;
+    const path = canonicalizeLogicalPath(read.path);
+    // A recursive read at `path` observes the value at `path` and everything
+    // below it, so its confidentiality is the union of every labelMap entry
+    // that is an ancestor-or-equal of `path` (a label that applies to it) OR a
+    // DESCENDANT of `path` (a label on a field inside the value just read).
+    // labelAtPath alone would only see the ancestor — so reading a whole object
+    // and sending one confidential field would slip the ceiling (review on
+    // #3993). A nonRecursive read sees ONLY the value at `path`, so it counts
+    // ancestor-or-equal entries but NOT descendants — counting those would
+    // false-reject valid commits (review round 2 on #3993).
+    for (const entry of metadata.labelMap.entries) {
+      const entryPath = canonicalizeLogicalPath(entry.path);
+      const overlapsRead = isPrefix(entryPath, path) ||
+        (read.nonRecursive !== true && isPrefix(path, entryPath));
+      if (!overlapsRead) continue;
+      for (const atom of entry.label.confidentiality ?? []) addAtom(atom);
+    }
+  }
+  return atoms;
+};
+
+// §5.2.1 / §7.3-7.5 egress gate: a recorded sink-request input whose sink
+// declares a confidentiality ceiling must not carry confidentiality outside it.
+// Rides the standard observe→enforce path (a reason invalidates prepare, which
+// the commit gate turns into a reject only in enforcing modes).
+const verifySinkRequestCeilings = (
+  tx: IExtendedStorageTransaction,
+): string[] => {
+  const state = tx.getCfcState();
+  const ceilings = state.sinkMaxConfidentiality;
+  if (ceilings === undefined) return [];
+  const gatedSinks = new Map<string, readonly unknown[]>();
+  for (const input of state.writePolicyInputs) {
+    if (input.kind !== "sink-request") continue;
+    const ceiling = ceilings[input.sink];
+    if (ceiling !== undefined) gatedSinks.set(input.sink, ceiling);
+  }
+  if (gatedSinks.size === 0) return [];
+  const consumed = collectConsumedConfidentiality(tx);
+  if (consumed.length === 0) return [];
+  const reasons: string[] = [];
+  for (const [sink, ceiling] of gatedSinks) {
+    const offending = consumed.filter((atom) =>
+      !ceiling.some((allowed) => deepEqual(allowed, atom))
+    );
+    if (offending.length > 0) {
+      // Name the offending atom(s) so an observe-mode diagnostic identifies the
+      // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
+      reasons.push(
+        `sink-request confidentiality exceeds ceiling for ${sink}: ` +
+          offending.map((atom) => JSON.stringify(atom)).join(", "),
+      );
+    }
+  }
+  return reasons;
+};
+
 export const prepareBoundaryCommit = (
   tx: IExtendedStorageTransaction,
 ): string[] => {
@@ -2501,5 +2580,6 @@ export const prepareBoundaryCommit = (
       // attempted-target tracking of this internal metadata update.
     }, metadata as unknown as FabricValue);
   }
+  reasons.push(...verifySinkRequestCeilings(tx));
   return reasons;
 };

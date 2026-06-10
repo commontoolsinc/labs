@@ -3,6 +3,7 @@ import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
 import type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
+import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 
 export type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
 
@@ -279,6 +280,10 @@ export type CfcTxState = {
   implementationIdentity?: ImplementationIdentity;
   outbox: PostCommitSideEffect[];
   diagnostics: string[];
+  // Per-sink confidentiality ceilings consulted by prepareBoundaryCommit for
+  // every recorded sink-request input (set once by the Runtime at tx creation;
+  // see SinkMaxConfidentiality). Undefined = no ceilings declared.
+  sinkMaxConfidentiality?: SinkMaxConfidentiality;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything
