@@ -693,3 +693,30 @@ export function rowLabelSpecOf(tableSchema: unknown): RowLabelSpec | undefined {
   const spec = tableSchema.rowLabel;
   return isRecord(spec) ? spec as unknown as RowLabelSpec : undefined;
 }
+
+/**
+ * The column names a rule reads (its input columns), in walk order, deduped.
+ * The read side locates each of these in the projection by TRUE origin
+ * `(table, column)` — never by output name — and refuses when one is missing
+ * or ambiguous.
+ */
+export function ruleInputFields(spec: RowLabelSpec): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const walk = (n: unknown): void => {
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    if (!isRecord(n)) return;
+    const m = n.match;
+    if (isRecord(m) && typeof m.field === "string" && !seen.has(m.field)) {
+      seen.add(m.field);
+      out.push(m.field);
+    }
+    for (const v of Object.values(n)) walk(v);
+  };
+  walk(spec.confidentiality);
+  walk(spec.integrity);
+  return out;
+}
