@@ -38,6 +38,7 @@ import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
 import { columnDeclaresIfc } from "@commonfabric/memory/v2";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 type SqliteDbRef = {
   id: string;
@@ -229,6 +230,137 @@ function deriveNullOriginIfc(tables: LabelTables): IFCLabel | undefined {
     : undefined;
 }
 
+type ColumnIfc = {
+  confidentiality?: unknown[];
+  integrity?: unknown[];
+  maxConfidentiality?: unknown[];
+};
+
+const unionAtoms = (
+  a: unknown[] | undefined,
+  b: unknown[] | undefined,
+): unknown[] | undefined => {
+  const out: unknown[] = [...(a ?? [])];
+  for (const atom of b ?? []) {
+    if (!out.some((existing) => deepEqual(existing, atom))) out.push(atom);
+  }
+  return out.length > 0 ? out : undefined;
+};
+
+// A write ceiling (`maxConfidentiality`) tightens only: absent = unlimited, so a
+// present ceiling beats absent, and two present ceilings meet at their
+// intersection (the smaller allowed set). It can never widen or be removed.
+// An EMPTY intersection stays `[]`, which the verifier reads as "public only"
+// (the tightest ceiling) — collapsing it to undefined would forge "no ceiling".
+const tightenCeiling = (
+  prior: unknown[] | undefined,
+  next: unknown[] | undefined,
+): unknown[] | undefined => {
+  if (prior === undefined) return next;
+  if (next === undefined) return prior;
+  return prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
+};
+
+// Integrity atoms are trust/provenance claims, NOT a confidentiality grade: a
+// row read from a column carries them to satisfy downstream `requiredIntegrity`
+// gates. So a re-derivation may keep or NARROW a column's integrity but must
+// never MINT trust the prior store didn't already carry — unioning would let a
+// re-declared `integrity: ["b"]` forge a claim the column was never trusted for
+// (mirrors schema-merge.ts, where integrity is subset-clamped like the ceiling).
+// Identical to `tightenCeiling` EXCEPT the prior-absent case yields undefined
+// (no prior trust to inherit) rather than adopting `next` wholesale.
+const clampIntegrity = (
+  prior: unknown[] | undefined,
+  next: unknown[] | undefined,
+): unknown[] | undefined => {
+  if (prior === undefined) return undefined;
+  if (next === undefined) return prior;
+  const kept = prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
+  return kept.length > 0 ? kept : undefined;
+};
+
+const mergeColumnIfcGrowOnly = (
+  prior: ColumnIfc,
+  next: ColumnIfc | undefined,
+): ColumnIfc => {
+  const n = next ?? {};
+  const merged: ColumnIfc = {};
+  const confidentiality = unionAtoms(prior.confidentiality, n.confidentiality);
+  const integrity = clampIntegrity(prior.integrity, n.integrity);
+  const maxConfidentiality = tightenCeiling(
+    prior.maxConfidentiality,
+    n.maxConfidentiality,
+  );
+  if (confidentiality) merged.confidentiality = confidentiality;
+  if (integrity) merged.integrity = integrity;
+  if (maxConfidentiality) merged.maxConfidentiality = maxConfidentiality;
+  return merged;
+};
+
+/**
+ * Grow-only merge of a db handle's per-column `ifc` across re-derivations
+ * (§8.12.1: a store's effective label is monotone — it may strengthen but never
+ * weaken). `tables[].ifc` lives in mutable handle-cell value data, outside the
+ * schema-envelope monotonicity the labelMap enforces, so a re-derivation reading
+ * a weaker input could silently lower a column's read label or widen its write
+ * ceiling (audit S8). Every column the PRIOR handle labeled keeps at least that
+ * label: read confidentiality/integrity union (grow); the write ceiling tightens
+ * only; a dropped table/column is restored. New tables/columns in `next` are
+ * additive and pass through (a fresh column or a stricter re-declaration is
+ * allowed — only weakening is clamped).
+ */
+export const growOnlyMergeDbTables = (
+  prior: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined => {
+  if (!prior) return next;
+  if (!next) return prior;
+  const result = cloneIfNecessary(
+    next as Parameters<typeof cloneIfNecessary>[0],
+    { frozen: false },
+  ) as Record<string, unknown>;
+  for (const [tableName, priorTableRaw] of Object.entries(prior)) {
+    const priorProps =
+      (priorTableRaw as { properties?: Record<string, unknown> } | undefined)
+        ?.properties;
+    if (!priorProps || typeof priorProps !== "object") continue;
+    const resultTable = result[tableName] as
+      | { properties?: Record<string, unknown> }
+      | undefined;
+    if (!resultTable || typeof resultTable !== "object") {
+      // Prior declared a table that `next` dropped — restore it wholesale.
+      result[tableName] = cloneIfNecessary(
+        priorTableRaw as Parameters<typeof cloneIfNecessary>[0],
+        { frozen: false },
+      );
+      continue;
+    }
+    const resultProps = (resultTable.properties ??= {}) as Record<
+      string,
+      { ifc?: ColumnIfc }
+    >;
+    for (const [colName, priorColRaw] of Object.entries(priorProps)) {
+      const priorIfc = (priorColRaw as { ifc?: ColumnIfc } | undefined)?.ifc;
+      if (!columnDeclaresIfc(priorIfc)) continue;
+      const resultCol = resultProps[colName] as { ifc?: ColumnIfc } | undefined;
+      if (!resultCol || typeof resultCol !== "object") {
+        // Prior labeled a column that `next` dropped — restore it wholesale so
+        // its non-ifc structure (e.g. `type`) survives alongside the label.
+        resultProps[colName] = cloneIfNecessary(
+          priorColRaw as Parameters<typeof cloneIfNecessary>[0],
+          { frozen: false },
+        ) as { ifc?: ColumnIfc };
+        continue;
+      }
+      resultCol.ifc = mergeColumnIfcGrowOnly(
+        priorIfc as ColumnIfc,
+        resultCol.ifc,
+      );
+    }
+  }
+  return result;
+};
+
 /**
  * CFC read-labeling: from each result column's TRUE origin (table, column),
  * build a schema for the result-cell's `result` array whose per-field `ifc`
@@ -349,9 +481,16 @@ export function sqliteDatabase(
       // the acting reader). "creator" would be wrong for linked dbs; the
       // handle's creation is where ownership is minted.
       const owner = runtime.trustSnapshotProvider()?.actingPrincipal;
+      // Grow-only merge the per-column `ifc` against any prior committed handle
+      // value at this (causally-stable) id: the store's effective label is
+      // monotone, so a re-derivation reading a weaker `tables` input cannot lower
+      // a column's read label or widen its write ceiling (audit S8). First
+      // creation (no prior) passes the declared tables through unchanged.
+      const prior = handle.withTx(tx).get() as SqliteDbRef | undefined;
+      const tables = growOnlyMergeDbTables(prior?.tables, options?.tables);
       handle.withTx(tx).set({
         id,
-        tables: options?.tables,
+        tables,
         scope,
         ...(owner !== undefined && { owner }),
       });
